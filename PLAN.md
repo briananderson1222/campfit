@@ -397,11 +397,14 @@ camp/
 8. ~~PWA manifest~~ DONE
 9. ~~Design system: Colorado-warmth aesthetic, component library (7 components)~~ DONE
 10. ~~Define Prisma schema (all models)~~ DONE (`prisma/schema.prisma`)
-11. Build CSV normalizer:
-    - Price parser (handles "$300/week per session", tiered pricing, etc.)
-    - Age parser (handles "PreK", "6 to teen", "ages 4-12", grade ranges)
-    - Schedule parser (week columns → CampSchedule records)
-    - Category classifier
+11. ~~Build CSV normalizer~~ DONE
+    - ~~Price parser~~ DONE (`lib/ingestion/price-parser.ts`) — handles 25+ pricing formats
+    - ~~Age parser~~ DONE (`lib/ingestion/age-parser.ts`) — handles "6 to teen", grade ranges, column markers
+    - ~~Schedule parser~~ DONE (`lib/ingestion/schedule-parser.ts`) — week columns, hours, drop-off/pickup
+    - ~~Category classifier~~ DONE (`lib/ingestion/category-classifier.ts`) — 20+ raw values → enum
+    - ~~Registration parser~~ DONE (`lib/ingestion/registration-parser.ts`) — status + date extraction
+    - ~~DataIngestionAdapter interface~~ DONE (`lib/ingestion/adapter.ts`)
+    - ~~CsvIngestionAdapter~~ DONE (`lib/ingestion/csv-adapter.ts`) — all 4 CSV file types
 12. Seed script: CSV → normalized → Supabase
 13. CampRepository with Prisma
 14. Replace mock data with real DB queries
