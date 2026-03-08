@@ -410,11 +410,11 @@ camp/
 14. ~~Replace mock data with real DB queries~~ DONE — all pages now server components fetching from Supabase
 15. PWA service worker (offline caching, install prompt)
 
-### Phase 2 — User Accounts & Saves
-1. Supabase Auth (email + Google OAuth)
-2. User profile + child age preferences
-3. Save/favorite camps (with 5-camp limit for free tier) — UI is built, needs backend
-4. Dashboard backend — UI is built, needs real data + auth
+### Phase 2 — User Accounts & Saves ✅ DONE
+1. ~~Supabase Auth (email + Google OAuth)~~ DONE — login/signup pages, middleware, OAuth callback
+2. User profile + child age preferences — deferred to Phase 5
+3. ~~Save/favorite camps (with 5-camp limit for free tier)~~ DONE — `/api/saves` GET/POST/DELETE, lazy User creation
+4. ~~Dashboard backend~~ DONE — server component with real saved camps, auth redirect
 
 ### Phase 3 — Notifications & Premium
 1. Stripe integration (checkout, webhooks, tier enforcement)
