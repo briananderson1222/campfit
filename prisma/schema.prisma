@@ -1,0 +1,309 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────
+
+enum CampType {
+  SUMMER_DAY
+  SLEEPAWAY
+  FAMILY
+  VIRTUAL
+  WINTER_BREAK
+  SCHOOL_BREAK
+}
+
+enum CampCategory {
+  SPORTS
+  ARTS
+  STEM
+  NATURE
+  ACADEMIC
+  MUSIC
+  THEATER
+  COOKING
+  MULTI_ACTIVITY
+  OTHER
+}
+
+enum RegistrationStatus {
+  OPEN
+  CLOSED
+  WAITLIST
+  COMING_SOON
+  UNKNOWN
+}
+
+enum DataConfidence {
+  VERIFIED
+  PLACEHOLDER
+  STALE
+}
+
+enum SourceType {
+  CSV
+  SCRAPER
+  MANUAL
+  PROVIDER_FORM
+}
+
+enum PricingUnit {
+  PER_WEEK
+  PER_SESSION
+  PER_DAY
+  FLAT
+  PER_CAMP
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+}
+
+enum UserTier {
+  FREE
+  PREMIUM
+}
+
+enum NotificationType {
+  REGISTRATION_OPENS
+  CAMP_APPROACHING
+  NEW_CAMP_MATCH
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum DataSourceStatus {
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+// ─── Camp & Related ─────────────────────────────────────
+
+model Camp {
+  id                   String             @id @default(uuid())
+  slug                 String             @unique
+  name                 String
+  description          String             @default("")
+  notes                String?
+  campType             CampType
+  category             CampCategory
+  websiteUrl           String             @default("")
+  interestingDetails   String?
+
+  // Location
+  city                 String             @default("Denver")
+  region               String?
+  neighborhood         String             @default("")
+  address              String             @default("")
+  latitude             Float?
+  longitude            Float?
+
+  // Logistics
+  lunchIncluded        Boolean            @default(false)
+
+  // Registration
+  registrationOpenDate DateTime?          @db.Date
+  registrationOpenTime String?            // stored as "9:00 AM" for display
+  registrationStatus   RegistrationStatus @default(UNKNOWN)
+
+  // Data provenance
+  sourceType           SourceType         @default(CSV)
+  sourceUrl            String?
+  lastVerifiedAt       DateTime?
+  dataConfidence       DataConfidence     @default(PLACEHOLDER)
+
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  // Relations
+  ageGroups            CampAgeGroup[]
+  schedules            CampSchedule[]
+  pricing              CampPricing[]
+  savedBy              SavedCamp[]
+  notifications        Notification[]
+  dataSourceCamps      DataSourceCamp[]
+
+  @@index([category])
+  @@index([campType])
+  @@index([neighborhood])
+  @@index([registrationStatus])
+  @@index([city])
+}
+
+model CampAgeGroup {
+  id       String @id @default(uuid())
+  campId   String
+  camp     Camp   @relation(fields: [campId], references: [id], onDelete: Cascade)
+  label    String // "PreK", "Ages 6-teen", "Grades 1-5"
+  minAge   Int?
+  maxAge   Int?
+  minGrade Int?   // -1 = PreK, 0 = K, 1 = 1st, etc.
+  maxGrade Int?
+
+  @@index([campId])
+  @@index([minAge, maxAge])
+}
+
+model CampSchedule {
+  id           String   @id @default(uuid())
+  campId       String
+  camp         Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  label        String   // "Week of June 1-5", "First Term", "Morning Session"
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  startTime    String?  // "9:00 AM"
+  endTime      String?  // "3:00 PM"
+  earlyDropOff String?  // "8:00 AM"
+  latePickup   String?  // "5:30 PM"
+
+  @@index([campId])
+  @@index([startDate])
+  @@index([startDate, endDate])
+}
+
+model CampPricing {
+  id            String      @id @default(uuid())
+  campId        String
+  camp          Camp        @relation(fields: [campId], references: [id], onDelete: Cascade)
+  label         String      // "Full Day", "Half Day", "2-Week Bundle"
+  amount        Decimal     @db.Decimal(10, 2)
+  unit          PricingUnit
+  durationWeeks Int?
+  ageQualifier  String?     // "8 year olds", "Ages 9-17"
+  discountNotes String?
+
+  @@index([campId])
+}
+
+// ─── Users & Saves ──────────────────────────────────────
+
+model User {
+  id                     String              @id @default(uuid())
+  email                  String              @unique
+  name                   String              @default("")
+  authProvider           AuthProvider        @default(EMAIL)
+  tier                   UserTier            @default(FREE)
+  stripeCustomerId       String?             @unique
+  stripeSubscriptionId   String?
+
+  // Notification preferences
+  notifyEmail            Boolean             @default(true)
+  notifyPush             Boolean             @default(false)
+  notifySms              Boolean             @default(false)
+  phoneNumber            String?
+
+  // Parent profile for matching
+  childAgeMin            Int?
+  childAgeMax            Int?
+  preferredNeighborhoods String[]            @default([])
+  preferredCategories    CampCategory[]      @default([])
+
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  // Relations
+  savedCamps             SavedCamp[]
+  notifications          Notification[]
+  pushSubscriptions      PushSubscription[]
+}
+
+model SavedCamp {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campId      String
+  camp        Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  notes       String?
+  notifyEmail Boolean  @default(true)
+  notifyPush  Boolean  @default(false)
+  notifySms   Boolean  @default(false)
+  savedAt     DateTime @default(now())
+
+  @@unique([userId, campId])
+  @@index([userId])
+  @@index([campId])
+}
+
+// ─── Notifications ──────────────────────────────────────
+
+model Notification {
+  id           String              @id @default(uuid())
+  userId       String
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campId       String?
+  camp         Camp?               @relation(fields: [campId], references: [id], onDelete: SetNull)
+  type         NotificationType
+  channel      NotificationChannel
+  title        String
+  body         String
+  scheduledFor DateTime
+  sentAt       DateTime?
+  status       NotificationStatus  @default(PENDING)
+  createdAt    DateTime            @default(now())
+
+  @@index([userId])
+  @@index([status, scheduledFor])
+  @@index([campId])
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─── Data Sources (Phase 4) ─────────────────────────────
+
+model DataSource {
+  id           String           @id @default(uuid())
+  name         String
+  type         SourceType
+  targetUrl    String           @default("")
+  schedule     String?          // cron expression
+  parserConfig Json?            // scraper-specific config
+  lastRunAt    DateTime?
+  lastStatus   DataSourceStatus?
+  campCount    Int              @default(0)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  // Relations
+  camps        DataSourceCamp[]
+}
+
+model DataSourceCamp {
+  id           String     @id @default(uuid())
+  dataSourceId String
+  dataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  campId       String
+  camp         Camp       @relation(fields: [campId], references: [id], onDelete: Cascade)
+  externalId   String?    // ID from the source system
+  lastSyncedAt DateTime   @default(now())
+
+  @@unique([dataSourceId, campId])
+  @@index([dataSourceId])
+  @@index([campId])
+}

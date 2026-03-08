@@ -360,7 +360,8 @@ camp/
 │       ├── price-parser.ts      — Phase 1: "$300/week per session" → structured pricing
 │       └── age-parser.ts        — Phase 1: "6 to teen", "PreK", "ages 4-12" → age range
 ├── prisma/
-│   └── schema.prisma            — Phase 1
+│   └── schema.prisma            ✅ Full schema (Camp, User, Notification, DataSource + relations)
+├── prisma.config.ts             ✅ Prisma 7 config (datasource URL)
 ├── scripts/
 │   ├── seed.ts                  — Phase 1: CSV → DB seeder
 │   └── geocode.ts               — Phase 5: Batch geocode camp addresses
@@ -395,7 +396,7 @@ camp/
 7. ~~Dashboard: saved camps, notification toggles, premium upgrade UX~~ DONE
 8. ~~PWA manifest~~ DONE
 9. ~~Design system: Colorado-warmth aesthetic, component library (7 components)~~ DONE
-10. Define Prisma schema (all models)
+10. ~~Define Prisma schema (all models)~~ DONE (`prisma/schema.prisma`)
 11. Build CSV normalizer:
     - Price parser (handles "$300/week per session", tiered pricing, etc.)
     - Age parser (handles "PreK", "6 to teen", "ages 4-12", grade ranges)
