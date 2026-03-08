@@ -311,93 +311,108 @@ interface SubscriptionService {
 
 ## Project Structure
 
+Files marked with ✅ exist. Others are planned.
+
 ```
 camp/
-├── app/                          # Next.js App Router
-│   ├── (public)/
-│   │   ├── page.tsx              # Home — featured camps + search
-│   │   ├── search/page.tsx       # Search results with filters
-│   │   ├── camps/[slug]/page.tsx # Camp detail page
-│   │   └── calendar/page.tsx     # Weekly availability view
-│   ├── (auth)/
-│   │   ├── login/page.tsx
-│   │   ├── signup/page.tsx
-│   │   ├── dashboard/page.tsx    # Saved camps
-│   │   └── settings/page.tsx     # Notification prefs, billing
-│   ├── api/
-│   │   ├── camps/route.ts
-│   │   ├── saved-camps/route.ts
-│   │   ├── notifications/route.ts
-│   │   ├── push/subscribe/route.ts
-│   │   └── webhooks/stripe/route.ts
-│   ├── manifest.ts               # PWA manifest
-│   └── layout.tsx
+├── app/
+│   ├── layout.tsx               ✅ Root layout (fonts, nav, footer)
+│   ├── page.tsx                 ✅ Home — hero, search, filters, camp grid
+│   ├── globals.css              ✅ Design system (Colorado-warmth theme)
+│   ├── camps/[slug]/page.tsx    ✅ Camp detail page
+│   ├── calendar/page.tsx        ✅ Weekly calendar (Gantt-style)
+│   ├── dashboard/page.tsx       ✅ Saved camps + notification prefs
+│   ├── login/page.tsx           — Phase 2
+│   ├── settings/page.tsx        — Phase 2 (notification prefs, billing)
+│   └── api/                     — Phase 2+
+│       ├── camps/route.ts
+│       ├── saved-camps/route.ts
+│       ├── notifications/route.ts
+│       ├── push/subscribe/route.ts
+│       └── webhooks/stripe/route.ts
 ├── components/
-│   ├── camp-card.tsx
-│   ├── camp-filters.tsx
-│   ├── week-calendar.tsx
-│   ├── search-bar.tsx
-│   ├── save-button.tsx
-│   └── install-prompt.tsx        # PWA install banner
+│   ├── nav.tsx                  ✅
+│   ├── footer.tsx               ✅
+│   ├── camp-card.tsx            ✅
+│   ├── camp-filters.tsx         ✅
+│   ├── search-bar.tsx           ✅
+│   ├── save-button.tsx          ✅
+│   ├── week-calendar.tsx        ✅
+│   └── install-prompt.tsx       — Phase 1 (PWA install banner)
 ├── lib/
-│   ├── repositories/
+│   ├── types.ts                 ✅ Full TypeScript interfaces
+│   ├── utils.ts                 ✅ cn(), formatCurrency, helpers
+│   ├── mock-data.ts             ✅ 10 realistic camps from CSV data
+│   ├── repositories/            — Phase 1
 │   │   └── camp-repository.ts
-│   ├── services/
+│   ├── services/                — Phase 2-3
 │   │   ├── search-service.ts
 │   │   ├── notification-service.ts
 │   │   └── subscription-service.ts
-│   ├── ingestion/
-│   │   ├── adapter.ts            # DataIngestionAdapter interface
-│   │   ├── csv-adapter.ts        # CSV parser + normalizer
-│   │   └── normalizers.ts        # Price parsing, age parsing, etc.
-│   ├── supabase/
+│   ├── ingestion/               — Phase 1
+│   │   ├── adapter.ts           # DataIngestionAdapter interface
+│   │   ├── csv-adapter.ts       # CSV parser + normalizer
+│   │   └── normalizers.ts       # Price parsing, age parsing, etc.
+│   ├── supabase/                — Phase 1-2
 │   │   ├── client.ts
 │   │   └── middleware.ts
 │   └── utils/
-│       ├── price-parser.ts       # "$300/week per session" → structured pricing
-│       └── age-parser.ts         # "6 to teen", "PreK", "ages 4-12" → age range
+│       ├── price-parser.ts      — Phase 1: "$300/week per session" → structured pricing
+│       └── age-parser.ts        — Phase 1: "6 to teen", "PreK", "ages 4-12" → age range
 ├── prisma/
-│   └── schema.prisma
+│   └── schema.prisma            — Phase 1
 ├── scripts/
-│   ├── seed.ts                   # CSV → DB seeder
-│   └── geocode.ts                # Batch geocode camp addresses
+│   ├── seed.ts                  — Phase 1: CSV → DB seeder
+│   └── geocode.ts               — Phase 5: Batch geocode camp addresses
 ├── public/
-│   ├── icons/                    # PWA icons
-│   └── sw.js                     # Service worker (generated)
-├── data/                         # CSV source files
+│   ├── manifest.json            ✅ PWA manifest
+│   └── icons/                   — Needs PWA icons generated
+├── data/                        ✅ CSV source files (7 files)
 │   └── *.csv
-└── scrapers/                     # Phase 4
-    ├── base-scraper.ts
-    └── sites/
-        └── *.ts                  # Per-site scraper implementations
+├── scrapers/                    — Phase 4
+│   ├── base-scraper.ts
+│   └── sites/
+│       └── *.ts
+├── package.json                 ✅
+├── tailwind.config.ts           ✅
+├── tsconfig.json                ✅
+├── next.config.mjs              ✅
+├── postcss.config.mjs           ✅
+└── PLAN.md                      ✅
 ```
 
 ---
 
 ## Implementation Phases
 
-### Phase 1 — Foundation & Data (Weeks 1-3)
-1. Initialize Next.js project with Tailwind + shadcn/ui
-2. Define Prisma schema (all models above)
-3. Build CSV normalizer:
-   - Price parser (handles "$300/week per session", tiered pricing, etc.)
-   - Age parser (handles "PreK", "6 to teen", "ages 4-12", grade ranges)
-   - Schedule parser (week columns → CampSchedule records)
-   - Category classifier
-4. Seed script: CSV → normalized → Supabase
-5. CampRepository with Prisma
-6. Home page: featured/all camps grid
-7. Search page: full-text search + filters (age, category, type, neighborhood)
-8. Camp detail page: all info, link to register
-9. PWA setup (manifest, service worker, install prompt)
+### Phase 1 — Foundation & Data
+1. ~~Initialize Next.js 14 project with Tailwind CSS~~ DONE
+2. ~~TypeScript types matching full data model~~ DONE (`lib/types.ts`)
+3. ~~Mock data with 10 realistic camps from CSV~~ DONE (`lib/mock-data.ts`)
+4. ~~Home page: hero, search, filters (age/category/type/neighborhood/cost/week), camp grid~~ DONE
+5. ~~Camp detail page: pricing tiers, weekly availability, age groups, registration info~~ DONE
+6. ~~Weekly calendar view (Gantt-style, color-coded by category, filterable)~~ DONE
+7. ~~Dashboard: saved camps, notification toggles, premium upgrade UX~~ DONE
+8. ~~PWA manifest~~ DONE
+9. ~~Design system: Colorado-warmth aesthetic, component library (7 components)~~ DONE
+10. Define Prisma schema (all models)
+11. Build CSV normalizer:
+    - Price parser (handles "$300/week per session", tiered pricing, etc.)
+    - Age parser (handles "PreK", "6 to teen", "ages 4-12", grade ranges)
+    - Schedule parser (week columns → CampSchedule records)
+    - Category classifier
+12. Seed script: CSV → normalized → Supabase
+13. CampRepository with Prisma
+14. Replace mock data with real DB queries
+15. PWA service worker (offline caching, install prompt)
 
-### Phase 2 — User Accounts & Saves (Weeks 4-5)
+### Phase 2 — User Accounts & Saves
 1. Supabase Auth (email + Google OAuth)
 2. User profile + child age preferences
-3. Save/favorite camps (with 5-camp limit for free tier)
-4. Dashboard: view saved camps
+3. Save/favorite camps (with 5-camp limit for free tier) — UI is built, needs backend
+4. Dashboard backend — UI is built, needs real data + auth
 
-### Phase 3 — Notifications & Premium (Weeks 6-8)
+### Phase 3 — Notifications & Premium
 1. Stripe integration (checkout, webhooks, tier enforcement)
 2. Premium gate on features (unlimited saves, advanced filters, notifications)
 3. Email notifications via Resend (registration-opens alerts)
@@ -406,7 +421,7 @@ camp/
 6. Notification scheduler (Vercel Cron or Supabase Edge Function)
 7. "New camps matching your preferences" matching engine
 
-### Phase 4 — Dynamic Data Pipeline (Weeks 9-12)
+### Phase 4 — Dynamic Data Pipeline
 1. DataIngestionAdapter interface
 2. Base scraper with Playwright
 3. First 5-10 camp site scrapers
@@ -414,12 +429,11 @@ camp/
 5. Data confidence tracking (VERIFIED / PLACEHOLDER / STALE)
 6. Admin review workflow via Supabase Studio
 
-### Phase 5 — Enhanced UX (Ongoing)
-1. Weekly calendar view (interactive, filterable)
-2. Map view (geocoded camps on a map)
-3. Camp comparison tool
-4. Calendar export (.ics / Google Calendar)
-5. SEO optimization (structured data, meta tags, sitemap)
+### Phase 5 — Enhanced UX
+1. Map view (geocoded camps on a map)
+2. Camp comparison tool
+3. Calendar export (.ics / Google Calendar)
+4. SEO optimization (structured data, meta tags, sitemap)
 
 ---
 
