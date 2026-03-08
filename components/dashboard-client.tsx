@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Heart, Bell, Mail, Smartphone, MessageSquare,
-  Trash2, ExternalLink, Crown, MapPin, Calendar,
+  Trash2, ExternalLink, Crown, MapPin, Calendar, Loader2,
 } from "lucide-react";
 import {
   CATEGORY_LABELS, CATEGORY_COLORS, STATUS_CONFIG, SavedCamp,
@@ -17,14 +17,28 @@ const MAX_FREE_SAVES = 5;
 interface DashboardClientProps {
   initialSaves: SavedCamp[];
   userEmail: string;
+  isPremium?: boolean;
 }
 
-export function DashboardClient({ initialSaves, userEmail }: DashboardClientProps) {
+export function DashboardClient({ initialSaves, userEmail, isPremium = false }: DashboardClientProps) {
   const router = useRouter();
   const [savedCamps, setSavedCamps] = useState<SavedCamp[]>(initialSaves);
   const [globalEmail, setGlobalEmail] = useState(true);
   const [globalPush, setGlobalPush] = useState(false);
   const [globalSms, setGlobalSms] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+
+  const handleUpgrade = async () => {
+    setUpgrading(true);
+    try {
+      const res = await fetch("/api/stripe/checkout", { method: "POST" });
+      const { url, error } = await res.json();
+      if (url) window.location.href = url;
+      else console.error("Checkout error:", error);
+    } finally {
+      setUpgrading(false);
+    }
+  };
 
   const removeCamp = async (savedId: string, campId: string) => {
     const res = await fetch(`/api/saves?campId=${campId}`, { method: "DELETE" });
@@ -47,15 +61,27 @@ export function DashboardClient({ initialSaves, userEmail }: DashboardClientProp
             </h1>
           </div>
           <p className="text-bark-400 ml-[52px]">
-            {savedCamps.length} of {MAX_FREE_SAVES} saves used (Free plan)
+            {isPremium
+            ? `${savedCamps.length} saves · Premium`
+            : `${savedCamps.length} of ${MAX_FREE_SAVES} saves used (Free plan)`}
             <span className="text-xs text-bark-300 ml-2">· {userEmail}</span>
           </p>
         </div>
 
-        <button className="btn-primary text-sm gap-1.5 shrink-0">
-          <Crown className="w-4 h-4" />
-          Upgrade
-        </button>
+        {!isPremium && (
+          <button
+            onClick={handleUpgrade}
+            disabled={upgrading}
+            className="btn-primary text-sm gap-1.5 shrink-0 disabled:opacity-60"
+          >
+            {upgrading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Crown className="w-4 h-4" />
+            )}
+            Upgrade
+          </button>
+        )}
       </div>
 
       {/* Save limit bar */}

@@ -412,6 +412,7 @@ camp/
 
 ### Phase 2 — User Accounts & Saves ✅ DONE
 1. ~~Supabase Auth (email + Google OAuth)~~ DONE — login/signup pages, middleware, OAuth callback
+   - ⚠️ **TODO**: Enable Google provider in Supabase dashboard → Authentication → Providers → Google (add OAuth client ID + secret)
 2. User profile + child age preferences — deferred to Phase 5
 3. ~~Save/favorite camps (with 5-camp limit for free tier)~~ DONE — `/api/saves` GET/POST/DELETE, lazy User creation
 4. ~~Dashboard backend~~ DONE — server component with real saved camps, auth redirect

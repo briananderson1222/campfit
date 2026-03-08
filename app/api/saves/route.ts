@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db";
-
-const MAX_FREE_SAVES = 5;
+import { getUserTier, FREE_SAVE_LIMIT } from "@/lib/tier";
 
 // GET /api/saves — list the current user's saved camp IDs
 export async function GET() {
@@ -50,18 +49,20 @@ export async function POST(request: Request) {
     [user.id, user.email ?? "", user.user_metadata?.name ?? ""]
   );
 
-  // Check save count for free tier
-  const countResult = await pool.query(
-    `SELECT COUNT(*) FROM "SavedCamp" WHERE "userId" = $1`,
-    [user.id]
-  );
-  const count = parseInt(countResult.rows[0].count);
-
-  if (count >= MAX_FREE_SAVES) {
-    return NextResponse.json(
-      { error: "Save limit reached", limit: MAX_FREE_SAVES },
-      { status: 403 }
+  // Check save count — enforce limit for free tier only
+  const tier = await getUserTier(user.id);
+  if (tier === "FREE") {
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM "SavedCamp" WHERE "userId" = $1`,
+      [user.id]
     );
+    const count = parseInt(countResult.rows[0].count);
+    if (count >= FREE_SAVE_LIMIT) {
+      return NextResponse.json(
+        { error: "Save limit reached", limit: FREE_SAVE_LIMIT },
+        { status: 403 }
+      );
+    }
   }
 
   // Upsert the save
