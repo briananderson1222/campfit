@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getPool } from "@/lib/db";
+import { getUserTier } from "@/lib/tier";
 import { DashboardClient } from "@/components/dashboard-client";
 import { SavedCamp } from "@/lib/types";
 
@@ -59,6 +60,8 @@ export default async function DashboardPage() {
     [user.id]
   );
 
+  const tier = await getUserTier(user.id);
+
   const savedCamps: SavedCamp[] = result.rows.map((row) => ({
     id: row.id,
     campId: row.campId,
@@ -94,5 +97,11 @@ export default async function DashboardPage() {
     },
   }));
 
-  return <DashboardClient initialSaves={savedCamps} userEmail={user.email ?? ""} />;
+  return (
+    <DashboardClient
+      initialSaves={savedCamps}
+      userEmail={user.email ?? ""}
+      isPremium={tier === "PREMIUM"}
+    />
+  );
 }
