@@ -1,6 +1,5 @@
 "use client";
 
-import { use } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -30,9 +29,9 @@ import { SaveButton } from "@/components/save-button";
 export default function CampDetailPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: { slug: string };
 }) {
-  const { slug } = use(params);
+  const { slug } = params;
   const camp = MOCK_CAMPS.find((c) => c.slug === slug);
 
   if (!camp) {
