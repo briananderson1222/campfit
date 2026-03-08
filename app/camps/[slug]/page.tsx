@@ -1,6 +1,5 @@
-"use client";
-
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   MapPin,
@@ -15,7 +14,7 @@ import {
   AlertTriangle,
   Sunset,
 } from "lucide-react";
-import { MOCK_CAMPS } from "@/lib/mock-data";
+import { getCampBySlug, getCampSlugs } from "@/lib/camp-repository";
 import {
   CATEGORY_LABELS,
   CATEGORY_COLORS,
@@ -26,27 +25,21 @@ import {
 import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
 
-export default function CampDetailPage({
+export const revalidate = 3600;
+
+export async function generateStaticParams() {
+  const slugs = await getCampSlugs();
+  return slugs.map((s) => ({ slug: s.slug }));
+}
+
+export default async function CampDetailPage({
   params,
 }: {
   params: { slug: string };
 }) {
-  const { slug } = params;
-  const camp = MOCK_CAMPS.find((c) => c.slug === slug);
+  const camp = await getCampBySlug(params.slug);
 
-  if (!camp) {
-    return (
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-20 text-center">
-        <h1 className="font-display text-2xl font-bold text-bark-700 mb-4">
-          Camp not found
-        </h1>
-        <Link href="/" className="btn-secondary">
-          <ArrowLeft className="w-4 h-4" />
-          Back to camps
-        </Link>
-      </div>
-    );
-  }
+  if (!camp) notFound();
 
   const status = STATUS_CONFIG[camp.registrationStatus];
   const categoryColor = CATEGORY_COLORS[camp.category];
@@ -79,9 +72,7 @@ export default function CampDetailPage({
               {CAMP_TYPE_LABELS[camp.campType]}
             </span>
           )}
-          <span className={cn("badge", status.color)}>
-            {status.label}
-          </span>
+          <span className={cn("badge", status.color)}>{status.label}</span>
           {camp.dataConfidence === "PLACEHOLDER" && (
             <span className="badge bg-amber-50 text-amber-600 gap-1">
               <AlertTriangle className="w-3 h-3" />
@@ -98,14 +89,16 @@ export default function CampDetailPage({
         </div>
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-bark-400">
-          <span className="flex items-center gap-1.5">
-            <MapPin className="w-4 h-4 text-pine-400" />
-            {camp.address}
-          </span>
+          {camp.address && (
+            <span className="flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-pine-400" />
+              {camp.address}
+            </span>
+          )}
           {firstSchedule?.startTime && (
             <span className="flex items-center gap-1.5">
               <Clock className="w-4 h-4 text-pine-400" />
-              {firstSchedule.startTime} - {firstSchedule.endTime}
+              {firstSchedule.startTime} – {firstSchedule.endTime}
             </span>
           )}
         </div>
@@ -135,116 +128,149 @@ export default function CampDetailPage({
             )}
           </section>
 
-          {/* Weekly Availability */}
-          <section className="glass-panel p-6 animate-fade-up stagger-2">
-            <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-pine-400" />
-              Weekly Availability
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {weekAvailability.map((week) => (
-                <div
-                  key={week.start}
-                  className={cn(
-                    "week-cell",
-                    week.available
-                      ? "week-cell-available"
-                      : "week-cell-unavailable"
-                  )}
-                  title={
-                    week.available
-                      ? `Available: ${week.label}`
-                      : `Not available: ${week.label}`
-                  }
-                >
-                  <span className="text-[10px] leading-tight text-center">
-                    {week.label.split(" ")[0]}
-                    <br />
-                    {week.label.split(" ")[1]?.replace("-", "\u2013") || ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-bark-300 mt-3">
-              {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
-            </p>
-          </section>
+          {/* Weekly Availability (summer camps only) */}
+          {camp.campType === "SUMMER_DAY" && (
+            <section className="glass-panel p-6 animate-fade-up stagger-2">
+              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-pine-400" />
+                Weekly Availability
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {weekAvailability.map((week) => (
+                  <div
+                    key={week.start}
+                    className={cn(
+                      "week-cell",
+                      week.available
+                        ? "week-cell-available"
+                        : "week-cell-unavailable"
+                    )}
+                    title={
+                      week.available
+                        ? `Available: ${week.label}`
+                        : `Not available: ${week.label}`
+                    }
+                  >
+                    <span className="text-[10px] leading-tight text-center">
+                      {week.label.split(" ")[0]}
+                      <br />
+                      {week.label.split(" ")[1]?.replace("-", "\u2013") || ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-bark-300 mt-3">
+                {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
+              </p>
+            </section>
+          )}
+
+          {/* Non-summer schedules */}
+          {camp.campType !== "SUMMER_DAY" && camp.schedules.length > 0 && (
+            <section className="glass-panel p-6 animate-fade-up stagger-2">
+              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-pine-400" />
+                Schedule
+              </h2>
+              <div className="space-y-2">
+                {camp.schedules.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-pine-50 border border-pine-200/40"
+                  >
+                    <span className="text-sm font-medium text-bark-600">
+                      {s.label}
+                    </span>
+                    {s.startTime && (
+                      <span className="text-xs text-bark-400">
+                        {s.startTime} – {s.endTime}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Ages & Grades */}
-          <section className="glass-panel p-6 animate-fade-up stagger-3">
-            <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
-              <Users className="w-5 h-5 text-pine-400" />
-              Ages & Grades
-            </h2>
-            <div className="flex flex-wrap gap-3">
-              {camp.ageGroups.map((ag) => (
-                <div
-                  key={ag.id}
-                  className="px-4 py-3 rounded-2xl bg-pine-50 border border-pine-200/50"
-                >
-                  <span className="font-display font-semibold text-pine-600 text-sm">
-                    {ag.label}
-                  </span>
-                  {ag.minAge !== null && ag.maxAge !== null && (
-                    <p className="text-xs text-pine-400 mt-0.5">
-                      Ages {ag.minAge}-{ag.maxAge}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
+          {camp.ageGroups.length > 0 && (
+            <section className="glass-panel p-6 animate-fade-up stagger-3">
+              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+                <Users className="w-5 h-5 text-pine-400" />
+                Ages & Grades
+              </h2>
+              <div className="flex flex-wrap gap-3">
+                {camp.ageGroups.map((ag) => (
+                  <div
+                    key={ag.id}
+                    className="px-4 py-3 rounded-2xl bg-pine-50 border border-pine-200/50"
+                  >
+                    <span className="font-display font-semibold text-pine-600 text-sm">
+                      {ag.label}
+                    </span>
+                    {ag.minAge !== null && ag.maxAge !== null && (
+                      <p className="text-xs text-pine-400 mt-0.5">
+                        Ages {ag.minAge}–{ag.maxAge}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
 
         {/* Right column — sidebar */}
         <div className="space-y-6">
           {/* Pricing */}
-          <section className="glass-panel p-6 animate-fade-up stagger-1">
-            <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-pine-400" />
-              Pricing
-            </h2>
-            <div className="space-y-3">
-              {camp.pricing.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-start justify-between p-3 rounded-xl bg-cream-200/40"
-                >
-                  <div>
-                    <span className="text-sm font-medium text-bark-500">
-                      {p.label}
-                    </span>
-                    {p.ageQualifier && (
-                      <p className="text-xs text-bark-300">{p.ageQualifier}</p>
-                    )}
+          {camp.pricing.length > 0 && (
+            <section className="glass-panel p-6 animate-fade-up stagger-1">
+              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-pine-400" />
+                Pricing
+              </h2>
+              <div className="space-y-3">
+                {camp.pricing.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-start justify-between p-3 rounded-xl bg-cream-200/40"
+                  >
+                    <div>
+                      <span className="text-sm font-medium text-bark-500">
+                        {p.label}
+                      </span>
+                      {p.ageQualifier && (
+                        <p className="text-xs text-bark-300">{p.ageQualifier}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className="font-display font-bold text-bark-700">
+                        {formatCurrency(p.amount)}
+                      </span>
+                      <span className="text-xs text-bark-300 block">
+                        {p.unit === "FLAT"
+                          ? "total"
+                          : p.unit === "PER_CAMP"
+                            ? "/session"
+                            : p.unit === "PER_DAY"
+                              ? "/day"
+                              : "/week"}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className="font-display font-bold text-bark-700">
-                      {formatCurrency(p.amount)}
-                    </span>
-                    <span className="text-xs text-bark-300 block">
-                      {p.unit === "FLAT"
-                        ? "total"
-                        : p.unit === "PER_CAMP"
-                          ? "/session"
-                          : p.unit === "PER_DAY"
-                            ? "/day"
-                            : "/week"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {camp.pricing.some((p) => p.discountNotes) && (
-              <div className="mt-3 text-xs text-pine-500">
-                {camp.pricing
-                  .filter((p) => p.discountNotes)
-                  .map((p) => (
-                    <p key={p.id}>{p.discountNotes}</p>
-                  ))}
+                ))}
               </div>
-            )}
-          </section>
+              {camp.pricing.some((p) => p.discountNotes) && (
+                <div className="mt-3 text-xs text-pine-500 space-y-1">
+                  {camp.pricing
+                    .filter((p) => p.discountNotes)
+                    .map((p) => (
+                      <p key={p.id}>{p.discountNotes}</p>
+                    ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Details */}
           <section className="glass-panel p-6 animate-fade-up stagger-2">
@@ -252,16 +278,18 @@ export default function CampDetailPage({
               Details
             </h2>
             <div className="space-y-3">
-              <DetailRow
-                icon={<MapPin className="w-4 h-4 text-pine-400" />}
-                label="Neighborhood"
-                value={camp.neighborhood}
-              />
+              {camp.neighborhood && (
+                <DetailRow
+                  icon={<MapPin className="w-4 h-4 text-pine-400" />}
+                  label="Neighborhood"
+                  value={camp.neighborhood}
+                />
+              )}
               {firstSchedule?.startTime && (
                 <DetailRow
                   icon={<Clock className="w-4 h-4 text-pine-400" />}
                   label="Hours"
-                  value={`${firstSchedule.startTime} - ${firstSchedule.endTime}`}
+                  value={`${firstSchedule.startTime} – ${firstSchedule.endTime}`}
                 />
               )}
               <DetailRow
@@ -306,15 +334,17 @@ export default function CampDetailPage({
           </section>
 
           {/* CTA */}
-          <a
-            href={camp.websiteUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-primary w-full text-base py-4"
-          >
-            Register at Camp Website
-            <ExternalLink className="w-4 h-4" />
-          </a>
+          {camp.websiteUrl && (
+            <a
+              href={camp.websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-primary w-full text-base py-4"
+            >
+              Register at Camp Website
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
         </div>
       </div>
     </div>
