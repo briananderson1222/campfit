@@ -1,0 +1,136 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Nunito+Sans:ital,opsz,wght@0,6..12,200..1000;1,6..12,200..1000&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-body text-bark-600 leading-relaxed;
+    background-color: #fefcf3;
+    background-image: radial-gradient(
+        ellipse at 20% 0%,
+        rgba(149, 213, 178, 0.08) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse at 80% 100%,
+        rgba(233, 196, 106, 0.06) 0%,
+        transparent 50%
+      );
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-pine-200 text-pine-700;
+  }
+}
+
+@layer components {
+  .camp-card {
+    @apply relative bg-cream-50 rounded-3xl border border-cream-400/40 shadow-camp
+      transition-all duration-300 ease-out overflow-hidden;
+  }
+
+  .camp-card:hover {
+    @apply shadow-camp-hover -translate-y-1;
+  }
+
+  .camp-card:hover .camp-card-image {
+    transform: scale(1.03);
+  }
+
+  .filter-chip {
+    @apply inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium
+      font-body cursor-pointer select-none transition-all duration-200;
+  }
+
+  .filter-chip-inactive {
+    @apply bg-cream-200/80 text-bark-400 hover:bg-cream-300 hover:text-bark-500;
+  }
+
+  .filter-chip-active {
+    @apply bg-pine-600 text-white shadow-sm;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
+      font-body tracking-wide uppercase;
+  }
+
+  .section-heading {
+    @apply font-display text-2xl sm:text-3xl font-bold text-bark-700 tracking-tight;
+  }
+
+  .input-field {
+    @apply w-full rounded-2xl border border-cream-400/60 bg-cream-50 px-4 py-3
+      text-bark-600 placeholder:text-bark-300 font-body
+      focus:outline-none focus:ring-2 focus:ring-pine-300/50 focus:border-pine-400
+      transition-all duration-200;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl
+      bg-terracotta-400 text-white font-display font-semibold text-sm
+      hover:bg-terracotta-500 active:bg-terracotta-600
+      shadow-sm hover:shadow-glow
+      transition-all duration-200 select-none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl
+      bg-cream-200 text-bark-500 font-display font-semibold text-sm
+      hover:bg-cream-300 active:bg-cream-400
+      border border-cream-400/50
+      transition-all duration-200 select-none;
+  }
+
+  .week-cell {
+    @apply w-10 h-10 sm:w-12 sm:h-12 rounded-xl text-xs font-semibold
+      flex items-center justify-center transition-all duration-200;
+  }
+
+  .week-cell-available {
+    @apply bg-pine-200/60 text-pine-700 border border-pine-300/50;
+  }
+
+  .week-cell-unavailable {
+    @apply bg-cream-200/40 text-bark-200;
+  }
+
+  .glass-panel {
+    @apply bg-cream-50/80 backdrop-blur-md border border-cream-400/30 rounded-3xl;
+  }
+}
+
+@layer utilities {
+  .stagger-1 { animation-delay: 0.1s; }
+  .stagger-2 { animation-delay: 0.2s; }
+  .stagger-3 { animation-delay: 0.3s; }
+  .stagger-4 { animation-delay: 0.4s; }
+  .stagger-5 { animation-delay: 0.5s; }
+  .stagger-6 { animation-delay: 0.6s; }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .noise-overlay {
+    position: relative;
+  }
+
+  .noise-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='512' height='512' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+}

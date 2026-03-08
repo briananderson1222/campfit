@@ -1,0 +1,345 @@
+"use client";
+
+import { use } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  MapPin,
+  Clock,
+  UtensilsCrossed,
+  Sunrise,
+  ExternalLink,
+  Calendar,
+  DollarSign,
+  Users,
+  ShieldCheck,
+  AlertTriangle,
+  Sunset,
+} from "lucide-react";
+import { MOCK_CAMPS } from "@/lib/mock-data";
+import {
+  CATEGORY_LABELS,
+  CATEGORY_COLORS,
+  STATUS_CONFIG,
+  CAMP_TYPE_LABELS,
+  SUMMER_WEEKS,
+} from "@/lib/types";
+import { cn, formatCurrency } from "@/lib/utils";
+import { SaveButton } from "@/components/save-button";
+
+export default function CampDetailPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = use(params);
+  const camp = MOCK_CAMPS.find((c) => c.slug === slug);
+
+  if (!camp) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-20 text-center">
+        <h1 className="font-display text-2xl font-bold text-bark-700 mb-4">
+          Camp not found
+        </h1>
+        <Link href="/" className="btn-secondary">
+          <ArrowLeft className="w-4 h-4" />
+          Back to camps
+        </Link>
+      </div>
+    );
+  }
+
+  const status = STATUS_CONFIG[camp.registrationStatus];
+  const categoryColor = CATEGORY_COLORS[camp.category];
+  const firstSchedule = camp.schedules[0];
+
+  const weekAvailability = SUMMER_WEEKS.map((week) => ({
+    ...week,
+    available: camp.schedules.some((s) => s.startDate === week.start),
+  }));
+
+  return (
+    <div className="mx-auto max-w-4xl px-4 sm:px-6 py-8 sm:py-12">
+      {/* Breadcrumb */}
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1.5 text-sm text-bark-300 hover:text-pine-500 transition-colors mb-6"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back to camps
+      </Link>
+
+      {/* Header */}
+      <div className="mb-8 animate-fade-up">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className={cn("badge", categoryColor)}>
+            {CATEGORY_LABELS[camp.category]}
+          </span>
+          {camp.campType !== "SUMMER_DAY" && (
+            <span className="badge bg-clay-100 text-clay-500">
+              {CAMP_TYPE_LABELS[camp.campType]}
+            </span>
+          )}
+          <span className={cn("badge", status.color)}>
+            {status.label}
+          </span>
+          {camp.dataConfidence === "PLACEHOLDER" && (
+            <span className="badge bg-amber-50 text-amber-600 gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              Unverified
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 tracking-tight">
+            {camp.name}
+          </h1>
+          <SaveButton campId={camp.id} size="lg" showLabel />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-bark-400">
+          <span className="flex items-center gap-1.5">
+            <MapPin className="w-4 h-4 text-pine-400" />
+            {camp.address}
+          </span>
+          {firstSchedule?.startTime && (
+            <span className="flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-pine-400" />
+              {firstSchedule.startTime} - {firstSchedule.endTime}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Main content grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column — main content */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* About */}
+          <section className="glass-panel p-6 animate-fade-up stagger-1">
+            <h2 className="font-display font-bold text-bark-700 text-lg mb-3">
+              About
+            </h2>
+            <p className="text-bark-500 leading-relaxed">{camp.description}</p>
+            {camp.notes && (
+              <p className="text-sm text-bark-400 mt-3 leading-relaxed">
+                {camp.notes}
+              </p>
+            )}
+            {camp.interestingDetails && (
+              <div className="mt-4 px-4 py-3 rounded-2xl bg-amber-300/10 border border-amber-300/30">
+                <p className="text-sm text-amber-600 font-medium">
+                  {camp.interestingDetails}
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* Weekly Availability */}
+          <section className="glass-panel p-6 animate-fade-up stagger-2">
+            <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-pine-400" />
+              Weekly Availability
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {weekAvailability.map((week) => (
+                <div
+                  key={week.start}
+                  className={cn(
+                    "week-cell",
+                    week.available
+                      ? "week-cell-available"
+                      : "week-cell-unavailable"
+                  )}
+                  title={
+                    week.available
+                      ? `Available: ${week.label}`
+                      : `Not available: ${week.label}`
+                  }
+                >
+                  <span className="text-[10px] leading-tight text-center">
+                    {week.label.split(" ")[0]}
+                    <br />
+                    {week.label.split(" ")[1]?.replace("-", "\u2013") || ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-bark-300 mt-3">
+              {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
+            </p>
+          </section>
+
+          {/* Ages & Grades */}
+          <section className="glass-panel p-6 animate-fade-up stagger-3">
+            <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <Users className="w-5 h-5 text-pine-400" />
+              Ages & Grades
+            </h2>
+            <div className="flex flex-wrap gap-3">
+              {camp.ageGroups.map((ag) => (
+                <div
+                  key={ag.id}
+                  className="px-4 py-3 rounded-2xl bg-pine-50 border border-pine-200/50"
+                >
+                  <span className="font-display font-semibold text-pine-600 text-sm">
+                    {ag.label}
+                  </span>
+                  {ag.minAge !== null && ag.maxAge !== null && (
+                    <p className="text-xs text-pine-400 mt-0.5">
+                      Ages {ag.minAge}-{ag.maxAge}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Right column — sidebar */}
+        <div className="space-y-6">
+          {/* Pricing */}
+          <section className="glass-panel p-6 animate-fade-up stagger-1">
+            <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-pine-400" />
+              Pricing
+            </h2>
+            <div className="space-y-3">
+              {camp.pricing.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-start justify-between p-3 rounded-xl bg-cream-200/40"
+                >
+                  <div>
+                    <span className="text-sm font-medium text-bark-500">
+                      {p.label}
+                    </span>
+                    {p.ageQualifier && (
+                      <p className="text-xs text-bark-300">{p.ageQualifier}</p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <span className="font-display font-bold text-bark-700">
+                      {formatCurrency(p.amount)}
+                    </span>
+                    <span className="text-xs text-bark-300 block">
+                      {p.unit === "FLAT"
+                        ? "total"
+                        : p.unit === "PER_CAMP"
+                          ? "/session"
+                          : p.unit === "PER_DAY"
+                            ? "/day"
+                            : "/week"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {camp.pricing.some((p) => p.discountNotes) && (
+              <div className="mt-3 text-xs text-pine-500">
+                {camp.pricing
+                  .filter((p) => p.discountNotes)
+                  .map((p) => (
+                    <p key={p.id}>{p.discountNotes}</p>
+                  ))}
+              </div>
+            )}
+          </section>
+
+          {/* Details */}
+          <section className="glass-panel p-6 animate-fade-up stagger-2">
+            <h2 className="font-display font-bold text-bark-700 text-lg mb-4">
+              Details
+            </h2>
+            <div className="space-y-3">
+              <DetailRow
+                icon={<MapPin className="w-4 h-4 text-pine-400" />}
+                label="Neighborhood"
+                value={camp.neighborhood}
+              />
+              {firstSchedule?.startTime && (
+                <DetailRow
+                  icon={<Clock className="w-4 h-4 text-pine-400" />}
+                  label="Hours"
+                  value={`${firstSchedule.startTime} - ${firstSchedule.endTime}`}
+                />
+              )}
+              <DetailRow
+                icon={<UtensilsCrossed className="w-4 h-4 text-pine-400" />}
+                label="Lunch"
+                value={camp.lunchIncluded ? "Included" : "Not included"}
+              />
+              {firstSchedule?.earlyDropOff && (
+                <DetailRow
+                  icon={<Sunrise className="w-4 h-4 text-amber-400" />}
+                  label="Early Drop-off"
+                  value={firstSchedule.earlyDropOff}
+                />
+              )}
+              {firstSchedule?.latePickup && (
+                <DetailRow
+                  icon={<Sunset className="w-4 h-4 text-terracotta-400" />}
+                  label="Late Pickup"
+                  value={`Until ${firstSchedule.latePickup}`}
+                />
+              )}
+              {camp.registrationOpenDate && (
+                <DetailRow
+                  icon={<Calendar className="w-4 h-4 text-pine-400" />}
+                  label="Registration Opens"
+                  value={new Date(camp.registrationOpenDate).toLocaleDateString(
+                    "en-US",
+                    { month: "long", day: "numeric", year: "numeric" }
+                  )}
+                />
+              )}
+              <DetailRow
+                icon={<ShieldCheck className="w-4 h-4 text-pine-400" />}
+                label="Data Status"
+                value={
+                  camp.dataConfidence === "VERIFIED"
+                    ? "Verified 2026"
+                    : "Unverified — check camp website"
+                }
+              />
+            </div>
+          </section>
+
+          {/* CTA */}
+          <a
+            href={camp.websiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-primary w-full text-base py-4"
+          >
+            Register at Camp Website
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 shrink-0">{icon}</div>
+      <div>
+        <span className="text-xs text-bark-300 uppercase tracking-wide font-semibold">
+          {label}
+        </span>
+        <p className="text-sm text-bark-500">{value}</p>
+      </div>
+    </div>
+  );
+}
