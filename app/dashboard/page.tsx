@@ -1,340 +1,98 @@
-"use client";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { getPool } from "@/lib/db";
+import { DashboardClient } from "@/components/dashboard-client";
+import { SavedCamp } from "@/lib/types";
 
-import { useState } from "react";
-import Link from "next/link";
-import {
-  Heart,
-  Bell,
-  Mail,
-  Smartphone,
-  MessageSquare,
-  Trash2,
-  ExternalLink,
-  Crown,
-  MapPin,
-  StickyNote,
-  Calendar,
-} from "lucide-react";
-import { MOCK_SAVED_CAMPS } from "@/lib/mock-data";
-import {
-  CATEGORY_LABELS,
-  CATEGORY_COLORS,
-  STATUS_CONFIG,
-  SavedCamp,
-} from "@/lib/types";
-import { cn, formatCurrency, getLowestPrice } from "@/lib/utils";
+export default async function DashboardPage() {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-const MAX_FREE_SAVES = 5;
+  if (!user) {
+    redirect("/auth/login");
+  }
 
-export default function DashboardPage() {
-  const [savedCamps, setSavedCamps] = useState<SavedCamp[]>(MOCK_SAVED_CAMPS);
-  const [globalEmail, setGlobalEmail] = useState(true);
-  const [globalPush, setGlobalPush] = useState(false);
-  const [globalSms, setGlobalSms] = useState(false);
-
-  const removeCamp = (id: string) => {
-    setSavedCamps((camps) => camps.filter((c) => c.id !== id));
-  };
-
-  return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 sm:py-12">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-8 animate-fade-up">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-2xl bg-terracotta-400 flex items-center justify-center">
-              <Heart className="w-5 h-5 text-white" />
-            </div>
-            <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 tracking-tight">
-              Saved Camps
-            </h1>
-          </div>
-          <p className="text-bark-400 ml-[52px]">
-            {savedCamps.length} of {MAX_FREE_SAVES} saves used (Free plan)
-          </p>
-        </div>
-
-        <button className="btn-primary text-sm gap-1.5 shrink-0">
-          <Crown className="w-4 h-4" />
-          Upgrade
-        </button>
-      </div>
-
-      {/* Save limit bar */}
-      <div className="mb-8 animate-fade-up stagger-1">
-        <div className="h-2 rounded-full bg-cream-300/60 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-pine-400 to-pine-500 transition-all duration-500"
-            style={{
-              width: `${(savedCamps.length / MAX_FREE_SAVES) * 100}%`,
-            }}
-          />
-        </div>
-        {savedCamps.length >= MAX_FREE_SAVES - 1 && (
-          <p className="text-xs text-amber-500 mt-2 flex items-center gap-1">
-            <Crown className="w-3 h-3" />
-            Upgrade to Premium for unlimited saves and all notification channels
-          </p>
-        )}
-      </div>
-
-      {/* Saved camps list */}
-      <div className="space-y-4 mb-12">
-        {savedCamps.length === 0 ? (
-          <div className="text-center py-16 glass-panel">
-            <Heart className="w-10 h-10 mx-auto mb-3 text-bark-300 opacity-40" />
-            <h3 className="font-display font-bold text-bark-500 text-lg mb-2">
-              No saved camps yet
-            </h3>
-            <p className="text-bark-300 mb-6 text-sm">
-              Browse camps and tap the heart to save ones you&apos;re interested in
-            </p>
-            <Link href="/" className="btn-primary">
-              Browse Camps
-            </Link>
-          </div>
-        ) : (
-          savedCamps.map((saved, i) => {
-            const camp = saved.camp;
-            const status = STATUS_CONFIG[camp.registrationStatus];
-            const categoryColor = CATEGORY_COLORS[camp.category];
-            const lowestPrice = getLowestPrice(camp.pricing);
-
-            return (
-              <div
-                key={saved.id}
-                className="glass-panel p-5 sm:p-6 animate-fade-up"
-                style={{ animationDelay: `${i * 0.1 + 0.2}s` }}
-              >
-                {/* Top row */}
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                      <span className={cn("badge", categoryColor)}>
-                        {CATEGORY_LABELS[camp.category]}
-                      </span>
-                      <span className={cn("badge", status.color)}>
-                        {status.label}
-                      </span>
-                    </div>
-                    <Link
-                      href={`/camps/${camp.slug}`}
-                      className="font-display font-bold text-lg text-bark-700 hover:text-pine-600 transition-colors"
-                    >
-                      {camp.name}
-                    </Link>
-                  </div>
-                  <button
-                    onClick={() => removeCamp(saved.id)}
-                    className="p-2 rounded-xl hover:bg-red-50 text-bark-300 hover:text-red-400 transition-colors shrink-0"
-                    title="Remove from saved"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Camp meta */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-bark-400 mb-4">
-                  <span className="flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-pine-400" />
-                    {camp.neighborhood}
-                  </span>
-                  {lowestPrice !== null && (
-                    <span className="font-semibold text-bark-500">
-                      {formatCurrency(lowestPrice)}
-                      {camp.pricing[0]?.unit === "PER_WEEK" ? "/wk" : ""}
-                    </span>
-                  )}
-                  {camp.registrationOpenDate && (
-                    <span className="flex items-center gap-1.5 text-amber-500">
-                      <Calendar className="w-3.5 h-3.5" />
-                      Reg. opens{" "}
-                      {new Date(
-                        camp.registrationOpenDate
-                      ).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  )}
-                </div>
-
-                {/* Personal notes */}
-                {saved.notes && (
-                  <div className="flex items-start gap-2 mb-4 px-3 py-2.5 rounded-xl bg-amber-50/60 border border-amber-200/40">
-                    <StickyNote className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-                    <p className="text-sm text-amber-600">{saved.notes}</p>
-                  </div>
-                )}
-
-                {/* Notification toggles */}
-                <div className="flex items-center justify-between pt-3 border-t border-cream-300/60">
-                  <div className="flex items-center gap-1 text-xs text-bark-300">
-                    <Bell className="w-3.5 h-3.5" />
-                    <span className="font-medium">Notify me via:</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <NotifyToggle
-                      icon={<Mail className="w-3.5 h-3.5" />}
-                      label="Email"
-                      active={saved.notifyEmail}
-                    />
-                    <NotifyToggle
-                      icon={<Smartphone className="w-3.5 h-3.5" />}
-                      label="Push"
-                      active={saved.notifyPush}
-                      premium
-                    />
-                    <NotifyToggle
-                      icon={<MessageSquare className="w-3.5 h-3.5" />}
-                      label="SMS"
-                      active={saved.notifySms}
-                      premium
-                    />
-                    <a
-                      href={camp.websiteUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 rounded-lg hover:bg-cream-200 text-bark-300 hover:text-pine-500 transition-colors"
-                      title="Visit camp website"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Global notification settings */}
-      <section className="glass-panel p-6 animate-fade-up stagger-4">
-        <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
-          <Bell className="w-5 h-5 text-pine-400" />
-          Notification Settings
-        </h2>
-        <p className="text-sm text-bark-400 mb-5">
-          Choose how you want to be notified about your saved camps
-        </p>
-
-        <div className="space-y-3">
-          <GlobalToggle
-            icon={<Mail className="w-4 h-4" />}
-            label="Email Notifications"
-            description="Get notified when registration opens"
-            active={globalEmail}
-            onChange={setGlobalEmail}
-          />
-          <GlobalToggle
-            icon={<Smartphone className="w-4 h-4" />}
-            label="Push Notifications"
-            description="Browser & mobile push alerts"
-            active={globalPush}
-            onChange={setGlobalPush}
-            premium
-          />
-          <GlobalToggle
-            icon={<MessageSquare className="w-4 h-4" />}
-            label="SMS Notifications"
-            description="Text message reminders"
-            active={globalSms}
-            onChange={setGlobalSms}
-            premium
-          />
-        </div>
-      </section>
-    </div>
+  // Fetch saved camps with full camp data
+  const pool = getPool();
+  const result = await pool.query(
+    `SELECT
+      sc.id,
+      sc."campId",
+      sc."savedAt"::text,
+      sc."notifyEmail",
+      sc."notifyPush",
+      sc."notifySms",
+      sc.notes,
+      c.*,
+      c."registrationOpenDate"::text AS "registrationOpenDate",
+      COALESCE(
+        json_agg(DISTINCT jsonb_build_object(
+          'id', ag."id", 'label', ag."label",
+          'minAge', ag."minAge", 'maxAge', ag."maxAge",
+          'minGrade', ag."minGrade", 'maxGrade', ag."maxGrade"
+        )) FILTER (WHERE ag."id" IS NOT NULL), '[]'
+      ) AS "ageGroups",
+      COALESCE(
+        json_agg(DISTINCT jsonb_build_object(
+          'id', s."id", 'label', s."label",
+          'startDate', s."startDate"::text, 'endDate', s."endDate"::text,
+          'startTime', s."startTime", 'endTime', s."endTime",
+          'earlyDropOff', s."earlyDropOff", 'latePickup', s."latePickup"
+        )) FILTER (WHERE s."id" IS NOT NULL), '[]'
+      ) AS "schedules",
+      COALESCE(
+        json_agg(DISTINCT jsonb_build_object(
+          'id', p."id", 'label', p."label",
+          'amount', p."amount"::float, 'unit', p."unit",
+          'durationWeeks', p."durationWeeks", 'ageQualifier', p."ageQualifier",
+          'discountNotes', p."discountNotes"
+        )) FILTER (WHERE p."id" IS NOT NULL), '[]'
+      ) AS "pricing"
+    FROM "SavedCamp" sc
+    JOIN "Camp" c ON c.id = sc."campId"
+    LEFT JOIN "CampAgeGroup" ag ON ag."campId" = c.id
+    LEFT JOIN "CampSchedule" s ON s."campId" = c.id
+    LEFT JOIN "CampPricing" p ON p."campId" = c.id
+    WHERE sc."userId" = $1
+    GROUP BY sc.id, c.id
+    ORDER BY sc."savedAt" DESC`,
+    [user.id]
   );
-}
 
-function NotifyToggle({
-  icon,
-  label,
-  active,
-  premium = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  premium?: boolean;
-}) {
-  return (
-    <button
-      className={cn(
-        "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-        active
-          ? "bg-pine-100 text-pine-600 border border-pine-200/60"
-          : "bg-cream-200/50 text-bark-300 border border-transparent hover:bg-cream-200",
-        premium && !active && "opacity-50"
-      )}
-      title={premium ? `${label} (Premium)` : label}
-    >
-      {icon}
-      {label}
-      {premium && <Crown className="w-2.5 h-2.5 text-amber-400" />}
-    </button>
-  );
-}
+  const savedCamps: SavedCamp[] = result.rows.map((row) => ({
+    id: row.id,
+    campId: row.campId,
+    savedAt: row.savedAt,
+    notifyEmail: row.notifyEmail,
+    notifyPush: row.notifyPush,
+    notifySms: row.notifySms,
+    notes: row.notes,
+    camp: {
+      id: row.campId,
+      slug: row.slug,
+      name: row.name,
+      description: row.description,
+      notes: row.notes,
+      campType: row.campType,
+      category: row.category,
+      websiteUrl: row.websiteUrl,
+      interestingDetails: row.interestingDetails,
+      city: row.city,
+      region: row.region,
+      neighborhood: row.neighborhood,
+      address: row.address,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      lunchIncluded: row.lunchIncluded,
+      registrationOpenDate: row.registrationOpenDate,
+      registrationOpenTime: row.registrationOpenTime,
+      registrationStatus: row.registrationStatus,
+      dataConfidence: row.dataConfidence,
+      ageGroups: row.ageGroups,
+      schedules: row.schedules,
+      pricing: row.pricing,
+    },
+  }));
 
-function GlobalToggle({
-  icon,
-  label,
-  description,
-  active,
-  onChange,
-  premium = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  description: string;
-  active: boolean;
-  onChange: (value: boolean) => void;
-  premium?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between p-4 rounded-2xl transition-colors",
-        active ? "bg-pine-50 border border-pine-200/50" : "bg-cream-200/30"
-      )}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className={cn(
-            "w-8 h-8 rounded-lg flex items-center justify-center",
-            active ? "bg-pine-500 text-white" : "bg-cream-300/60 text-bark-300"
-          )}
-        >
-          {icon}
-        </div>
-        <div>
-          <span className="text-sm font-medium text-bark-600 flex items-center gap-1.5">
-            {label}
-            {premium && (
-              <span className="badge bg-amber-100 text-amber-600 text-[10px] py-0">
-                <Crown className="w-2.5 h-2.5" />
-                Premium
-              </span>
-            )}
-          </span>
-          <p className="text-xs text-bark-300">{description}</p>
-        </div>
-      </div>
-      <button
-        onClick={() => onChange(!active)}
-        className={cn(
-          "relative w-11 h-6 rounded-full transition-colors duration-200",
-          active ? "bg-pine-500" : "bg-bark-200"
-        )}
-      >
-        <span
-          className={cn(
-            "absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200",
-            active && "translate-x-5"
-          )}
-        />
-      </button>
-    </div>
-  );
+  return <DashboardClient initialSaves={savedCamps} userEmail={user.email ?? ""} />;
 }
