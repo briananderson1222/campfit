@@ -405,7 +405,7 @@ camp/
     - ~~Registration parser~~ DONE (`lib/ingestion/registration-parser.ts`) — status + date extraction
     - ~~DataIngestionAdapter interface~~ DONE (`lib/ingestion/adapter.ts`)
     - ~~CsvIngestionAdapter~~ DONE (`lib/ingestion/csv-adapter.ts`) — all 4 CSV file types
-12. Seed script: CSV → normalized → Supabase
+12. ~~Seed script: CSV → normalized → Supabase~~ DONE — 158 camps seeded (108 summer, 14 sleepaway, 1 family, 16 winter, 19 break)
 13. CampRepository with Prisma
 14. Replace mock data with real DB queries
 15. PWA service worker (offline caching, install prompt)
