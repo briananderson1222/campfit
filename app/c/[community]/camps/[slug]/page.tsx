@@ -499,8 +499,10 @@ export default async function CommunityDetailPage({
                 icon={<ShieldCheck className="w-4 h-4 text-pine-400" />}
                 label="Data Status"
                 value={
-                  camp.dataConfidence === "VERIFIED"
-                    ? "Verified 2026"
+                  camp.dataConfidence === "VERIFIED" && camp.lastVerifiedAt
+                    ? `Verified ${new Date(camp.lastVerifiedAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`
+                    : camp.dataConfidence === "VERIFIED"
+                    ? "Verified (source pending)"
                     : "Unverified — check camp website"
                 }
               />

@@ -91,6 +91,8 @@ export interface Camp {
   registrationStatus: RegistrationStatus;
 
   dataConfidence: DataConfidence;
+  lastVerifiedAt: string | null;
+  sourceUrl: string | null;
 
   ageGroups: CampAgeGroup[];
   schedules: CampSchedule[];

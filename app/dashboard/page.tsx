@@ -93,6 +93,8 @@ export default async function DashboardPage() {
       communitySlug: row.communitySlug,
       displayName: row.displayName,
       dataConfidence: row.dataConfidence,
+      lastVerifiedAt: row.lastVerifiedAt ?? null,
+      sourceUrl: row.sourceUrl ?? null,
       ageGroups: row.ageGroups,
       schedules: row.schedules,
       pricing: row.pricing,

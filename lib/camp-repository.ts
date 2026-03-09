@@ -15,46 +15,33 @@ const CAMPS_WITH_RELATIONS_SQL = `
     c.*,
     c."communitySlug", c."displayName",
     c."registrationOpenDate"::text AS "registrationOpenDate",
-    COALESCE(
-      json_agg(DISTINCT jsonb_build_object(
-        'id', ag."id",
-        'label', ag."label",
-        'minAge', ag."minAge",
-        'maxAge', ag."maxAge",
-        'minGrade', ag."minGrade",
-        'maxGrade', ag."maxGrade"
-      )) FILTER (WHERE ag."id" IS NOT NULL),
-      '[]'
-    ) AS "ageGroups",
-    COALESCE(
-      json_agg(jsonb_build_object(
-        'id', s."id",
-        'label', s."label",
-        'startDate', s."startDate"::text,
-        'endDate', s."endDate"::text,
-        'startTime', s."startTime",
-        'endTime', s."endTime",
-        'earlyDropOff', s."earlyDropOff",
-        'latePickup', s."latePickup"
-      ) ORDER BY s."startDate" ASC, s."label" ASC) FILTER (WHERE s."id" IS NOT NULL),
-      '[]'
-    ) AS "schedules",
-    COALESCE(
-      json_agg(DISTINCT jsonb_build_object(
-        'id', p."id",
-        'label', p."label",
-        'amount', p."amount"::float,
-        'unit', p."unit",
+    COALESCE((
+      SELECT json_agg(jsonb_build_object(
+        'id', ag."id", 'label', ag."label",
+        'minAge', ag."minAge", 'maxAge', ag."maxAge",
+        'minGrade', ag."minGrade", 'maxGrade', ag."maxGrade"
+      ) ORDER BY ag."minAge" ASC NULLS LAST, ag."label" ASC)
+      FROM "CampAgeGroup" ag WHERE ag."campId" = c."id"
+    ), '[]') AS "ageGroups",
+    COALESCE((
+      SELECT json_agg(jsonb_build_object(
+        'id', s."id", 'label', s."label",
+        'startDate', s."startDate"::text, 'endDate', s."endDate"::text,
+        'startTime', s."startTime", 'endTime', s."endTime",
+        'earlyDropOff', s."earlyDropOff", 'latePickup', s."latePickup"
+      ) ORDER BY s."startDate" ASC NULLS LAST, s."label" ASC)
+      FROM "CampSchedule" s WHERE s."campId" = c."id"
+    ), '[]') AS "schedules",
+    COALESCE((
+      SELECT json_agg(jsonb_build_object(
+        'id', p."id", 'label', p."label",
+        'amount', p."amount"::float, 'unit', p."unit",
         'durationWeeks', p."durationWeeks",
-        'ageQualifier', p."ageQualifier",
-        'discountNotes', p."discountNotes"
-      )) FILTER (WHERE p."id" IS NOT NULL),
-      '[]'
-    ) AS "pricing"
+        'ageQualifier', p."ageQualifier", 'discountNotes', p."discountNotes"
+      ) ORDER BY p."amount" ASC NULLS LAST)
+      FROM "CampPricing" p WHERE p."campId" = c."id"
+    ), '[]') AS "pricing"
   FROM "Camp" c
-  LEFT JOIN "CampAgeGroup" ag ON ag."campId" = c."id"
-  LEFT JOIN "CampSchedule" s ON s."campId" = c."id"
-  LEFT JOIN "CampPricing" p ON p."campId" = c."id"
 `;
 
 // ─── Public API ───────────────────────────────────────────────────────────
