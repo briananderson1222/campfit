@@ -324,7 +324,7 @@ export default async function CommunityDetailPage({
                 Schedule
               </h2>
               <div className="space-y-2">
-                {camp.schedules.map((s) => {
+                {[...camp.schedules].sort((a, b) => (a.startDate ?? "").localeCompare(b.startDate ?? "")).map((s) => {
                   const hasDate = s.startDate && s.startDate !== "1970-01-01";
                   const dateRange = hasDate
                     ? (() => {
