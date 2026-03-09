@@ -3,6 +3,8 @@
  * Returns all sessions as VEVENT entries.
  */
 
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { getCampBySlug } from "@/lib/camp-repository";
 

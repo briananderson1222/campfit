@@ -22,17 +22,20 @@ function createPool(): Pool {
     user: process.env.PGUSER ?? "postgres.rpnzolnnhbzhuspwpajq",
     password: process.env.PGPASSWORD ?? "eDG*8dX-c#eD2Z2",
     ssl: { rejectUnauthorized: false },
-    max: 5,
+    // Keep small — Supabase free tier has a 60-connection limit.
+    // A singleton is used globally so this is the max for the whole process.
+    max: 3,
     idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
   });
 }
 
 export function getPool(): Pool {
-  if (process.env.NODE_ENV === "development") {
-    if (!global._pgPool) {
-      global._pgPool = createPool();
-    }
-    return global._pgPool;
+  // Always use a singleton — safe in Next.js because each worker process
+  // is a single Node.js instance. Prevents exhausting Supabase connections
+  // during concurrent static page generation at build time.
+  if (!global._pgPool) {
+    global._pgPool = createPool();
   }
-  return createPool();
+  return global._pgPool;
 }
