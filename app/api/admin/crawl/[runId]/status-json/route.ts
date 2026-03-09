@@ -13,5 +13,10 @@ export async function GET(_req: Request, { params }: { params: { runId: string }
     totalCamps: run.totalCamps,
     newProposals: run.newProposals,
     errorCount: run.errorCount,
+    campLog: run.campLog ?? [],
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    triggeredBy: run.triggeredBy,
+    trigger: run.trigger,
   });
 }

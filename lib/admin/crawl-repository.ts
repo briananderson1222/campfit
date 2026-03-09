@@ -1,5 +1,5 @@
 import { getPool } from '@/lib/db';
-import type { CrawlRun, CrawlStatus } from './types';
+import type { CrawlRun, CrawlCampLogEntry, CrawlStatus } from './types';
 
 export async function createCrawlRun(opts: {
   triggeredBy: string;
@@ -65,6 +65,17 @@ export async function appendCrawlError(
   const pool = getPool();
   await pool.query(
     `UPDATE "CrawlRun" SET "errorLog" = "errorLog" || $1::jsonb WHERE id = $2`,
+    [JSON.stringify([entry]), id]
+  );
+}
+
+export async function appendCrawlLog(
+  id: string,
+  entry: CrawlCampLogEntry
+): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `UPDATE "CrawlRun" SET "campLog" = "campLog" || $1::jsonb WHERE id = $2`,
     [JSON.stringify([entry]), id]
   );
 }

@@ -1,7 +1,7 @@
 import { getPool } from '@/lib/db';
 import { extractCampDataFromUrl } from './llm-extractor';
 import { computeDiff, computeOverallConfidence } from './diff-engine';
-import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError } from '@/lib/admin/crawl-repository';
+import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
 import { createProposal } from '@/lib/admin/review-repository';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import type { CrawlProgressEvent, CrawlRun } from '@/lib/admin/types';
@@ -72,6 +72,12 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         errorCount++;
         errorLog.push({ campId: camp.id, error: result.error, url: camp.websiteUrl });
         await appendCrawlError(run.id, { campId: camp.id, error: result.error, url: camp.websiteUrl });
+        await appendCrawlLog(run.id, {
+          campId: camp.id, campName: camp.name, url: camp.websiteUrl,
+          status: 'error', model: result.model ?? 'unknown',
+          proposals: 0, fieldsChanged: [], error: result.error,
+          durationMs, processedAt: new Date().toISOString(),
+        });
         await emit({ type: 'camp_error', campId: camp.id, campName: camp.name, error: result.error });
 
         // Still record failure metric
@@ -106,6 +112,15 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         // Record metrics
         const siteHost = getSiteHost(camp.websiteUrl);
         await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result, changesFound, durationMs });
+
+        await appendCrawlLog(run.id, {
+          campId: camp.id, campName: camp.name, url: camp.websiteUrl,
+          status: changesFound > 0 ? 'ok' : 'no_changes',
+          model: result.model,
+          proposals: changesFound > 0 ? 1 : 0,
+          fieldsChanged: Object.keys(proposedChanges),
+          durationMs, processedAt: new Date().toISOString(),
+        });
 
         await emit({ type: 'camp_done', campId: camp.id, proposalId, confidence: result.overallConfidence, changesFound });
       }

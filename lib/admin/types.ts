@@ -3,6 +3,19 @@ export type CrawlTrigger = 'MANUAL' | 'SCHEDULED';
 export type ProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SKIPPED';
 export type ChangeType = 'UPDATE' | 'NEW_CAMP' | 'FIELD_POPULATED';
 
+export interface CrawlCampLogEntry {
+  campId: string;
+  campName: string;
+  url: string;
+  status: 'ok' | 'error' | 'no_changes';
+  model: string;
+  proposals: number;
+  fieldsChanged: string[];
+  error?: string;
+  durationMs: number;
+  processedAt: string; // ISO
+}
+
 export interface CrawlRun {
   id: string;
   startedAt: string;
@@ -16,6 +29,7 @@ export interface CrawlRun {
   triggeredBy: string | null;
   campIds: string[] | null;
   errorLog: { campId: string; error: string; url: string }[];
+  campLog: CrawlCampLogEntry[];
 }
 
 export interface FieldDiff {
