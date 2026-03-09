@@ -297,21 +297,44 @@ export default async function CampDetailPage({
                 Schedule
               </h2>
               <div className="space-y-2">
-                {camp.schedules.map((s) => (
+                {camp.schedules.map((s) => {
+                  const hasDate = s.startDate && s.startDate !== "1970-01-01";
+                  const dateRange = hasDate
+                    ? (() => {
+                        const fmt = (d: string) =>
+                          new Date(d + "T12:00:00").toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          });
+                        return s.endDate && s.endDate !== s.startDate
+                          ? `${fmt(s.startDate)} – ${fmt(s.endDate)}`
+                          : fmt(s.startDate);
+                      })()
+                    : null;
+
+                  return (
                   <div
                     key={s.id}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-pine-50 border border-pine-200/40"
+                    className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl bg-pine-50 border border-pine-200/40"
                   >
-                    <span className="text-sm font-medium text-bark-600">
-                      {s.label}
-                    </span>
+                    <div>
+                      <span className="text-sm font-medium text-bark-600">
+                        {s.label}
+                      </span>
+                      {dateRange ? (
+                        <p className="text-xs text-pine-500 mt-0.5">{dateRange}</p>
+                      ) : (
+                        <p className="text-xs text-bark-300 mt-0.5 italic">Dates TBD — check camp website</p>
+                      )}
+                    </div>
                     {s.startTime && (
-                      <span className="text-xs text-bark-400">
+                      <span className="text-xs text-bark-400 shrink-0 mt-0.5">
                         {s.startTime} – {s.endTime}
                       </span>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           )}
