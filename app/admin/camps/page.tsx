@@ -2,6 +2,7 @@ import { getPool } from '@/lib/db';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { ExternalLink } from 'lucide-react';
+import { RecrawlButton } from './recrawl-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,7 @@ export default async function AdminCampsPage() {
               <th className="text-left px-4 py-3 font-semibold">Last Verified</th>
               <th className="text-center px-4 py-3 font-semibold">Missing</th>
               <th className="text-center px-4 py-3 font-semibold">Pending</th>
-              <th className="px-4 py-3" />
+              <th className="px-4 py-3 font-semibold text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -133,17 +134,20 @@ export default async function AdminCampsPage() {
                   </td>
 
                   <td className="px-4 py-3">
-                    {camp.websiteUrl && (
-                      <a
-                        href={camp.websiteUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-bark-300 hover:text-pine-500 transition-colors"
-                        title={camp.websiteUrl}
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <RecrawlButton campId={camp.id} campName={camp.name} />
+                      {camp.websiteUrl && (
+                        <a
+                          href={camp.websiteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-bark-300 hover:text-pine-500 transition-colors"
+                          title={camp.websiteUrl}
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
