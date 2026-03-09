@@ -251,33 +251,41 @@ export default async function CampDetailPage({
                 <Calendar className="w-5 h-5 text-pine-400" />
                 Weekly Availability
               </h2>
-              <div className="flex flex-wrap gap-2">
-                {weekAvailability.map((week) => (
-                  <div
-                    key={week.start}
-                    className={cn(
-                      "week-cell",
-                      week.available
-                        ? "week-cell-available"
-                        : "week-cell-unavailable"
-                    )}
-                    title={
-                      week.available
-                        ? `Available: ${week.label}`
-                        : `Not available: ${week.label}`
-                    }
-                  >
-                    <span className="text-[10px] leading-tight text-center">
-                      {week.label.split(" ")[0]}
-                      <br />
-                      {week.label.split(" ")[1]?.replace("-", "\u2013") || ""}
-                    </span>
+              {camp.schedules.length === 0 ? (
+                <p className="text-sm text-bark-400">
+                  Weekly schedule not yet available — check the camp website for dates.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {weekAvailability.map((week) => (
+                      <div
+                        key={week.start}
+                        className={cn(
+                          "week-cell",
+                          week.available
+                            ? "week-cell-available"
+                            : "week-cell-unavailable"
+                        )}
+                        title={
+                          week.available
+                            ? `Available: ${week.label}`
+                            : `Not available: ${week.label}`
+                        }
+                      >
+                        <span className="text-[10px] leading-tight text-center">
+                          {week.label.split(" ")[0]}
+                          <br />
+                          {week.label.split(" ")[1]?.replace("-", "\u2013") || ""}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <p className="text-xs text-bark-300 mt-3">
-                {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
-              </p>
+                  <p className="text-xs text-bark-300 mt-3">
+                    {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
+                  </p>
+                </>
+              )}
             </section>
           )}
 
