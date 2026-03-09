@@ -429,13 +429,15 @@ camp/
    - ⚠️ **TODO**: Create Stripe product + price, set STRIPE_PRICE_ID
    - ⚠️ **TODO**: Register Stripe webhook endpoint: https://camp-scout-pied.vercel.app/api/stripe/webhook
 
-### Phase 4 — Dynamic Data Pipeline
-1. DataIngestionAdapter interface
-2. Base scraper with Playwright
-3. First 5-10 camp site scrapers
-4. Nightly cron job: scrape → normalize → upsert → diff report
-5. Data confidence tracking (VERIFIED / PLACEHOLDER / STALE)
-6. Admin review workflow via Supabase Studio
+### Phase 4 — Dynamic Data Pipeline ✅ DONE (framework)
+1. ~~DataIngestionAdapter interface~~ DONE (Phase 1)
+2. ~~Base scraper with cheerio~~ DONE — `lib/ingestion/scraper-base.ts`
+3. ~~First scrapers~~ DONE — Avid4 Adventure, Denver Art Museum (add more in `lib/ingestion/scrapers/`)
+4. ~~Weekly cron job via GitHub Actions~~ DONE — `.github/workflows/scrape.yml` (Mondays 6am UTC)
+5. ~~Data confidence tracking~~ DONE — scraped camps set `dataConfidence: VERIFIED`
+6. Admin review workflow via Supabase Studio — use Studio directly
+   - ⚠️ **TODO**: Add GitHub secret `SUPABASE_DB_PASSWORD` in repo settings
+   - ⚠️ **TODO**: Add more scrapers in `lib/ingestion/scrapers/` as needed
 
 ### Phase 5 — Enhanced UX
 1. Map view (geocoded camps on a map)

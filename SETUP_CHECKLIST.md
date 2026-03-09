@@ -46,6 +46,16 @@
 
 ---
 
+### 6. GitHub Actions (web scraper — runs weekly)
+1. Go to your GitHub repo → Settings → Secrets and variables → Actions
+2. Add secret: `SUPABASE_DB_PASSWORD` = `eDG*8dX-c#eD2Z2`
+3. (Optional) Add `VERCEL_REVALIDATE_URL` to auto-refresh the site after scraping
+4. The scraper runs every Monday at 6am UTC automatically
+5. To test locally: `npm run scrape:dry` (no DB writes)
+6. To add a new camp site scraper, create a new file in `lib/ingestion/scrapers/` following the Avid4 pattern, then register it in `scripts/scrape.ts`
+
+---
+
 ## 📋 Future Work (in PLAN.md)
 - Phase 4: Web scraper to auto-update camp data
 - Phase 5: Map view, camp comparison, SEO, calendar export

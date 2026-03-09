@@ -1,0 +1,53 @@
+name: Weekly Camp Scraper
+
+on:
+  schedule:
+    # Every Monday at 6am UTC (midnight MT)
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (extract but don't write to DB)"
+        type: boolean
+        default: false
+      scraper:
+        description: "Run a specific scraper (e.g. 'avid4')"
+        type: string
+        required: false
+
+jobs:
+  scrape:
+    name: Scrape camp sites
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scraper
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          if [ -n "${{ inputs.scraper }}" ]; then ARGS="$ARGS --scraper ${{ inputs.scraper }}"; fi
+          npx tsx scripts/scrape.ts $ARGS
+        env:
+          PGHOST: aws-0-us-west-2.pooler.supabase.com
+          PGPORT: 6543
+          PGDATABASE: postgres
+          PGUSER: postgres.rpnzolnnhbzhuspwpajq
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Trigger Vercel revalidation
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          curl -s -X POST "${{ secrets.VERCEL_REVALIDATE_URL }}" || true
