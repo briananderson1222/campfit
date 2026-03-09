@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Nav } from "@/components/nav";
-import { Footer } from "@/components/footer";
 import { CompareProvider } from "@/lib/compare-context";
 import { SavesProvider } from "@/lib/saves-context";
-import { CompareBar } from "@/components/compare-bar";
+import { SiteShell } from "@/components/site-shell";
 import "./globals.css";
 
 const BASE_URL = "https://camp.fit";
@@ -63,10 +61,7 @@ export default function RootLayout({
       <body className="min-h-screen flex flex-col">
         <SavesProvider>
           <CompareProvider>
-            <Nav />
-            <main className="flex-1">{children}</main>
-            <Footer />
-            <CompareBar />
+            <SiteShell>{children}</SiteShell>
           </CompareProvider>
         </SavesProvider>
       </body>
