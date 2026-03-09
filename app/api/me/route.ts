@@ -7,16 +7,16 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ isAdmin: false });
 
-  // Check env var first (fast), then DB
-  const adminEmails = (process.env.ADMIN_EMAILS ?? '').split(',').map(e => e.trim());
-  if (adminEmails.includes(user.email ?? '')) {
-    return NextResponse.json({ isAdmin: true });
-  }
-
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT "isAdmin" FROM "User" WHERE id = $1`,
+    `SELECT "isAdmin", tier FROM "User" WHERE id = $1`,
     [user.id]
   );
-  return NextResponse.json({ isAdmin: rows[0]?.isAdmin === true });
+
+  // ADMIN_EMAILS env var grants admin regardless of DB row
+  const adminEmails = (process.env.ADMIN_EMAILS ?? '').split(',').map(e => e.trim());
+  const isAdmin = adminEmails.includes(user.email ?? '') || rows[0]?.isAdmin === true;
+  const tier = rows[0]?.tier ?? 'FREE';
+
+  return NextResponse.json({ isAdmin, tier, isPremium: tier === 'PREMIUM' });
 }

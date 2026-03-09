@@ -5,6 +5,7 @@ import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { CompareBar } from "@/components/compare-bar";
 import { LangProvider } from "@/lib/i18n/lang-context";
+import { AdsenseLoader } from "@/components/adsense-loader";
 
 export function SiteShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -14,6 +15,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
 
   return (
     <LangProvider>
+      <AdsenseLoader />
       <Nav />
       <main className="flex-1">{children}</main>
       <Footer />
