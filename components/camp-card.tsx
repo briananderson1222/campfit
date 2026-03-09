@@ -18,10 +18,13 @@ import {
 import { cn, formatCurrency, getLowestPrice, getAgeRangeSummary } from "@/lib/utils";
 import { CompareButton } from "@/components/compare-button";
 import { useCommunity } from "@/lib/community-context";
+import { useSaves } from "@/lib/saves-context";
 import { routes } from "@/lib/routes";
 
 export function CampCard({ camp }: { camp: Camp }) {
   const { slug: communitySlug } = useCommunity();
+  const { isSaved, toggle } = useSaves();
+  const saved = isSaved(camp.id);
   const lowestPrice = getLowestPrice(camp.pricing);
   const ageRange = getAgeRangeSummary(camp.ageGroups);
   const status = STATUS_CONFIG[camp.registrationStatus];
@@ -56,12 +59,20 @@ export function CampCard({ camp }: { camp: Camp }) {
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              toggle(camp.id);
             }}
-            className="shrink-0 w-8 h-8 rounded-full bg-cream-200/60 hover:bg-terracotta-50
-              flex items-center justify-center transition-colors border border-cream-400/40"
-            title="Save camp"
+            className={cn(
+              "shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors border",
+              saved
+                ? "bg-terracotta-50 border-terracotta-300"
+                : "bg-cream-200/60 hover:bg-terracotta-50 border-cream-400/40"
+            )}
+            title={saved ? "Remove from saved" : "Save camp"}
           >
-            <Heart className="w-3.5 h-3.5 text-bark-400 hover:text-terracotta-400 transition-colors" />
+            <Heart className={cn(
+              "w-3.5 h-3.5 transition-colors",
+              saved ? "text-terracotta-400 fill-terracotta-400" : "text-bark-400 hover:text-terracotta-400"
+            )} />
           </button>
         </div>
 

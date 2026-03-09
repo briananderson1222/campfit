@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { CompareProvider } from "@/lib/compare-context";
+import { SavesProvider } from "@/lib/saves-context";
 import { CompareBar } from "@/components/compare-bar";
 import "./globals.css";
 
@@ -60,12 +61,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen flex flex-col">
-        <CompareProvider>
-          <Nav />
-          <main className="flex-1">{children}</main>
-          <Footer />
-          <CompareBar />
-        </CompareProvider>
+        <SavesProvider>
+          <CompareProvider>
+            <Nav />
+            <main className="flex-1">{children}</main>
+            <Footer />
+            <CompareBar />
+          </CompareProvider>
+        </SavesProvider>
       </body>
     </html>
   );
