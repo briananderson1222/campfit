@@ -10,11 +10,11 @@ const BASE_URL = "https://camp.fit";
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: "CampFit — Discover Denver Kids Camps",
+    default: "CampFit — Find Kids Camps in Your City",
     template: "%s | CampFit",
   },
   description:
-    "Find the perfect summer, winter, and year-round camps for your kids in Denver. Search by age, activity, neighborhood, and availability.",
+    "Find the best kids' camps in your city. Browse by age, activity, neighborhood, and availability.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -26,15 +26,15 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: BASE_URL,
-    title: "CampFit — Discover Denver Kids Camps",
+    title: "CampFit — Find Kids Camps in Your City",
     description:
-      "Find the perfect summer, winter, and year-round camps for your kids in Denver.",
+      "Find the best kids' camps in your city. Browse by age, activity, neighborhood, and availability.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CampFit — Denver Kids Camps",
+    title: "CampFit — Find Kids Camps in Your City",
     description:
-      "Find the perfect summer, winter, and year-round camps for your kids in Denver.",
+      "Find the best kids' camps in your city. Browse by age, activity, neighborhood, and availability.",
   },
   alternates: {
     canonical: BASE_URL,

@@ -27,9 +27,10 @@ export async function GET() {
     ``,
     `## Key Pages`,
     ``,
-    `- [Home / Search](${BASE}/): Search and filter all ${camps.length} Denver camps by age, category, type, neighborhood, cost, and week`,
-    `- [Weekly Calendar](${BASE}/calendar): Interactive Gantt-style calendar showing which camps run each week of summer`,
-    `- [Compare Camps](${BASE}/compare): Side-by-side comparison of up to 3 camps (pricing, hours, ages, weekly availability, lunch)`,
+    `- [Home / City Picker](${BASE}/): City picker — find camps by city`,
+    `- [Denver Camps](${BASE}/c/denver)`,
+    `- [Weekly Calendar](${BASE}/c/denver/calendar): Interactive Gantt-style calendar showing which camps run each week of summer`,
+    `- [Compare Camps](${BASE}/c/denver/compare): Side-by-side comparison of up to 3 camps (pricing, hours, ages, weekly availability, lunch)`,
     `- [sitemap.xml](${BASE}/sitemap.xml): Full site map`,
     ``,
     `## Camp Categories`,
@@ -49,7 +50,7 @@ export async function GET() {
     `Each camp page includes: full description, pricing tiers, age groups, weekly schedule availability, registration status and opening date, location/neighborhood, lunch/extended care info, and a direct link to the camp's registration website.`,
     ``,
     ...camps.map(
-      (c) => `- [${c.name}](${BASE}/camps/${c.slug})`
+      (c) => `- [${c.name}](${BASE}/c/${c.communitySlug}/camps/${c.slug})`
     ),
     ``,
     `## Optional`,

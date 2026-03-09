@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { Camp, SUMMER_WEEKS, CATEGORY_LABELS, CampCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useCommunity } from "@/lib/community-context";
+import { routes } from "@/lib/routes";
 
 interface WeekCalendarProps {
   camps: Camp[];
@@ -23,6 +25,7 @@ const CATEGORY_BAR_COLORS: Record<CampCategory, string> = {
 };
 
 export function WeekCalendar({ camps, compact = false }: WeekCalendarProps) {
+  const { slug: communitySlug } = useCommunity();
   const isAvailable = (camp: Camp, weekStart: string) =>
     camp.schedules.some((s) => s.startDate === weekStart);
 
@@ -54,7 +57,7 @@ export function WeekCalendar({ camps, compact = false }: WeekCalendarProps) {
                 {/* Camp name */}
                 <div className={cn("shrink-0 pr-3", compact ? "w-40" : "w-52")}>
                   <Link
-                    href={`/camps/${camp.slug}`}
+                    href={routes.campDetail(communitySlug, camp.slug)}
                     className="text-sm font-medium text-bark-500 hover:text-pine-600 truncate block transition-colors"
                   >
                     {camp.name}

@@ -10,7 +10,7 @@
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
-import { getAllCamps } from "@/lib/camp-repository";
+import { getAllCamps, getDistinctCommunities } from "@/lib/camp-repository";
 import {
   CATEGORY_LABELS,
   CAMP_TYPE_LABELS,
@@ -23,10 +23,11 @@ const BASE = "https://camp.fit";
 function campToMarkdown(camp: Camp): string {
   const lines: string[] = [];
 
-  lines.push(`### [${camp.name}](${BASE}/camps/${camp.slug})`);
+  lines.push(`### [${camp.name}](${BASE}/c/${camp.communitySlug}/camps/${camp.slug})`);
   lines.push(``);
 
   const meta: string[] = [
+    `**Community:** ${camp.displayName}`,
     `**Category:** ${CATEGORY_LABELS[camp.category]}`,
     `**Type:** ${CAMP_TYPE_LABELS[camp.campType]}`,
   ];
@@ -106,7 +107,11 @@ function campToMarkdown(camp: Camp): string {
 }
 
 export async function GET() {
-  const camps = await getAllCamps();
+  const communities = await getDistinctCommunities();
+  const campArrays = await Promise.all(
+    communities.map((c) => getAllCamps(c.communitySlug))
+  );
+  const camps = campArrays.flat();
 
   // Group camps by category
   const byCategory = new Map<string, Camp[]>();

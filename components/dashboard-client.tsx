@@ -11,6 +11,7 @@ import {
   CATEGORY_LABELS, CATEGORY_COLORS, STATUS_CONFIG, SavedCamp,
 } from "@/lib/types";
 import { cn, formatCurrency, getLowestPrice } from "@/lib/utils";
+import { routes } from "@/lib/routes";
 
 const MAX_FREE_SAVES = 5;
 
@@ -124,7 +125,7 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
             <p className="text-bark-300 mb-6 text-sm">
               Browse camps and tap the heart to save ones you&apos;re interested in
             </p>
-            <Link href="/" className="btn-primary">
+            <Link href={routes.home()} className="btn-primary">
               Browse Camps
             </Link>
           </div>
@@ -152,7 +153,7 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
                       </span>
                     </div>
                     <Link
-                      href={`/camps/${camp.slug}`}
+                      href={routes.campDetail('denver', camp.slug)}
                       className="font-display font-bold text-lg text-bark-700 hover:text-pine-600 transition-colors"
                     >
                       {camp.name}

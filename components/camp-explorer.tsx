@@ -13,6 +13,8 @@ import {
   CATEGORY_LABELS,
 } from "@/lib/types";
 import { cn, getLowestPrice } from "@/lib/utils";
+import { useCommunity } from "@/lib/community-context";
+import { routes } from "@/lib/routes";
 
 interface CampExplorerProps {
   camps: Camp[];
@@ -20,6 +22,7 @@ interface CampExplorerProps {
 }
 
 export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
+  const { slug: communitySlug } = useCommunity();
   const [query, setQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<CampFilters>({});
@@ -196,7 +199,7 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
               : "All Camps"}
           </h2>
           <Link
-            href="/calendar"
+            href={routes.communityCalendar(communitySlug)}
             className="btn-secondary text-sm hidden sm:inline-flex"
           >
             Calendar View

@@ -22,6 +22,8 @@ function weeksToSchedules(
 export const MOCK_CAMPS: Camp[] = [
   {
     id: "c1",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "aerial-cirque-over-denver",
     name: "Aerial Cirque Over Denver",
     description:
@@ -83,6 +85,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c2",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "denver-parks-rec-summer-in-the-parks",
     name: "Denver Parks & Rec — Summer in the Parks",
     description:
@@ -135,6 +139,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c3",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "avid4-adventure-camp-blue-sky",
     name: "Avid4 Adventure — Camp Blue Sky",
     description:
@@ -189,6 +195,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c4",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "cheley-colorado-camps",
     name: "Cheley Colorado Camps",
     description:
@@ -281,6 +289,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c5",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "altitude-all-sports",
     name: "Altitude All Sports — Multi-Sport Camp",
     description:
@@ -326,6 +336,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c6",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "code-ninjas-denver",
     name: "Code Ninjas — Summer Tech Camp",
     description:
@@ -377,6 +389,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c7",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "denver-art-museum-creative-camps",
     name: "Denver Art Museum — Creative Summer Camps",
     description:
@@ -439,6 +453,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c8",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "rocky-mountain-nature-explorers",
     name: "Rocky Mountain Nature Explorers",
     description:
@@ -490,6 +506,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c9",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "denver-center-performing-arts-camps",
     name: "Denver Center for the Performing Arts — Theater Camp",
     description:
@@ -543,6 +561,8 @@ export const MOCK_CAMPS: Camp[] = [
   },
   {
     id: "c10",
+    communitySlug: "denver",
+    displayName: "Denver",
     slug: "tiny-chefs-cooking-camp",
     name: "Tiny Chefs — Kids Cooking Camp",
     description:
