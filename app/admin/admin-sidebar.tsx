@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, History, Database,
-  ExternalLink, Menu, X,
+  ExternalLink, Menu, X, Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,7 @@ export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
     { href: "/admin/review", icon: <ClipboardList className="w-4 h-4" />, label: "Review Queue", badge: pendingCount },
     { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl History" },
     { href: "/admin/camps", icon: <Database className="w-4 h-4" />, label: "Camp Data" },
+    { href: "/admin/users", icon: <Users className="w-4 h-4" />, label: "Users" },
   ];
 
   const isActive = (href: string, exact = false) =>
