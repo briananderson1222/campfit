@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -8,6 +9,7 @@ import {
   Sunrise,
   ExternalLink,
   Calendar,
+  CalendarPlus,
   DollarSign,
   Users,
   ShieldCheck,
@@ -24,8 +26,66 @@ import {
 } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
+import { CompareButton } from "@/components/compare-button";
 
 export const revalidate = 3600;
+
+const BASE_URL = "https://camp-scout-pied.vercel.app";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string };
+}): Promise<Metadata> {
+  const camp = await getCampBySlug(params.slug);
+  if (!camp) return {};
+
+  const minPrice = camp.pricing.length
+    ? Math.min(...camp.pricing.map((p) => p.amount))
+    : null;
+  const ageRange =
+    camp.ageGroups.length
+      ? (() => {
+          const ages = camp.ageGroups.flatMap((ag) =>
+            ag.minAge !== null && ag.maxAge !== null
+              ? [ag.minAge, ag.maxAge]
+              : []
+          );
+          return ages.length
+            ? `ages ${Math.min(...ages)}–${Math.max(...ages)}`
+            : null;
+        })()
+      : null;
+
+  const description = [
+    camp.description?.slice(0, 120),
+    ageRange && `For ${ageRange}.`,
+    minPrice && `Starting at ${formatCurrency(minPrice)}.`,
+    camp.neighborhood && `Located in ${camp.neighborhood}, Denver.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    title: `${camp.name} — Denver Kids Camp | CampScout`,
+    description,
+    openGraph: {
+      title: `${camp.name} | CampScout`,
+      description,
+      url: `${BASE_URL}/camps/${camp.slug}`,
+      siteName: "CampScout",
+      type: "website",
+    },
+    twitter: {
+      card: "summary",
+      title: `${camp.name} | CampScout`,
+      description,
+    },
+    alternates: {
+      canonical: `${BASE_URL}/camps/${camp.slug}`,
+    },
+  };
+}
 
 export async function generateStaticParams() {
   const slugs = await getCampSlugs();
@@ -50,8 +110,61 @@ export default async function CampDetailPage({
     available: camp.schedules.some((s) => s.startDate === week.start),
   }));
 
+  // JSON-LD structured data
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: camp.name,
+    description: camp.description,
+    url: `${BASE_URL}/camps/${camp.slug}`,
+    ...(camp.address && {
+      location: {
+        "@type": "Place",
+        name: camp.name,
+        address: {
+          "@type": "PostalAddress",
+          streetAddress: camp.address,
+          addressLocality: "Denver",
+          addressRegion: "CO",
+          addressCountry: "US",
+        },
+      },
+    }),
+    ...(firstSchedule && {
+      startDate: firstSchedule.startDate,
+      endDate: firstSchedule.endDate,
+    }),
+    ...(camp.pricing.length > 0 && {
+      offers: camp.pricing.map((p) => ({
+        "@type": "Offer",
+        name: p.label,
+        price: p.amount,
+        priceCurrency: "USD",
+        availability:
+          camp.registrationStatus === "OPEN"
+            ? "https://schema.org/InStock"
+            : "https://schema.org/SoldOut",
+        ...(camp.websiteUrl && { url: camp.websiteUrl }),
+      })),
+    }),
+    organizer: {
+      "@type": "Organization",
+      name: camp.name,
+    },
+    audience: {
+      "@type": "Audience",
+      audienceType: "Children",
+    },
+    eventStatus: "https://schema.org/EventScheduled",
+    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+  };
+
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 py-8 sm:py-12">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Breadcrumb */}
       <Link
         href="/"
@@ -85,7 +198,10 @@ export default async function CampDetailPage({
           <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 tracking-tight">
             {camp.name}
           </h1>
-          <SaveButton campId={camp.id} size="lg" showLabel />
+          <div className="flex items-center gap-2 shrink-0">
+            <CompareButton slug={camp.slug} />
+            <SaveButton campId={camp.id} size="lg" showLabel />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-bark-400">
@@ -343,6 +459,18 @@ export default async function CampDetailPage({
             >
               Register at Camp Website
               <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
+
+          {/* Calendar export */}
+          {camp.schedules.length > 0 && (
+            <a
+              href={`/api/camps/${camp.slug}/calendar`}
+              download
+              className="btn-secondary w-full text-sm py-3 flex items-center justify-center gap-2"
+            >
+              <CalendarPlus className="w-4 h-4" />
+              Add to Calendar (.ics)
             </a>
           )}
         </div>

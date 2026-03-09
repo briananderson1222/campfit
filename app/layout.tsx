@@ -1,10 +1,18 @@
 import type { Metadata, Viewport } from "next";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { CompareProvider } from "@/lib/compare-context";
+import { CompareBar } from "@/components/compare-bar";
 import "./globals.css";
 
+const BASE_URL = "https://camp-scout-pied.vercel.app";
+
 export const metadata: Metadata = {
-  title: "CampScout — Discover Denver Kids Camps",
+  metadataBase: new URL(BASE_URL),
+  title: {
+    default: "CampScout — Discover Denver Kids Camps",
+    template: "%s | CampScout",
+  },
   description:
     "Find the perfect summer, winter, and year-round camps for your kids in Denver. Search by age, activity, neighborhood, and availability.",
   manifest: "/manifest.json",
@@ -12,6 +20,24 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "CampScout",
+  },
+  openGraph: {
+    siteName: "CampScout",
+    type: "website",
+    locale: "en_US",
+    url: BASE_URL,
+    title: "CampScout — Discover Denver Kids Camps",
+    description:
+      "Find the perfect summer, winter, and year-round camps for your kids in Denver.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CampScout — Denver Kids Camps",
+    description:
+      "Find the perfect summer, winter, and year-round camps for your kids in Denver.",
+  },
+  alternates: {
+    canonical: BASE_URL,
   },
 };
 
@@ -30,9 +56,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen flex flex-col">
-        <Nav />
-        <main className="flex-1">{children}</main>
-        <Footer />
+        <CompareProvider>
+          <Nav />
+          <main className="flex-1">{children}</main>
+          <Footer />
+          <CompareBar />
+        </CompareProvider>
       </body>
     </html>
   );
