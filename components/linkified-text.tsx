@@ -24,7 +24,6 @@ export function LinkifiedText({
             target="_blank"
             rel="noopener noreferrer"
             className="text-pine-600 underline underline-offset-2 hover:text-pine-500 break-all"
-            onClick={(e) => e.stopPropagation()}
           >
             {part}
           </a>
