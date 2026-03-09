@@ -27,7 +27,15 @@ export function CampCard({ camp }: { camp: Camp }) {
   const saved = isSaved(camp.id);
   const lowestPrice = getLowestPrice(camp.pricing);
   const ageRange = getAgeRangeSummary(camp.ageGroups);
-  const status = STATUS_CONFIG[camp.registrationStatus];
+  // If status is COMING_SOON but open date has passed, treat as OPEN for display
+  const today = new Date().toISOString().slice(0, 10);
+  const effectiveStatus =
+    camp.registrationStatus === "COMING_SOON" &&
+    camp.registrationOpenDate &&
+    camp.registrationOpenDate <= today
+      ? "OPEN"
+      : camp.registrationStatus;
+  const status = STATUS_CONFIG[effectiveStatus];
   const categoryColor = CATEGORY_COLORS[camp.category];
   const weeksAvailable = camp.schedules.length;
   const firstSchedule = camp.schedules[0];
@@ -50,12 +58,8 @@ export function CampCard({ camp }: { camp: Camp }) {
               </span>
             )}
             <span className={cn("badge whitespace-nowrap", status.color)}>
-              {camp.registrationStatus === "COMING_SOON" && camp.registrationOpenDate
-                ? (() => {
-                    const today = new Date().toISOString().slice(0, 10);
-                    if (camp.registrationOpenDate === today) return "Opens Today";
-                    return `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-                  })()
+              {effectiveStatus === "COMING_SOON" && camp.registrationOpenDate
+                ? `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
                 : status.label}
             </span>
           </div>
