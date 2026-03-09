@@ -26,7 +26,7 @@ const CAMPS_WITH_RELATIONS_SQL = `
       '[]'
     ) AS "ageGroups",
     COALESCE(
-      json_agg(DISTINCT jsonb_build_object(
+      json_agg(jsonb_build_object(
         'id', s."id",
         'label', s."label",
         'startDate', s."startDate"::text,
@@ -35,7 +35,7 @@ const CAMPS_WITH_RELATIONS_SQL = `
         'endTime', s."endTime",
         'earlyDropOff', s."earlyDropOff",
         'latePickup', s."latePickup"
-      )) FILTER (WHERE s."id" IS NOT NULL),
+      ) ORDER BY s."startDate" ASC, s."label" ASC) FILTER (WHERE s."id" IS NOT NULL),
       '[]'
     ) AS "schedules",
     COALESCE(
