@@ -11,32 +11,33 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
-  const { tier, isAdmin } = body as { tier?: string; isAdmin?: boolean };
+  const { tier, isAdmin, email } = body as { tier?: string; isAdmin?: boolean; email?: string };
 
   const pool = getPool();
 
-  // Upsert into User table (may not exist yet if they never hit an auth callback)
+  // $1 = id, $2 = email; update params start at $3
+  const queryValues: unknown[] = [params.userId, email ?? ''];
   const updates: string[] = [];
-  const values: unknown[] = [params.userId];
 
   if (tier !== undefined) {
-    values.push(tier);
-    updates.push(`tier = $${values.length}`);
+    queryValues.push(tier);
+    updates.push(`tier = $${queryValues.length}`);
   }
   if (isAdmin !== undefined) {
-    values.push(isAdmin);
-    updates.push(`"isAdmin" = $${values.length}`);
+    queryValues.push(isAdmin);
+    updates.push(`"isAdmin" = $${queryValues.length}`);
   }
 
   if (updates.length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
   }
 
+  // Upsert without referencing auth.users (pooler lacks permission)
   await pool.query(
     `INSERT INTO "User" (id, email, tier, "isAdmin")
-     SELECT $1, email, 'FREE', false FROM auth.users WHERE id = $1
+     VALUES ($1, $2, 'FREE', false)
      ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')}, "updatedAt" = now()`,
-    values
+    queryValues
   );
 
   return NextResponse.json({ ok: true });

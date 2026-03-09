@@ -65,7 +65,7 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
       const res = await fetch(`/api/admin/users/${modal.userId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({ ...patch, email: modal.email }),
       });
       if (!res.ok) throw new Error(await res.text());
 
