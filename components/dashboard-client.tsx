@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Heart, Bell, Mail, Smartphone, MessageSquare,
-  Trash2, ExternalLink, Crown, MapPin, Calendar, Loader2,
+  Trash2, ExternalLink, Crown, MapPin, Calendar, CalendarArrowDown, Loader2,
 } from "lucide-react";
 import {
   CATEGORY_LABELS, CATEGORY_COLORS, STATUS_CONFIG, SavedCamp,
@@ -68,20 +68,33 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
           </p>
         </div>
 
-        {!isPremium && (
-          <button
-            onClick={handleUpgrade}
-            disabled={upgrading}
-            className="btn-primary text-sm gap-1.5 shrink-0 disabled:opacity-60"
-          >
-            {upgrading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Crown className="w-4 h-4" />
-            )}
-            Upgrade
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {savedCamps.length > 0 && (
+            <a
+              href="/api/calendar/export"
+              download="my-campscout-camps.ics"
+              className="btn-secondary text-sm gap-1.5"
+              title="Export all saved camps to calendar"
+            >
+              <CalendarArrowDown className="w-4 h-4" />
+              Export .ics
+            </a>
+          )}
+          {!isPremium && (
+            <button
+              onClick={handleUpgrade}
+              disabled={upgrading}
+              className="btn-primary text-sm gap-1.5 disabled:opacity-60"
+            >
+              {upgrading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Crown className="w-4 h-4" />
+              )}
+              Upgrade
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Save limit bar */}

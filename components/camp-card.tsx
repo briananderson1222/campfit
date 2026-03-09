@@ -14,6 +14,7 @@ import {
   CAMP_TYPE_LABELS,
 } from "@/lib/types";
 import { cn, formatCurrency, getLowestPrice, getAgeRangeSummary } from "@/lib/utils";
+import { CompareButton } from "@/components/compare-button";
 
 export function CampCard({ camp }: { camp: Camp }) {
   const lowestPrice = getLowestPrice(camp.pricing);
@@ -114,20 +115,22 @@ export function CampCard({ camp }: { camp: Camp }) {
         </div>
       </div>
 
-      {/* Save button overlay */}
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        className="absolute top-5 right-4 w-9 h-9 rounded-full bg-cream-50/90 backdrop-blur-sm
-          flex items-center justify-center shadow-sm
-          opacity-0 group-hover:opacity-100 hover:bg-terracotta-50
-          transition-all duration-200 border border-cream-400/40"
-        title="Save camp"
-      >
-        <Heart className="w-4 h-4 text-bark-400 hover:text-terracotta-400 transition-colors" />
-      </button>
+      {/* Action buttons overlay */}
+      <div className="absolute top-5 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+        <CompareButton slug={camp.slug} className="shadow-sm bg-cream-50/90 backdrop-blur-sm" />
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="w-9 h-9 rounded-full bg-cream-50/90 backdrop-blur-sm
+            flex items-center justify-center shadow-sm hover:bg-terracotta-50
+            transition-colors border border-cream-400/40"
+          title="Save camp"
+        >
+          <Heart className="w-4 h-4 text-bark-400 hover:text-terracotta-400 transition-colors" />
+        </button>
+      </div>
     </Link>
   );
 }

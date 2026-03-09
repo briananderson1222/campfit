@@ -7,6 +7,7 @@ import {
   Compass,
   CalendarDays,
   Heart,
+  GitCompareArrows,
   Menu,
   X,
   LogIn,
@@ -67,6 +68,9 @@ export function Nav() {
           </NavLink>
           <NavLink href="/calendar" icon={<CalendarDays className="w-4 h-4" />}>
             Calendar
+          </NavLink>
+          <NavLink href="/compare" icon={<GitCompareArrows className="w-4 h-4" />}>
+            Compare
           </NavLink>
           <NavLink href="/dashboard" icon={<Heart className="w-4 h-4" />}>
             Saved
@@ -154,6 +158,13 @@ export function Nav() {
               onClick={() => setMobileOpen(false)}
             >
               Weekly Calendar
+            </MobileNavLink>
+            <MobileNavLink
+              href="/compare"
+              icon={<GitCompareArrows className="w-5 h-5" />}
+              onClick={() => setMobileOpen(false)}
+            >
+              Compare Camps
             </MobileNavLink>
             <MobileNavLink
               href="/dashboard"
