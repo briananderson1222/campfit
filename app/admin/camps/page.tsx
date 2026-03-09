@@ -57,7 +57,71 @@ export default async function AdminCampsPage() {
         </p>
       </div>
 
-      <div className="glass-panel overflow-hidden">
+      {/* Mobile: card list */}
+      <div className="sm:hidden space-y-2">
+        {camps.length === 0 ? (
+          <p className="text-bark-300 text-sm text-center py-8">No camps found</p>
+        ) : camps.map(camp => (
+          <div key={camp.id} className="glass-panel p-4">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <Link
+                  href={`/c/${camp.communitySlug}/camps/${camp.slug}`}
+                  target="_blank"
+                  className="font-medium text-bark-700 hover:text-pine-600 transition-colors text-sm leading-snug"
+                >
+                  {camp.name}
+                </Link>
+                <p className="text-xs text-bark-300 mt-0.5">{camp.communitySlug}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {camp.websiteUrl && (
+                  <a href={camp.websiteUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-bark-300 hover:text-pine-500 transition-colors">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+              <StatusBadge value={camp.registrationStatus} />
+              <ConfidenceBadge value={camp.dataConfidence} />
+              {camp.pendingProposals > 0 && (
+                <Link
+                  href={`/admin/review?campId=${camp.id}`}
+                  className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold hover:bg-amber-200 transition-colors"
+                >
+                  {camp.pendingProposals} pending
+                </Link>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 text-xs text-bark-400">
+                <span>
+                  {camp.lastVerifiedAt
+                    ? new Date(camp.lastVerifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+                    : <span className="text-red-400 font-medium">Never verified</span>}
+                </span>
+                <span>{camp.scheduleCount > 0 ? `${camp.scheduleCount} wks` : <span className="text-red-400">0 wks</span>}</span>
+                {camp.missingFieldCount > 0 && (
+                  <span className={cn(
+                    'font-medium',
+                    camp.missingFieldCount <= 2 ? 'text-amber-600' : 'text-red-500'
+                  )}>
+                    {camp.missingFieldCount} missing
+                  </span>
+                )}
+              </div>
+              <RecrawlButton campId={camp.id} campName={camp.name} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden sm:block glass-panel overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-cream-300/60 text-xs text-bark-300 uppercase tracking-wide">
@@ -74,9 +138,7 @@ export default async function AdminCampsPage() {
           <tbody>
             {camps.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-bark-300">
-                  No camps found
-                </td>
+                <td colSpan={8} className="px-4 py-12 text-center text-bark-300">No camps found</td>
               </tr>
             ) : (
               camps.map((camp, i) => (
@@ -88,75 +150,48 @@ export default async function AdminCampsPage() {
                   )}
                 >
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/c/${camp.communitySlug}/camps/${camp.slug}`}
-                      target="_blank"
-                      className="font-medium text-bark-700 hover:text-pine-600 transition-colors"
-                    >
+                    <Link href={`/c/${camp.communitySlug}/camps/${camp.slug}`} target="_blank"
+                      className="font-medium text-bark-700 hover:text-pine-600 transition-colors">
                       {camp.name}
                     </Link>
                     <p className="text-xs text-bark-300 mt-0.5">{camp.communitySlug}</p>
                   </td>
-
-                  <td className="px-4 py-3">
-                    <StatusBadge value={camp.registrationStatus} />
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <ConfidenceBadge value={camp.dataConfidence} />
-                  </td>
-
+                  <td className="px-4 py-3"><StatusBadge value={camp.registrationStatus} /></td>
+                  <td className="px-4 py-3"><ConfidenceBadge value={camp.dataConfidence} /></td>
                   <td className="px-4 py-3 text-bark-400 text-xs">
                     {camp.lastVerifiedAt
-                      ? new Date(camp.lastVerifiedAt).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })
+                      ? new Date(camp.lastVerifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                       : <span className="text-red-400 font-medium">Never</span>}
                   </td>
-
                   <td className="px-4 py-3 text-center text-xs text-bark-400">
                     {camp.scheduleCount > 0 ? camp.scheduleCount : <span className="text-red-400">0</span>}
                   </td>
-
                   <td className="px-4 py-3 text-center">
                     <span className={cn(
-                      'inline-block w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center',
-                      camp.missingFieldCount === 0
-                        ? 'bg-pine-100 text-pine-600'
-                        : camp.missingFieldCount <= 2
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-red-100 text-red-600'
+                      'inline-flex w-7 h-7 rounded-full text-xs font-bold items-center justify-center',
+                      camp.missingFieldCount === 0 ? 'bg-pine-100 text-pine-600'
+                        : camp.missingFieldCount <= 2 ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-600'
                     )}>
                       {camp.missingFieldCount}
                     </span>
                   </td>
-
                   <td className="px-4 py-3 text-center">
                     {camp.pendingProposals > 0 ? (
-                      <Link
-                        href={`/admin/review?campId=${camp.id}`}
-                        className="inline-block px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold hover:bg-amber-200 transition-colors"
-                      >
+                      <Link href={`/admin/review?campId=${camp.id}`}
+                        className="inline-block px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold hover:bg-amber-200 transition-colors">
                         {camp.pendingProposals}
                       </Link>
                     ) : (
                       <span className="text-bark-200 text-xs">—</span>
                     )}
                   </td>
-
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <RecrawlButton campId={camp.id} campName={camp.name} />
                       {camp.websiteUrl && (
-                        <a
-                          href={camp.websiteUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-bark-300 hover:text-pine-500 transition-colors"
-                          title={camp.websiteUrl}
-                        >
+                        <a href={camp.websiteUrl} target="_blank" rel="noopener noreferrer"
+                          className="text-bark-300 hover:text-pine-500 transition-colors" title={camp.websiteUrl}>
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       )}
