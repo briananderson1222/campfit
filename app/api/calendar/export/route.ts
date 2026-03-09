@@ -49,7 +49,7 @@ export async function GET() {
     [user.id]
   );
 
-  const baseUrl = "https://camp-scout-pied.vercel.app";
+  const baseUrl = "https://camp.fit";
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",

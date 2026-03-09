@@ -33,7 +33,7 @@ export async function POST() {
     );
   }
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? "https://camp-scout-pied.vercel.app";
+  const origin = process.env.NEXT_PUBLIC_APP_URL ?? "https://camp.fit";
 
   const session = await stripe.checkout.sessions.create({
     customer: customerId,

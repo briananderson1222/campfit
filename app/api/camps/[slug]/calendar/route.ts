@@ -57,7 +57,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const baseUrl = "https://camp-scout-pied.vercel.app";
+  const baseUrl = "https://camp.fit";
   const campUrl = `${baseUrl}/camps/${camp.slug}`;
   const description = [
     camp.description?.slice(0, 200),

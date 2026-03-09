@@ -12,7 +12,7 @@ export const revalidate = 3600;
 import { getCampSlugs } from "@/lib/camp-repository";
 import { CATEGORY_LABELS, CAMP_TYPE_LABELS } from "@/lib/types";
 
-const BASE = "https://camp-scout-pied.vercel.app";
+const BASE = "https://camp.fit";
 
 export async function GET() {
   const camps = await getCampSlugs();

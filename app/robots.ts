@@ -7,6 +7,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       disallow: ["/dashboard", "/auth/", "/api/"],
     },
-    sitemap: "https://camp-scout-pied.vercel.app/sitemap.xml",
+    sitemap: "https://camp.fit/sitemap.xml",
   };
 }
