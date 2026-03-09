@@ -33,24 +33,27 @@ export function CrawlRunnerButton() {
 
       eventSource.onmessage = (e) => {
         const event = JSON.parse(e.data);
-        if (event.type === 'started') {
-          setProgress(p => ({ ...p!, total: event.totalCamps }));
-        } else if (event.type === 'camp_processing') {
-          setProgress(p => ({ ...p!, current: event.campName }));
-        } else if (event.type === 'camp_done') {
-          setProgress(p => ({
-            ...p!,
-            processed: p!.processed + 1,
-            proposals: p!.proposals + (event.proposalId ? 1 : 0),
-          }));
-        } else if (event.type === 'camp_error') {
-          setProgress(p => ({ ...p!, processed: p!.processed + 1, errors: p!.errors + 1 }));
+        // SSE status route emits: 'progress' | 'completed' | 'failed'
+        // These carry totalCamps, processedCamps, errorCount, newProposals
+        if (event.type === 'progress') {
+          setProgress({
+            total: event.totalCamps ?? 0,
+            processed: event.processedCamps ?? 0,
+            proposals: event.newProposals ?? 0,
+            errors: event.errorCount ?? 0,
+          });
         } else if (event.type === 'completed') {
+          setProgress({
+            total: event.totalCamps ?? 0,
+            processed: event.processedCamps ?? 0,
+            proposals: event.newProposals ?? 0,
+            errors: event.errorCount ?? 0,
+          });
           setState('done');
           eventSource.close();
         } else if (event.type === 'failed') {
           setState('error');
-          setErrorMsg(event.error);
+          setErrorMsg(event.error ?? 'Crawl failed');
           eventSource.close();
         }
       };

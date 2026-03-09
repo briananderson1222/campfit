@@ -113,15 +113,28 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     await client.query('COMMIT');
 
-    // Write logs and metrics outside transaction
-    await writeChangeLogs(changeLogs);
-    await updateProposalStatus(params.id, 'APPROVED', user.email, reviewerNotes, feedbackTags);
-    await recordReviewDecision({
-      proposalId: params.id,
-      runId: proposal.crawlRunId,
-      approvedFields,
-      rejectedFields,
-    });
+    // Write logs and metrics outside transaction — failures here are non-fatal
+    try {
+      await writeChangeLogs(changeLogs);
+    } catch (logErr) {
+      console.error('writeChangeLogs failed (non-fatal):', logErr);
+    }
+    try {
+      await updateProposalStatus(params.id, 'APPROVED', user.email, reviewerNotes, feedbackTags);
+    } catch (statusErr) {
+      console.error('updateProposalStatus failed:', statusErr);
+      return NextResponse.json({ error: String(statusErr) }, { status: 500 });
+    }
+    try {
+      await recordReviewDecision({
+        proposalId: params.id,
+        runId: proposal.crawlRunId,
+        approvedFields,
+        rejectedFields,
+      });
+    } catch (metricsErr) {
+      console.error('recordReviewDecision failed (non-fatal):', metricsErr);
+    }
 
     return NextResponse.json({ success: true, appliedFields: approvedFields.length });
   } catch (err) {

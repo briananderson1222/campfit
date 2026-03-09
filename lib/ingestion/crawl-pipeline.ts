@@ -18,7 +18,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
   const pool = getPool();
   const emit = options.onProgress ?? (() => {});
 
-  // Fetch camps to crawl
+  // Fetch camps to crawl (scalar fields only — array relations are fetched separately per camp)
   const campsResult = await pool.query<Camp & { id: string; name: string; websiteUrl: string; communitySlug: string }>(
     options.campIds?.length
       ? `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
@@ -32,7 +32,15 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     options.campIds?.length ? [options.campIds] : []
   );
 
-  const camps = campsResult.rows;
+  // Attach empty arrays for relation fields — the diff engine handles missing arrays gracefully
+  // (fetching full relations for 158 camps upfront is expensive; we only load them if a diff
+  // for that field is detected, which happens in the approve step, not here)
+  const camps = campsResult.rows.map(c => ({
+    ...c,
+    ageGroups: [] as Camp['ageGroups'],
+    schedules: [] as Camp['schedules'],
+    pricing: [] as Camp['pricing'],
+  }));
 
   // Create crawl run record
   const run = await createCrawlRun({
@@ -76,11 +84,17 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         let proposalId: string | null = null;
         if (changesFound > 0) {
           const confidence = computeOverallConfidence(proposedChanges);
+          let rawExtractionObj: Record<string, unknown> = {};
+          try {
+            rawExtractionObj = JSON.parse(result.rawResponse || '{}');
+          } catch {
+            rawExtractionObj = { _raw: result.rawResponse };
+          }
           proposalId = await createProposal({
             campId: camp.id,
             crawlRunId: run.id,
             sourceUrl: camp.websiteUrl,
-            rawExtraction: JSON.parse(result.rawResponse || '{}'),
+            rawExtraction: rawExtractionObj,
             proposedChanges,
             overallConfidence: confidence,
             extractionModel: result.model,

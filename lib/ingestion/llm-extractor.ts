@@ -22,7 +22,7 @@ Return ONLY a valid JSON object with this exact shape — no markdown, no code f
   "interestingDetails": string | null,
   "ageGroups": [{"label": string, "minAge": number|null, "maxAge": number|null, "minGrade": number|null, "maxGrade": number|null}] | null,
   "schedules": [{"label": string, "startDate": "YYYY-MM-DD"|null, "endDate": "YYYY-MM-DD"|null, "startTime": string|null, "endTime": string|null, "earlyDropOff": string|null, "latePickup": string|null}] | null,
-  "pricing": [{"label": string, "amount": number, "unit": "PER_WEEK"|"PER_DAY"|"FLAT"|"PER_CAMP", "durationWeeks": number|null, "ageQualifier": string|null, "discountNotes": string|null}] | null,
+  "pricing": [{"label": string, "amount": number, "unit": "PER_WEEK"|"PER_SESSION"|"PER_DAY"|"FLAT"|"PER_CAMP", "durationWeeks": number|null, "ageQualifier": string|null, "discountNotes": string|null}] | null,
   "confidence": {
     "name": 0.0,
     "description": 0.0,
