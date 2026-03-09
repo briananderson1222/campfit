@@ -13,6 +13,7 @@ import {
   LogIn,
   LogOut,
   User,
+  LayoutDashboard,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -26,14 +27,22 @@ export function Nav() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
 
-    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+      if (user) fetch('/api/me').then(r => r.json()).then(d => setIsAdmin(d.isAdmin === true));
+    });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_, session) => setUser(session?.user ?? null)
+      (_, session) => {
+        setUser(session?.user ?? null);
+        if (session?.user) fetch('/api/me').then(r => r.json()).then(d => setIsAdmin(d.isAdmin === true));
+        else setIsAdmin(false);
+      }
     );
 
     return () => subscription.unsubscribe();
@@ -112,6 +121,16 @@ export function Nav() {
                       <User className="w-4 h-4" />
                       My Dashboard
                     </Link>
+                    {isAdmin && (
+                      <Link
+                        href="/admin"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2.5 text-sm text-pine-600 font-medium hover:bg-pine-50 transition-colors"
+                      >
+                        <LayoutDashboard className="w-4 h-4" />
+                        Admin Portal
+                      </Link>
+                    )}
                     <button
                       onClick={handleSignOut}
                       className="flex items-center gap-2 px-4 py-2.5 text-sm text-bark-500 hover:bg-cream-200/60 transition-colors w-full text-left"
@@ -176,7 +195,17 @@ export function Nav() {
             >
               Saved Camps
             </MobileNavLink>
-            <div className="mt-2 px-2">
+            <div className="mt-2 px-2 space-y-2">
+              {isAdmin && (
+                <Link
+                  href="/admin"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center gap-3 px-3 py-3 rounded-xl text-pine-600 bg-pine-50 font-medium transition-colors"
+                >
+                  <LayoutDashboard className="w-5 h-5" />
+                  Admin Portal
+                </Link>
+              )}
               {user ? (
                 <button
                   onClick={() => {
