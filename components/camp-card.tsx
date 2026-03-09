@@ -51,7 +51,11 @@ export function CampCard({ camp }: { camp: Camp }) {
             )}
             <span className={cn("badge whitespace-nowrap", status.color)}>
               {camp.registrationStatus === "COMING_SOON" && camp.registrationOpenDate
-                ? `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                ? (() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    if (camp.registrationOpenDate === today) return "Opens Today";
+                    return `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+                  })()
                 : status.label}
             </span>
           </div>

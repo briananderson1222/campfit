@@ -23,6 +23,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { useCommunity } from "@/lib/community-context";
 import { routes } from "@/lib/routes";
+import { LangToggle } from "@/components/lang-toggle";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 function ThemeToggle({ className }: { className?: string }) {
@@ -152,6 +153,7 @@ export function Nav() {
           </NavLink>
           <div className="w-px h-6 bg-cream-400/60 mx-2" />
           <ThemeToggle />
+          <LangToggle />
 
           {user ? (
             <div className="relative">
@@ -262,7 +264,10 @@ export function Nav() {
             <div className="mt-2 px-2 space-y-2">
               <div className="flex items-center justify-between px-1 py-1">
                 <span className="text-sm text-bark-400 dark:text-cream-400 font-medium">Theme</span>
-                <ThemeToggle />
+                <div className="flex items-center gap-2">
+                  <LangToggle />
+                  <ThemeToggle />
+                </div>
               </div>
               {isAdmin && (
                 <Link

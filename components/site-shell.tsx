@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { CompareBar } from "@/components/compare-bar";
+import { LangProvider } from "@/lib/i18n/lang-context";
 
 export function SiteShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -12,11 +13,11 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
   if (isAdmin) return <>{children}</>;
 
   return (
-    <>
+    <LangProvider>
       <Nav />
       <main className="flex-1">{children}</main>
       <Footer />
       <CompareBar />
-    </>
+    </LangProvider>
   );
 }

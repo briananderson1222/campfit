@@ -73,8 +73,14 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
     });
   }, [camps, query, filters]);
 
+  const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
   const comingSoonCamps = camps
-    .filter((c) => c.registrationStatus === "COMING_SOON")
+    .filter((c) => {
+      if (c.registrationStatus !== "COMING_SOON") return false;
+      // If registration already opened (today or past), don't show in this section
+      if (c.registrationOpenDate && c.registrationOpenDate <= today) return false;
+      return true;
+    })
     .sort((a, b) => {
       // Camps with a known open date first, sorted soonest first
       if (a.registrationOpenDate && b.registrationOpenDate)
@@ -187,19 +193,9 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
             {comingSoonCamps.slice(0, 6).map((camp, i) => (
               <div
                 key={camp.id}
-                className="animate-fade-up relative"
+                className="animate-fade-up"
                 style={{ animationDelay: `${i * 0.1}s` }}
               >
-                {camp.registrationOpenDate ? (
-                  <div className="absolute top-3 right-3 z-10 bg-amber-400 text-white text-xs font-bold px-2 py-1 rounded-lg shadow-sm">
-                    Opens {new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    {camp.registrationOpenTime && ` · ${camp.registrationOpenTime}`}
-                  </div>
-                ) : (
-                  <div className="absolute top-3 right-3 z-10 bg-bark-300 text-white text-xs font-medium px-2 py-1 rounded-lg shadow-sm">
-                    Date TBD
-                  </div>
-                )}
                 <CampCard camp={camp} />
               </div>
             ))}
