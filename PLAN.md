@@ -417,14 +417,17 @@ camp/
 3. ~~Save/favorite camps (with 5-camp limit for free tier)~~ DONE — `/api/saves` GET/POST/DELETE, lazy User creation
 4. ~~Dashboard backend~~ DONE — server component with real saved camps, auth redirect
 
-### Phase 3 — Notifications & Premium
-1. Stripe integration (checkout, webhooks, tier enforcement)
-2. Premium gate on features (unlimited saves, advanced filters, notifications)
-3. Email notifications via Resend (registration-opens alerts)
-4. Web Push notifications (service worker + PushSubscription)
-5. SMS via Twilio
-6. Notification scheduler (Vercel Cron or Supabase Edge Function)
-7. "New camps matching your preferences" matching engine
+### Phase 3 — Notifications & Premium ✅ DONE (core)
+1. ~~Stripe integration (checkout, webhooks, tier enforcement)~~ DONE — checkout, portal, webhook → User.tier
+2. ~~Premium gate on features (unlimited saves)~~ DONE — tier check in saves API
+3. ~~Email notifications via Resend (registration-opens alerts)~~ DONE — `lib/notifications/email.ts`
+4. Web Push notifications — deferred
+5. SMS via Twilio — deferred
+6. ~~Notification scheduler (Vercel Cron)~~ DONE — `/api/cron/notify` daily at 8am UTC
+7. "New camps matching your preferences" matching engine — deferred to Phase 5
+   - ⚠️ **TODO**: Add env vars in Vercel: STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET, RESEND_API_KEY, RESEND_FROM_EMAIL, CRON_SECRET
+   - ⚠️ **TODO**: Create Stripe product + price, set STRIPE_PRICE_ID
+   - ⚠️ **TODO**: Register Stripe webhook endpoint: https://camp-scout-pied.vercel.app/api/stripe/webhook
 
 ### Phase 4 — Dynamic Data Pipeline
 1. DataIngestionAdapter interface
