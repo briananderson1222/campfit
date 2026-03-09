@@ -10,7 +10,7 @@ import {
 } from "react";
 
 const MAX_COMPARE = 3;
-const STORAGE_KEY = "campscout_compare";
+const STORAGE_KEY = "campfit_compare";
 
 interface CompareContextValue {
   compareList: string[]; // slugs

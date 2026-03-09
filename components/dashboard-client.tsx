@@ -72,7 +72,7 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
           {savedCamps.length > 0 && (
             <a
               href="/api/calendar/export"
-              download="my-campscout-camps.ics"
+              download="my-campfit-camps.ics"
               className="btn-secondary text-sm gap-1.5"
               title="Export all saved camps to calendar"
             >

@@ -16,7 +16,7 @@ function getResend(): Resend {
   return _resend;
 }
 
-const FROM = process.env.RESEND_FROM_EMAIL ?? "CampScout <notifications@campscout.app>";
+const FROM = process.env.RESEND_FROM_EMAIL ?? "CampFit <notifications@campfit.app>";
 
 export interface RegistrationAlert {
   to: string;
@@ -76,7 +76,7 @@ export async function sendRegistrationAlert(alert: RegistrationAlert) {
       ${alert.websiteUrl ? `<p style="margin-top:16px;font-size:13px;">Or go directly to <a href="${alert.websiteUrl}">the camp's registration page</a>.</p>` : ""}
     </div>
     <div class="footer">
-      <p>You're receiving this because you saved this camp on CampScout.<br/>
+      <p>You're receiving this because you saved this camp on CampFit.<br/>
       <a href="https://camp.fit/dashboard">Manage your saved camps</a></p>
     </div>
   </div>
@@ -108,7 +108,7 @@ export async function sendNewCampDigest(alert: NewCampAlert) {
   await resend.emails.send({
     from: FROM,
     to: alert.to,
-    subject: `🆕 ${alert.camps.length} new camps added to CampScout`,
+    subject: `🆕 ${alert.camps.length} new camps added to CampFit`,
     html: `
 <!DOCTYPE html>
 <html>

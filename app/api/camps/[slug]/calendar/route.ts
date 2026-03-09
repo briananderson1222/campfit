@@ -21,10 +21,10 @@ function buildIcs(events: { uid: string; summary: string; description: string; l
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//CampScout//CampScout//EN",
+    "PRODID:-//CampFit//CampFit//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:CampScout",
+    "X-WR-CALNAME:CampFit",
     "X-WR-TIMEZONE:America/Denver",
   ];
 
@@ -70,7 +70,7 @@ export async function GET(
     .join("\n");
 
   const events = camp.schedules.map((s) => ({
-    uid: `campscout-${camp.id}-${s.id}@camp-scout-pied.vercel.app`,
+    uid: `campfit-${camp.id}-${s.id}@camp-scout-pied.vercel.app`,
     summary: camp.name,
     description,
     location: camp.address || "Denver, CO",
@@ -88,7 +88,7 @@ export async function GET(
     // Create a single placeholder event if no schedule
     const today = new Date();
     events.push({
-      uid: `campscout-${camp.id}@camp-scout-pied.vercel.app`,
+      uid: `campfit-${camp.id}@camp-scout-pied.vercel.app`,
       summary: camp.name,
       description,
       location: camp.address || "Denver, CO",

@@ -1,5 +1,5 @@
 /**
- * GET /llms-full.txt — Complete CampScout camp data as markdown.
+ * GET /llms-full.txt — Complete CampFit camp data as markdown.
  * https://llmstxt.org/
  *
  * All camps inlined with full details — pricing, ages, schedules, registration.
@@ -117,9 +117,9 @@ export async function GET() {
   }
 
   const lines: string[] = [
-    `# CampScout — Complete Camp Directory`,
+    `# CampFit — Complete Camp Directory`,
     ``,
-    `> CampScout lists ${camps.length} kids' camps in Denver, Colorado. Data includes pricing, age groups, weekly schedule availability, registration status, and direct registration links. All prices are in USD.`,
+    `> CampFit lists ${camps.length} kids' camps in Denver, Colorado. Data includes pricing, age groups, weekly schedule availability, registration status, and direct registration links. All prices are in USD.`,
     ``,
     `**Base URL:** ${BASE}`,
     `**Data freshness:** Updated hourly (ISR). Registration status and dates reflect the 2025–2026 season.`,

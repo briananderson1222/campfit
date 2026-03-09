@@ -57,7 +57,7 @@ export function Nav() {
             <Compass className="w-5 h-5 text-cream-100" strokeWidth={2.5} />
           </div>
           <span className="font-display font-bold text-xl text-bark-700 tracking-tight">
-            Camp<span className="text-terracotta-400">Scout</span>
+            Camp<span className="text-terracotta-400">Fit</span>
           </span>
         </Link>
 
