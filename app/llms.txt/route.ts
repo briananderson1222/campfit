@@ -2,7 +2,7 @@
  * GET /llms.txt — LLM-friendly site guide following the llms.txt standard.
  * https://llmstxt.org/
  *
- * Curated index of CampScout: what it is, key pages, and links to all camps.
+ * Curated index of CampFit: what it is, key pages, and links to all camps.
  * For full inlined camp data, see /llms-full.txt
  */
 
@@ -19,11 +19,11 @@ export async function GET() {
 
   // Group by first letter for readability
   const lines: string[] = [
-    `# CampScout`,
+    `# CampFit`,
     ``,
-    `> CampScout is a directory of kids' camps in Denver, Colorado. Parents can search, filter, save, and compare camps by age group, category (sports, arts, STEM, nature, theater, cooking, music, academic), camp type (summer day, sleepaway, winter break, school break), neighborhood, weekly availability, and cost. The site currently lists ${camps.length} camps.`,
+    `> CampFit is a directory of kids' camps in Denver, Colorado. Parents can search, filter, save, and compare camps by age group, category (sports, arts, STEM, nature, theater, cooking, music, academic), camp type (summer day, sleepaway, winter break, school break), neighborhood, weekly availability, and cost. The site currently lists ${camps.length} camps.`,
     ``,
-    `CampScout is built for Denver-area parents planning summer and school-break activities for children. All camp data includes pricing tiers, age ranges, weekly schedules, registration status, and direct links to camp registration pages.`,
+    `CampFit is built for Denver-area parents planning summer and school-break activities for children. All camp data includes pricing tiers, age ranges, weekly schedules, registration status, and direct links to camp registration pages.`,
     ``,
     `## Key Pages`,
     ``,

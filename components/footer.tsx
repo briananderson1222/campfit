@@ -13,7 +13,7 @@ export function Footer() {
                 <Compass className="w-4 h-4 text-cream-100" />
               </div>
               <span className="font-display font-bold text-lg text-cream-100 tracking-tight">
-                Camp<span className="text-terracotta-400">Scout</span>
+                Camp<span className="text-terracotta-400">Fit</span>
               </span>
             </div>
             <p className="text-sm text-pine-200/70 leading-relaxed max-w-xs">
@@ -40,7 +40,7 @@ export function Footer() {
               Company
             </h3>
             <div className="flex flex-col gap-2.5">
-              <FooterLink href="#">About CampScout</FooterLink>
+              <FooterLink href="#">About CampFit</FooterLink>
               <FooterLink href="#">List Your Camp</FooterLink>
               <FooterLink href="#">Privacy Policy</FooterLink>
             </div>
@@ -48,7 +48,7 @@ export function Footer() {
         </div>
 
         <div className="mt-12 pt-6 border-t border-pine-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-pine-200/50">
-          <p>2026 CampScout. Built in Denver, CO.</p>
+          <p>2026 CampFit. Built in Denver, CO.</p>
           <p className="flex items-center gap-1">
             Made with <Heart className="w-3 h-3 text-terracotta-400 fill-terracotta-400" /> for Colorado families
           </p>

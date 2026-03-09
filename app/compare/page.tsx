@@ -5,7 +5,7 @@ import { CompareClient } from "@/components/compare-client";
 export const revalidate = 3600;
 
 export const metadata = {
-  title: "Compare Camps — CampScout",
+  title: "Compare Camps — CampFit",
   description:
     "Compare up to 3 Denver kids camps side by side — pricing, schedules, age groups, and more.",
 };

@@ -68,18 +68,18 @@ export async function generateMetadata({
     .join(" ");
 
   return {
-    title: `${camp.name} — Denver Kids Camp | CampScout`,
+    title: `${camp.name} — Denver Kids Camp | CampFit`,
     description,
     openGraph: {
-      title: `${camp.name} | CampScout`,
+      title: `${camp.name} | CampFit`,
       description,
       url: `${BASE_URL}/camps/${camp.slug}`,
-      siteName: "CampScout",
+      siteName: "CampFit",
       type: "website",
     },
     twitter: {
       card: "summary",
-      title: `${camp.name} | CampScout`,
+      title: `${camp.name} | CampFit`,
       description,
     },
     alternates: {

@@ -53,10 +53,10 @@ export async function GET() {
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//CampScout//CampScout//EN",
+    "PRODID:-//CampFit//CampFit//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:My CampScout Camps",
+    "X-WR-CALNAME:My CampFit Camps",
     "X-WR-TIMEZONE:America/Denver",
   ];
 
@@ -80,7 +80,7 @@ export async function GET() {
 
       lines.push(
         "BEGIN:VEVENT",
-        `UID:campscout-${camp.id}-${s.id}@camp-scout-pied.vercel.app`,
+        `UID:campfit-${camp.id}-${s.id}@camp-scout-pied.vercel.app`,
         `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
         `DTSTART;VALUE=DATE:${toIcsDate(s.startDate)}`,
         `DTEND;VALUE=DATE:${s.endDate ? toIcsDate(s.endDate) : dtend}`,
@@ -99,7 +99,7 @@ export async function GET() {
   return new Response(icsContent, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="my-campscout-camps.ics"',
+      "Content-Disposition": 'attachment; filename="my-campfit-camps.ics"',
       "Cache-Control": "no-store",
     },
   });

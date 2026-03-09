@@ -10,8 +10,8 @@ const BASE_URL = "https://camp.fit";
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: "CampScout — Discover Denver Kids Camps",
-    template: "%s | CampScout",
+    default: "CampFit — Discover Denver Kids Camps",
+    template: "%s | CampFit",
   },
   description:
     "Find the perfect summer, winter, and year-round camps for your kids in Denver. Search by age, activity, neighborhood, and availability.",
@@ -19,20 +19,20 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "CampScout",
+    title: "CampFit",
   },
   openGraph: {
-    siteName: "CampScout",
+    siteName: "CampFit",
     type: "website",
     locale: "en_US",
     url: BASE_URL,
-    title: "CampScout — Discover Denver Kids Camps",
+    title: "CampFit — Discover Denver Kids Camps",
     description:
       "Find the perfect summer, winter, and year-round camps for your kids in Denver.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CampScout — Denver Kids Camps",
+    title: "CampFit — Denver Kids Camps",
     description:
       "Find the perfect summer, winter, and year-round camps for your kids in Denver.",
   },

@@ -48,7 +48,7 @@ export abstract class BaseScraper {
         const res = await fetch(url, {
           headers: {
             "User-Agent":
-              "Mozilla/5.0 (compatible; CampScoutBot/1.0; +https://campscout.app/bot)",
+              "Mozilla/5.0 (compatible; CampFitBot/1.0; +https://campfit.app/bot)",
             Accept: "text/html,application/xhtml+xml,*/*",
           },
           signal: AbortSignal.timeout(15_000),
@@ -73,7 +73,7 @@ export abstract class BaseScraper {
   protected async fetchJson<T>(url: string): Promise<T> {
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "CampScoutBot/1.0",
+        "User-Agent": "CampFitBot/1.0",
         Accept: "application/json",
       },
       signal: AbortSignal.timeout(15_000),
