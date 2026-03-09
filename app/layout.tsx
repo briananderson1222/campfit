@@ -39,6 +39,10 @@ export const metadata: Metadata = {
   alternates: {
     canonical: BASE_URL,
   },
+  other: {
+    // llms.txt standard — https://llmstxt.org/
+    "llms-txt": `${BASE_URL}/llms.txt`,
+  },
 };
 
 export const viewport: Viewport = {
