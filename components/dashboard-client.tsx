@@ -153,7 +153,7 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
                       </span>
                     </div>
                     <Link
-                      href={routes.campDetail('denver', camp.slug)}
+                      href={routes.campDetail(camp.communitySlug, camp.slug)}
                       className="font-display font-bold text-lg text-bark-700 hover:text-pine-600 transition-colors"
                     >
                       {camp.name}
