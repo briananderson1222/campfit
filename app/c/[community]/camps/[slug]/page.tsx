@@ -201,9 +201,22 @@ export default async function CommunityDetailPage({
         </div>
 
         <div className="flex items-start justify-between gap-4">
-          <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 tracking-tight">
-            {camp.name}
-          </h1>
+          <div className="min-w-0">
+            <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 tracking-tight">
+              {camp.name}
+            </h1>
+            {camp.websiteUrl && (
+              <a
+                href={camp.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-pine-500 hover:text-pine-600 mt-1 break-all"
+              >
+                <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                {camp.websiteUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+              </a>
+            )}
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             <CompareButton slug={camp.slug} />
             <SaveButton campId={camp.id} size="lg" showLabel />
@@ -215,6 +228,12 @@ export default async function CommunityDetailPage({
             <span className="flex items-center gap-1.5">
               <MapPin className="w-4 h-4 text-pine-400" />
               {camp.address}
+            </span>
+          )}
+          {camp.neighborhood && !camp.address && (
+            <span className="flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-pine-400" />
+              {camp.neighborhood}, {camp.displayName}
             </span>
           )}
           {firstSchedule?.startTime && (

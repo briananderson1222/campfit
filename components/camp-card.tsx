@@ -89,10 +89,12 @@ export function CampCard({ camp }: { camp: Camp }) {
 
           {/* Meta row */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-bark-400 mb-4">
-            <span className="flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-pine-400" />
-              {camp.neighborhood}
-            </span>
+            {(camp.neighborhood || camp.city) && (
+              <span className="flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-pine-400" />
+                {camp.neighborhood || camp.city}
+              </span>
+            )}
             {firstSchedule?.startTime && (
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-pine-400" />
