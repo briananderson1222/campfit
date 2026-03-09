@@ -50,7 +50,9 @@ export function CampCard({ camp }: { camp: Camp }) {
               </span>
             )}
             <span className={cn("badge whitespace-nowrap", status.color)}>
-              {status.label}
+              {camp.registrationStatus === "COMING_SOON" && camp.registrationOpenDate
+                ? `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                : status.label}
             </span>
           </div>
 
