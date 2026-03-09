@@ -43,7 +43,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Check ?lang= query param first
     const params = new URLSearchParams(window.location.search);
-    const queryLang = params.get(COOKIE_NAME);
+    const queryLang = params.get(COOKIE_NAME) ?? undefined;
 
     if (isValidLang(queryLang)) {
       setCookie(COOKIE_NAME, queryLang, COOKIE_MAX_AGE);
