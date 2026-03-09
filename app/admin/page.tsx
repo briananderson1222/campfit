@@ -2,7 +2,7 @@ import { getRecentCrawlRuns } from '@/lib/admin/crawl-repository';
 import { getPendingCount } from '@/lib/admin/review-repository';
 import { getMostChangedFields } from '@/lib/admin/changelog-repository';
 import { getDashboardMetrics } from '@/lib/admin/metrics-repository';
-import { CrawlRunnerButton } from './crawl-runner-button';
+import { CrawlModal } from './crawl-modal';
 import { ClipboardList, TrendingUp, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -26,7 +26,7 @@ export default async function AdminDashboard() {
           <h1 className="font-display text-3xl font-extrabold text-bark-700">Dashboard</h1>
           <p className="text-bark-400 text-sm mt-1">Camp data pipeline overview</p>
         </div>
-        <CrawlRunnerButton />
+        <CrawlModal />
       </div>
 
       {/* Stat cards */}
