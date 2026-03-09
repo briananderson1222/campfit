@@ -1,6 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { stripHtmlToText } from './html-stripper';
 import { LLMExtractionResult } from '@/lib/admin/types';
+import { callLLM, buildPrompt } from './llm-provider';
 import type { CampInput } from './adapter';
 
 const EXTRACTION_SYSTEM_PROMPT = `You are a data extraction assistant for a kids camp directory. Extract structured camp information from website text.
@@ -53,9 +53,9 @@ export async function extractCampDataFromUrl(
   campName: string,
   options: { model?: string; maxChars?: number } = {}
 ): Promise<LLMExtractionResult> {
-  const model = options.model ?? 'claude-haiku-4-5-20251001';
   const maxChars = options.maxChars ?? 32_000;
   const extractedAt = new Date().toISOString();
+  let model = options.model ?? 'auto';
 
   // Step 1: Fetch HTML
   let html: string;
@@ -97,27 +97,16 @@ export async function extractCampDataFromUrl(
     };
   }
 
-  // Step 3: Call Claude
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  // Step 3: Call LLM (provider auto-selected from env)
   let rawResponse = '';
   let tokensUsed = 0;
 
   try {
-    const message = await client.messages.create({
-      model,
-      max_tokens: 2048,
-      system: EXTRACTION_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Camp name hint: "${campName}"\n\nWebsite URL: ${websiteUrl}\n\nWebsite text:\n${text}`,
-        },
-      ],
-    });
-
-    const firstBlock = message.content[0];
-    rawResponse = firstBlock.type === 'text' && 'text' in firstBlock ? (firstBlock as { type: 'text'; text: string }).text : '';
-    tokensUsed = message.usage.input_tokens + message.usage.output_tokens;
+    const prompt = buildPrompt(campName, websiteUrl, text);
+    const result = await callLLM(prompt);
+    rawResponse = result.text;
+    model = result.model;
+    tokensUsed = 0; // not all providers expose token counts
   } catch (err) {
     return {
       extracted: {},
@@ -127,7 +116,7 @@ export async function extractCampDataFromUrl(
       model,
       tokensUsed: 0,
       extractedAt,
-      error: `Claude API error: ${err instanceof Error ? err.message : String(err)}`,
+      error: `LLM error: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
