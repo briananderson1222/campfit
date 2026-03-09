@@ -21,7 +21,7 @@ export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
   const navLinks = [
     { href: "/admin", icon: <LayoutDashboard className="w-4 h-4" />, label: "Dashboard", exact: true },
     { href: "/admin/review", icon: <ClipboardList className="w-4 h-4" />, label: "Review Queue", badge: pendingCount },
-    { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl History" },
+    { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl Monitor" },
     { href: "/admin/camps", icon: <Database className="w-4 h-4" />, label: "Camp Data" },
     { href: "/admin/users", icon: <Users className="w-4 h-4" />, label: "Users" },
   ];

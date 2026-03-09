@@ -93,7 +93,7 @@ export default async function AdminDashboard() {
             </div>
           )}
           <Link href="/admin/crawls" className="text-sm text-pine-500 hover:text-pine-600 mt-3 inline-block">
-            View all crawls →
+            Crawl Monitor →
           </Link>
         </div>
 
