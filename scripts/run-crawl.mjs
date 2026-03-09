@@ -150,6 +150,7 @@ async function callLLM(prompt) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, format: 'json' }),
+    signal: AbortSignal.timeout(180000), // 3 min max per inference
   });
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
   const data = await res.json();
