@@ -42,12 +42,16 @@ export function buildPrompt(campName: string, url: string, text: string): string
 Camp name: ${campName}
 Source URL: ${url}
 
-Extract what you can find. For each field, set confidence 0-1 based on how sure you are.
-Only include fields you found evidence for (set others to null with confidence 0).
-Return ONLY valid JSON — no explanation, no markdown fences.
+Extract what you can find. For each field:
+- Set confidence 0-1 (1.0 = explicitly stated, 0.5 = inferred, 0 = not found)
+- Set excerpt to the verbatim sentence/phrase from the page that supports the value (null if not found)
+Only include fields with evidence. Return ONLY valid JSON — no markdown, no explanation.
 
 Schema:
 ${EXTRACTION_SCHEMA}
+
+Also include:
+  "excerpts": { <same field names as extracted, value is the supporting quote from the page or null> }
 
 Website text:
 ${text.slice(0, 20000)}`;

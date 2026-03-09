@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, X, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 
@@ -107,7 +107,7 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                   className="mt-1 w-4 h-4 accent-pine-600 shrink-0"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="font-semibold text-bark-600 text-sm">{FIELD_LABELS[field] ?? field}</span>
                     <span className={cn(
                       'text-xs px-1.5 py-0.5 rounded-full font-medium',
@@ -115,8 +115,14 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                       conf >= 50 ? 'bg-amber-100 text-amber-600' :
                       'bg-red-100 text-red-500'
                     )}>
-                      {conf}% confidence
+                      {conf}%
                     </span>
+                    {diff.mode === 'populate' && (
+                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 font-medium">new data</span>
+                    )}
+                    {diff.mode === 'add_items' && (
+                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-medium">+ items</span>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-sm">
@@ -129,6 +135,13 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                       <FieldValue value={diff.new} field={field} expanded={isExpanded} highlight />
                     </div>
                   </div>
+
+                  {diff.excerpt && (
+                    <div className="mt-3 flex gap-2 bg-amber-50/60 border border-amber-200/60 rounded-lg px-3 py-2">
+                      <Quote className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-800 italic leading-relaxed">{diff.excerpt}</p>
+                    </div>
+                  )}
 
                   {isExpandable && (
                     <button
@@ -178,12 +191,32 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
           </div>
         </div>
 
-        <div className="glass-panel p-5">
-          <h3 className="font-semibold text-bark-600 mb-2 text-sm">Extraction Info</h3>
-          <div className="space-y-1 text-xs text-bark-400">
-            <p>Model: {proposal.extractionModel}</p>
-            <p>Created: {new Date(proposal.createdAt).toLocaleString()}</p>
-            <p>Fields changed: {fields.length}</p>
+        <div className="glass-panel p-5 space-y-3">
+          <h3 className="font-semibold text-bark-600 mb-1 text-sm">Source</h3>
+          <a
+            href={proposal.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-start gap-1.5 text-xs text-pine-500 hover:text-pine-700 break-all leading-relaxed"
+          >
+            <ExternalLink className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            {proposal.sourceUrl.replace(/^https?:\/\//, '')}
+          </a>
+
+          {proposal.crawlStartedAt && (
+            <div className="flex items-center gap-1.5 text-xs text-bark-400">
+              <GitBranch className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                Crawl {new Date(proposal.crawlStartedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                {proposal.crawlTriggeredBy && ` · ${proposal.crawlTriggeredBy}`}
+              </span>
+            </div>
+          )}
+
+          <div className="border-t border-cream-300 pt-3 space-y-1 text-xs text-bark-400">
+            <p>Model: <span className="font-mono">{proposal.extractionModel}</span></p>
+            <p>Proposed: {new Date(proposal.createdAt).toLocaleString()}</p>
+            <p>{fields.length} field{fields.length !== 1 ? 's' : ''} changed</p>
           </div>
         </div>
       </div>

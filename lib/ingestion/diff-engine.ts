@@ -15,7 +15,8 @@ const ARRAY_FIELDS = ['ageGroups', 'schedules', 'pricing'] as const;
 export function computeDiff(
   current: Camp,
   extracted: Partial<CampInput>,
-  confidence: Record<string, number>
+  confidence: Record<string, number>,
+  excerpts: Record<string, string> = {}
 ): ProposedChanges {
   const changes: ProposedChanges = {};
 
@@ -29,20 +30,19 @@ export function computeDiff(
 
     const currentVal = (current as unknown as Record<string, unknown>)[field];
 
-    // Normalize for comparison
-    const normalizedCurrent = normalize(currentVal);
-    const normalizedExtracted = normalize(extractedVal);
-
-    if (normalizedCurrent !== normalizedExtracted) {
+    if (normalize(currentVal) !== normalize(extractedVal)) {
+      const isEmpty = currentVal === null || currentVal === undefined || currentVal === '';
       changes[field] = {
         old: currentVal,
         new: extractedVal,
         confidence: conf,
+        mode: isEmpty ? 'populate' : 'update',
+        ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
       };
     }
   }
 
-  // Array fields — compare as sorted normalized JSON
+  // Array fields — detect full replace vs additive
   for (const field of ARRAY_FIELDS) {
     const conf = confidence[field] ?? 0;
     if (conf < MIN_CONFIDENCE) continue;
@@ -51,14 +51,22 @@ export function computeDiff(
     if (!Array.isArray(extractedArr) || extractedArr.length === 0) continue;
 
     const currentArr = (current as unknown as Record<string, unknown>)[field];
-    const currentJson = stableJson(currentArr);
-    const extractedJson = stableJson(extractedArr);
+    const currentItems = Array.isArray(currentArr) ? currentArr : [];
 
-    if (currentJson !== extractedJson) {
+    if (stableJson(currentItems) !== stableJson(extractedArr)) {
+      // Check if extracted is purely additive (all current items still present)
+      const currentSet = new Set(currentItems.map(i => stableJson(i)));
+      const isAdditive = currentItems.length > 0 &&
+        extractedArr.every((item: unknown) => currentSet.has(stableJson(item)) || !currentSet.has(stableJson(item))) &&
+        extractedArr.length > currentItems.length &&
+        currentItems.every((item: unknown) => new Set(extractedArr.map((i: unknown) => stableJson(i))).has(stableJson(item)));
+
       changes[field] = {
-        old: currentArr,
+        old: currentItems,
         new: extractedArr,
         confidence: conf,
+        mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
+        ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
       };
     }
   }

@@ -51,6 +51,9 @@ export default async function ReviewQueuePage({
                   <p className="text-sm text-bark-400 mt-0.5">
                     {changeCount} field{changeCount !== 1 ? 's' : ''} changed ·{' '}
                     {new Date(proposal.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {proposal.crawlStartedAt && (
+                      <span className="text-bark-300"> · crawl {new Date(proposal.crawlStartedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    )}
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {Object.keys(proposal.proposedChanges).slice(0, 5).map(field => (

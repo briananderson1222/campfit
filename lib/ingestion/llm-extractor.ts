@@ -71,13 +71,8 @@ export async function extractCampDataFromUrl(
     html = await res.text();
   } catch (err) {
     return {
-      extracted: {},
-      confidence: {},
-      overallConfidence: 0,
-      rawResponse: '',
-      model,
-      tokensUsed: 0,
-      extractedAt,
+      extracted: {}, confidence: {}, excerpts: {}, overallConfidence: 0,
+      rawResponse: '', model, tokensUsed: 0, extractedAt,
       error: `Fetch failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
@@ -86,13 +81,8 @@ export async function extractCampDataFromUrl(
   const text = stripHtmlToText(html, maxChars);
   if (text.length < 100) {
     return {
-      extracted: {},
-      confidence: {},
-      overallConfidence: 0,
-      rawResponse: '',
-      model,
-      tokensUsed: 0,
-      extractedAt,
+      extracted: {}, confidence: {}, excerpts: {}, overallConfidence: 0,
+      rawResponse: '', model, tokensUsed: 0, extractedAt,
       error: 'Page text too short after stripping — likely JS-rendered or bot-blocked',
     };
   }
@@ -109,13 +99,8 @@ export async function extractCampDataFromUrl(
     tokensUsed = 0; // not all providers expose token counts
   } catch (err) {
     return {
-      extracted: {},
-      confidence: {},
-      overallConfidence: 0,
-      rawResponse: '',
-      model,
-      tokensUsed: 0,
-      extractedAt,
+      extracted: {}, confidence: {}, excerpts: {}, overallConfidence: 0,
+      rawResponse: '', model, tokensUsed: 0, extractedAt,
       error: `LLM error: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
@@ -126,6 +111,7 @@ export async function extractCampDataFromUrl(
     return {
       extracted: parsed.extracted,
       confidence: parsed.confidence,
+      excerpts: parsed.excerpts,
       overallConfidence: computeOverallConfidence(parsed.confidence),
       rawResponse,
       model,
@@ -136,6 +122,7 @@ export async function extractCampDataFromUrl(
     return {
       extracted: {},
       confidence: {},
+      excerpts: {},
       overallConfidence: 0,
       rawResponse,
       model,
@@ -149,12 +136,13 @@ export async function extractCampDataFromUrl(
 function parseExtractionResponse(raw: string): {
   extracted: Partial<CampInput>;
   confidence: Record<string, number>;
+  excerpts: Record<string, string>;
 } {
   // Strip markdown code fences if present
   const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
   const data = JSON.parse(cleaned);
 
-  const { confidence = {}, ...rest } = data;
+  const { confidence = {}, excerpts: rawExcerpts = {}, ...rest } = data;
 
   // Map to CampInput shape (remove null values, keep structure)
   const extracted: Partial<CampInput> = {};
@@ -168,7 +156,13 @@ function parseExtractionResponse(raw: string): {
     }
   }
 
-  return { extracted, confidence };
+  // Normalize excerpts — only keep non-null strings
+  const excerpts: Record<string, string> = {};
+  for (const [k, v] of Object.entries(rawExcerpts)) {
+    if (v && typeof v === 'string') excerpts[k] = v;
+  }
+
+  return { extracted, confidence, excerpts };
 }
 
 function computeOverallConfidence(confidence: Record<string, number>): number {

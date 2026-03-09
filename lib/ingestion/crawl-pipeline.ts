@@ -78,7 +78,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result, changesFound: 0, durationMs });
       } else {
         // Diff
-        const proposedChanges = computeDiff(camp as unknown as import('@/lib/types').Camp, result.extracted, result.confidence);
+        const proposedChanges = computeDiff(camp as unknown as import('@/lib/types').Camp, result.extracted, result.confidence, result.excerpts);
         const changesFound = Object.keys(proposedChanges).length;
 
         let proposalId: string | null = null;

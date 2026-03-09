@@ -22,6 +22,8 @@ export interface FieldDiff {
   old: unknown;
   new: unknown;
   confidence: number;
+  excerpt?: string;    // verbatim snippet from source page supporting this value
+  mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions
 }
 
 export type ProposedChanges = Record<string, FieldDiff>;
@@ -41,10 +43,14 @@ export interface CampChangeProposal {
   extractionModel: string;
   reviewerNotes: string | null;
   feedbackTags: string[] | null;
-  // joined
+  // joined from Camp
   campName?: string;
   campSlug?: string;
   communitySlug?: string;
+  // joined from CrawlRun
+  crawlStartedAt?: string;
+  crawlTrigger?: string;
+  crawlTriggeredBy?: string;
 }
 
 export interface CampChangeLog {
@@ -71,6 +77,7 @@ export interface CrawlMetric {
 export interface LLMExtractionResult {
   extracted: Partial<import('@/lib/ingestion/adapter').CampInput>;
   confidence: Record<string, number>;
+  excerpts: Record<string, string>; // per-field verbatim source snippets
   overallConfidence: number;
   rawResponse: string;
   model: string;

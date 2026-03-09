@@ -11,6 +11,17 @@ export async function createProposal(opts: {
   extractionModel: string;
 }): Promise<string> {
   const pool = getPool();
+
+  // Supersede any older PENDING proposals for this camp — newer crawl takes precedence
+  await pool.query(
+    `UPDATE "CampChangeProposal"
+     SET status = 'SKIPPED',
+         "reviewerNotes" = COALESCE("reviewerNotes", '') || ' [Superseded by newer crawl]',
+         "reviewedAt" = now()
+     WHERE "campId" = $1 AND status = 'PENDING'`,
+    [opts.campId]
+  );
+
   const result = await pool.query(
     `INSERT INTO "CampChangeProposal"
        ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel")
@@ -32,9 +43,11 @@ export async function getPendingProposals(opts: {
 
   const [rows, countRow] = await Promise.all([
     pool.query(
-      `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug"
+      `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
+              r."startedAt" AS "crawlStartedAt", r.trigger AS "crawlTrigger"
        FROM "CampChangeProposal" p
        JOIN "Camp" c ON c.id = p."campId"
+       LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
        WHERE p.status = 'PENDING' AND p."overallConfidence" >= $1
        ORDER BY p."createdAt" DESC
        LIMIT $2 OFFSET $3`,
@@ -55,9 +68,11 @@ export async function getPendingProposals(opts: {
 export async function getProposal(id: string): Promise<CampChangeProposal | null> {
   const pool = getPool();
   const result = await pool.query(
-    `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug"
+    `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
+            r."startedAt" AS "crawlStartedAt", r.trigger AS "crawlTrigger", r."triggeredBy" AS "crawlTriggeredBy"
      FROM "CampChangeProposal" p
      JOIN "Camp" c ON c.id = p."campId"
+     LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
      WHERE p.id = $1`,
     [id]
   );
