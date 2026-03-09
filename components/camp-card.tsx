@@ -89,9 +89,13 @@ export function CampCard({ camp }: { camp: Camp }) {
             <span className="text-xs text-bark-300 uppercase tracking-wide font-semibold">
               {ageRange}
             </span>
-            <span className="text-xs text-bark-300">
-              {weeksAvailable} week{weeksAvailable !== 1 ? "s" : ""} available
-            </span>
+            {camp.campType === "SUMMER_DAY" && (
+              <span className="text-xs text-bark-300">
+                {weeksAvailable > 0
+                  ? `${weeksAvailable} week${weeksAvailable !== 1 ? "s" : ""} available`
+                  : "Contact for schedule"}
+              </span>
+            )}
           </div>
 
           <div className="text-right">
