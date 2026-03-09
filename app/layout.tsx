@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ThemeProvider } from "next-themes";
 import { CompareProvider } from "@/lib/compare-context";
 import { SavesProvider } from "@/lib/saves-context";
 import { SiteShell } from "@/components/site-shell";
@@ -57,13 +58,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen flex flex-col">
-        <SavesProvider>
-          <CompareProvider>
-            <SiteShell>{children}</SiteShell>
-          </CompareProvider>
-        </SavesProvider>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <SavesProvider>
+            <CompareProvider>
+              <SiteShell>{children}</SiteShell>
+            </CompareProvider>
+          </SavesProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
