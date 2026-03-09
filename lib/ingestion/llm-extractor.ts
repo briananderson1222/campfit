@@ -93,7 +93,7 @@ export async function extractCampDataFromUrl(
 
   try {
     const prompt = buildPrompt(campName, websiteUrl, text);
-    const result = await callLLM(prompt);
+    const result = await callLLM(prompt, options.model !== 'auto' ? options.model : undefined);
     rawResponse = result.text;
     model = result.model;
     tokensUsed = 0; // not all providers expose token counts

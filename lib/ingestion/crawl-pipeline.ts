@@ -11,6 +11,7 @@ export interface CrawlOptions {
   triggeredBy: string;
   trigger?: 'MANUAL' | 'SCHEDULED';
   campIds?: string[];
+  model?: string;
   onProgress?: (event: CrawlProgressEvent) => void | Promise<void>;
 }
 
@@ -64,7 +65,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     const startMs = Date.now();
     try {
       // Extract
-      const result = await extractCampDataFromUrl(camp.websiteUrl, camp.name);
+      const result = await extractCampDataFromUrl(camp.websiteUrl, camp.name, { model: options.model });
       const durationMs = Date.now() - startMs;
 
       if (result.error) {

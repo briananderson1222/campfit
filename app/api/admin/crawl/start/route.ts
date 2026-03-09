@@ -11,6 +11,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const campIds: string[] | undefined = body.campIds;
+  const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
 
   let resolveRunId!: (id: string) => void;
   const runIdPromise = new Promise<string>(resolve => { resolveRunId = resolve; });
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
     triggeredBy: user.email,
     trigger: 'MANUAL',
     campIds,
+    model,
     onProgress: (event) => {
       if (event.type === 'started') resolveRunId(event.runId);
     },

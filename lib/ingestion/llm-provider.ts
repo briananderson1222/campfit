@@ -57,10 +57,10 @@ Website text:
 ${text.slice(0, 20000)}`;
 }
 
-async function callAnthropic(prompt: string, apiKey: string): Promise<LLMResponse> {
+async function callAnthropic(prompt: string, apiKey: string, modelId?: string): Promise<LLMResponse> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
-  const model = 'claude-haiku-4-5-20251001';
+  const model = modelId ?? 'claude-haiku-4-5-20251001';
   const msg = await client.messages.create({
     model,
     max_tokens: 1024,
@@ -70,8 +70,8 @@ async function callAnthropic(prompt: string, apiKey: string): Promise<LLMRespons
   return { text, model, provider: 'anthropic' };
 }
 
-async function callGemini(prompt: string, apiKey: string): Promise<LLMResponse> {
-  const model = 'gemini-2.0-flash';
+async function callGemini(prompt: string, apiKey: string, modelId?: string): Promise<LLMResponse> {
+  const model = modelId ?? 'gemini-2.0-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method: 'POST',
@@ -100,7 +100,38 @@ async function callOllama(prompt: string, model: string): Promise<LLMResponse> {
   return { text: data.response, model, provider: 'ollama' };
 }
 
-export async function callLLM(prompt: string): Promise<LLMResponse> {
+/**
+ * Call an LLM with an optional model override.
+ *
+ * @param prompt - The prompt to send.
+ * @param modelOverride - Optional "provider:model" string, e.g. "gemini:gemini-2.0-flash".
+ *   When provided, the specified provider and model are used directly.
+ *   When omitted, falls back to the auto-select priority (anthropic → gemini → ollama).
+ */
+export async function callLLM(prompt: string, modelOverride?: string): Promise<LLMResponse> {
+  if (modelOverride) {
+    const colonIdx = modelOverride.indexOf(':');
+    if (colonIdx === -1) throw new Error(`Invalid modelOverride format: "${modelOverride}". Expected "provider:model".`);
+    const provider = modelOverride.slice(0, colonIdx);
+    const modelId = modelOverride.slice(colonIdx + 1);
+
+    if (provider === 'anthropic') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
+      return callAnthropic(prompt, apiKey, modelId);
+    }
+    if (provider === 'gemini') {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
+      return callGemini(prompt, apiKey, modelId);
+    }
+    if (provider === 'ollama') {
+      return callOllama(prompt, modelId);
+    }
+    throw new Error(`Unknown provider: "${provider}"`);
+  }
+
+  // Auto-select: first available provider wins
   if (process.env.ANTHROPIC_API_KEY) {
     return callAnthropic(prompt, process.env.ANTHROPIC_API_KEY);
   }

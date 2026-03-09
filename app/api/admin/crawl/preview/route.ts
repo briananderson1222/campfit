@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
 
-export type CrawlPriority = 'stale' | 'missing' | 'coming_soon' | 'never_crawled' | 'all';
+export type CrawlPriority = 'stale' | 'missing' | 'coming_soon' | 'never_crawled' | 'all' | 'specific';
 
 export interface CrawlPreviewCamp {
   id: string;
@@ -25,8 +25,62 @@ export async function GET(req: Request) {
   const priority = (url.searchParams.get('priority') ?? 'stale') as CrawlPriority;
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '10', 10), 100);
   const community = url.searchParams.get('community') ?? null;
+  const campId = url.searchParams.get('campId') ?? null;
+  const q = url.searchParams.get('q') ?? null;
 
   const pool = getPool();
+
+  // --- Single camp lookup by ID ---
+  if (campId) {
+    const result = await pool.query(`
+      SELECT
+        id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
+        "lastVerifiedAt",
+        (CASE WHEN description = '' OR description IS NULL THEN 1 ELSE 0 END +
+         CASE WHEN neighborhood = '' OR neighborhood IS NULL THEN 1 ELSE 0 END +
+         CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
+        0 AS "priorityScore"
+      FROM "Camp"
+      WHERE id = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''
+    `, [campId]);
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
+    );
+
+    return NextResponse.json({
+      camps: result.rows as CrawlPreviewCamp[],
+      totalCrawlable: countResult.rows[0].total,
+    });
+  }
+
+  // --- Text search (priority=specific with q=<query>) ---
+  if (priority === 'specific' && q) {
+    const searchLimit = Math.min(limit, 10);
+    const result = await pool.query(`
+      SELECT
+        id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
+        "lastVerifiedAt",
+        (CASE WHEN description = '' OR description IS NULL THEN 1 ELSE 0 END +
+         CASE WHEN neighborhood = '' OR neighborhood IS NULL THEN 1 ELSE 0 END +
+         CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
+        0 AS "priorityScore"
+      FROM "Camp"
+      WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''
+        AND name ILIKE $1
+      ORDER BY name ASC
+      LIMIT $2
+    `, [`%${q}%`, searchLimit]);
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
+    );
+
+    return NextResponse.json({
+      camps: result.rows as CrawlPreviewCamp[],
+      totalCrawlable: countResult.rows[0].total,
+    });
+  }
 
   // Base: only camps with a crawlable URL
   let whereClause = `"websiteUrl" IS NOT NULL AND "websiteUrl" != ''`;
@@ -42,9 +96,9 @@ export async function GET(req: Request) {
     whereClause += ` AND "lastVerifiedAt" IS NULL`;
   } else if (priority === 'coming_soon') {
     whereClause += ` AND "registrationStatus" = 'COMING_SOON'`;
+  } else if (priority === 'missing') {
+    whereClause += ` AND (description = '' OR description IS NULL OR neighborhood = '' OR neighborhood IS NULL OR "registrationStatus" = 'UNKNOWN')`;
   }
-
-  const now = new Date().toISOString();
 
   const result = await pool.query(`
     SELECT
