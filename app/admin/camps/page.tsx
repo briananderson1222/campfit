@@ -14,6 +14,8 @@ interface CampRow {
   dataConfidence: string;
   lastVerifiedAt: string | null;
   communitySlug: string;
+  registrationStatus: string;
+  scheduleCount: number;
   missingFieldCount: number;
   pendingProposals: number;
 }
@@ -29,6 +31,8 @@ async function getCampsWithQuality(): Promise<CampRow[]> {
       c."dataConfidence",
       c."lastVerifiedAt",
       c."communitySlug",
+      c."registrationStatus",
+      (SELECT COUNT(*)::int FROM "CampSchedule" s WHERE s."campId" = c.id) AS "scheduleCount",
       (CASE WHEN c.description = '' OR c.description IS NULL THEN 1 ELSE 0 END +
        CASE WHEN c."websiteUrl" = '' OR c."websiteUrl" IS NULL THEN 1 ELSE 0 END +
        CASE WHEN c.neighborhood = '' OR c.neighborhood IS NULL THEN 1 ELSE 0 END +
@@ -37,7 +41,6 @@ async function getCampsWithQuality(): Promise<CampRow[]> {
        WHERE "campId" = c.id AND status = 'PENDING') AS "pendingProposals"
     FROM "Camp" c
     ORDER BY "missingFieldCount" DESC, "lastVerifiedAt" ASC NULLS FIRST
-    LIMIT 100
   `);
   return result.rows;
 }
@@ -50,7 +53,7 @@ export default async function AdminCampsPage() {
       <div className="mb-8">
         <h1 className="font-display text-3xl font-extrabold text-bark-700">Camp Data</h1>
         <p className="text-bark-400 text-sm mt-1">
-          Top 100 camps by data quality score · sorted by missing fields then oldest verified
+          {camps.length} camps · sorted by missing fields then oldest verified · click Crawl to refresh a camp
         </p>
       </div>
 
@@ -59,8 +62,10 @@ export default async function AdminCampsPage() {
           <thead>
             <tr className="border-b border-cream-300/60 text-xs text-bark-300 uppercase tracking-wide">
               <th className="text-left px-4 py-3 font-semibold">Camp</th>
+              <th className="text-left px-4 py-3 font-semibold">Status</th>
               <th className="text-left px-4 py-3 font-semibold">Confidence</th>
               <th className="text-left px-4 py-3 font-semibold">Last Verified</th>
+              <th className="text-center px-4 py-3 font-semibold">Weeks</th>
               <th className="text-center px-4 py-3 font-semibold">Missing</th>
               <th className="text-center px-4 py-3 font-semibold">Pending</th>
               <th className="px-4 py-3 font-semibold text-left">Actions</th>
@@ -94,6 +99,10 @@ export default async function AdminCampsPage() {
                   </td>
 
                   <td className="px-4 py-3">
+                    <StatusBadge value={camp.registrationStatus} />
+                  </td>
+
+                  <td className="px-4 py-3">
                     <ConfidenceBadge value={camp.dataConfidence} />
                   </td>
 
@@ -105,6 +114,10 @@ export default async function AdminCampsPage() {
                           year: 'numeric',
                         })
                       : <span className="text-red-400 font-medium">Never</span>}
+                  </td>
+
+                  <td className="px-4 py-3 text-center text-xs text-bark-400">
+                    {camp.scheduleCount > 0 ? camp.scheduleCount : <span className="text-red-400">0</span>}
                   </td>
 
                   <td className="px-4 py-3 text-center">
@@ -156,6 +169,26 @@ export default async function AdminCampsPage() {
         </table>
       </div>
     </div>
+  );
+}
+
+function StatusBadge({ value }: { value: string }) {
+  const colors: Record<string, string> = {
+    OPEN: 'bg-emerald-100 text-emerald-700',
+    CLOSED: 'bg-red-100 text-red-600',
+    COMING_SOON: 'bg-amber-100 text-amber-700',
+    UNKNOWN: 'bg-gray-100 text-gray-500',
+  };
+  const labels: Record<string, string> = {
+    OPEN: 'Open', CLOSED: 'Closed', COMING_SOON: 'Soon', UNKNOWN: '?',
+  };
+  return (
+    <span className={cn(
+      'inline-block px-2 py-0.5 rounded-full text-xs font-semibold',
+      colors[value] ?? 'bg-cream-200 text-bark-400'
+    )}>
+      {labels[value] ?? value}
+    </span>
   );
 }
 
