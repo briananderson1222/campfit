@@ -107,6 +107,10 @@ model Camp {
   websiteUrl           String             @default("")
   interestingDetails   String?
 
+  // Community
+  communitySlug        String             @default("denver")
+  displayName          String             @default("Denver")
+
   // Location
   city                 String             @default("Denver")
   region               String?
@@ -145,6 +149,7 @@ model Camp {
   @@index([neighborhood])
   @@index([registrationStatus])
   @@index([city])
+  @@index([communitySlug])
 }
 
 model CampAgeGroup {

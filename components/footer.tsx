@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Compass, Heart } from "lucide-react";
+import { routes } from "@/lib/routes";
 
 export function Footer() {
   return (
@@ -28,8 +29,8 @@ export function Footer() {
               Explore
             </h3>
             <div className="flex flex-col gap-2.5">
-              <FooterLink href="/">Browse Camps</FooterLink>
-              <FooterLink href="/calendar">Weekly Calendar</FooterLink>
+              <FooterLink href={routes.home()}>Browse Camps</FooterLink>
+              <FooterLink href={routes.home()}>Weekly Calendar</FooterLink>
               <FooterLink href="/dashboard">Saved Camps</FooterLink>
             </div>
           </div>

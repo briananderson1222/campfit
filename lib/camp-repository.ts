@@ -6,13 +6,14 @@
  */
 
 import { getPool } from "@/lib/db";
-import { Camp, CampCategory, CampType } from "@/lib/types";
+import { Camp, CampCategory, CampType, Community } from "@/lib/types";
 
 // ─── SQL ──────────────────────────────────────────────────────────────────
 
 const CAMPS_WITH_RELATIONS_SQL = `
   SELECT
     c.*,
+    c."communitySlug", c."displayName",
     c."registrationOpenDate"::text AS "registrationOpenDate",
     COALESCE(
       json_agg(DISTINCT jsonb_build_object(
@@ -59,12 +60,13 @@ const CAMPS_WITH_RELATIONS_SQL = `
 // ─── Public API ───────────────────────────────────────────────────────────
 
 /**
- * Fetch all camps with their related age groups, schedules, and pricing.
+ * Fetch all camps for a community with their related age groups, schedules, and pricing.
  */
-export async function getAllCamps(): Promise<Camp[]> {
+export async function getAllCamps(communitySlug: string): Promise<Camp[]> {
   const pool = getPool();
   const result = await pool.query<Camp>(
-    `${CAMPS_WITH_RELATIONS_SQL} GROUP BY c."id" ORDER BY c."name"`
+    `${CAMPS_WITH_RELATIONS_SQL} WHERE c."communitySlug" = $1 GROUP BY c."id" ORDER BY c."name"`,
+    [communitySlug]
   );
   return result.rows;
 }
@@ -82,16 +84,17 @@ export async function getCampBySlug(slug: string): Promise<Camp | null> {
 }
 
 /**
- * Fetch camps filtered by category and/or camp type.
+ * Fetch camps filtered by community, category and/or camp type.
  * Full-text and age filtering is done client-side after fetching.
  */
 export async function getCampsByType(
+  communitySlug: string,
   campType?: CampType,
   category?: CampCategory
 ): Promise<Camp[]> {
   const pool = getPool();
-  const conditions: string[] = [];
-  const params: (string | undefined)[] = [];
+  const conditions: string[] = [`c."communitySlug" = $1`];
+  const params: (string | undefined)[] = [communitySlug];
 
   if (campType) {
     params.push(campType);
@@ -102,7 +105,7 @@ export async function getCampsByType(
     conditions.push(`c."category" = $${params.length}::"CampCategory"`);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const where = `WHERE ${conditions.join(" AND ")}`;
 
   const result = await pool.query<Camp>(
     `${CAMPS_WITH_RELATIONS_SQL} ${where} GROUP BY c."id" ORDER BY c."name"`,
@@ -114,10 +117,24 @@ export async function getCampsByType(
 /**
  * Lightweight camp list (no relations) for building metadata or sitemaps.
  */
-export async function getCampSlugs(): Promise<{ slug: string; name: string }[]> {
+export async function getCampSlugs(): Promise<{ slug: string; name: string; communitySlug: string }[]> {
   const pool = getPool();
-  const result = await pool.query<{ slug: string; name: string }>(
-    `SELECT "slug", "name" FROM "Camp" ORDER BY "name"`
+  const result = await pool.query<{ slug: string; name: string; communitySlug: string }>(
+    `SELECT "slug", "name", "communitySlug" FROM "Camp" ORDER BY "name"`
+  );
+  return result.rows;
+}
+
+/**
+ * Returns distinct communities with camp counts, ordered by count descending.
+ */
+export async function getDistinctCommunities(): Promise<Community[]> {
+  const pool = getPool();
+  const result = await pool.query<Community>(
+    `SELECT "communitySlug", "displayName", COUNT(*)::int AS count
+     FROM "Camp"
+     GROUP BY "communitySlug", "displayName"
+     ORDER BY count DESC`
   );
   return result.rows;
 }

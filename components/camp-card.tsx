@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   MapPin,
@@ -15,8 +17,11 @@ import {
 } from "@/lib/types";
 import { cn, formatCurrency, getLowestPrice, getAgeRangeSummary } from "@/lib/utils";
 import { CompareButton } from "@/components/compare-button";
+import { useCommunity } from "@/lib/community-context";
+import { routes } from "@/lib/routes";
 
 export function CampCard({ camp }: { camp: Camp }) {
+  const { slug: communitySlug } = useCommunity();
   const lowestPrice = getLowestPrice(camp.pricing);
   const ageRange = getAgeRangeSummary(camp.ageGroups);
   const status = STATUS_CONFIG[camp.registrationStatus];
@@ -61,7 +66,7 @@ export function CampCard({ camp }: { camp: Camp }) {
         </div>
 
         {/* Name — full-width link */}
-        <Link href={`/camps/${camp.slug}`} className="block">
+        <Link href={routes.campDetail(communitySlug, camp.slug)} className="block">
           <h3 className="font-display font-bold text-lg text-bark-700 leading-snug mb-2 group-hover:text-pine-600 transition-colors">
             {camp.name}
           </h3>

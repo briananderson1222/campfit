@@ -26,6 +26,8 @@ import {
   SUMMER_WEEKS,
 } from "@/lib/types";
 import { cn, formatCurrency, getAgeRangeSummary } from "@/lib/utils";
+import { useCommunity } from "@/lib/community-context";
+import { routes } from "@/lib/routes";
 
 const MAX_COMPARE = 3;
 
@@ -38,17 +40,20 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
   const searchParams = useSearchParams();
   const [camps, setCamps] = useState<Camp[]>(initialCamps);
   const [shareToast, setShareToast] = useState(false);
+  const { slug: communitySlug } = useCommunity();
 
   const removeCamp = useCallback(
     (slug: string) => {
       const next = camps.filter((c) => c.slug !== slug);
       setCamps(next);
-      const params = next.map((c) => c.slug).join(",");
-      router.replace(params ? `/compare?camps=${params}` : "/compare", {
-        scroll: false,
-      });
+      router.replace(
+        next.length > 0
+          ? routes.communityCompare(communitySlug, next.map((c) => c.slug))
+          : routes.community(communitySlug),
+        { scroll: false }
+      );
     },
-    [camps, router]
+    [camps, router, communitySlug]
   );
 
   const handleShare = () => {
@@ -65,7 +70,7 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
       <div className="flex items-start justify-between mb-8 animate-fade-up">
         <div>
           <Link
-            href="/"
+            href={routes.community(communitySlug)}
             className="inline-flex items-center gap-1.5 text-sm text-bark-300 hover:text-pine-500 transition-colors mb-3"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -105,7 +110,7 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
             {camps.length === 0 && (
               <>
                 {" "}
-                <Link href="/" className="text-pine-500 underline">
+                <Link href={routes.community(communitySlug)} className="text-pine-500 underline">
                   Browse camps
                 </Link>
               </>
@@ -123,7 +128,7 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
           <p className="text-bark-300 mb-6">
             Browse camps and click &ldquo;Compare&rdquo; to add them here
           </p>
-          <Link href="/" className="btn-primary">
+          <Link href={routes.community(communitySlug)} className="btn-primary">
             Browse Camps
           </Link>
         </div>
@@ -167,7 +172,7 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
                         </span>
                       </div>
                       <Link
-                        href={`/camps/${camp.slug}`}
+                        href={routes.campDetail(communitySlug, camp.slug)}
                         className="font-display font-bold text-bark-700 hover:text-pine-600 transition-colors leading-tight block"
                       >
                         {camp.name}
@@ -364,7 +369,7 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
                   <td key={c.id} className="px-3 pt-4 pb-2 align-top">
                     <div className="flex flex-col gap-2">
                       <Link
-                        href={`/camps/${c.slug}`}
+                        href={routes.campDetail(communitySlug, c.slug)}
                         className="btn-secondary text-xs py-2 justify-center"
                       >
                         View Details

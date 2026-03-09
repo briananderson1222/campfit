@@ -77,6 +77,8 @@ export interface Camp {
 
   city: string;
   region: string | null;
+  communitySlug: string;
+  displayName: string;
   neighborhood: string;
   address: string;
   latitude: number | null;
@@ -93,6 +95,12 @@ export interface Camp {
   ageGroups: CampAgeGroup[];
   schedules: CampSchedule[];
   pricing: CampPricing[];
+}
+
+export interface Community {
+  communitySlug: string;
+  displayName: string;
+  count: number;
 }
 
 export interface SavedCamp {

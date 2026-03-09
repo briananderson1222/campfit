@@ -4,15 +4,18 @@ import { useRouter } from "next/navigation";
 import { GitCompareArrows, X } from "lucide-react";
 import { useCompare } from "@/lib/compare-context";
 import { cn } from "@/lib/utils";
+import { useCommunity } from "@/lib/community-context";
+import { routes } from "@/lib/routes";
 
 export function CompareBar() {
   const { compareList, clearCompare } = useCompare();
   const router = useRouter();
+  const { slug: communitySlug } = useCommunity();
 
   if (compareList.length === 0) return null;
 
   const handleCompare = () => {
-    router.push(`/compare?camps=${compareList.join(",")}`);
+    router.push(routes.communityCompare(communitySlug, compareList));
   };
 
   return (
