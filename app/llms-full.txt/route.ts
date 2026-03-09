@@ -18,7 +18,7 @@ import {
 } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
-const BASE = "https://camp-scout-pied.vercel.app";
+const BASE = "https://camp.fit";
 
 function campToMarkdown(camp: Camp): string {
   const lines: string[] = [];

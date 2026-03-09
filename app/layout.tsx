@@ -5,7 +5,7 @@ import { CompareProvider } from "@/lib/compare-context";
 import { CompareBar } from "@/components/compare-bar";
 import "./globals.css";
 
-const BASE_URL = "https://camp-scout-pied.vercel.app";
+const BASE_URL = "https://camp.fit";
 
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),

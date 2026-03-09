@@ -34,7 +34,7 @@ export async function sendRegistrationAlert(alert: RegistrationAlert) {
     { weekday: "long", month: "long", day: "numeric", year: "numeric" }
   );
 
-  const campUrl = `https://camp-scout-pied.vercel.app/camps/${alert.campSlug}`;
+  const campUrl = `https://camp.fit/camps/${alert.campSlug}`;
 
   const { error } = await resend.emails.send({
     from: FROM,
@@ -77,7 +77,7 @@ export async function sendRegistrationAlert(alert: RegistrationAlert) {
     </div>
     <div class="footer">
       <p>You're receiving this because you saved this camp on CampScout.<br/>
-      <a href="https://camp-scout-pied.vercel.app/dashboard">Manage your saved camps</a></p>
+      <a href="https://camp.fit/dashboard">Manage your saved camps</a></p>
     </div>
   </div>
 </body>
@@ -101,7 +101,7 @@ export async function sendNewCampDigest(alert: NewCampAlert) {
     .slice(0, 5)
     .map(
       (c) =>
-        `<li style="margin-bottom:12px;"><a href="https://camp-scout-pied.vercel.app/camps/${c.slug}" style="color:#2D6A4F;font-weight:600;">${c.name}</a> <span style="color:#8C7B68;font-size:13px;">· ${c.category} · ${c.neighborhood}</span></li>`
+        `<li style="margin-bottom:12px;"><a href="https://camp.fit/camps/${c.slug}" style="color:#2D6A4F;font-weight:600;">${c.name}</a> <span style="color:#8C7B68;font-size:13px;">· ${c.category} · ${c.neighborhood}</span></li>`
     )
     .join("");
 
@@ -132,10 +132,10 @@ export async function sendNewCampDigest(alert: NewCampAlert) {
       <div class="logo">Camp<span>Scout</span></div>
       <h2>New camps just added</h2>
       <ul>${campItems}</ul>
-      <a href="https://camp-scout-pied.vercel.app" class="btn">Browse All Camps →</a>
+      <a href="https://camp.fit" class="btn">Browse All Camps →</a>
     </div>
     <div class="footer">
-      <a href="https://camp-scout-pied.vercel.app/dashboard">Manage notifications</a>
+      <a href="https://camp.fit/dashboard">Manage notifications</a>
     </div>
   </div>
 </body>

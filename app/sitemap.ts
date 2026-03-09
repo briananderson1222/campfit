@@ -1,7 +1,7 @@
 import { MetadataRoute } from "next";
 import { getCampSlugs } from "@/lib/camp-repository";
 
-const BASE_URL = "https://camp-scout-pied.vercel.app";
+const BASE_URL = "https://camp.fit";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const slugs = await getCampSlugs();

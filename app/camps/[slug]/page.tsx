@@ -31,7 +31,7 @@ import { LinkifiedText } from "@/components/linkified-text";
 
 export const revalidate = 3600;
 
-const BASE_URL = "https://camp-scout-pied.vercel.app";
+const BASE_URL = "https://camp.fit";
 
 export async function generateMetadata({
   params,
