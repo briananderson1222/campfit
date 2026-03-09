@@ -83,7 +83,7 @@ function LoginForm() {
               <Compass className="w-5 h-5 text-cream-100" strokeWidth={2.5} />
             </div>
             <span className="font-display font-bold text-2xl text-bark-700 tracking-tight">
-              Camp<span className="text-terracotta-400">Scout</span>
+              Camp<span className="text-terracotta-400">Fit</span>
             </span>
           </Link>
           <h1 className="font-display text-2xl font-extrabold text-bark-700 mt-2">
