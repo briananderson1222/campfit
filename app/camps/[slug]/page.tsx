@@ -27,6 +27,7 @@ import {
 import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
 import { CompareButton } from "@/components/compare-button";
+import { LinkifiedText } from "@/components/linkified-text";
 
 export const revalidate = 3600;
 
@@ -229,16 +230,18 @@ export default async function CampDetailPage({
             <h2 className="font-display font-bold text-bark-700 text-lg mb-3">
               About
             </h2>
-            <p className="text-bark-500 leading-relaxed">{camp.description}</p>
+            <p className="text-bark-500 leading-relaxed">
+              <LinkifiedText text={camp.description} />
+            </p>
             {camp.notes && (
               <p className="text-sm text-bark-400 mt-3 leading-relaxed">
-                {camp.notes}
+                <LinkifiedText text={camp.notes} />
               </p>
             )}
             {camp.interestingDetails && (
               <div className="mt-4 px-4 py-3 rounded-2xl bg-amber-300/10 border border-amber-300/30">
                 <p className="text-sm text-amber-600 font-medium">
-                  {camp.interestingDetails}
+                  <LinkifiedText text={camp.interestingDetails} />
                 </p>
               </div>
             )}
