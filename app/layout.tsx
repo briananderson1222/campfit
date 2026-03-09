@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { CompareProvider } from "@/lib/compare-context";
@@ -69,6 +70,7 @@ export default function RootLayout({
             <CompareBar />
           </CompareProvider>
         </SavesProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
