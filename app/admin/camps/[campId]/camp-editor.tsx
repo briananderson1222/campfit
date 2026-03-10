@@ -49,10 +49,14 @@ interface SiteHint {
 
 // ── Coverage meter ────────────────────────────────────────────────────────────
 
-function CoverageMeter({ campId, camp, fieldSources: initialFieldSources }: {
-  campId: string; camp: Camp; fieldSources: Record<string, FieldSource> | null;
+// Fields covered by inline EditableField attest buttons — excluded from coverage meter chips
+const INLINE_ATTESTED_FIELDS = new Set(['description', 'campType', 'category', 'registrationStatus', 'city', 'websiteUrl']);
+
+function CoverageMeter({ camp, fieldSources, onAttest }: {
+  camp: Camp;
+  fieldSources: Record<string, FieldSource> | null;
+  onAttest: (field: string) => Promise<void>;
 }) {
-  const [fieldSources, setFieldSources] = useState(initialFieldSources);
   const [attesting, setAttesting] = useState<string | null>(null);
 
   const campLike = { ...camp, ageGroups: camp.ageGroups, pricing: camp.pricing, schedules: camp.schedules };
@@ -60,20 +64,13 @@ function CoverageMeter({ campId, camp, fieldSources: initialFieldSources }: {
   const isVerified = missing.length === 0 && unattested.length === 0;
   const color = isVerified ? 'bg-pine-500' : pct >= 67 ? 'bg-amber-400' : 'bg-red-400';
 
-  async function attest(field: string) {
+  // Only show chips for complex fields not covered by inline EditableField attest buttons
+  const chipMissing = missing.filter(f => !INLINE_ATTESTED_FIELDS.has(f));
+  const chipUnattested = unattested.filter(f => !INLINE_ATTESTED_FIELDS.has(f));
+
+  async function handleAttest(field: string) {
     setAttesting(field);
-    const res = await fetch(`/api/admin/camps/${campId}/attest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: [field] }),
-    }).catch(() => null);
-    if (res?.ok) {
-      const now = new Date().toISOString();
-      setFieldSources(prev => ({
-        ...(prev ?? {}),
-        [field]: { excerpt: null, sourceUrl: 'admin:attested', approvedAt: now },
-      }));
-    }
+    await onAttest(field);
     setAttesting(null);
   }
 
@@ -95,12 +92,12 @@ function CoverageMeter({ campId, camp, fieldSources: initialFieldSources }: {
       <div className="w-full h-1.5 rounded-full bg-cream-200 dark:bg-bark-600 overflow-hidden">
         <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
       </div>
-      {missing.length > 0 && (
+      {chipMissing.length > 0 && (
         <div className="space-y-1 pt-0.5">
-          <p className="text-xs text-bark-300">Have value but need source — tap to attest directly:</p>
+          <p className="text-xs text-bark-300">Have value but need source:</p>
           <div className="flex flex-wrap gap-1.5">
-            {missing.map(f => (
-              <button key={f} onClick={() => attest(f)} disabled={attesting === f}
+            {chipMissing.map(f => (
+              <button key={f} onClick={() => handleAttest(f)} disabled={attesting === f}
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200/60 dark:border-red-700/30 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-50">
                 {attesting === f ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                 {f}
@@ -109,12 +106,12 @@ function CoverageMeter({ campId, camp, fieldSources: initialFieldSources }: {
           </div>
         </div>
       )}
-      {unattested.length > 0 && (
+      {chipUnattested.length > 0 && (
         <div className="space-y-1 pt-0.5">
-          <p className="text-xs text-bark-300">Blank — tap to mark as N/A / intentionally blank:</p>
+          <p className="text-xs text-bark-300">Blank — tap to mark as N/A:</p>
           <div className="flex flex-wrap gap-1.5">
-            {unattested.map(f => (
-              <button key={f} onClick={() => attest(f)} disabled={attesting === f}
+            {chipUnattested.map(f => (
+              <button key={f} onClick={() => handleAttest(f)} disabled={attesting === f}
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-700/30 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors disabled:opacity-50">
                 {attesting === f ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                 {f}
@@ -288,7 +285,10 @@ function NeighborhoodField({ campId, value, communitySlug }: { campId: string; v
 
 // ── Age group editor ──────────────────────────────────────────────────────────
 
-function AgeGroupsEditor({ campId, initial }: { campId: string; initial: AgeGroup[] }) {
+function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
+  campId: string; initial: AgeGroup[];
+  isAttested?: boolean; onAttest?: () => Promise<void>;
+}) {
   const [groups, setGroups] = useState<AgeGroup[]>(initial);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Omit<AgeGroup, 'id'>[]>([]);
@@ -325,15 +325,30 @@ function AgeGroupsEditor({ campId, initial }: { campId: string; initial: AgeGrou
     setSaving(false);
   }
 
+  const [attestingAg, setAttestingAg] = useState(false);
+
   if (!editing) {
     return (
       <div className="glass-panel p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide">Age Groups</h2>
-          <button onClick={startEdit}
-            className="flex items-center gap-1 text-xs text-bark-300 hover:text-bark-500 dark:hover:text-cream-300 transition-colors">
-            <Pencil className="w-3.5 h-3.5" /> Edit
-          </button>
+          <div className="flex items-center gap-2">
+            {onAttest && !isAttested && (
+              <button onClick={async () => { setAttestingAg(true); await onAttest(); setAttestingAg(false); }}
+                disabled={attestingAg}
+                className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-pine-200 dark:border-pine-700 text-pine-600 dark:text-pine-400 hover:bg-pine-50 dark:hover:bg-pine-900/20 transition-colors disabled:opacity-50">
+                {attestingAg ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+                Attest
+              </button>
+            )}
+            {onAttest && isAttested && (
+              <span className="text-xs text-pine-500 dark:text-pine-400 flex items-center gap-0.5"><ShieldCheck className="w-3 h-3" /></span>
+            )}
+            <button onClick={startEdit}
+              className="flex items-center gap-1 text-xs text-bark-300 hover:text-bark-500 dark:hover:text-cream-300 transition-colors">
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+          </div>
         </div>
         {groups.length === 0 ? (
           <p className="text-sm text-bark-200 italic">Not set</p>
@@ -417,15 +432,25 @@ function AgeGroupsEditor({ campId, initial }: { campId: string; initial: AgeGrou
 // ── Editable field (generic) ──────────────────────────────────────────────────
 
 function EditableField({
-  campId, field, label, value, type = 'text',
+  campId, field, label, value, type = 'text', onAttest, isAttested,
 }: {
   campId: string; field: string; label: string;
   value: string | null | boolean; type?: 'text' | 'textarea' | 'select' | 'boolean' | 'date';
+  onAttest?: () => Promise<void>;
+  isAttested?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState(value);
   const [draft, setDraft] = useState(String(value ?? ''));
   const [saving, setSaving] = useState(false);
+  const [attesting, setAttesting] = useState(false);
+
+  async function handleAttest() {
+    if (!onAttest) return;
+    setAttesting(true);
+    await onAttest();
+    setAttesting(false);
+  }
 
   async function save() {
     setSaving(true);
@@ -492,15 +517,46 @@ function EditableField({
                 </a>
               )}
             </span>
-            <button onClick={() => { setDraft(String(current ?? '')); setEditing(true); }}
-              className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0"
-              title={`Edit ${label}`}>
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              {onAttest && !isAttested && (
+                <button onClick={handleAttest} disabled={attesting}
+                  className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-pine-200 dark:border-pine-700 text-pine-600 dark:text-pine-400 hover:bg-pine-50 dark:hover:bg-pine-900/20 transition-colors disabled:opacity-50"
+                  title="Attest this field as reviewed/confirmed">
+                  {attesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+                  Attest
+                </button>
+              )}
+              {onAttest && isAttested && (
+                <span className="text-xs text-pine-500 dark:text-pine-400 flex items-center gap-0.5" title="Field attested">
+                  <ShieldCheck className="w-3 h-3" />
+                </span>
+              )}
+              <button onClick={() => { setDraft(String(current ?? '')); setEditing(true); }}
+                className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all"
+                title={`Edit ${label}`}>
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </dd>
     </div>
+  );
+}
+
+// ── Inline attest button (for section headers) ────────────────────────────────
+
+function AttestInlineButton({ isAttested, onAttest }: { isAttested: boolean; onAttest: () => Promise<void> }) {
+  const [attesting, setAttesting] = useState(false);
+  if (isAttested) {
+    return <span className="text-xs text-pine-500 dark:text-pine-400 flex items-center gap-0.5"><ShieldCheck className="w-3 h-3" /></span>;
+  }
+  return (
+    <button onClick={async () => { setAttesting(true); await onAttest(); setAttesting(false); }} disabled={attesting}
+      className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-pine-200 dark:border-pine-700 text-pine-600 dark:text-pine-400 hover:bg-pine-50 dark:hover:bg-pine-900/20 transition-colors disabled:opacity-50">
+      {attesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+      Attest
+    </button>
   );
 }
 
@@ -683,6 +739,26 @@ export function CampEditor({
   camp: Camp; pendingProposals?: PendingProposal[];
   siteHints?: SiteHint[]; domain?: string; provider?: Provider | null;
 }) {
+  const [fieldSources, setFieldSources] = useState<Record<string, FieldSource> | null>(camp.fieldSources);
+
+  async function attest(field: string) {
+    const res = await fetch(`/api/admin/camps/${camp.id}/attest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: [field] }),
+    }).catch(() => null);
+    if (res?.ok) {
+      const now = new Date().toISOString();
+      setFieldSources(prev => ({
+        ...(prev ?? {}),
+        [field]: { excerpt: null, sourceUrl: 'admin:attested', approvedAt: now },
+      }));
+    }
+  }
+
+  function attestProp(field: string) { return () => attest(field); }
+  function isAttested(field: string) { return !!fieldSources?.[field]?.approvedAt; }
+
   return (
     <div className="space-y-5">
       {/* Pending proposals banner */}
@@ -717,7 +793,7 @@ export function CampEditor({
       )}
 
       {/* Field coverage meter */}
-      <CoverageMeter campId={camp.id} camp={camp} fieldSources={camp.fieldSources} />
+      <CoverageMeter camp={camp} fieldSources={fieldSources} onAttest={attest} />
 
       {/* Core info */}
       <div className="glass-panel p-5">
@@ -731,10 +807,14 @@ export function CampEditor({
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
           <EditableField campId={camp.id} field="name" label="Name" value={camp.name} />
           <ProviderField campId={camp.id} providerId={camp.providerId} organizationName={camp.organizationName} provider={provider} />
-          <EditableField campId={camp.id} field="websiteUrl" label="Website URL" value={camp.websiteUrl} />
-          <EditableField campId={camp.id} field="campType" label="Camp Type" value={camp.campType} type="select" />
-          <EditableField campId={camp.id} field="category" label="Category" value={camp.category} type="select" />
-          <EditableField campId={camp.id} field="registrationStatus" label="Registration Status" value={camp.registrationStatus} type="select" />
+          <EditableField campId={camp.id} field="websiteUrl" label="Website URL" value={camp.websiteUrl}
+            onAttest={attestProp('websiteUrl')} isAttested={isAttested('websiteUrl')} />
+          <EditableField campId={camp.id} field="campType" label="Camp Type" value={camp.campType} type="select"
+            onAttest={attestProp('campType')} isAttested={isAttested('campType')} />
+          <EditableField campId={camp.id} field="category" label="Category" value={camp.category} type="select"
+            onAttest={attestProp('category')} isAttested={isAttested('category')} />
+          <EditableField campId={camp.id} field="registrationStatus" label="Registration Status" value={camp.registrationStatus} type="select"
+            onAttest={attestProp('registrationStatus')} isAttested={isAttested('registrationStatus')} />
           <EditableField campId={camp.id} field="registrationOpenDate" label="Registration Open Date" value={camp.registrationOpenDate} type="date" />
           <EditableField campId={camp.id} field="dataConfidence" label="Data Confidence" value={camp.dataConfidence} type="select" />
           <EditableField campId={camp.id} field="lunchIncluded" label="Lunch Included" value={camp.lunchIncluded} type="boolean" />
@@ -745,7 +825,8 @@ export function CampEditor({
       <div className="glass-panel p-5">
         <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-4">Description & Details</h2>
         <dl className="space-y-4">
-          <EditableField campId={camp.id} field="description" label="Description (public)" value={camp.description} type="textarea" />
+          <EditableField campId={camp.id} field="description" label="Description (public)" value={camp.description} type="textarea"
+            onAttest={attestProp('description')} isAttested={isAttested('description')} />
           <EditableField campId={camp.id} field="interestingDetails" label="Interesting Details (public callout)" value={camp.interestingDetails} type="textarea" />
           <EditableField campId={camp.id} field="notes" label="Internal Notes (admin only — not shown publicly)" value={camp.notes} type="textarea" />
         </dl>
@@ -755,7 +836,8 @@ export function CampEditor({
       <div className="glass-panel p-5">
         <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-4">Location</h2>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-          <EditableField campId={camp.id} field="city" label="City" value={camp.city} />
+          <EditableField campId={camp.id} field="city" label="City" value={camp.city}
+            onAttest={attestProp('city')} isAttested={isAttested('city')} />
           <NeighborhoodField campId={camp.id} value={camp.neighborhood} communitySlug={camp.communitySlug} />
           <div className="sm:col-span-2">
             <EditableField campId={camp.id} field="address" label="Street Address" value={camp.address} />
@@ -765,13 +847,17 @@ export function CampEditor({
       </div>
 
       {/* Age groups — editable */}
-      <AgeGroupsEditor campId={camp.id} initial={camp.ageGroups} />
+      <AgeGroupsEditor campId={camp.id} initial={camp.ageGroups}
+        isAttested={isAttested('ageGroups')} onAttest={attestProp('ageGroups')} />
 
       {camp.schedules.length > 0 && (
         <div className="glass-panel p-5">
-          <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-3">
-            Schedules ({camp.schedules.length} session{camp.schedules.length !== 1 ? 's' : ''})
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide">
+              Schedules ({camp.schedules.length} session{camp.schedules.length !== 1 ? 's' : ''})
+            </h2>
+            <AttestInlineButton isAttested={isAttested('schedules')} onAttest={attestProp('schedules')} />
+          </div>
           <div className="space-y-1.5">
             {camp.schedules.map(s => (
               <div key={s.id} className="flex items-center gap-3 text-sm">
@@ -790,7 +876,10 @@ export function CampEditor({
 
       {camp.pricing.length > 0 && (
         <div className="glass-panel p-5">
-          <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-3">Pricing</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide">Pricing</h2>
+            <AttestInlineButton isAttested={isAttested('pricing')} onAttest={attestProp('pricing')} />
+          </div>
           <div className="space-y-1.5">
             {camp.pricing.map(p => (
               <div key={p.id} className="flex items-center gap-3 text-sm">
