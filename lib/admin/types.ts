@@ -36,8 +36,15 @@ export interface FieldDiff {
   old: unknown;
   new: unknown;
   confidence: number;
-  excerpt?: string;    // verbatim snippet from source page supporting this value
+  excerpt?: string;     // verbatim snippet from source page supporting this value
+  sourceUrl?: string;   // URL of the page the excerpt was found on
   mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions
+}
+
+export interface FieldSource {
+  excerpt: string | null;
+  sourceUrl: string;
+  approvedAt: string; // ISO timestamp
 }
 
 export type ProposedChanges = Record<string, FieldDiff>;
@@ -57,10 +64,14 @@ export interface CampChangeProposal {
   extractionModel: string;
   reviewerNotes: string | null;
   feedbackTags: string[] | null;
+  // partial-approval state
+  priority: number;             // 0 = fresh, -1 = partially reviewed (sinks in queue)
+  appliedFields: string[];      // fields already applied in previous partial approvals
   // joined from Camp
   campName?: string;
   campSlug?: string;
   communitySlug?: string;
+  campData?: Record<string, unknown>; // full camp row for context
   // joined from CrawlRun
   crawlStartedAt?: string;
   crawlTrigger?: string;

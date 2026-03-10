@@ -49,7 +49,7 @@ export async function getPendingProposals(opts: {
        JOIN "Camp" c ON c.id = p."campId"
        LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
        WHERE p.status = 'PENDING' AND p."overallConfidence" >= $1
-       ORDER BY p."createdAt" DESC
+       ORDER BY p.priority DESC, p."createdAt" DESC
        LIMIT $2 OFFSET $3`,
       [minConfidence, limit, offset]
     ),
@@ -68,8 +68,10 @@ export async function getPendingProposals(opts: {
 export async function getProposal(id: string): Promise<CampChangeProposal | null> {
   const pool = getPool();
   const result = await pool.query(
-    `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
-            r."startedAt" AS "crawlStartedAt", r.trigger AS "crawlTrigger", r."triggeredBy" AS "crawlTriggeredBy"
+    `SELECT p.*,
+            c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
+            r."startedAt" AS "crawlStartedAt", r.trigger AS "crawlTrigger", r."triggeredBy" AS "crawlTriggeredBy",
+            row_to_json(c.*) AS "campData"
      FROM "CampChangeProposal" p
      JOIN "Camp" c ON c.id = p."campId"
      LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
@@ -92,6 +94,29 @@ export async function updateProposalStatus(
      SET status = $1, "reviewedAt" = now(), "reviewedBy" = $2, "reviewerNotes" = $3, "feedbackTags" = $4
      WHERE id = $5`,
     [status, reviewedBy, notes ?? null, feedbackTags ?? null, id]
+  );
+}
+
+/** Apply some fields and keep proposal PENDING at lower priority. */
+export async function partialApprove(
+  id: string,
+  newAppliedFields: string[],
+  reviewedBy: string,
+  notes?: string,
+): Promise<void> {
+  const pool = getPool();
+  // Merge new applied fields with any previously applied ones (deduplicate)
+  await pool.query(
+    `UPDATE "CampChangeProposal"
+     SET "appliedFields" = (
+           SELECT array_agg(DISTINCT f ORDER BY f)
+           FROM unnest(COALESCE("appliedFields", '{}') || $1::text[]) f
+         ),
+         "priority"     = -1,
+         "reviewedBy"   = $2,
+         "reviewerNotes"= COALESCE($3, "reviewerNotes")
+     WHERE id = $4`,
+    [newAppliedFields, reviewedBy, notes ?? null, id],
   );
 }
 

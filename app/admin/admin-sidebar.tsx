@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, History, Database,
-  ExternalLink, Menu, X, Users,
+  ExternalLink, Menu, X, Users, LogOut, Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { createClient } from "@/lib/supabase/client";
 
 interface AdminSidebarProps {
   userEmail: string;
@@ -17,11 +19,20 @@ interface AdminSidebarProps {
 export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  }
 
   const navLinks = [
     { href: "/admin", icon: <LayoutDashboard className="w-4 h-4" />, label: "Dashboard", exact: true },
     { href: "/admin/review", icon: <ClipboardList className="w-4 h-4" />, label: "Review Queue", badge: pendingCount },
     { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl Monitor" },
+    { href: "/admin/providers", icon: <Building2 className="w-4 h-4" />, label: "Providers" },
     { href: "/admin/camps", icon: <Database className="w-4 h-4" />, label: "Camp Data" },
     { href: "/admin/users", icon: <Users className="w-4 h-4" />, label: "Users" },
   ];
@@ -71,7 +82,7 @@ export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
         ))}
       </nav>
 
-      <div className="px-3 py-4 border-t border-pine-600">
+      <div className="px-3 py-4 border-t border-pine-600 space-y-2">
         <Link
           href="/"
           className="flex items-center gap-2 text-xs text-pine-400 hover:text-pine-200 transition-colors"
@@ -79,6 +90,17 @@ export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
           <ExternalLink className="w-3.5 h-3.5" />
           View site
         </Link>
+        <div className="flex items-center justify-between pt-1">
+          <ThemeToggle className="text-pine-400 hover:text-pine-200 hover:bg-pine-600 dark:text-pine-300 dark:hover:text-pine-100 dark:hover:bg-pine-600" />
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs text-pine-400 hover:text-red-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-pine-600"
+            title="Sign out"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sign out
+          </button>
+        </div>
       </div>
     </>
   );

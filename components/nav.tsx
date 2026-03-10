@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
 import {
   Compass,
   CalendarDays,
@@ -15,9 +14,6 @@ import {
   LogOut,
   User,
   LayoutDashboard,
-  Sun,
-  Moon,
-  Monitor,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -25,65 +21,7 @@ import { useCommunity } from "@/lib/community-context";
 import { routes } from "@/lib/routes";
 import { LangToggle } from "@/components/lang-toggle";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
-
-function ThemeToggle({ className }: { className?: string }) {
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  if (!mounted) {
-    return (
-      <button
-        className={cn(
-          "p-2 rounded-xl transition-colors",
-          "hover:bg-cream-200/60 dark:hover:bg-bark-600/60",
-          className
-        )}
-        aria-label="Toggle theme"
-      >
-        <span className="w-4 h-4 block" />
-      </button>
-    );
-  }
-
-  // cycle: light → dark → system
-  function cycleTheme() {
-    if (theme === "light") setTheme("dark");
-    else if (theme === "dark") setTheme("system");
-    else setTheme("light");
-  }
-
-  const label =
-    theme === "light"
-      ? "Switch to dark mode"
-      : theme === "dark"
-      ? "Switch to system theme"
-      : "Switch to light mode";
-
-  const Icon =
-    theme === "system"
-      ? Monitor
-      : resolvedTheme === "dark"
-      ? Moon
-      : Sun;
-
-  return (
-    <button
-      onClick={cycleTheme}
-      className={cn(
-        "p-2 rounded-xl transition-colors",
-        "text-bark-400 hover:text-bark-600 hover:bg-cream-200/60",
-        "dark:text-cream-300 dark:hover:text-cream-100 dark:hover:bg-bark-600/60",
-        className
-      )}
-      aria-label={label}
-      title={label}
-    >
-      <Icon className="w-4 h-4" />
-    </button>
-  );
-}
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export function Nav() {
   const router = useRouter();

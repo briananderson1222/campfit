@@ -14,44 +14,79 @@ export interface LLMResponse {
   provider: string;
 }
 
-const EXTRACTION_SCHEMA = `{
+// Denver neighborhoods used to guide the LLM — loaded once at module level from DB if available,
+// otherwise falls back to this static list so the prompt stays useful without a DB call.
+const DENVER_NEIGHBORHOODS = [
+  'Auraria','Baker','Barnum','Bear Valley','Capitol Hill','CBD / LoDo','Central Park',
+  'Cherry Creek','Cheesman Park','City Park','City Park West','Clayton','Cole',
+  'Congress Park','Curtis Park','East Colfax','Elyria Swansea','Five Points','Globeville',
+  'Golden Triangle','Hale','Hampden','Hampden South','Harvey Park','Highland','Indian Creek',
+  'Jefferson Park','Lincoln Park','Mayfair','Montbello','Montclair','North Capitol Hill',
+  'Overland','Park Hill','Platt Park','RiNo','Ruby Hill','Sloan Lake','South Park Hill',
+  'Stapleton','Sunnyside','University','University Hills','Uptown','Virginia Village',
+  'Washington Park','Wellshire','West Highland','Westwood','Whittier','Windsor',
+];
+
+export function buildPrompt(campName: string, url: string, text: string, siteHints: string[] = [], neighborhoods: string[] = DENVER_NEIGHBORHOODS): string {
+  const hintsSection = siteHints.length > 0
+    ? `\nSITE-SPECIFIC NOTES (apply these when extracting from this domain):\n${siteHints.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n`
+    : '';
+  const nbhdList = neighborhoods.length > 0 ? neighborhoods.join(', ') : '';
+  const nbhdRule = nbhdList
+    ? `- neighborhood must be one of these known Denver neighborhoods or null if not found: ${nbhdList}`
+    : '- neighborhood: the specific area/district name if mentioned, or null';
+
+  return `You are extracting structured data about a kids' summer camp from their website for a camp directory.
+
+Camp name: ${campName}
+Source URL: ${url}
+${hintsSection}
+RULES:
+- Only extract fields you find EXPLICIT evidence for on the page. Never guess or infer beyond what is written.
+- confidence: 1.0 = exact text found, 0.7 = strongly implied, 0.5 = reasonably inferred, 0 = not found. Set to 0 and null the value if you are not confident.
+- excerpt: copy the EXACT verbatim sentence or phrase from the website text that proves your answer. This is REQUIRED for every non-null field — reviewers use it to verify accuracy. If you cannot find a direct quote, set the field to null with confidence 0.
+- city must be a real city name (e.g. "Arvada", "Denver") — NOT a state name.
+- address must be a street address only (e.g. "4001 E Iliff Ave") — NOT a neighborhood or park name.
+${nbhdRule}
+- campType must be one of: SUMMER_DAY, SLEEPAWAY, FAMILY, VIRTUAL, WINTER_BREAK, SCHOOL_BREAK
+- category must be one of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER
+- registrationStatus must be one of: OPEN, FULL, WAITLIST, CLOSED, COMING_SOON, UNKNOWN
+  OPEN=accepting registrations, FULL=at capacity (no spots left), WAITLIST=full but waitlist available, CLOSED=registration period ended
+
+Return ONLY valid JSON matching this exact shape — no markdown fences, no explanation:
+
+{
   "extracted": {
     "description": string | null,
     "city": string | null,
     "neighborhood": string | null,
     "address": string | null,
     "lunchIncluded": boolean | null,
-    "registrationStatus": "OPEN"|"CLOSED"|"WAITLIST"|"UNKNOWN"|null,
-    "campType": "SUMMER_DAY"|"SUMMER_OVERNIGHT"|"AFTER_SCHOOL"|"ENRICHMENT"|"SPORTS_CLINIC"|null,
-    "category": "STEM"|"ARTS"|"SPORTS"|"NATURE"|"ACADEMIC"|"MULTI_ACTIVITY"|"FAITH"|"SPECIAL_NEEDS"|null
+    "registrationStatus": "OPEN"|"FULL"|"WAITLIST"|"CLOSED"|"COMING_SOON"|"UNKNOWN"|null,
+    "campType": "SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK"|null,
+    "category": "SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER"|null
   },
   "confidence": {
-    "description": number 0-1,
-    "city": number 0-1,
-    "neighborhood": number 0-1,
-    "address": number 0-1,
-    "lunchIncluded": number 0-1,
-    "registrationStatus": number 0-1,
-    "campType": number 0-1,
-    "category": number 0-1
+    "description": 0,
+    "city": 0,
+    "neighborhood": 0,
+    "address": 0,
+    "lunchIncluded": 0,
+    "registrationStatus": 0,
+    "campType": 0,
+    "category": 0
+  },
+  "excerpts": {
+    "description": "verbatim quote from page or null",
+    "city": "verbatim quote from page or null",
+    "neighborhood": "verbatim quote from page or null",
+    "address": "verbatim quote from page or null",
+    "lunchIncluded": "verbatim quote from page or null",
+    "registrationStatus": "verbatim quote from page or null",
+    "campType": "verbatim quote from page or null",
+    "category": "verbatim quote from page or null"
   }
-}`;
-
-export function buildPrompt(campName: string, url: string, text: string): string {
-  return `You are extracting structured data about a kids' camp from their website.
-Camp name: ${campName}
-Source URL: ${url}
-
-Extract what you can find. For each field:
-- Set confidence 0-1 (1.0 = explicitly stated, 0.5 = inferred, 0 = not found)
-- Set excerpt to the verbatim sentence/phrase from the page that supports the value (null if not found)
-Only include fields with evidence. Return ONLY valid JSON — no markdown, no explanation.
-
-Schema:
-${EXTRACTION_SCHEMA}
-
-Also include:
-  "excerpts": { <same field names as extracted, value is the supporting quote from the page or null> }
+}
 
 Website text:
 ${text.slice(0, 20000)}`;
@@ -63,7 +98,7 @@ async function callAnthropic(prompt: string, apiKey: string, modelId?: string): 
   const model = modelId ?? 'claude-haiku-4-5-20251001';
   const msg = await client.messages.create({
     model,
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   });
   const text = msg.content[0].type === 'text' ? msg.content[0].text : '';
@@ -78,7 +113,7 @@ async function callGemini(prompt: string, apiKey: string, modelId?: string): Pro
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+      generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
     }),
   });
   if (!res.ok) throw new Error(`Gemini API error: ${res.status} ${await res.text()}`);

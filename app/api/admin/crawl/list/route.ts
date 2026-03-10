@@ -13,6 +13,17 @@ export async function GET() {
   const result = await pool.query(
     `SELECT * FROM "CrawlRun" ORDER BY "startedAt" DESC LIMIT 50`
   );
+  const runs = result.rows;
 
-  return NextResponse.json({ runs: result.rows });
+  // Resolve campIds → camp names for targeted runs
+  const allCampIds = Array.from(new Set(runs.flatMap((r: { campIds: string[] | null }) => r.campIds ?? [])));
+  const campNames: Record<string, string> = {};
+  if (allCampIds.length > 0) {
+    const camps = await pool.query(
+      `SELECT id, name FROM "Camp" WHERE id = ANY($1)`, [allCampIds]
+    );
+    camps.rows.forEach((c: { id: string; name: string }) => { campNames[c.id] = c.name; });
+  }
+
+  return NextResponse.json({ runs, campNames });
 }

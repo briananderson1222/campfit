@@ -3,6 +3,8 @@ import type { CampInput } from './adapter';
 import type { ProposedChanges, FieldDiff } from '@/lib/admin/types';
 
 const MIN_CONFIDENCE = 0.3; // Skip fields below this threshold
+const SUPPRESS_DAYS = 30;  // Re-suppress recently-approved fields at low confidence
+const SUPPRESS_CONFIDENCE = 0.8; // Threshold below which suppression applies
 
 const SCALAR_FIELDS = [
   'name', 'description', 'campType', 'category', 'registrationStatus',
@@ -16,9 +18,12 @@ export function computeDiff(
   current: Camp,
   extracted: Partial<CampInput>,
   confidence: Record<string, number>,
-  excerpts: Record<string, string> = {}
+  excerpts: Record<string, string> = {},
+  fieldSources: Record<string, { approvedAt?: string }> = {},
+  sourceUrl = ''
 ): ProposedChanges {
   const changes: ProposedChanges = {};
+  const now = Date.now();
 
   // Scalar fields
   for (const field of SCALAR_FIELDS) {
@@ -31,6 +36,13 @@ export function computeDiff(
     const currentVal = (current as unknown as Record<string, unknown>)[field];
 
     if (normalize(currentVal) !== normalize(extractedVal)) {
+      // Suppress re-proposals for recently-approved fields at low confidence
+      const src = fieldSources[field];
+      if (src?.approvedAt) {
+        const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
+        if (daysSince < SUPPRESS_DAYS && conf < SUPPRESS_CONFIDENCE) continue;
+      }
+
       const isEmpty = currentVal === null || currentVal === undefined || currentVal === '';
       changes[field] = {
         old: currentVal,
@@ -38,6 +50,7 @@ export function computeDiff(
         confidence: conf,
         mode: isEmpty ? 'populate' : 'update',
         ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
       };
     }
   }
@@ -54,6 +67,13 @@ export function computeDiff(
     const currentItems = Array.isArray(currentArr) ? currentArr : [];
 
     if (stableJson(currentItems) !== stableJson(extractedArr)) {
+      // Suppress recently-approved array fields too
+      const src = fieldSources[field];
+      if (src?.approvedAt) {
+        const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
+        if (daysSince < SUPPRESS_DAYS && conf < SUPPRESS_CONFIDENCE) continue;
+      }
+
       // Check if extracted is purely additive (all current items still present)
       const currentSet = new Set(currentItems.map(i => stableJson(i)));
       const isAdditive = currentItems.length > 0 &&
@@ -67,6 +87,7 @@ export function computeDiff(
         confidence: conf,
         mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
         ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
       };
     }
   }

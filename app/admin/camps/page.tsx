@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { ExternalLink } from 'lucide-react';
 import { RecrawlButton } from './recrawl-button';
+import { UrlEditor } from './url-editor';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,12 +63,11 @@ export default async function AdminCampsPage() {
         {camps.length === 0 ? (
           <p className="text-bark-300 text-sm text-center py-8">No camps found</p>
         ) : camps.map(camp => (
-          <div key={camp.id} className="glass-panel p-4">
+          <div key={camp.id} className={cn('glass-panel p-4', !camp.websiteUrl && 'border-red-200/60 bg-red-50/20')}>
             <div className="flex items-start justify-between gap-2 mb-2">
               <div className="min-w-0">
                 <Link
-                  href={`/c/${camp.communitySlug}/camps/${camp.slug}`}
-                  target="_blank"
+                  href={`/admin/camps/${camp.id}`}
                   className="font-medium text-bark-700 hover:text-pine-600 transition-colors text-sm leading-snug"
                 >
                   {camp.name}
@@ -114,7 +114,9 @@ export default async function AdminCampsPage() {
                   </span>
                 )}
               </div>
-              <RecrawlButton campId={camp.id} campName={camp.name} />
+              {camp.websiteUrl
+                ? <RecrawlButton campId={camp.id} campName={camp.name} />
+                : <UrlEditor campId={camp.id} />}
             </div>
           </div>
         ))}
@@ -146,11 +148,11 @@ export default async function AdminCampsPage() {
                   key={camp.id}
                   className={cn(
                     'border-b border-cream-200/50 hover:bg-cream-100/60 transition-colors',
-                    i % 2 === 0 ? 'bg-white/20' : 'bg-cream-50/30'
+                    !camp.websiteUrl ? 'bg-red-50/30' : i % 2 === 0 ? 'bg-white/20' : 'bg-cream-50/30'
                   )}
                 >
                   <td className="px-4 py-3">
-                    <Link href={`/c/${camp.communitySlug}/camps/${camp.slug}`} target="_blank"
+                    <Link href={`/admin/camps/${camp.id}`}
                       className="font-medium text-bark-700 hover:text-pine-600 transition-colors">
                       {camp.name}
                     </Link>
@@ -188,7 +190,9 @@ export default async function AdminCampsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <RecrawlButton campId={camp.id} campName={camp.name} />
+                      {camp.websiteUrl
+                        ? <RecrawlButton campId={camp.id} campName={camp.name} />
+                        : <UrlEditor campId={camp.id} />}
                       {camp.websiteUrl && (
                         <a href={camp.websiteUrl} target="_blank" rel="noopener noreferrer"
                           className="text-bark-300 hover:text-pine-500 transition-colors" title={camp.websiteUrl}>

@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ChevronDown, ChevronUp, CheckCircle, XCircle, Minus,
   ExternalLink, RefreshCw, Loader2, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CrawlModal } from '@/app/admin/crawl-modal';
 import type { CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
 
 function durationLabel(startedAt: string, completedAt: string | null, isRunning = false): string {
@@ -104,15 +106,22 @@ interface RunWithLog extends CrawlRun {
   campLog: CrawlCampLogEntry[];
 }
 
-function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlight: boolean }) {
+function CrawlRunCard({ run: initialRun, highlight, campNames, onRetry }: { run: RunWithLog; highlight: boolean; campNames: Record<string, string>; onRetry: (campIds: string[] | undefined) => void }) {
   const [run, setRun] = useState(initialRun);
   const [expanded, setExpanded] = useState(highlight || initialRun.status === 'RUNNING');
   const [elapsed, setElapsed] = useState(() => durationLabel(initialRun.startedAt, initialRun.completedAt, initialRun.status === 'RUNNING'));
 
-  // Poll DB for live progress when running
+  // Poll DB for live progress when running; auto-mark stale runs as FAILED
   useEffect(() => {
     if (run.status !== 'RUNNING') return;
     const interval = setInterval(async () => {
+      // If no progress for 10+ minutes, stop polling and mark locally as FAILED
+      const elapsedMins = (Date.now() - new Date(run.startedAt).getTime()) / 60000;
+      if (elapsedMins > 10 && run.processedCamps === 0) {
+        setRun(prev => ({ ...prev, status: 'FAILED' }));
+        clearInterval(interval);
+        return;
+      }
       const r = await fetch(`/api/admin/crawl/${run.id}/status-json`).catch(() => null);
       if (!r) return;
       const data = await r.json().catch(() => null);
@@ -121,7 +130,7 @@ function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlig
       if (data.status !== 'RUNNING') clearInterval(interval);
     }, 3000);
     return () => clearInterval(interval);
-  }, [run.id, run.status]);
+  }, [run.id, run.status, run.startedAt, run.processedCamps]);
 
   // Tick elapsed timer for running runs
   useEffect(() => {
@@ -163,9 +172,12 @@ function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlig
               <p className="text-sm font-medium text-bark-700">
                 {run.totalCamps > 0
                   ? `${run.processedCamps} / ${run.totalCamps} camps`
-                  : run.status === 'RUNNING' ? 'Starting…' : 'No camps'}
+                  : run.status === 'RUNNING' ? 'Starting…' : 'No camps processed'}
                 {run.newProposals > 0 && <span className="text-pine-600 font-normal ml-2">· {run.newProposals} proposals</span>}
-                {run.errorCount > 0 && <span className="text-red-500 font-normal ml-2">· {run.errorCount} errors</span>}
+                {run.errorCount > 0 && <span className="text-red-500 font-medium ml-2">· {run.errorCount} error{run.errorCount !== 1 ? 's' : ''}</span>}
+                {run.status === 'RUNNING' && run.processedCamps === 0 && (Date.now() - new Date(run.startedAt).getTime()) > 300000 && (
+                  <span className="text-amber-600 font-normal ml-2">· may be stuck</span>
+                )}
               </p>
               <p className="text-xs text-bark-300 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 <Clock className="w-3 h-3" />
@@ -176,6 +188,11 @@ function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlig
                 {run.trigger}
                 {run.triggeredBy && <><span>·</span>{run.triggeredBy}</>}
               </p>
+              {run.campIds && run.campIds.length > 0 && (
+                <p className="text-xs text-bark-400 mt-0.5 truncate">
+                  {run.campIds.map(id => campNames[id] ?? id).join(', ')}
+                </p>
+              )}
             </div>
 
             {expanded
@@ -188,6 +205,14 @@ function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlig
               className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg font-medium hover:bg-amber-200 transition-colors shrink-0">
               Review →
             </Link>
+          )}
+          {(run.status === 'FAILED' || (run.status === 'RUNNING' && run.processedCamps === 0 && (Date.now() - new Date(run.startedAt).getTime()) > 300000)) && (
+            <button
+              onClick={() => onRetry(run.campIds ?? undefined)}
+              className="text-xs px-2 py-1 bg-red-50 border border-red-200 text-red-500 rounded-lg font-medium hover:bg-red-100 transition-colors shrink-0 flex items-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3" /> Retry
+            </button>
           )}
         </div>
 
@@ -219,14 +244,56 @@ function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlig
                   )}
                 </div>
               </>
-            ) : run.status === 'RUNNING' ? (
-              <div className="flex items-center gap-2 px-3 py-4 text-xs text-bark-300">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Waiting for first camp to complete…
+            ) : run.status === 'RUNNING' ? (() => {
+              const elapsedMins = (Date.now() - new Date(run.startedAt).getTime()) / 60000;
+              const isStale = elapsedMins > 5 && run.processedCamps === 0;
+              return (
+                <div className={`px-3 py-4 space-y-1 ${isStale ? '' : 'flex items-center gap-2'}`}>
+                  {isStale ? (
+                    <>
+                      <p className="text-xs text-amber-600 font-medium flex items-center gap-1.5">
+                        <XCircle className="w-3.5 h-3.5" />
+                        Crawl appears stuck — no camps processed in {Math.round(elapsedMins)}m
+                      </p>
+                      <p className="text-xs text-bark-300">
+                        The serverless function likely timed out. Run crawls locally via the CLI or check API key credits.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-bark-300" />
+                      <span className="text-xs text-bark-300">Waiting for first camp to complete…</span>
+                    </>
+                  )}
+                  {run.errorCount > 0 && (
+                    <p className="text-xs text-red-500 font-medium mt-1">
+                      {run.errorCount} error{run.errorCount !== 1 ? 's' : ''} recorded
+                    </p>
+                  )}
+                </div>
+              );
+            })() : run.status === 'FAILED' && run.campLog.length === 0 ? (
+              <div className="px-3 py-4 space-y-1">
+                <p className="text-xs text-red-500 font-medium flex items-center gap-1.5">
+                  <XCircle className="w-3.5 h-3.5" /> Crawl failed before processing any camps
+                </p>
+                <p className="text-xs text-bark-300">
+                  Likely cause: API credits exhausted, serverless timeout, or network error.
+                </p>
               </div>
-            ) : (
-              <p className="px-3 py-4 text-xs text-bark-300">No camp log for this run (ran before logging was added).</p>
-            )}
+            ) : run.totalCamps === 0 ? (
+              <div className="px-3 py-4 space-y-1">
+                <p className="text-xs text-red-500 font-medium">No camps were crawled</p>
+                <p className="text-xs text-bark-300">
+                  {run.campIds?.length
+                    ? `The selected camp${run.campIds.length > 1 ? 's have' : ' has'} no website URL — add one to enable crawling.`
+                    : 'No camps matched the crawl criteria.'}
+                </p>
+                {run.campIds && run.campIds.length > 0 && (
+                  <p className="text-xs text-bark-300">{run.campIds.map(id => campNames[id] ?? id).join(', ')}</p>
+                )}
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -234,24 +301,37 @@ function CrawlRunCard({ run: initialRun, highlight }: { run: RunWithLog; highlig
   );
 }
 
-export default function AdminCrawlsPage({
-  searchParams,
-}: {
-  searchParams: { runId?: string };
-}) {
+export default function AdminCrawlsPage() {
+  const searchParams = useSearchParams();
   const [runs, setRuns] = useState<RunWithLog[]>([]);
+  const [campNames, setCampNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const highlightId = searchParams.runId;
+  const highlightId = searchParams.get('runId') ?? undefined;
+  const [retryOpen, setRetryOpen] = useState(false);
+  const [retryCampIds, setRetryCampIds] = useState<string[] | undefined>();
+
+  function handleRetry(campIds: string[] | undefined) {
+    setRetryCampIds(campIds);
+    setRetryOpen(true);
+  }
 
   const fetchRuns = useCallback(async () => {
     const r = await fetch('/api/admin/crawl/list').catch(() => null);
     if (!r) return;
     const data = await r.json().catch(() => null);
     if (data?.runs) setRuns(data.runs);
+    if (data?.campNames) setCampNames(data.campNames);
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchRuns(); }, [fetchRuns]);
+
+  // Scroll to highlighted run after data loads
+  useEffect(() => {
+    if (!highlightId || loading) return;
+    const el = document.getElementById(highlightId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [highlightId, loading]);
 
   // Refresh list when any run completes (in case new ones started elsewhere)
   useEffect(() => {
@@ -263,6 +343,15 @@ export default function AdminCrawlsPage({
 
   return (
     <div>
+      {/* Single modal instance at page root — avoids fixed positioning issues inside overflow:hidden cards */}
+      {retryOpen && (
+        <CrawlModal
+          retryWithCampIds={retryCampIds}
+          forceOpen
+          onClose={() => setRetryOpen(false)}
+        />
+      )}
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-3xl font-extrabold text-bark-700">Crawl Monitor</h1>
@@ -287,7 +376,7 @@ export default function AdminCrawlsPage({
       ) : (
         <div className="space-y-3">
           {runs.map(run => (
-            <CrawlRunCard key={run.id} run={run} highlight={run.id === highlightId} />
+            <CrawlRunCard key={run.id} run={run} highlight={run.id === highlightId} campNames={campNames} onRetry={handleRetry} />
           ))}
         </div>
       )}

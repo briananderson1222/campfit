@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getProposal, updateProposalStatus } from '@/lib/admin/review-repository';
+import { getProposal, updateProposalStatus, partialApprove } from '@/lib/admin/review-repository';
 import { writeChangeLogs } from '@/lib/admin/changelog-repository';
 import { recordReviewDecision } from '@/lib/admin/metrics-repository';
+import { isFullyVerified } from '@/lib/admin/verification';
 import { getPool } from '@/lib/db';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -10,15 +11,22 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { approvedFields = [], reviewerNotes, feedbackTags }: {
+  const { approvedFields = [], reviewerNotes, feedbackTags, overrides, keepPending = false }: {
     approvedFields: string[];
     reviewerNotes?: string;
     feedbackTags?: string[];
+    overrides?: Record<string, import('@/lib/admin/types').FieldDiff>;
+    keepPending?: boolean; // if true: apply selected fields but leave proposal in queue
   } = await request.json();
 
   const proposal = await getProposal(params.id);
   if (!proposal) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (proposal.status !== 'PENDING') return NextResponse.json({ error: 'Already reviewed' }, { status: 409 });
+
+  // Merge reviewer overrides into proposal changes (reviewer may have edited values)
+  const effectiveChanges = overrides
+    ? { ...proposal.proposedChanges, ...overrides }
+    : proposal.proposedChanges;
 
   const pool = getPool();
   const client = await pool.connect();
@@ -26,7 +34,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   try {
     await client.query('BEGIN');
 
-    const allFields = Object.keys(proposal.proposedChanges);
+    const allFields = Object.keys(effectiveChanges);
     const rejectedFields = allFields.filter(f => !approvedFields.includes(f));
 
     const SCALAR = [
@@ -44,13 +52,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const changeLogs: ChangeLogEntry[] = [];
 
     for (const field of approvedFields) {
-      const diff = proposal.proposedChanges[field];
+      const diff = effectiveChanges[field];
       if (!diff) continue;
 
       if (SCALAR.includes(field)) {
+        const fieldSource = {
+          excerpt: diff.excerpt ?? null,
+          sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
+          approvedAt: new Date().toISOString(),
+        };
         await client.query(
-          `UPDATE "Camp" SET "${field}" = $1 WHERE id = $2`,
-          [diff.new, proposal.campId]
+          `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
+          [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
         );
         changeLogs.push({
           campId: proposal.campId,
@@ -103,11 +116,42 @@ export async function POST(request: Request, { params }: { params: { id: string 
       }
     }
 
-    // Update camp verified timestamp
+    // Update lastVerifiedAt whenever any fields are approved.
+    // Auto-set VERIFIED when ALL required fields on the camp now have fieldSources coverage.
+    // This is field-coverage-based, not proposal-based — partial approvals can still
+    // eventually trigger VERIFIED once the last required field gets its citation.
     if (approvedFields.length > 0) {
-      await client.query(
-        `UPDATE "Camp" SET "lastVerifiedAt" = now(), "dataConfidence" = 'VERIFIED', "sourceType" = 'SCRAPER' WHERE id = $1`,
+      // Fetch the current camp state (including freshly-written fieldSources) to check coverage
+      const { rows: [updatedCamp] } = await client.query(
+        `SELECT description, "campType", category, "registrationStatus", city, "websiteUrl",
+                "ageGroups", pricing, schedules, "fieldSources"
+         FROM "Camp"
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(json_agg(ag), '[]'::json) AS "ageGroups"
+           FROM "CampAgeGroup" ag WHERE ag."campId" = "Camp".id
+         ) ag ON true
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(json_agg(s), '[]'::json) AS schedules
+           FROM "CampSchedule" s WHERE s."campId" = "Camp".id
+         ) s ON true
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(json_agg(p), '[]'::json) AS pricing
+           FROM "CampPricing" p WHERE p."campId" = "Camp".id
+         ) p ON true
+         WHERE "Camp".id = $1`,
         [proposal.campId]
+      );
+
+      const campNowVerified = !keepPending && updatedCamp &&
+        isFullyVerified(updatedCamp, updatedCamp.fieldSources);
+
+      await client.query(
+        `UPDATE "Camp"
+         SET "lastVerifiedAt" = now(),
+             "sourceType"     = 'SCRAPER',
+             "dataConfidence" = CASE WHEN $2 THEN 'VERIFIED'::"DataConfidence" ELSE "dataConfidence" END
+         WHERE id = $1`,
+        [proposal.campId, campNowVerified ?? false]
       );
     }
 
@@ -119,11 +163,21 @@ export async function POST(request: Request, { params }: { params: { id: string 
     } catch (logErr) {
       console.error('writeChangeLogs failed (non-fatal):', logErr);
     }
-    try {
-      await updateProposalStatus(params.id, 'APPROVED', user.email, reviewerNotes, feedbackTags);
-    } catch (statusErr) {
-      console.error('updateProposalStatus failed:', statusErr);
-      return NextResponse.json({ error: String(statusErr) }, { status: 500 });
+    if (keepPending) {
+      // Partial approval: apply fields, keep proposal in queue at lower priority
+      try {
+        await partialApprove(params.id, approvedFields, user.email, reviewerNotes);
+      } catch (err) {
+        console.error('partialApprove failed:', err);
+        return NextResponse.json({ error: String(err) }, { status: 500 });
+      }
+    } else {
+      try {
+        await updateProposalStatus(params.id, 'APPROVED', user.email, reviewerNotes, feedbackTags);
+      } catch (statusErr) {
+        console.error('updateProposalStatus failed:', statusErr);
+        return NextResponse.json({ error: String(statusErr) }, { status: 500 });
+      }
     }
     try {
       await recordReviewDecision({
@@ -136,7 +190,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       console.error('recordReviewDecision failed (non-fatal):', metricsErr);
     }
 
-    return NextResponse.json({ success: true, appliedFields: approvedFields.length });
+    return NextResponse.json({ success: true, kept: keepPending, appliedFields: approvedFields.length });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Approve error:', err);

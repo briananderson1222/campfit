@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "crawl": "tsx scripts/run-crawl.ts",
+    "backfill:providers": "tsx scripts/backfill-providers.ts",
+    "harvest": "tsx scripts/harvest-aggregator.ts",
     "seed": "tsx scripts/seed.ts",
     "scrape": "tsx scripts/scrape.ts",
     "scrape:dry": "tsx scripts/scrape.ts --dry-run"

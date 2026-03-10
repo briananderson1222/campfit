@@ -20,8 +20,9 @@ export type CampCategory =
 
 export type RegistrationStatus =
   | "OPEN"
-  | "CLOSED"
-  | "WAITLIST"
+  | "FULL"       // at capacity — may open if someone drops
+  | "WAITLIST"   // full but accepting waitlist
+  | "CLOSED"     // registration period ended
   | "COMING_SOON"
   | "UNKNOWN";
 
@@ -64,6 +65,12 @@ export interface CampPricing {
   discountNotes: string | null;
 }
 
+export interface FieldSource {
+  excerpt: string | null;
+  sourceUrl: string;
+  approvedAt: string; // ISO
+}
+
 export interface Camp {
   id: string;
   slug: string;
@@ -93,10 +100,40 @@ export interface Camp {
   dataConfidence: DataConfidence;
   lastVerifiedAt: string | null;
   sourceUrl: string | null;
+  fieldSources?: Record<string, FieldSource> | null;
+
+  organizationName?: string | null;
+  providerId?: string | null;
 
   ageGroups: CampAgeGroup[];
   schedules: CampSchedule[];
   pricing: CampPricing[];
+}
+
+export interface Provider {
+  id: string;
+  name: string;
+  slug: string;
+  websiteUrl: string | null;
+  domain: string | null;
+  logoUrl: string | null;
+  address: string | null;
+  city: string | null;
+  neighborhood: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  notes: string | null;
+  crawlRootUrl: string | null;
+  communitySlug: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProviderWithStats extends Provider {
+  campCount: number;
+  pendingProposals: number;
+  lastCrawledAt: string | null;
+  avgConfidence: number | null;
 }
 
 export interface Community {
@@ -169,8 +206,9 @@ export const STATUS_CONFIG: Record<
   { label: string; color: string }
 > = {
   OPEN: { label: "Open", color: "bg-emerald-100 text-emerald-800" },
-  CLOSED: { label: "Closed", color: "bg-red-100 text-red-800" },
+  FULL: { label: "Full", color: "bg-orange-100 text-orange-800" },
   WAITLIST: { label: "Waitlist", color: "bg-amber-100 text-amber-800" },
+  CLOSED: { label: "Closed", color: "bg-red-100 text-red-800" },
   COMING_SOON: {
     label: "Coming Soon",
     color: "bg-sky-100 text-sky-800",

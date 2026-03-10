@@ -44,9 +44,20 @@ const CONFIDENCE_COLORS: Record<string, string> = {
   PLACEHOLDER: 'text-red-500',
 };
 
-export function CrawlModal() {
-  const [open, setOpen] = useState(false);
-  const [priority, setPriority] = useState<CrawlPriority>('all');
+export function CrawlModal({
+  trigger,
+  retryWithCampIds,
+  forceOpen,
+  onClose,
+}: {
+  trigger?: React.ReactNode;
+  retryWithCampIds?: string[];
+  forceOpen?: boolean;
+  onClose?: () => void;
+} = {}) {
+  const isRetry = !!retryWithCampIds?.length;
+  const [open, setOpen] = useState(forceOpen ?? false);
+  const [priority, setPriority] = useState<CrawlPriority>(isRetry ? 'specific' : 'all');
   const [limit, setLimit] = useState(10);
 
   // Model selection
@@ -57,12 +68,25 @@ export function CrawlModal() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<CrawlPreviewCamp[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [selectedCampIds, setSelectedCampIds] = useState<Set<string>>(new Set());
+  const [selectedCampIds, setSelectedCampIds] = useState<Set<string>>(
+    isRetry ? new Set(retryWithCampIds) : new Set()
+  );
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Preview (for non-specific modes)
   const [preview, setPreview] = useState<{ camps: CrawlPreviewCamp[]; totalCrawlable: number } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Pre-load retry camps when modal opens
+  useEffect(() => {
+    if (!open || !isRetry || searchResults.length > 0) return;
+    setSearchLoading(true);
+    fetch(`/api/admin/crawl/preview?ids=${retryWithCampIds!.join(',')}`)
+      .then(r => r.json())
+      .then(d => setSearchResults(d.camps ?? []))
+      .catch(() => {})
+      .finally(() => setSearchLoading(false));
+  }, [open, isRetry, retryWithCampIds, searchResults.length]);
 
   // Run state
   const [runState, setRunState] = useState<RunState>('idle');
@@ -164,20 +188,31 @@ export function CrawlModal() {
 
   const reset = () => {
     setRunState('idle'); setRunProgress(null); setErrorMsg(null);
-    setPreview(null); setSelectedCampIds(new Set()); setSearchQuery(''); setSearchResults([]);
+    setPreview(null);
+    setSearchQuery('');
+    if (!isRetry) {
+      setSelectedCampIds(new Set());
+      setSearchResults([]);
+    }
   };
 
   const close = () => {
     setOpen(false);
+    onClose?.();
     if (runState === 'done' || runState === 'error') reset();
   };
 
   return (
     <>
-      <button onClick={() => setOpen(true)} className="btn-primary gap-2">
-        <Play className="w-4 h-4" />
-        Run Crawl
-      </button>
+      {trigger
+        ? <span onClick={() => setOpen(true)}>{trigger}</span>
+        : (
+          <button onClick={() => setOpen(true)} className="btn-primary gap-2">
+            <Play className="w-4 h-4" />
+            Run Crawl
+          </button>
+        )
+      }
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -187,7 +222,7 @@ export function CrawlModal() {
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300/40">
               <div>
-                <h2 className="font-display font-bold text-xl text-bark-700">Configure Crawl</h2>
+                <h2 className="font-display font-bold text-xl text-bark-700">{isRetry ? 'Retry Crawl' : 'Configure Crawl'}</h2>
                 {preview && priority !== 'specific' && (
                   <p className="text-xs text-bark-300 mt-0.5">{preview.totalCrawlable} camps have crawlable URLs</p>
                 )}

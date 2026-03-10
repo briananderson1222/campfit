@@ -257,11 +257,6 @@ export default async function CommunityDetailPage({
             <p className="text-bark-500 leading-relaxed">
               <LinkifiedText text={camp.description} />
             </p>
-            {camp.notes && (
-              <p className="text-sm text-bark-400 mt-3 leading-relaxed">
-                <LinkifiedText text={camp.notes} />
-              </p>
-            )}
             {camp.interestingDetails && (
               <div className="mt-4 px-4 py-3 rounded-2xl bg-amber-300/10 border border-amber-300/30">
                 <p className="text-sm text-amber-600 font-medium">

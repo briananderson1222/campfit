@@ -3,55 +3,10 @@ import { LLMExtractionResult } from '@/lib/admin/types';
 import { callLLM, buildPrompt } from './llm-provider';
 import type { CampInput } from './adapter';
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a data extraction assistant for a kids camp directory. Extract structured camp information from website text.
-
-Return ONLY a valid JSON object with this exact shape — no markdown, no code fences, no explanation:
-
-{
-  "name": string | null,
-  "description": string | null,
-  "campType": "SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK" | null,
-  "category": "SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER" | null,
-  "registrationStatus": "OPEN"|"CLOSED"|"WAITLIST"|"COMING_SOON"|"UNKNOWN" | null,
-  "registrationOpenDate": "YYYY-MM-DD" | null,
-  "lunchIncluded": true | false | null,
-  "address": string | null,
-  "neighborhood": string | null,
-  "city": string | null,
-  "websiteUrl": string | null,
-  "interestingDetails": string | null,
-  "ageGroups": [{"label": string, "minAge": number|null, "maxAge": number|null, "minGrade": number|null, "maxGrade": number|null}] | null,
-  "schedules": [{"label": string, "startDate": "YYYY-MM-DD"|null, "endDate": "YYYY-MM-DD"|null, "startTime": string|null, "endTime": string|null, "earlyDropOff": string|null, "latePickup": string|null}] | null,
-  "pricing": [{"label": string, "amount": number, "unit": "PER_WEEK"|"PER_SESSION"|"PER_DAY"|"FLAT"|"PER_CAMP", "durationWeeks": number|null, "ageQualifier": string|null, "discountNotes": string|null}] | null,
-  "confidence": {
-    "name": 0.0,
-    "description": 0.0,
-    "campType": 0.0,
-    "category": 0.0,
-    "registrationStatus": 0.0,
-    "registrationOpenDate": 0.0,
-    "lunchIncluded": 0.0,
-    "address": 0.0,
-    "neighborhood": 0.0,
-    "ageGroups": 0.0,
-    "schedules": 0.0,
-    "pricing": 0.0,
-    "interestingDetails": 0.0
-  }
-}
-
-Rules:
-- Set any field to null if you cannot find the information. NEVER guess or hallucinate.
-- confidence values: 1.0 = explicitly stated on page, 0.5 = reasonably inferred, 0.0 = not found.
-- Dates must be YYYY-MM-DD. Assume year 2026 unless stated otherwise.
-- Prices are numeric USD (no $ sign).
-- description should be the camp's own description of itself, 2-4 sentences max.
-- interestingDetails: one memorable distinguishing fact about this camp (1 sentence).`;
-
 export async function extractCampDataFromUrl(
   websiteUrl: string,
   campName: string,
-  options: { model?: string; maxChars?: number } = {}
+  options: { model?: string; maxChars?: number; siteHints?: string[]; neighborhoods?: string[] } = {}
 ): Promise<LLMExtractionResult> {
   const maxChars = options.maxChars ?? 32_000;
   const extractedAt = new Date().toISOString();
@@ -92,7 +47,7 @@ export async function extractCampDataFromUrl(
   let tokensUsed = 0;
 
   try {
-    const prompt = buildPrompt(campName, websiteUrl, text);
+    const prompt = buildPrompt(campName, websiteUrl, text, options.siteHints, options.neighborhoods);
     const result = await callLLM(prompt, options.model !== 'auto' ? options.model : undefined);
     rawResponse = result.text;
     model = result.model;

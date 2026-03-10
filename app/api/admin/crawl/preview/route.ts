@@ -30,6 +30,24 @@ export async function GET(req: Request) {
 
   const pool = getPool();
 
+  // --- Batch lookup by IDs (for retry) ---
+  const ids = url.searchParams.get('ids');
+  if (ids) {
+    const idList = ids.split(',').filter(Boolean);
+    const result = await pool.query(`
+      SELECT
+        id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
+        "lastVerifiedAt",
+        (CASE WHEN description = '' OR description IS NULL THEN 1 ELSE 0 END +
+         CASE WHEN neighborhood = '' OR neighborhood IS NULL THEN 1 ELSE 0 END +
+         CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
+        0 AS "priorityScore"
+      FROM "Camp"
+      WHERE id = ANY($1)
+    `, [idList]);
+    return NextResponse.json({ camps: result.rows as CrawlPreviewCamp[], totalCrawlable: result.rows.length });
+  }
+
   // --- Single camp lookup by ID ---
   if (campId) {
     const result = await pool.query(`

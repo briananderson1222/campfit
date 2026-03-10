@@ -116,7 +116,21 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Expose theme colors as CSS custom properties: var(--color-pine-600) etc.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ({ addBase, theme }: any) => {
+      function toVars(obj: Record<string, unknown>, prefix = "--color"): Record<string, string> {
+        return Object.entries(obj).reduce((acc: Record<string, string>, [key, val]) => {
+          if (typeof val === "string") acc[`${prefix}-${key}`] = val;
+          else if (typeof val === "object" && val !== null)
+            Object.assign(acc, toVars(val as Record<string, unknown>, `${prefix}-${key}`));
+          return acc;
+        }, {});
+      }
+      addBase({ ":root": toVars(theme("colors")) });
+    },
+  ],
 };
 
 export default config;
