@@ -20,6 +20,14 @@ export async function POST(
   if (rows.length === 0) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
   if (!rows[0].websiteUrl) return NextResponse.json({ error: 'Camp has no websiteUrl to crawl' }, { status: 400 });
 
+  // Immediately skip any existing PENDING proposals for this camp so it
+  // falls out of the review queue until the new crawl produces a replacement.
+  await pool.query(
+    `UPDATE "CampChangeProposal" SET status = 'SKIPPED', "updatedAt" = now()
+     WHERE "campId" = $1 AND status = 'PENDING'`,
+    [params.campId]
+  );
+
   const run = await runCrawlPipeline({
     triggeredBy: user.email,
     trigger: 'MANUAL',

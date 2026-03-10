@@ -22,7 +22,7 @@ async function getPendingProposals(campId: string) {
   const pool = getPool();
   const { rows } = await pool.query(
     `SELECT id, "createdAt", "overallConfidence", "appliedFields",
-            array_length(array(SELECT jsonb_object_keys("proposedChanges")), 1) AS "fieldCount"
+            (SELECT count(*)::int FROM jsonb_object_keys("proposedChanges")) AS "fieldCount"
      FROM "CampChangeProposal"
      WHERE "campId" = $1 AND status = 'PENDING'
      ORDER BY priority DESC, "createdAt" DESC`,

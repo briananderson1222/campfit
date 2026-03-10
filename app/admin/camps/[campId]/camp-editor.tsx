@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   Check, X, Pencil, Loader2, ExternalLink, AlertCircle,
   Plus, Trash2, ToggleLeft, ToggleRight, ClipboardList,
-  Lightbulb, ShieldCheck, Building2,
+  Lightbulb, ShieldCheck, Building2, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
@@ -49,18 +49,33 @@ interface SiteHint {
 
 // ── Coverage meter ────────────────────────────────────────────────────────────
 
-function CoverageMeter({ camp, fieldSources }: { camp: Camp; fieldSources: Record<string, FieldSource> | null }) {
-  // Pass the camp data alongside relation arrays so the coverage function has everything
-  const campLike = {
-    ...camp,
-    ageGroups: camp.ageGroups,
-    pricing: camp.pricing,
-    schedules: camp.schedules,
-  };
-  const { covered, missing, unattested, pct } = computeCoverage(campLike as never, fieldSources);
+function CoverageMeter({ campId, camp, fieldSources: initialFieldSources }: {
+  campId: string; camp: Camp; fieldSources: Record<string, FieldSource> | null;
+}) {
+  const [fieldSources, setFieldSources] = useState(initialFieldSources);
+  const [attesting, setAttesting] = useState<string | null>(null);
 
+  const campLike = { ...camp, ageGroups: camp.ageGroups, pricing: camp.pricing, schedules: camp.schedules };
+  const { covered, missing, unattested, pct } = computeCoverage(campLike as never, fieldSources);
   const isVerified = missing.length === 0 && unattested.length === 0;
   const color = isVerified ? 'bg-pine-500' : pct >= 67 ? 'bg-amber-400' : 'bg-red-400';
+
+  async function attest(field: string) {
+    setAttesting(field);
+    const res = await fetch(`/api/admin/camps/${campId}/attest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: [field] }),
+    }).catch(() => null);
+    if (res?.ok) {
+      const now = new Date().toISOString();
+      setFieldSources(prev => ({
+        ...(prev ?? {}),
+        [field]: { excerpt: null, sourceUrl: 'admin:attested', approvedAt: now },
+      }));
+    }
+    setAttesting(null);
+  }
 
   return (
     <div className="rounded-xl border border-cream-300 dark:border-bark-500 p-3.5 space-y-2">
@@ -81,23 +96,31 @@ function CoverageMeter({ camp, fieldSources }: { camp: Camp; fieldSources: Recor
         <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
       </div>
       {missing.length > 0 && (
-        <div className="flex flex-wrap gap-1 pt-0.5">
-          {missing.map(f => (
-            <span key={f} className="text-xs px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-200/60 dark:border-red-700/30">
-              {f}
-            </span>
-          ))}
-          <span className="text-xs text-bark-200 self-center">have value but need source</span>
+        <div className="space-y-1 pt-0.5">
+          <p className="text-xs text-bark-300">Have value but need source — tap to attest directly:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {missing.map(f => (
+              <button key={f} onClick={() => attest(f)} disabled={attesting === f}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200/60 dark:border-red-700/30 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-50">
+                {attesting === f ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {unattested.length > 0 && (
-        <div className="flex flex-wrap gap-1 pt-0.5">
-          {unattested.map(f => (
-            <span key={f} className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-700/30">
-              {f}
-            </span>
-          ))}
-          <span className="text-xs text-bark-200 self-center">blank — need data or N/A attestation</span>
+        <div className="space-y-1 pt-0.5">
+          <p className="text-xs text-bark-300">Blank — tap to mark as N/A / intentionally blank:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {unattested.map(f => (
+              <button key={f} onClick={() => attest(f)} disabled={attesting === f}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-700/30 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors disabled:opacity-50">
+                {attesting === f ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {isVerified && (
@@ -173,7 +196,7 @@ function ProviderField({ campId, providerId, organizationName, provider }: {
               {currentOrgName || 'No organization'}
             </span>
             <button onClick={() => setEditing(true)}
-              className="opacity-0 group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0">
+              className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0">
               <Pencil className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -253,7 +276,7 @@ function NeighborhoodField({ campId, value, communitySlug }: { campId: string; v
               {current || 'Not set'}
             </span>
             <button onClick={() => { setDraft(current ?? ''); setEditing(true); }}
-              className="opacity-0 group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0">
+              className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0">
               <Pencil className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -470,13 +493,53 @@ function EditableField({
               )}
             </span>
             <button onClick={() => { setDraft(String(current ?? '')); setEditing(true); }}
-              className="opacity-0 group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0"
+              className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0"
               title={`Edit ${label}`}>
               <Pencil className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
       </dd>
+    </div>
+  );
+}
+
+// ── Crawl button ──────────────────────────────────────────────────────────────
+
+function CrawlButton({ campId, websiteUrl }: { campId: string; websiteUrl: string | null }) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [msg, setMsg] = useState('');
+
+  if (!websiteUrl) return null;
+
+  async function crawl() {
+    setStatus('loading');
+    setMsg('');
+    const res = await fetch(`/api/admin/camps/${campId}/crawl`, { method: 'POST' }).catch(() => null);
+    if (res?.ok) {
+      setStatus('done');
+      setMsg('Crawling… check back in ~30s for a new proposal.');
+    } else {
+      setStatus('error');
+      setMsg('Failed to start crawl.');
+    }
+    setTimeout(() => { setStatus('idle'); setMsg(''); }, 10000);
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {msg && <span className="text-xs text-bark-400 dark:text-bark-300">{msg}</span>}
+      <button
+        onClick={crawl}
+        disabled={status === 'loading'}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-cream-300 dark:border-bark-500 text-bark-400 hover:text-pine-600 hover:border-pine-300 dark:hover:border-pine-500 dark:hover:text-pine-400 transition-colors disabled:opacity-50"
+        title="Crawl this camp's website and generate a change proposal"
+      >
+        {status === 'loading'
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <RefreshCw className="w-3.5 h-3.5" />}
+        {status === 'loading' ? 'Crawling…' : 'Crawl'}
+      </button>
     </div>
   );
 }
@@ -643,7 +706,7 @@ export function CampEditor({
                         {p.appliedFields?.length > 0 && <span className="text-amber-500 ml-1">· {p.appliedFields.length} already applied</span>}
                       </span>
                       <span className="text-amber-400">· {Math.round(p.overallConfidence * 100)}% · {new Date(p.createdAt).toLocaleDateString()}</span>
-                      <span className="opacity-0 group-hover:opacity-100 text-pine-500 ml-auto">Review →</span>
+                      <span className="sm:opacity-0 sm:group-hover:opacity-100 text-pine-500 ml-auto">Review →</span>
                     </Link>
                   );
                 })}
@@ -654,13 +717,16 @@ export function CampEditor({
       )}
 
       {/* Field coverage meter */}
-      <CoverageMeter camp={camp} fieldSources={camp.fieldSources} />
+      <CoverageMeter campId={camp.id} camp={camp} fieldSources={camp.fieldSources} />
 
       {/* Core info */}
       <div className="glass-panel p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide">Core Info</h2>
-          <MarkVerifiedButton campId={camp.id} initial={camp.dataConfidence} />
+          <div className="flex items-center gap-2">
+            <CrawlButton campId={camp.id} websiteUrl={camp.websiteUrl} />
+            <MarkVerifiedButton campId={camp.id} initial={camp.dataConfidence} />
+          </div>
         </div>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
           <EditableField campId={camp.id} field="name" label="Name" value={camp.name} />
