@@ -175,6 +175,15 @@ export const CAMP_TYPE_LABELS: Record<CampType, string> = {
   SCHOOL_BREAK: "School Break",
 };
 
+export const CAMP_TYPE_DESCRIPTIONS: Record<CampType, string> = {
+  SUMMER_DAY: "Drop-off camp during summer. Kids go home each evening.",
+  SLEEPAWAY: "Overnight residential camp. Kids stay on-site for the session.",
+  FAMILY: "Parents and kids attend together.",
+  VIRTUAL: "Fully online — no travel required.",
+  WINTER_BREAK: "Runs during winter/holiday school break (Dec–Jan).",
+  SCHOOL_BREAK: "Runs during spring break, fall break, or other non-summer school holidays.",
+};
+
 export const CATEGORY_LABELS: Record<CampCategory, string> = {
   SPORTS: "Sports",
   ARTS: "Arts & Crafts",

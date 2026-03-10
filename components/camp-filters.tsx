@@ -6,6 +6,7 @@ import {
   CampType,
   CATEGORY_LABELS,
   CAMP_TYPE_LABELS,
+  CAMP_TYPE_DESCRIPTIONS,
   NEIGHBORHOODS,
   SUMMER_WEEKS,
   CampFilters,
@@ -117,6 +118,7 @@ export function CampFiltersPanel({
             {Object.entries(CAMP_TYPE_LABELS).map(([key, label]) => (
               <button
                 key={key}
+                title={CAMP_TYPE_DESCRIPTIONS[key as CampType]}
                 onClick={() =>
                   update({
                     campType:
@@ -136,6 +138,7 @@ export function CampFiltersPanel({
               </button>
             ))}
           </div>
+          <p className="text-xs text-bark-300 mt-2">Hover a type for details.</p>
         </FilterSection>
 
         {/* Age Range */}

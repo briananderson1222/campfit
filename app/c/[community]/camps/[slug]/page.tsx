@@ -22,6 +22,7 @@ import {
   CATEGORY_COLORS,
   STATUS_CONFIG,
   CAMP_TYPE_LABELS,
+  CAMP_TYPE_DESCRIPTIONS,
   SUMMER_WEEKS,
 } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -186,11 +187,12 @@ export default async function CommunityDetailPage({
           <span className={cn("badge", categoryColor)}>
             {CATEGORY_LABELS[camp.category]}
           </span>
-          {camp.campType !== "SUMMER_DAY" && (
-            <span className="badge bg-clay-100 text-clay-500">
-              {CAMP_TYPE_LABELS[camp.campType]}
-            </span>
-          )}
+          <span
+            className="badge bg-clay-100 text-clay-500"
+            title={CAMP_TYPE_DESCRIPTIONS[camp.campType]}
+          >
+            {CAMP_TYPE_LABELS[camp.campType]}
+          </span>
           <span className={cn("badge", status.color)}>{status.label}</span>
           {camp.dataConfidence === "PLACEHOLDER" && (
             <span className="badge bg-amber-50 text-amber-600 gap-1">
