@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb } from 'lucide-react';
+import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
@@ -163,6 +163,10 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
     }
   };
 
+  const fieldSources = (campData.fieldSources ?? {}) as Record<string, { excerpt: string | null; sourceUrl: string; approvedAt: string }>;
+  const [proofOpen, setProofOpen] = useState<Set<string>>(new Set());
+  const toggleProof = (f: string) => setProofOpen(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n; });
+
   const campSnapshot = (
       <div className="glass-panel p-5">
         <div className="flex items-center justify-between mb-3">
@@ -184,6 +188,9 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
               const isEditingCamp = campEditFields[field];
               if (!showAllMeta && (val === null || val === undefined || val === '' || val === false)) return null;
               const proposedVal = isChanged ? proposedChanges[field]?.new : undefined;
+              const proof = fieldSources[field];
+              const isProofOpen = proofOpen.has(field);
+
               return (
                 <div key={field} className={cn(
                   'group py-1.5 px-1 rounded border-b border-cream-200/50',
@@ -191,6 +198,18 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                 )}>
                   <p className="text-xs text-bark-300 uppercase tracking-wide flex items-center gap-1">
                     {FIELD_LABELS[field] ?? field}
+                    {/* Proof status icon */}
+                    {proof ? (
+                      <button
+                        onClick={() => toggleProof(field)}
+                        title={`Verified ${new Date(proof.approvedAt).toLocaleDateString()} — click to ${isProofOpen ? 'hide' : 'show'} proof`}
+                        className="ml-1 text-pine-500 hover:text-pine-700"
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                      </button>
+                    ) : (val !== null && val !== undefined && val !== '') ? (
+                      <span title="No proof citation yet"><ShieldAlert className="w-3 h-3 ml-1 text-amber-400" /></span>
+                    ) : null}
                     {INLINE_EDITABLE.has(field) && !isEditingCamp && (
                       <button
                         onClick={() => { setCampEditFields(p => ({ ...p, [field]: true })); setCampEdits(p => ({ ...p, [field]: String(val ?? '') })); }}
@@ -231,32 +250,36 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                       {ENUM_OPTIONS[field] ? labelFor(field, String(val ?? '')) : formatValue(val)}
                     </p>
                   )}
+                  {/* Inline proof */}
+                  {proof && isProofOpen && (
+                    <div className="mt-1.5 rounded-lg bg-pine-50/60 border border-pine-200/50 px-2.5 py-2 space-y-1">
+                      <p className="text-xs text-pine-600 font-medium flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" />
+                        Verified {new Date(proof.approvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                      {proof.excerpt && (
+                        <p className="text-xs text-bark-500 italic leading-relaxed">"{proof.excerpt}"</p>
+                      )}
+                      {!proof.excerpt && (
+                        <p className="text-xs text-bark-400 italic">Admin attestation — no excerpt</p>
+                      )}
+                      {proof.sourceUrl && (
+                        <a
+                          href={proof.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-pine-500 hover:text-pine-700 break-all"
+                        >
+                          <Link2 className="w-3 h-3 shrink-0" />
+                          {proof.sourceUrl.replace(/^https?:\/\//, '').slice(0, 60)}
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
         </div>
-
-        {/* Value provenance */}
-        {(() => {
-          const fs = campData.fieldSources as Record<string, { excerpt: string | null; sourceUrl: string; approvedAt: string }> | null | undefined;
-          if (!fs || Object.keys(fs).length === 0) return null;
-          return (
-            <div className="mt-3 pt-3 border-t border-cream-200/60">
-              <p className="text-xs text-bark-300 uppercase tracking-wide mb-2">Value Provenance</p>
-              <div className="space-y-1.5">
-                {Object.entries(fs).map(([field, src]) => (
-                  <div key={field} className="flex items-start gap-2 text-xs">
-                    <span className="text-bark-400 font-medium shrink-0">{FIELD_LABELS[field] ?? field}:</span>
-                    {src.excerpt && <span className="text-bark-500 italic truncate">"{src.excerpt.slice(0, 80)}"</span>}
-                    <a href={src.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-pine-400 hover:text-pine-600 shrink-0">
-                      <Link2 className="w-3 h-3" />
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
       </div>
   );
 
