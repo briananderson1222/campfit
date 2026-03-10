@@ -169,32 +169,6 @@
 
 }
 
-/* ── Admin dark mode — override hardcoded cream/bark utilities ──────────
-   Admin components use text-bark-* / bg-cream-* without dark: variants.
-   Scoped to `main` inside `.dark` so public pages are unaffected.
-   Wrapped in @layer base to prevent PostCSS circular dependency errors. */
-@layer base {
-  .dark main .text-bark-700,
-  .dark main .text-bark-600 { color: var(--color-cream-200); }
-  .dark main .text-bark-500 { color: var(--color-cream-300); }
-  .dark main .text-bark-400 { color: var(--color-cream-400); }
-  .dark main .text-bark-300 { color: var(--color-bark-300); }
-  .dark main .text-bark-200 { color: var(--color-bark-400); }
-
-  .dark main .bg-cream-50  { background-color: color-mix(in srgb, var(--color-pine-800) 60%, transparent); }
-  .dark main .bg-cream-100 { background-color: color-mix(in srgb, var(--color-pine-800) 40%, transparent); }
-  .dark main .bg-cream-200 { background-color: color-mix(in srgb, var(--color-pine-700) 60%, transparent); }
-  .dark main .bg-cream-300 { background-color: color-mix(in srgb, var(--color-pine-700) 80%, transparent); }
-
-  .dark main .border-cream-200 { border-color: color-mix(in srgb, var(--color-pine-600) 50%, transparent); }
-  .dark main .border-cream-300 { border-color: color-mix(in srgb, var(--color-pine-600) 60%, transparent); }
-  .dark main .border-cream-400 { border-color: color-mix(in srgb, var(--color-pine-600) 70%, transparent); }
-  .dark main .border-cream-400\/40 { border-color: color-mix(in srgb, var(--color-pine-600) 40%, transparent); }
-  .dark main .border-cream-400\/60 { border-color: color-mix(in srgb, var(--color-pine-600) 60%, transparent); }
-
-  .dark main input::placeholder { color: var(--color-bark-400); }
-  .dark main textarea::placeholder { color: var(--color-bark-400); }
-}
 
 @layer utilities {
   .stagger-1 { animation-delay: 0.1s; }

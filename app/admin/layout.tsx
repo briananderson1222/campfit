@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getPendingCount } from '@/lib/admin/review-repository';
 import { AdminSidebar } from './admin-sidebar';
+import './admin-dark.css';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
