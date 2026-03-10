@@ -45,6 +45,7 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
   const [loading, setLoading] = useState<'approve' | 'keep' | 'reject' | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [proposedCollapsed, setProposedCollapsed] = useState(false);
+  const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
   const [showAllMeta, setShowAllMeta] = useState(false);
   // editing state: { [field]: currentEditValue }
   const [editing, setEditing] = useState<Record<string, string>>({});
@@ -182,6 +183,7 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
               const isChanged = changedFieldNames.has(field);
               const isEditingCamp = campEditFields[field];
               if (!showAllMeta && (val === null || val === undefined || val === '' || val === false)) return null;
+              const proposedVal = isChanged ? proposedChanges[field]?.new : undefined;
               return (
                 <div key={field} className={cn(
                   'group py-1.5 px-1 rounded border-b border-cream-200/50',
@@ -189,7 +191,6 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                 )}>
                   <p className="text-xs text-bark-300 uppercase tracking-wide flex items-center gap-1">
                     {FIELD_LABELS[field] ?? field}
-                    {isChanged && <span className="text-amber-500 font-medium">· being updated</span>}
                     {INLINE_EDITABLE.has(field) && !isEditingCamp && (
                       <button
                         onClick={() => { setCampEditFields(p => ({ ...p, [field]: true })); setCampEdits(p => ({ ...p, [field]: String(val ?? '') })); }}
@@ -215,9 +216,18 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                  ) : isChanged ? (
+                    <div className="flex items-center gap-1.5 flex-wrap text-sm">
+                      <span className="text-bark-400 line-through text-xs">
+                        {ENUM_OPTIONS[field] ? labelFor(field, String(val ?? '')) : formatValue(val)}
+                      </span>
+                      <span className="text-amber-400 text-xs">→</span>
+                      <span className="text-amber-700 font-medium text-xs">
+                        {ENUM_OPTIONS[field] ? labelFor(field, String(proposedVal ?? '')) : formatValue(proposedVal)}
+                      </span>
+                    </div>
                   ) : (
-                    <p className={cn('text-bark-600 truncate', isChanged && 'text-amber-700 font-medium')}>
-                      {isChanged && <span className="text-amber-400 mr-1">→</span>}
+                    <p className="text-bark-600 truncate text-sm">
                       {ENUM_OPTIONS[field] ? labelFor(field, String(val ?? '')) : formatValue(val)}
                     </p>
                   )}
@@ -252,32 +262,35 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Proposed Changes header (always visible) ── */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setProposedCollapsed(v => !v)}
+          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700"
+        >
+          {proposedCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          Proposed Changes
+        </button>
+        {!proposedCollapsed && (
+          <>
+            <span className="text-bark-300 text-xs">·</span>
+            <button onClick={() => setSelected(new Set(fields.map(([k]) => k)))} className="text-xs text-pine-500 hover:underline">Select all</button>
+            <button onClick={() => setSelected(new Set())} className="text-xs text-bark-400 hover:underline">Deselect all</button>
+          </>
+        )}
+        <span className="text-bark-300 ml-auto text-xs">
+          {alreadyApplied.size > 0 && <span className="text-pine-500 mr-2">{alreadyApplied.size} applied</span>}
+          {!proposedCollapsed && <>{selected.size} of {fields.length} remaining selected</>}
+        </span>
+      </div>
+
+      {!proposedCollapsed && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Proposed Changes ─────────────────────────────────── */}
+        {/* ── Proposed Changes list ─────────────────────────────── */}
         <div className="lg:col-span-2 space-y-3">
-          <div className="flex items-center gap-2 mb-2">
-            <button
-              onClick={() => setProposedCollapsed(v => !v)}
-              className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700"
-            >
-              {proposedCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-              Proposed Changes
-            </button>
-            {!proposedCollapsed && (
-              <>
-                <span className="text-bark-300 text-xs">·</span>
-                <button onClick={() => setSelected(new Set(fields.map(([k]) => k)))} className="text-xs text-pine-500 hover:underline">Select all</button>
-                <button onClick={() => setSelected(new Set())} className="text-xs text-bark-400 hover:underline">Deselect all</button>
-              </>
-            )}
-            <span className="text-bark-300 ml-auto text-xs">
-              {alreadyApplied.size > 0 && <span className="text-pine-500 mr-2">{alreadyApplied.size} applied</span>}
-              {!proposedCollapsed && <>{selected.size} of {fields.length} remaining selected</>}
-            </span>
-          </div>
 
           {/* Already-applied fields (greyed out) */}
-          {alreadyApplied.size > 0 && !proposedCollapsed && (
+          {alreadyApplied.size > 0 && (
             <div className="space-y-2 opacity-60">
               {Array.from(alreadyApplied).filter(f => proposal.proposedChanges[f]).map(field => (
                 <div key={field} className="rounded-2xl border border-pine-200/60 bg-pine-50/20 px-4 py-2.5 flex items-center gap-3">
@@ -292,7 +305,7 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
             </div>
           )}
 
-          {!proposedCollapsed && fields.map(([field, diff]) => {
+          {fields.map(([field, diff]) => {
             const isSelected = selected.has(field);
             const isArray = Array.isArray(diff.new);
             const isExpandable = isArray || String(diff.new).length > 120;
@@ -526,9 +539,19 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
           </div>
         </div>
       </div>
+      )} {/* end !proposedCollapsed */}
 
-      {/* ── Current Camp Data (context, below proposed changes) ─── */}
-      {campSnapshot}
+      {/* ── Current Camp Data (collapsed by default) ─── */}
+      <div>
+        <button
+          onClick={() => setSnapshotCollapsed(v => !v)}
+          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700 mb-3"
+        >
+          {snapshotCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          Current Camp Data
+        </button>
+        {!snapshotCollapsed && campSnapshot}
+      </div>
     </div>
   );
 }
