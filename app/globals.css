@@ -192,8 +192,8 @@
 .dark main .border-cream-400\/40 { border-color: color-mix(in srgb, var(--color-pine-600) 40%, transparent); }
 .dark main .border-cream-400\/60 { border-color: color-mix(in srgb, var(--color-pine-600) 60%, transparent); }
 
-.dark main .placeholder\:text-bark-300::placeholder { color: var(--color-bark-400); }
-.dark main .placeholder\:text-bark-400::placeholder { color: var(--color-bark-300); }
+.dark main input::placeholder { color: var(--color-bark-400); }
+.dark main textarea::placeholder { color: var(--color-bark-400); }
 
 @layer utilities {
   .stagger-1 { animation-delay: 0.1s; }
