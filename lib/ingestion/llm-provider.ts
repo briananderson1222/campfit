@@ -48,7 +48,7 @@ RULES:
 - city must be a real city name (e.g. "Arvada", "Denver") — NOT a state name.
 - address must be a street address only (e.g. "4001 E Iliff Ave") — NOT a neighborhood or park name.
 ${nbhdRule}
-- campType must be one of: SUMMER_DAY, SLEEPAWAY, FAMILY, VIRTUAL, WINTER_BREAK, SCHOOL_BREAK
+- campType must be one of: SUMMER_DAY (drop-off day camp during summer), SLEEPAWAY (overnight/residential, kids stay on-site), FAMILY (parents attend with kids), VIRTUAL (fully online), WINTER_BREAK (runs during winter/holiday school break), SCHOOL_BREAK (spring break, fall break, or other non-summer school holiday)
 - category must be one of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER
 - registrationStatus must be one of: OPEN, FULL, WAITLIST, CLOSED, COMING_SOON, UNKNOWN
   OPEN=accepting registrations, FULL=at capacity (no spots left), WAITLIST=full but waitlist available, CLOSED=registration period ended

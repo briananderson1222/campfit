@@ -6,6 +6,7 @@ import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quo
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
+import { CAMP_TYPE_DESCRIPTIONS } from '@/lib/types';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Camp Name', description: 'Description', campType: 'Camp Type',
@@ -601,7 +602,13 @@ function FieldInput({ field, value, onChange, onCommit, onCancel }: {
         className="flex-1 text-xs border border-pine-300 rounded px-2 py-1 focus:outline-none focus:border-pine-500 bg-white"
       >
         {enumOpts.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+          <option
+            key={o.value}
+            value={o.value}
+            title={field === 'campType' ? CAMP_TYPE_DESCRIPTIONS[o.value as keyof typeof CAMP_TYPE_DESCRIPTIONS] : undefined}
+          >
+            {o.label}
+          </option>
         ))}
       </select>
     );
