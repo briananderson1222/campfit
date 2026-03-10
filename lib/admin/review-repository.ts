@@ -120,6 +120,47 @@ export async function partialApprove(
   );
 }
 
+export interface UnverifiedCamp {
+  id: string;
+  name: string;
+  slug: string;
+  communitySlug: string;
+  dataConfidence: string;
+  websiteUrl: string | null;
+  lastVerifiedAt: string | null;
+  updatedAt: string;
+}
+
+/** Camps that are not VERIFIED and have no pending proposal — need attention. */
+export async function getUnverifiedCamps(opts: {
+  limit?: number;
+  offset?: number;
+}): Promise<{ camps: UnverifiedCamp[]; total: number }> {
+  const pool = getPool();
+  const { limit = 50, offset = 0 } = opts;
+
+  const base = `FROM "Camp" c
+    WHERE c."dataConfidence" != 'VERIFIED'
+      AND NOT EXISTS (
+        SELECT 1 FROM "CampChangeProposal" p
+        WHERE p."campId" = c.id AND p.status = 'PENDING'
+      )`;
+
+  const [rows, countRow] = await Promise.all([
+    pool.query(
+      `SELECT c.id, c.name, c.slug, c."communitySlug", c."dataConfidence",
+              c."websiteUrl", c."lastVerifiedAt", c."updatedAt"
+       ${base}
+       ORDER BY c."dataConfidence" ASC, c."updatedAt" ASC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    ),
+    pool.query(`SELECT COUNT(*) ${base}`),
+  ]);
+
+  return { camps: rows.rows, total: parseInt(countRow.rows[0].count) };
+}
+
 export async function getPendingCount(): Promise<number> {
   const pool = getPool();
   const result = await pool.query(`SELECT COUNT(*) FROM "CampChangeProposal" WHERE status = 'PENDING'`);

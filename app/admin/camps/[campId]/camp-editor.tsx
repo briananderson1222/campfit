@@ -57,9 +57,9 @@ function CoverageMeter({ camp, fieldSources }: { camp: Camp; fieldSources: Recor
     pricing: camp.pricing,
     schedules: camp.schedules,
   };
-  const { covered, missing, skipped, pct } = computeCoverage(campLike as never, fieldSources);
+  const { covered, missing, unattested, pct } = computeCoverage(campLike as never, fieldSources);
 
-  const isVerified = pct === 100 && missing.length === 0;
+  const isVerified = missing.length === 0 && unattested.length === 0;
   const color = isVerified ? 'bg-pine-500' : pct >= 67 ? 'bg-amber-400' : 'bg-red-400';
 
   return (
@@ -74,7 +74,7 @@ function CoverageMeter({ camp, fieldSources }: { camp: Camp; fieldSources: Recor
             : pct >= 67 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
             : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
         )}>
-          {covered.length}/{covered.length + missing.length} sourced
+          {covered.length}/{REQUIRED_FOR_VERIFIED.length} attested
         </span>
       </div>
       <div className="w-full h-1.5 rounded-full bg-cream-200 dark:bg-bark-600 overflow-hidden">
@@ -87,13 +87,23 @@ function CoverageMeter({ camp, fieldSources }: { camp: Camp; fieldSources: Recor
               {f}
             </span>
           ))}
-          <span className="text-xs text-bark-200 self-center">need source citations</span>
+          <span className="text-xs text-bark-200 self-center">have value but need source</span>
+        </div>
+      )}
+      {unattested.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {unattested.map(f => (
+            <span key={f} className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-700/30">
+              {f}
+            </span>
+          ))}
+          <span className="text-xs text-bark-200 self-center">blank — need data or N/A attestation</span>
         </div>
       )}
       {isVerified && (
         <p className="text-xs text-pine-600 dark:text-pine-400 flex items-center gap-1">
           <ShieldCheck className="w-3.5 h-3.5" />
-          All required fields have source citations — auto-VERIFIED on next approval
+          All required fields attested — auto-VERIFIED on next approval
         </p>
       )}
     </div>

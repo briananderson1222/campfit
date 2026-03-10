@@ -1,90 +1,182 @@
 import Link from 'next/link';
-import { getPendingProposals } from '@/lib/admin/review-repository';
+import { getPendingProposals, getUnverifiedCamps } from '@/lib/admin/review-repository';
 import { cn } from '@/lib/utils';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, AlertTriangle, Clock } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ReviewQueuePage({
   searchParams,
 }: {
-  searchParams: { page?: string; minConfidence?: string };
+  searchParams: { page?: string; tab?: string };
 }) {
+  const tab = searchParams.tab === 'unverified' ? 'unverified' : 'proposals';
   const page = Math.max(1, parseInt(searchParams.page ?? '1'));
-  const minConfidence = parseFloat(searchParams.minConfidence ?? '0');
-  const limit = 20;
+  const limit = 25;
   const offset = (page - 1) * limit;
 
-  const { proposals, total } = await getPendingProposals({ limit, offset, minConfidence }).catch(() => ({ proposals: [], total: 0 }));
-  const totalPages = Math.ceil(total / limit);
+  const [{ proposals, total: proposalTotal }, { camps: unverifiedCamps, total: unverifiedTotal }] =
+    await Promise.all([
+      getPendingProposals({ limit, offset }).catch(() => ({ proposals: [], total: 0 })),
+      getUnverifiedCamps({ limit, offset }).catch(() => ({ camps: [], total: 0 })),
+    ]);
+
+  const activeTotal = tab === 'unverified' ? unverifiedTotal : proposalTotal;
+  const totalPages = Math.ceil(activeTotal / limit);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-3xl font-extrabold text-bark-700">Review Queue</h1>
-          <p className="text-bark-400 text-sm mt-1">{total} pending proposals</p>
+          <p className="text-bark-400 text-sm mt-1">
+            {proposalTotal} pending proposal{proposalTotal !== 1 ? 's' : ''} ·{' '}
+            {unverifiedTotal} unverified camp{unverifiedTotal !== 1 ? 's' : ''}
+          </p>
         </div>
       </div>
 
-      {proposals.length === 0 ? (
-        <div className="glass-panel p-16 text-center">
-          <p className="text-bark-300 text-lg">No pending proposals</p>
-          <p className="text-bark-200 text-sm mt-2">Run a crawl to generate proposals for review</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {proposals.map(proposal => {
-            const changeCount = Object.keys(proposal.proposedChanges).length;
-            const conf = proposal.overallConfidence;
-            return (
-              <Link
-                key={proposal.id}
-                href={`/admin/review/${proposal.id}`}
-                className="glass-panel p-5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
-              >
-                <ConfidenceBadge value={conf} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors">
-                    {proposal.campName}
-                  </p>
-                  <p className="text-sm text-bark-400 mt-0.5">
-                    {changeCount} field{changeCount !== 1 ? 's' : ''} changed ·{' '}
-                    {new Date(proposal.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    {proposal.crawlStartedAt && (
-                      <span className="text-bark-300"> · crawl {new Date(proposal.crawlStartedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                    )}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {Object.keys(proposal.proposedChanges).slice(0, 5).map(field => (
-                      <span key={field} className="text-xs bg-cream-200 text-bark-400 px-2 py-0.5 rounded-full">
-                        {field}
-                      </span>
-                    ))}
-                    {changeCount > 5 && (
-                      <span className="text-xs text-bark-300">+{changeCount - 5} more</span>
-                    )}
+      {/* Tabs */}
+      <div className="flex gap-1 mb-5 border-b border-cream-300/60">
+        <TabLink href="/admin/review?tab=proposals" active={tab === 'proposals'}>
+          Pending Proposals
+          {proposalTotal > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-amber-400 text-white text-[10px] font-bold leading-none">
+              {proposalTotal}
+            </span>
+          )}
+        </TabLink>
+        <TabLink href="/admin/review?tab=unverified" active={tab === 'unverified'}>
+          Unverified Camps
+          {unverifiedTotal > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-red-400 text-white text-[10px] font-bold leading-none">
+              {unverifiedTotal}
+            </span>
+          )}
+        </TabLink>
+      </div>
+
+      {/* ── Pending Proposals tab ── */}
+      {tab === 'proposals' && (
+        proposals.length === 0 ? (
+          <div className="glass-panel p-16 text-center">
+            <p className="text-bark-300 text-lg">No pending proposals</p>
+            <p className="text-bark-200 text-sm mt-2">Run a crawl to generate proposals for review</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {proposals.map(proposal => {
+              const changeCount = Object.keys(proposal.proposedChanges).length;
+              const conf = proposal.overallConfidence;
+              return (
+                <Link
+                  key={proposal.id}
+                  href={`/admin/review/${proposal.id}`}
+                  className="glass-panel p-5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
+                >
+                  <ConfidenceBadge value={conf} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors">
+                      {proposal.campName}
+                    </p>
+                    <p className="text-sm text-bark-400 mt-0.5">
+                      {changeCount} field{changeCount !== 1 ? 's' : ''} changed ·{' '}
+                      {new Date(proposal.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {proposal.crawlStartedAt && (
+                        <span className="text-bark-300"> · crawl {new Date(proposal.crawlStartedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      )}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {Object.keys(proposal.proposedChanges).slice(0, 5).map(field => (
+                        <span key={field} className="text-xs bg-cream-200 text-bark-400 px-2 py-0.5 rounded-full">
+                          {field}
+                        </span>
+                      ))}
+                      {changeCount > 5 && (
+                        <span className="text-xs text-bark-300">+{changeCount - 5} more</span>
+                      )}
+                    </div>
                   </div>
+                  <ChevronRight className="w-5 h-5 text-bark-300 shrink-0 group-hover:text-pine-500 transition-colors" />
+                </Link>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* ── Unverified Camps tab ── */}
+      {tab === 'unverified' && (
+        unverifiedCamps.length === 0 ? (
+          <div className="glass-panel p-16 text-center">
+            <p className="text-bark-300 text-lg">All camps are verified!</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {unverifiedCamps.map(camp => (
+              <Link
+                key={camp.id}
+                href={`/admin/camps/${camp.id}`}
+                className="glass-panel px-5 py-3.5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
+              >
+                <ConfidencePill confidence={camp.dataConfidence} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors truncate">
+                    {camp.name}
+                  </p>
+                  <p className="text-xs text-bark-400 mt-0.5 flex items-center gap-2">
+                    <span>{camp.communitySlug}</span>
+                    {camp.lastVerifiedAt ? (
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        Last verified {new Date(camp.lastVerifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-amber-500">
+                        <AlertTriangle className="w-3 h-3" />
+                        Never verified
+                      </span>
+                    )}
+                    {!camp.websiteUrl && (
+                      <span className="text-red-400">No website URL</span>
+                    )}
+                  </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-bark-300 shrink-0 group-hover:text-pine-500 transition-colors" />
               </Link>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )
       )}
 
       {totalPages > 1 && (
         <div className="flex justify-center gap-2 mt-8">
           {page > 1 && (
-            <Link href={`/admin/review?page=${page - 1}`} className="btn-secondary text-sm">Previous</Link>
+            <Link href={`/admin/review?tab=${tab}&page=${page - 1}`} className="btn-secondary text-sm">Previous</Link>
           )}
           <span className="px-4 py-2 text-sm text-bark-400">Page {page} of {totalPages}</span>
           {page < totalPages && (
-            <Link href={`/admin/review?page=${page + 1}`} className="btn-secondary text-sm">Next</Link>
+            <Link href={`/admin/review?tab=${tab}&page=${page + 1}`} className="btn-secondary text-sm">Next</Link>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'px-4 py-2.5 text-sm font-medium flex items-center border-b-2 -mb-px transition-colors',
+        active
+          ? 'border-pine-500 text-pine-600'
+          : 'border-transparent text-bark-400 hover:text-bark-600 hover:border-bark-300'
+      )}
+    >
+      {children}
+    </Link>
   );
 }
 
@@ -98,5 +190,18 @@ function ConfidenceBadge({ value }: { value: number }) {
       <span className="text-lg leading-none">{pct}</span>
       <span className="text-[10px] leading-none opacity-80">%</span>
     </div>
+  );
+}
+
+function ConfidencePill({ confidence }: { confidence: string }) {
+  const cfg: Record<string, { label: string; cls: string }> = {
+    PLACEHOLDER: { label: 'Placeholder', cls: 'bg-red-100 text-red-600' },
+    STALE:       { label: 'Stale',       cls: 'bg-amber-100 text-amber-700' },
+  };
+  const { label, cls } = cfg[confidence] ?? { label: confidence, cls: 'bg-cream-200 text-bark-400' };
+  return (
+    <span className={cn('text-xs font-semibold px-2.5 py-1 rounded-full shrink-0', cls)}>
+      {label}
+    </span>
   );
 }

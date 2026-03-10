@@ -1,20 +1,20 @@
 /**
  * Field-level verification coverage for the VERIFIED badge.
  *
- * VERIFIED means: every required field that has a value on the camp record
- * has been explicitly approved from a source — either a crawl excerpt or
- * admin review — documented in fieldSources[field].approvedAt.
+ * VERIFIED means: every required field has been explicitly attested by an
+ * admin or sourced from a crawl — documented in fieldSources[field].approvedAt.
  *
- * Optional fields (not blocking VERIFIED): neighborhood, address,
- * lunchIncluded, interestingDetails, registrationOpenDate.
+ * A blank/null field is acceptable IF an admin has explicitly attested it
+ * (i.e. fieldSources[field] exists with approvedAt). This signals "I checked
+ * and this is intentionally N/A for this camp."
  *
- * Relation fields (ageGroups, pricing, schedules) count only if the
- * array is non-empty — an empty array means "we just don't have data yet."
+ * Fields that are blank AND have no attestation block VERIFIED — an admin
+ * must either populate the field via a crawl proposal OR explicitly attest it.
  */
 
 import type { Camp, FieldSource } from '@/lib/types';
 
-/** Fields required to be sourced before VERIFIED status can be set. */
+/** Fields required to be attested before VERIFIED status can be set. */
 export const REQUIRED_FOR_VERIFIED = [
   'description',
   'campType',
@@ -30,17 +30,16 @@ export const REQUIRED_FOR_VERIFIED = [
 export type RequiredField = typeof REQUIRED_FOR_VERIFIED[number];
 
 export interface CoverageResult {
-  covered: RequiredField[];   // required fields with approved fieldSources
-  missing: RequiredField[];   // required fields present but lacking a source
-  skipped: RequiredField[];   // required fields that are empty/null (not blocking)
-  pct: number;                // covered / (covered + missing) * 100, NaN if nothing to verify
+  covered: RequiredField[];    // attested (has fieldSources[f].approvedAt) — may be blank
+  missing: RequiredField[];    // has a value but no attestation yet
+  unattested: RequiredField[]; // blank/null AND no attestation — needs explicit "N/A" or data
+  pct: number;                 // covered / total * 100
 }
 
 /**
  * Compute field-level verification coverage for a camp.
- *
- * @param camp - the camp record (may omit fieldSources, relations)
- * @param fieldSources - the camp's fieldSources map (separate so callers can pass subsets)
+ * Every required field must have fieldSources[field].approvedAt to count as covered,
+ * regardless of whether the field value itself is empty.
  */
 export function computeCoverage(
   camp: Partial<Camp>,
@@ -49,40 +48,37 @@ export function computeCoverage(
   const sources = fieldSources ?? {};
   const covered: RequiredField[] = [];
   const missing: RequiredField[] = [];
-  const skipped: RequiredField[] = [];
+  const unattested: RequiredField[] = [];
 
   for (const field of REQUIRED_FOR_VERIFIED) {
-    const value = (camp as Record<string, unknown>)[field];
-    const isEmpty = isEmptyValue(value);
-
-    if (isEmpty) {
-      skipped.push(field);
-      continue;
-    }
-
-    if (sources[field]?.approvedAt) {
+    const attested = !!sources[field]?.approvedAt;
+    if (attested) {
       covered.push(field);
     } else {
-      missing.push(field);
+      const value = (camp as Record<string, unknown>)[field];
+      if (isEmptyValue(value)) {
+        unattested.push(field); // blank + no attestation — needs admin "N/A" or data
+      } else {
+        missing.push(field);    // has value but no source — needs proposal approval
+      }
     }
   }
 
-  const total = covered.length + missing.length;
-  const pct = total === 0 ? 100 : Math.round((covered.length / total) * 100);
+  const total = REQUIRED_FOR_VERIFIED.length;
+  const pct = Math.round((covered.length / total) * 100);
 
-  return { covered, missing, skipped, pct };
+  return { covered, missing, unattested, pct };
 }
 
 /**
- * Returns true if all required non-empty fields have source citations.
- * This is the gate for auto-setting dataConfidence = 'VERIFIED'.
+ * Returns true only when ALL required fields have attestations.
  */
 export function isFullyVerified(
   camp: Partial<Camp>,
   fieldSources: Record<string, FieldSource> | null | undefined
 ): boolean {
-  const { missing } = computeCoverage(camp, fieldSources);
-  return missing.length === 0;
+  const { missing, unattested } = computeCoverage(camp, fieldSources);
+  return missing.length === 0 && unattested.length === 0;
 }
 
 function isEmptyValue(value: unknown): boolean {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
@@ -42,7 +42,8 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
   const fields = (Object.entries(proposedChanges) as [string, FieldDiff][]).filter(([k]) => !alreadyApplied.has(k));
   const [selected, setSelected] = useState<Set<string>>(new Set(fields.map(([k]) => k)));
   const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState<'approve' | 'keep' | 'reject' | null>(null);
+  const [loading, setLoading] = useState<'approve' | 'keep' | 'reject' | 'recrawl' | null>(null);
+  const [recrawlMsg, setRecrawlMsg] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [proposedCollapsed, setProposedCollapsed] = useState(false);
   const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
@@ -305,7 +306,35 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
           {alreadyApplied.size > 0 && <span className="text-pine-500 mr-2">{alreadyApplied.size} applied</span>}
           {!proposedCollapsed && <>{selected.size} of {fields.length} remaining selected</>}
         </span>
+        {/* Recrawl button */}
+        <button
+          disabled={loading === 'recrawl'}
+          onClick={async () => {
+            setLoading('recrawl');
+            setRecrawlMsg(null);
+            try {
+              const res = await fetch(`/api/admin/camps/${proposal.campId}/crawl`, { method: 'POST' });
+              if (res.ok) {
+                setRecrawlMsg('Crawling… new proposal will replace this one when ready.');
+                setTimeout(() => { router.refresh(); }, 8000);
+              } else {
+                const j = await res.json().catch(() => ({}));
+                setRecrawlMsg(j.error ?? 'Crawl failed');
+              }
+            } finally {
+              setLoading(null);
+            }
+          }}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-cream-300 text-bark-400 hover:text-pine-600 hover:border-pine-300 disabled:opacity-40 transition-colors"
+          title="Re-crawl this camp's website and replace this proposal with fresh results"
+        >
+          {loading === 'recrawl' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          Recrawl
+        </button>
       </div>
+      {recrawlMsg && (
+        <p className="text-xs text-pine-600 bg-pine-50 border border-pine-200/60 rounded-lg px-3 py-2">{recrawlMsg}</p>
+      )}
 
       {!proposedCollapsed && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
