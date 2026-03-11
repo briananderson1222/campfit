@@ -7,6 +7,88 @@ import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import type { CrawlProgressEvent, CrawlRun } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 
+// ── Provider matching helpers ──────────────────────────────────────────────────
+
+function parseDomain(url: string): string | null {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
+}
+
+function domainToName(domain: string): string {
+  const base = domain.split('.')[0];
+  return base
+    .replace(/[-_]/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(' ')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function toSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+async function makeUniqueSlug(pool: import('pg').Pool, name: string): Promise<string> {
+  const base = toSlug(name);
+  let slug = base;
+  let attempt = 2;
+  while (true) {
+    const { rows } = await pool.query('SELECT 1 FROM "Provider" WHERE slug = $1', [slug]);
+    if (rows.length === 0) return slug;
+    slug = `${base}-${attempt++}`;
+  }
+}
+
+/**
+ * For a successfully-crawled camp, ensure it's linked to a Provider.
+ * Matches by domain first; creates a new Provider if none exists.
+ * No-ops if the camp already has a providerId.
+ * Returns a short status string for logging.
+ */
+async function matchOrCreateProvider(
+  pool: import('pg').Pool,
+  camp: { id: string; websiteUrl: string; communitySlug: string; city: string | null; providerId: string | null }
+): Promise<string | null> {
+  if (camp.providerId) return null; // already linked
+
+  const domain = parseDomain(camp.websiteUrl);
+  if (!domain) return null;
+
+  // Find existing provider by domain
+  const { rows: existing } = await pool.query<{ id: string; name: string }>(
+    `SELECT id, name FROM "Provider" WHERE domain = $1 LIMIT 1`,
+    [domain]
+  );
+
+  let providerId: string;
+  let action: string;
+
+  if (existing.length > 0) {
+    providerId = existing[0].id;
+    action = `matched → ${existing[0].name}`;
+  } else {
+    const name = domainToName(domain);
+    const slug = await makeUniqueSlug(pool, name);
+    const { rows: [created] } = await pool.query<{ id: string }>(
+      `INSERT INTO "Provider" (name, slug, "websiteUrl", domain, city, "communitySlug")
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (slug) DO UPDATE SET domain = EXCLUDED.domain, "updatedAt" = now()
+       RETURNING id`,
+      [name, slug, camp.websiteUrl, domain, camp.city, camp.communitySlug]
+    );
+    providerId = created.id;
+    action = `created → ${name}`;
+  }
+
+  await pool.query(
+    `UPDATE "Camp" SET "providerId" = $1 WHERE id = $2 AND "providerId" IS NULL`,
+    [providerId, camp.id]
+  );
+
+  return action;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 class Semaphore {
   private slots: number;
   private queue: (() => void)[] = [];
@@ -54,11 +136,13 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     resolvedCampIds?.length
       ? `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
                "campType", category, "registrationStatus", "registrationOpenDate", "lunchIncluded",
-               address, "interestingDetails", COALESCE("fieldSources", '{}') AS "fieldSources"
+               address, "interestingDetails", "providerId",
+               COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE id = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
       : `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
                "campType", category, "registrationStatus", "registrationOpenDate", "lunchIncluded",
-               address, "interestingDetails", COALESCE("fieldSources", '{}') AS "fieldSources"
+               address, "interestingDetails", "providerId",
+               COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != '' ORDER BY "lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
     resolvedCampIds?.length ? [resolvedCampIds] : []
   );
@@ -183,6 +267,18 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               newProposals++;
             }
 
+            // Provider matching — ensure camp is linked to a Provider by domain
+            const providerAction = await matchOrCreateProvider(pool, {
+              id: camp.id,
+              websiteUrl: camp.websiteUrl,
+              communitySlug: camp.communitySlug,
+              city: camp.city ?? null,
+              providerId: (camp as unknown as { providerId: string | null }).providerId ?? null,
+            }).catch(err => {
+              console.error(`[crawl] provider match failed for camp ${camp.id}:`, err);
+              return null;
+            });
+
             // Record metrics
             const siteHost = getSiteHost(camp.websiteUrl);
             await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result, changesFound, durationMs });
@@ -194,6 +290,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               proposals: changesFound > 0 ? 1 : 0,
               fieldsChanged: Object.keys(proposedChanges),
               durationMs, processedAt: new Date().toISOString(),
+              ...(providerAction ? { providerAction } : {}),
             });
 
             await emit({ type: 'camp_done', campId: camp.id, proposalId, confidence: result.overallConfidence, changesFound });

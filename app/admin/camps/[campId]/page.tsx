@@ -58,8 +58,8 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
 
   const domain = domainOf(camp.websiteUrl);
   const [pendingProposals, siteHints] = await Promise.all([
-    getPendingProposals(params.campId).catch(() => []),
-    getSiteHints(domain).catch(() => []),
+    getPendingProposals(params.campId).catch(err => { console.error('[admin/camps] getPendingProposals failed:', err); return []; }),
+    getSiteHints(domain).catch(err => { console.error('[admin/camps] getSiteHints failed:', err); return []; }),
   ]);
 
   return (
