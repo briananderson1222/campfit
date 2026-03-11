@@ -86,17 +86,17 @@ export function CampCard({ camp }: { camp: Camp }) {
 
         {/* Name — full-width link */}
         <Link href={routes.campDetail(communitySlug, camp.slug)} className="block">
-          <h3 className="font-display font-bold text-lg text-bark-700 leading-snug mb-2 group-hover:text-pine-600 transition-colors">
+          <h3 className="font-display font-bold text-lg text-bark-700 dark:text-cream-200 leading-snug mb-2 group-hover:text-pine-600 transition-colors">
             {camp.name}
           </h3>
 
           {/* Description snippet */}
-          <p className="text-sm text-bark-400 leading-relaxed line-clamp-2 mb-4">
+          <p className="text-sm text-bark-400 dark:text-cream-400 leading-relaxed line-clamp-2 mb-4">
             {camp.description}
           </p>
 
           {/* Meta row */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-bark-400 mb-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-bark-400 dark:text-cream-400 mb-4">
             {(camp.neighborhood || camp.city) && (
               <span className="flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-pine-400" />
@@ -127,11 +127,11 @@ export function CampCard({ camp }: { camp: Camp }) {
         {/* Bottom row: age/weeks + compare + price */}
         <div className="flex items-end justify-between gap-3 pt-3 border-t border-cream-300/60">
           <div className="flex flex-col gap-1.5 min-w-0">
-            <span className="text-xs text-bark-300 uppercase tracking-wide font-semibold">
+            <span className="text-xs text-bark-300 dark:text-bark-200 uppercase tracking-wide font-semibold">
               {ageRange}
             </span>
             {campTypeVal === "SUMMER_DAY" && (
-              <span className="text-xs text-bark-300">
+              <span className="text-xs text-bark-300 dark:text-bark-200">
                 {weeksAvailable > 0
                   ? `${weeksAvailable} week${weeksAvailable !== 1 ? "s" : ""} available`
                   : "Contact for schedule"}
@@ -144,10 +144,10 @@ export function CampCard({ camp }: { camp: Camp }) {
           <div className="text-right shrink-0">
             {lowestPrice !== null ? (
               <>
-                <span className="font-display font-bold text-xl text-bark-700">
+                <span className="font-display font-bold text-xl text-bark-700 dark:text-cream-200">
                   {formatCurrency(lowestPrice)}
                 </span>
-                <span className="text-xs text-bark-300 block">
+                <span className="text-xs text-bark-300 dark:text-bark-200 block">
                   {camp.pricing[0]?.unit === "FLAT"
                     ? "total"
                     : camp.pricing[0]?.unit === "PER_CAMP"
@@ -156,7 +156,7 @@ export function CampCard({ camp }: { camp: Camp }) {
                 </span>
               </>
             ) : (
-              <span className="text-sm text-bark-300 italic">Contact for pricing</span>
+              <span className="text-sm text-bark-300 dark:text-bark-200 italic">Contact for pricing</span>
             )}
           </div>
         </div>

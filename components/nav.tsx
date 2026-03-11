@@ -22,10 +22,12 @@ import { routes } from "@/lib/routes";
 import { LangToggle } from "@/components/lang-toggle";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useLang } from "@/lib/i18n/lang-context";
 
 export function Nav() {
   const router = useRouter();
   const { slug: communitySlug } = useCommunity();
+  const { t } = useLang();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -78,16 +80,16 @@ export function Nav() {
         {/* Desktop links */}
         <div className="hidden sm:flex items-center gap-1">
           <NavLink href={routes.community(communitySlug)} icon={<Compass className="w-4 h-4" />}>
-            Explore
+            {t("nav.explore")}
           </NavLink>
           <NavLink href={routes.communityCalendar(communitySlug)} icon={<CalendarDays className="w-4 h-4" />}>
-            Calendar
+            {t("nav.calendar")}
           </NavLink>
           <NavLink href={routes.communityCompare(communitySlug)} icon={<GitCompareArrows className="w-4 h-4" />}>
-            Compare
+            {t("nav.compare")}
           </NavLink>
           <NavLink href="/dashboard" icon={<Heart className="w-4 h-4" />}>
-            Saved
+            {t("nav.saved")}
           </NavLink>
           <div className="w-px h-6 bg-cream-400/60 mx-2" />
           <ThemeToggle />
@@ -112,7 +114,7 @@ export function Nav() {
                   />
                   <div className="absolute right-0 mt-2 w-48 glass-panel border border-cream-400/40 dark:border-bark-600/40 shadow-camp-hover rounded-2xl overflow-hidden z-20 animate-fade-in">
                     <div className="px-4 py-3 border-b border-cream-400/40 dark:border-bark-600/40">
-                      <p className="text-xs text-bark-300 dark:text-bark-400">Signed in as</p>
+                      <p className="text-xs text-bark-300 dark:text-bark-400">{t("nav.signedInAs")}</p>
                       <p className="text-sm font-medium text-bark-600 dark:text-cream-200 truncate">
                         {user.email}
                       </p>
@@ -123,7 +125,7 @@ export function Nav() {
                       className="flex items-center gap-2 px-4 py-2.5 text-sm text-bark-500 dark:text-cream-300 hover:bg-cream-200/60 dark:hover:bg-bark-600/60 transition-colors"
                     >
                       <User className="w-4 h-4" />
-                      My Dashboard
+                      {t("nav.myDashboard")}
                     </Link>
                     {isAdmin && (
                       <Link
@@ -132,7 +134,7 @@ export function Nav() {
                         className="flex items-center gap-2 px-4 py-2.5 text-sm text-pine-600 dark:text-pine-300 font-medium hover:bg-pine-50 dark:hover:bg-pine-900/40 transition-colors"
                       >
                         <LayoutDashboard className="w-4 h-4" />
-                        Admin Portal
+                        {t("nav.adminPortal")}
                       </Link>
                     )}
                     <button
@@ -140,7 +142,7 @@ export function Nav() {
                       className="flex items-center gap-2 px-4 py-2.5 text-sm text-bark-500 dark:text-cream-300 hover:bg-cream-200/60 dark:hover:bg-bark-600/60 transition-colors w-full text-left"
                     >
                       <LogOut className="w-4 h-4" />
-                      Sign Out
+                      {t("nav.signOut")}
                     </button>
                   </div>
                 </>
@@ -149,7 +151,7 @@ export function Nav() {
           ) : (
             <Link href="/auth/login" className="btn-primary text-sm px-4 py-2">
               <LogIn className="w-4 h-4" />
-              Sign In
+              {t("nav.signIn")}
             </Link>
           )}
         </div>
@@ -176,28 +178,28 @@ export function Nav() {
               icon={<Compass className="w-5 h-5" />}
               onClick={() => setMobileOpen(false)}
             >
-              Explore Camps
+              {t("nav.exploreCamps")}
             </MobileNavLink>
             <MobileNavLink
               href={routes.communityCalendar(communitySlug)}
               icon={<CalendarDays className="w-5 h-5" />}
               onClick={() => setMobileOpen(false)}
             >
-              Weekly Calendar
+              {t("nav.weeklyCalendar")}
             </MobileNavLink>
             <MobileNavLink
               href={routes.communityCompare(communitySlug)}
               icon={<GitCompareArrows className="w-5 h-5" />}
               onClick={() => setMobileOpen(false)}
             >
-              Compare Camps
+              {t("nav.compareCamps")}
             </MobileNavLink>
             <MobileNavLink
               href="/dashboard"
               icon={<Heart className="w-5 h-5" />}
               onClick={() => setMobileOpen(false)}
             >
-              Saved Camps
+              {t("nav.savedCamps")}
             </MobileNavLink>
             <div className="mt-2 px-2 space-y-2">
               <div className="flex items-center justify-between px-1 py-1">
@@ -214,7 +216,7 @@ export function Nav() {
                   className="flex items-center gap-3 px-3 py-3 rounded-xl text-pine-600 dark:text-pine-300 bg-pine-50 dark:bg-pine-900/40 font-medium transition-colors"
                 >
                   <LayoutDashboard className="w-5 h-5" />
-                  Admin Portal
+                  {t("nav.adminPortal")}
                 </Link>
               )}
               {user ? (
@@ -226,7 +228,7 @@ export function Nav() {
                   className="btn-secondary w-full text-sm"
                 >
                   <LogOut className="w-4 h-4" />
-                  Sign Out ({user.email})
+                  {t("nav.signOut")} ({user.email})
                 </button>
               ) : (
                 <Link
@@ -235,7 +237,7 @@ export function Nav() {
                   className="btn-primary w-full text-sm flex items-center justify-center gap-2"
                 >
                   <LogIn className="w-4 h-4" />
-                  Sign In
+                  {t("nav.signIn")}
                 </Link>
               )}
             </div>

@@ -117,14 +117,14 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
               Denver Summer 2026 — {totalCount} camps
             </div>
 
-            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-extrabold text-bark-700 tracking-tight mb-5 text-balance animate-fade-up">
+            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-extrabold text-bark-700 dark:text-cream-200 tracking-tight mb-5 text-balance animate-fade-up">
               Find the perfect camp for your{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-pine-500 to-pine-400">
                 little explorer
               </span>
             </h1>
 
-            <p className="text-lg text-bark-400 leading-relaxed max-w-lg mx-auto mb-8 animate-fade-up stagger-1">
+            <p className="text-lg text-bark-400 dark:text-cream-400 leading-relaxed max-w-lg mx-auto mb-8 animate-fade-up stagger-1">
               Search {totalCount} Denver camps by age, activity, neighborhood,
               and availability. Never miss registration again.
             </p>
@@ -225,10 +225,10 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
             <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-cream-200 flex items-center justify-center">
               <Mountain className="w-8 h-8 text-bark-300" />
             </div>
-            <h3 className="font-display font-bold text-bark-500 text-lg mb-2">
+            <h3 className="font-display font-bold text-bark-500 dark:text-cream-400 text-lg mb-2">
               No camps found
             </h3>
-            <p className="text-bark-300 mb-6">
+            <p className="text-bark-300 dark:text-bark-200 mb-6">
               Try adjusting your filters or search terms
             </p>
             <button

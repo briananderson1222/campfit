@@ -61,10 +61,10 @@ export function ReportButton({ campId }: { campId: string }) {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-bark-900/40 backdrop-blur-sm" onClick={close} />
 
-          <div className="relative w-full max-w-md bg-white dark:bg-bark-800 rounded-2xl shadow-camp-hover overflow-hidden animate-fade-in">
+          <div className="relative z-10 w-full max-w-md bg-white dark:bg-bark-800 rounded-2xl shadow-camp-hover overflow-hidden animate-fade-in">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-cream-200 dark:border-bark-600">
               <h2 className="font-display font-bold text-bark-700 dark:text-cream-100">Report an issue</h2>
@@ -126,10 +126,15 @@ export function ReportButton({ campId }: { campId: string }) {
 
                 {/* Footer */}
                 <div className="flex items-center justify-between pt-1">
-                  <p className="text-xs text-bark-300">Reports are reviewed by our team.</p>
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-xs text-bark-300">Reports are reviewed by our team.</p>
+                    {description.trim().length > 0 && description.trim().length < 5 && (
+                      <p className="text-xs text-bark-400">{5 - description.trim().length} more chars needed</p>
+                    )}
+                  </div>
                   <button
                     onClick={submit}
-                    disabled={submitting || description.trim().length < 10}
+                    disabled={submitting || description.trim().length < 5}
                     className="btn-primary text-sm gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flag className="w-3.5 h-3.5" />}

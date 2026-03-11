@@ -33,6 +33,7 @@ import { SaveButton } from "@/components/save-button";
 import { CompareButton } from "@/components/compare-button";
 import { LinkifiedText } from "@/components/linkified-text";
 import { ReportButton } from "@/components/report-button";
+import { AdminCampBar } from "@/components/admin-camp-bar";
 import { routes } from "@/lib/routes";
 
 export const revalidate = 3600;
@@ -179,6 +180,7 @@ export default async function CommunityDetailPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+      <AdminCampBar campId={camp.id} campName={camp.name} />
       {/* Breadcrumb */}
       <Link
         href={routes.community(params.community)}
