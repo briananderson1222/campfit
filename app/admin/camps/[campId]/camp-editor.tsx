@@ -49,30 +49,15 @@ interface SiteHint {
 
 // ── Coverage meter ────────────────────────────────────────────────────────────
 
-// Fields covered by inline EditableField attest buttons — excluded from coverage meter chips
-const INLINE_ATTESTED_FIELDS = new Set(['description', 'campType', 'category', 'registrationStatus', 'city', 'websiteUrl']);
 
-function CoverageMeter({ camp, fieldSources, onAttest }: {
+function CoverageMeter({ camp, fieldSources }: {
   camp: Camp;
   fieldSources: Record<string, FieldSource> | null;
-  onAttest: (field: string) => Promise<void>;
 }) {
-  const [attesting, setAttesting] = useState<string | null>(null);
-
   const campLike = { ...camp, ageGroups: camp.ageGroups, pricing: camp.pricing, schedules: camp.schedules };
   const { covered, missing, unattested, pct } = computeCoverage(campLike as never, fieldSources);
   const isVerified = missing.length === 0 && unattested.length === 0;
   const color = isVerified ? 'bg-pine-500' : pct >= 67 ? 'bg-amber-400' : 'bg-red-400';
-
-  // Only show chips for complex fields not covered by inline EditableField attest buttons
-  const chipMissing = missing.filter(f => !INLINE_ATTESTED_FIELDS.has(f));
-  const chipUnattested = unattested.filter(f => !INLINE_ATTESTED_FIELDS.has(f));
-
-  async function handleAttest(field: string) {
-    setAttesting(field);
-    await onAttest(field);
-    setAttesting(null);
-  }
 
   return (
     <div className="rounded-xl border border-cream-300 dark:border-bark-500 p-3.5 space-y-2">
@@ -92,34 +77,6 @@ function CoverageMeter({ camp, fieldSources, onAttest }: {
       <div className="w-full h-1.5 rounded-full bg-cream-200 dark:bg-bark-600 overflow-hidden">
         <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
       </div>
-      {chipMissing.length > 0 && (
-        <div className="space-y-1 pt-0.5">
-          <p className="text-xs text-bark-300">Have value but need source:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {chipMissing.map(f => (
-              <button key={f} onClick={() => handleAttest(f)} disabled={attesting === f}
-                className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200/60 dark:border-red-700/30 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-50">
-                {attesting === f ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                {f}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {chipUnattested.length > 0 && (
-        <div className="space-y-1 pt-0.5">
-          <p className="text-xs text-bark-300">Blank — tap to mark as N/A:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {chipUnattested.map(f => (
-              <button key={f} onClick={() => handleAttest(f)} disabled={attesting === f}
-                className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-700/30 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors disabled:opacity-50">
-                {attesting === f ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                {f}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       {isVerified && (
         <p className="text-xs text-pine-600 dark:text-pine-400 flex items-center gap-1">
           <ShieldCheck className="w-3.5 h-3.5" />
@@ -793,7 +750,7 @@ export function CampEditor({
       )}
 
       {/* Field coverage meter */}
-      <CoverageMeter camp={camp} fieldSources={fieldSources} onAttest={attest} />
+      <CoverageMeter camp={camp} fieldSources={fieldSources} />
 
       {/* Core info */}
       <div className="glass-panel p-5">
