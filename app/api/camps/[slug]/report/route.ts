@@ -7,7 +7,7 @@ type ReportType = typeof VALID_TYPES[number];
 
 export async function POST(
   req: Request,
-  { params }: { params: { campId: string } }
+  { params }: { params: { slug: string } }
 ) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -26,17 +26,17 @@ export async function POST(
 
   const pool = getPool();
 
-  // Verify camp exists
+  // Verify camp exists — slug param is the camp UUID (passed as campId from the UI)
   const { rows: [camp] } = await pool.query<{ id: string }>(
     `SELECT id FROM "Camp" WHERE id = $1`,
-    [params.campId]
+    [params.slug]
   );
   if (!camp) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
 
   await pool.query(
     `INSERT INTO "CampReport" ("campId", "userId", "userEmail", type, description)
      VALUES ($1, $2, $3, $4, $5)`,
-    [params.campId, user.id, user.email, type, description]
+    [camp.id, user.id, user.email, type, description]
   );
 
   return NextResponse.json({ ok: true });
