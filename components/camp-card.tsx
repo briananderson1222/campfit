@@ -14,6 +14,9 @@ import {
   CATEGORY_COLORS,
   STATUS_CONFIG,
   CAMP_TYPE_LABELS,
+  getEffectiveStatus,
+  primaryCategory,
+  primaryCampType,
 } from "@/lib/types";
 import { cn, formatCurrency, getLowestPrice, getAgeRangeSummary } from "@/lib/utils";
 import { CompareButton } from "@/components/compare-button";
@@ -27,16 +30,11 @@ export function CampCard({ camp }: { camp: Camp }) {
   const saved = isSaved(camp.id);
   const lowestPrice = getLowestPrice(camp.pricing);
   const ageRange = getAgeRangeSummary(camp.ageGroups);
-  // If status is COMING_SOON but open date has passed, treat as OPEN for display
-  const today = new Date().toISOString().slice(0, 10);
-  const effectiveStatus =
-    camp.registrationStatus === "COMING_SOON" &&
-    camp.registrationOpenDate &&
-    camp.registrationOpenDate <= today
-      ? "OPEN"
-      : camp.registrationStatus;
+  const effectiveStatus = getEffectiveStatus(camp.registrationStatus, camp.registrationOpenDate, camp.registrationCloseDate ?? null);
   const status = STATUS_CONFIG[effectiveStatus];
-  const categoryColor = CATEGORY_COLORS[camp.category];
+  const campCategory = primaryCategory(camp);
+  const campTypeVal = primaryCampType(camp);
+  const categoryColor = CATEGORY_COLORS[campCategory];
   const weeksAvailable = camp.schedules.length;
   const firstSchedule = camp.schedules[0];
 
@@ -50,11 +48,11 @@ export function CampCard({ camp }: { camp: Camp }) {
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <span className={cn("badge", categoryColor)}>
-              {CATEGORY_LABELS[camp.category]}
+              {CATEGORY_LABELS[campCategory]}
             </span>
-            {camp.campType !== "SUMMER_DAY" && (
+            {campTypeVal !== "SUMMER_DAY" && (
               <span className="badge bg-clay-100 text-clay-500">
-                {CAMP_TYPE_LABELS[camp.campType]}
+                {CAMP_TYPE_LABELS[campTypeVal]}
               </span>
             )}
             <span className={cn("badge whitespace-nowrap", status.color)}>
@@ -132,7 +130,7 @@ export function CampCard({ camp }: { camp: Camp }) {
             <span className="text-xs text-bark-300 uppercase tracking-wide font-semibold">
               {ageRange}
             </span>
-            {camp.campType === "SUMMER_DAY" && (
+            {campTypeVal === "SUMMER_DAY" && (
               <span className="text-xs text-bark-300">
                 {weeksAvailable > 0
                   ? `${weeksAvailable} week${weeksAvailable !== 1 ? "s" : ""} available`

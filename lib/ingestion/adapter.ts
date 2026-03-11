@@ -23,6 +23,10 @@ export interface CampInput {
   notes: string | null;
   campType: CampType;
   category: CampCategory;
+  campTypes?: CampType[];
+  categories?: CampCategory[];
+  state?: string | null;
+  zip?: string | null;
   websiteUrl: string;
   interestingDetails: string | null;
 

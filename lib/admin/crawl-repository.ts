@@ -18,12 +18,13 @@ export async function createCrawlRun(opts: {
 
 export async function updateCrawlRunProgress(
   id: string,
-  updates: Partial<Pick<CrawlRun, 'processedCamps' | 'errorCount' | 'newProposals'>>
+  updates: Partial<Pick<CrawlRun, 'processedCamps' | 'errorCount' | 'newProposals' | 'totalCamps'>>
 ): Promise<void> {
   const pool = getPool();
   const sets: string[] = [];
   const vals: unknown[] = [];
   let i = 1;
+  if (updates.totalCamps !== undefined) { sets.push(`"totalCamps" = $${i++}`); vals.push(updates.totalCamps); }
   if (updates.processedCamps !== undefined) { sets.push(`"processedCamps" = $${i++}`); vals.push(updates.processedCamps); }
   if (updates.errorCount !== undefined) { sets.push(`"errorCount" = $${i++}`); vals.push(updates.errorCount); }
   if (updates.newProposals !== undefined) { sets.push(`"newProposals" = $${i++}`); vals.push(updates.newProposals); }

@@ -3,10 +3,12 @@
  * Local crawl runner — bypasses Vercel serverless timeout limits.
  *
  * Usage:
- *   node scripts/run-crawl.mjs               # all camps
- *   node scripts/run-crawl.mjs --limit 5     # first 5 camps (by lastVerifiedAt)
- *   node scripts/run-crawl.mjs --id abc,def  # specific camp IDs
- *   node scripts/run-crawl.mjs --dry-run     # fetch URLs, skip LLM + DB writes
+ *   node scripts/run-crawl.mjs                          # all camps
+ *   node scripts/run-crawl.mjs --limit 5               # first 5 camps (by lastVerifiedAt)
+ *   node scripts/run-crawl.mjs --id abc,def            # specific camp IDs
+ *   node scripts/run-crawl.mjs --provider-id xyz       # all camps for a provider
+ *   node scripts/run-crawl.mjs --provider-id xyz --discover  # + discover new programs
+ *   node scripts/run-crawl.mjs --dry-run               # fetch URLs, skip LLM + DB writes
  */
 
 import { createRequire } from 'module';
@@ -57,6 +59,9 @@ const limitIdx = args.indexOf('--limit');
 const limit   = limitIdx !== -1 ? parseInt(args[limitIdx + 1]) : null;
 const idIdx   = args.indexOf('--id');
 const campIds = idIdx !== -1 ? args[idIdx + 1].split(',') : null;
+const providerIdIdx = args.indexOf('--provider-id');
+const providerIds = providerIdIdx !== -1 ? args[providerIdIdx + 1].split(',') : null;
+const discover = args.includes('--discover');
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -112,6 +117,7 @@ function stripHtml(html, url) {
 }
 
 function buildPrompt(campName, url, text, siteHints = [], neighborhoods = []) {
+  const today = new Date().toISOString().split('T')[0];
   const hintsSection = siteHints.length > 0
     ? `\nSITE-SPECIFIC NOTES (apply these when extracting from this domain):\n${siteHints.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n`
     : '';
@@ -123,6 +129,7 @@ function buildPrompt(campName, url, text, siteHints = [], neighborhoods = []) {
 
 Camp name: ${campName}
 Source URL: ${url}
+Today's date: ${today}
 ${hintsSection}
 RULES:
 - Only extract fields you find EXPLICIT evidence for on the page. Never guess or infer beyond what is written.
@@ -131,10 +138,22 @@ RULES:
 - city must be a real city name (e.g. "Arvada", "Denver") — NOT a state name.
 - address must be a street address only (e.g. "4001 E Iliff Ave") — NOT a neighborhood or park name.
 ${nbhdRule}
-- campType must be one of: SUMMER_DAY, SLEEPAWAY, FAMILY, VIRTUAL, WINTER_BREAK, SCHOOL_BREAK
-- category must be one of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER
+- campTypes must be an array containing one or more of: SUMMER_DAY, SLEEPAWAY, FAMILY, VIRTUAL, WINTER_BREAK, SCHOOL_BREAK — list all that apply
+- categories must be an array containing one or more of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER — list all that apply
+- state must be a 2-letter US state abbreviation (e.g. 'CO') if found on the page, or null
+- zip must be a 5-digit US zip code if found on the page, or null
 - registrationStatus must be one of: OPEN, FULL, WAITLIST, CLOSED, COMING_SOON, UNKNOWN
-  OPEN=accepting registrations, FULL=at capacity (no spots left), WAITLIST=full but waitlist available, CLOSED=registration period ended
+  Use today's date (${today}) to reason about which status is correct:
+  COMING_SOON = registration opens in the FUTURE (open date is after today)
+  OPEN = registration is currently open (open date is in the past OR page says "register now" / "enroll today")
+  FULL = at capacity, no spots left
+  WAITLIST = full but waitlist is available
+  CLOSED = registration period has ended
+  UNKNOWN = no clear registration information found
+  IMPORTANT: If the page mentions a registration open date that has already passed (before ${today}), do NOT use COMING_SOON — use OPEN or UNKNOWN depending on whether the page confirms registration is still active.
+
+- registrationOpenDate: the date registration opens, as YYYY-MM-DD. Only set if an explicit date is stated.
+- registrationCloseDate: the date registration closes or the deadline to register, as YYYY-MM-DD. Only set if explicitly stated.
 
 Return ONLY valid JSON matching this exact shape — no markdown fences, no explanation:
 
@@ -146,8 +165,12 @@ Return ONLY valid JSON matching this exact shape — no markdown fences, no expl
     "address": string | null,
     "lunchIncluded": boolean | null,
     "registrationStatus": "OPEN"|"FULL"|"WAITLIST"|"CLOSED"|"COMING_SOON"|"UNKNOWN"|null,
-    "campType": "SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK"|null,
-    "category": "SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER"|null
+    "registrationOpenDate": "YYYY-MM-DD" | null,
+    "registrationCloseDate": "YYYY-MM-DD" | null,
+    "campTypes": ["SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK"],
+    "categories": ["SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER"],
+    "state": "CO" | null,
+    "zip": "80000" | null
   },
   "confidence": {
     "description": 0,
@@ -156,8 +179,12 @@ Return ONLY valid JSON matching this exact shape — no markdown fences, no expl
     "address": 0,
     "lunchIncluded": 0,
     "registrationStatus": 0,
-    "campType": 0,
-    "category": 0
+    "registrationOpenDate": 0,
+    "registrationCloseDate": 0,
+    "campTypes": 0,
+    "categories": 0,
+    "state": 0,
+    "zip": 0
   },
   "excerpts": {
     "description": "verbatim quote from page or null",
@@ -166,8 +193,12 @@ Return ONLY valid JSON matching this exact shape — no markdown fences, no expl
     "address": "verbatim quote from page or null",
     "lunchIncluded": "verbatim quote from page or null",
     "registrationStatus": "verbatim quote from page or null",
-    "campType": "verbatim quote from page or null",
-    "category": "verbatim quote from page or null"
+    "registrationOpenDate": "verbatim quote from page or null",
+    "registrationCloseDate": "verbatim quote from page or null",
+    "campTypes": "verbatim quote from page or null",
+    "categories": "verbatim quote from page or null",
+    "state": "verbatim quote from page or null",
+    "zip": "verbatim quote from page or null"
   }
 }
 
@@ -310,17 +341,103 @@ function computeDiff(current, extracted, confidence, excerpts = {}, sourceUrl = 
   return diff;
 }
 
+// ── Discovery helpers ─────────────────────────────────────────────────────────
+
+function toSlug(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+function bigrams(str) {
+  const s = str.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  const result = new Set();
+  for (let i = 0; i < s.length - 1; i++) result.add(s.slice(i, i + 2));
+  return result;
+}
+
+function diceCoefficient(a, b) {
+  const ba = bigrams(a);
+  const bb = bigrams(b);
+  if (ba.size === 0 || bb.size === 0) return 0;
+  let intersection = 0;
+  for (const gram of ba) if (bb.has(gram)) intersection++;
+  return (2 * intersection) / (ba.size + bb.size);
+}
+
+function filterNewDiscoveries(stubs, existingNames, threshold = 0.75) {
+  return stubs.filter(stub => {
+    for (const existing of existingNames) {
+      if (diceCoefficient(stub.name, existing) >= threshold) return false;
+    }
+    return true;
+  });
+}
+
+async function discoverCampsFromPage(url) {
+  const html = await fetchPage(url);
+  const text = stripHtml(html, url);
+
+  const prompt = `You are analyzing a kids' camp website page to discover all distinct camp programs listed.
+
+Source URL: ${url}
+
+TASK:
+1. Determine if this page lists multiple distinct camp programs/sessions (a "listing page").
+   A listing page typically shows 3+ different named programs with brief descriptions.
+   A single-camp detail page is NOT a listing page.
+
+2. If it is a listing page, extract every distinct camp program name you find.
+   - Include the direct URL to each program's detail page if one is linked (make it absolute using the source URL as base).
+   - Include a short snippet/description (1-2 sentences) from the listing if available.
+   - Each program should be a genuinely distinct camp offering (different name, age range, theme, etc.).
+   - Do NOT include schedule sessions/weeks of the same program as separate entries.
+
+Return ONLY valid JSON matching this exact shape — no markdown fences, no explanation:
+
+{
+  "isListingPage": true | false,
+  "camps": [
+    {
+      "name": "Program Name",
+      "detailUrl": "https://... or null",
+      "snippet": "Brief description or null"
+    }
+  ]
+}
+
+If isListingPage is false, return an empty camps array.
+
+Website text:
+${text.slice(0, 24000)}`;
+
+  const raw = await callLLM(prompt);
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error(`No JSON in discovery response`);
+  return JSON.parse(jsonMatch[0]);
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  log(`Starting crawl — dry=${dryRun} limit=${limit ?? 'all'} ids=${campIds?.join(',') ?? 'none'}`);
+  log(`Starting crawl — dry=${dryRun} limit=${limit ?? 'all'} ids=${campIds?.join(',') ?? 'none'} providerIds=${providerIds?.join(',') ?? 'none'} discover=${discover}`);
 
   // Load camps
   let query, params = [];
-  const cols = `id, name, "websiteUrl", description, city, neighborhood, address, "lunchIncluded", "registrationStatus", "campType", category, COALESCE("fieldSources", '{}') AS "fieldSources"`;
-  if (campIds) {
+  const cols = `id, name, slug, "websiteUrl", description, city, neighborhood, address, "lunchIncluded", "registrationStatus", "campType", category, "communitySlug", "providerId", COALESCE("fieldSources", '{}') AS "fieldSources"`;
+
+  // Resolve providerIds → campIds if needed
+  let resolvedCampIds = campIds;
+  if (!resolvedCampIds && providerIds) {
+    const { rows } = await pool.query(
+      `SELECT id FROM "Camp" WHERE "providerId" = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`,
+      [providerIds]
+    );
+    resolvedCampIds = rows.map(r => r.id);
+    log(`Resolved ${resolvedCampIds.length} camps for provider(s) ${providerIds.join(',')}`);
+  }
+
+  if (resolvedCampIds) {
     query = `SELECT ${cols} FROM "Camp" WHERE id = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`;
-    params = [campIds];
+    params = [resolvedCampIds];
   } else {
     query = `SELECT ${cols} FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != '' ORDER BY "lastVerifiedAt" ASC NULLS FIRST${limit ? ` LIMIT ${limit}` : ''}`;
   }
@@ -342,6 +459,67 @@ async function main() {
   }
 
   let processed = 0, errors = 0, proposals = 0;
+
+  // ── Discovery pre-pass ──────────────────────────────────────────────────────
+  // When --discover is set, find listing pages (URLs shared by 2+ camps) and
+  // extract new programs, inserting them so the update loop can process them.
+  if (discover && !dryRun && camps.length > 0) {
+    log('Running discovery pre-pass...');
+    const urlGroups = new Map();
+    for (const camp of camps) {
+      if (!urlGroups.has(camp.websiteUrl)) urlGroups.set(camp.websiteUrl, []);
+      urlGroups.get(camp.websiteUrl).push(camp);
+    }
+
+    for (const [url, group] of urlGroups) {
+      // Only run discovery on listing pages (2+ camps sharing the same URL)
+      if (group.length < 2) continue;
+      log(`[discovery] ${url} — shared by ${group.length} camps, running discovery…`);
+      try {
+        const result = await discoverCampsFromPage(url);
+        log(`  → isListingPage=${result.isListingPage}, found ${result.camps?.length ?? 0} programs`);
+        if (!result.isListingPage || !result.camps?.length) continue;
+
+        const existingNames = group.map(c => c.name);
+        const newStubs = filterNewDiscoveries(result.camps, existingNames);
+        log(`  → ${newStubs.length} genuinely new programs after dedup`);
+
+        const refCamp = group[0];
+        for (const stub of newStubs) {
+          const campUrl = stub.detailUrl ?? url;
+          const baseSlug = toSlug(stub.name);
+          const campSlug = baseSlug + '-' + Math.random().toString(36).slice(2, 6);
+          try {
+            const { rows: [newCamp] } = await pool.query(
+              `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", city, "dataConfidence", "campType", category, "providerId")
+               VALUES ($1, $2, $3, $4, $5, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', $6)
+               ON CONFLICT (slug) DO NOTHING
+               RETURNING id, name, "websiteUrl", "communitySlug", city, "providerId", COALESCE("fieldSources", '{}') AS "fieldSources"`,
+              [stub.name, campSlug, campUrl, refCamp.communitySlug, refCamp.city, refCamp.providerId ?? null]
+            );
+            if (newCamp) {
+              log(`  → created: "${newCamp.name}" (${newCamp.id})`);
+              camps.push({
+                ...newCamp,
+                slug: campSlug,
+                neighborhood: null, description: null, campType: null, category: null,
+                registrationStatus: null, lunchIncluded: null, address: null,
+              });
+            } else {
+              log(`  → slug conflict for "${stub.name}", skipping`);
+            }
+          } catch (err) {
+            log(`  → ERROR inserting "${stub.name}": ${err.message}`);
+          }
+        }
+
+        await delay(2000); // be polite between discovery requests
+      } catch (err) {
+        log(`  → discovery ERROR for ${url}: ${err.message}`);
+      }
+    }
+    log(`Discovery pre-pass complete. Total camps to process: ${camps.length}`);
+  }
 
   for (let i = 0; i < camps.length; i++) {
     const camp = camps[i];

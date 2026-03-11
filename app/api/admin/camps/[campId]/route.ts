@@ -4,8 +4,8 @@ import { getPool } from '@/lib/db';
 
 const EDITABLE_FIELDS = new Set([
   'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes', 'interestingDetails',
-  'campType', 'category', 'registrationStatus', 'registrationOpenDate',
-  'dataConfidence', 'lunchIncluded', 'city', 'neighborhood', 'address',
+  'campType', 'category', 'campTypes', 'categories', 'registrationStatus', 'registrationOpenDate',
+  'dataConfidence', 'lunchIncluded', 'city', 'neighborhood', 'address', 'state', 'zip',
 ]);
 
 export async function PATCH(

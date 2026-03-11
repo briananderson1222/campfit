@@ -145,16 +145,7 @@ export default async function ProviderDetailPage({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <form action={`/api/admin/providers/${provider.id}/crawl`} method="POST">
-            <button
-              type="submit"
-              className="px-3 py-2 rounded-xl bg-pine-600 hover:bg-pine-700 text-cream-100 text-sm font-semibold transition-colors"
-            >
-              Trigger Crawl
-            </button>
-          </form>
-        </div>
+        <div />
       </div>
 
       {/* ── Rollup stats ── */}
@@ -217,7 +208,7 @@ export default async function ProviderDetailPage({
       )}
 
       {/* ── Provider info + crawl hints (inline editable) ── */}
-      <ProviderEditor provider={provider} siteHints={siteHints} />
+      <ProviderEditor provider={provider} siteHints={siteHints} campCount={provider.campCount ?? 0} />
 
       {/* ── Camps table ── */}
       <div className="glass-panel overflow-hidden">

@@ -23,6 +23,8 @@ import {
   STATUS_CONFIG,
   CAMP_TYPE_LABELS,
   SUMMER_WEEKS,
+  primaryCategory,
+  primaryCampType,
 } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
@@ -103,7 +105,9 @@ export default async function CampDetailPage({
   if (!camp) notFound();
 
   const status = STATUS_CONFIG[camp.registrationStatus];
-  const categoryColor = CATEGORY_COLORS[camp.category];
+  const campCategory = primaryCategory(camp);
+  const campTypeVal = primaryCampType(camp);
+  const categoryColor = CATEGORY_COLORS[campCategory];
   const firstSchedule = camp.schedules[0];
 
   const weekAvailability = SUMMER_WEEKS.map((week) => ({
@@ -179,11 +183,11 @@ export default async function CampDetailPage({
       <div className="mb-8 animate-fade-up">
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className={cn("badge", categoryColor)}>
-            {CATEGORY_LABELS[camp.category]}
+            {CATEGORY_LABELS[campCategory]}
           </span>
-          {camp.campType !== "SUMMER_DAY" && (
+          {campTypeVal !== "SUMMER_DAY" && (
             <span className="badge bg-clay-100 text-clay-500">
-              {CAMP_TYPE_LABELS[camp.campType]}
+              {CAMP_TYPE_LABELS[campTypeVal]}
             </span>
           )}
           <span className={cn("badge", status.color)}>{status.label}</span>
@@ -248,7 +252,7 @@ export default async function CampDetailPage({
           </section>
 
           {/* Weekly Availability (summer camps only) */}
-          {camp.campType === "SUMMER_DAY" && (
+          {campTypeVal === "SUMMER_DAY" && (
             <section className="glass-panel p-6 animate-fade-up stagger-2">
               <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-pine-400" />
@@ -293,7 +297,7 @@ export default async function CampDetailPage({
           )}
 
           {/* Non-summer schedules */}
-          {camp.campType !== "SUMMER_DAY" && camp.schedules.length > 0 && (
+          {campTypeVal !== "SUMMER_DAY" && camp.schedules.length > 0 && (
             <section className="glass-panel p-6 animate-fade-up stagger-2">
               <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-pine-400" />

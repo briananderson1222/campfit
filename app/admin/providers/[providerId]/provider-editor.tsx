@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   Check, X, Pencil, Loader2, ExternalLink,
   Plus, Trash2, ToggleLeft, ToggleRight,
+  RefreshCw, Telescope, CheckCircle, XCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -191,9 +192,111 @@ function SiteHintsSection({ domain, initialHints }: { domain: string | null; ini
   );
 }
 
+// ── Provider crawl controls ───────────────────────────────────────────────────
+
+type CrawlState = 'idle' | 'running' | 'done' | 'error';
+
+function ProviderCrawlSection({ providerId, campCount }: { providerId: string; campCount: number }) {
+  const [state, setState] = useState<CrawlState>('idle');
+  const [progress, setProgress] = useState<{ processed: number; total: number; proposals: number; errors: number } | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function startCrawl(discover: boolean) {
+    setState('running');
+    setProgress({ processed: 0, total: campCount, proposals: 0, errors: 0 });
+    setErrorMsg(null);
+
+    try {
+      const res = await fetch(`/api/admin/providers/${providerId}/crawl`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discover }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const { runId } = await res.json();
+
+      const poll = setInterval(async () => {
+        const r = await fetch(`/api/admin/crawl/${runId}/status-json`).catch(() => null);
+        if (!r?.ok) return;
+        const data = await r.json().catch(() => null);
+        if (!data) return;
+        setProgress({ processed: data.processedCamps ?? 0, total: data.totalCamps ?? campCount, proposals: data.newProposals ?? 0, errors: data.errorCount ?? 0 });
+        if (data.status === 'COMPLETED') { clearInterval(poll); setState('done'); }
+        else if (data.status === 'FAILED') { clearInterval(poll); setState('error'); setErrorMsg('Crawl failed'); }
+      }, 3000);
+
+      setTimeout(() => clearInterval(poll), 310_000);
+    } catch (err) {
+      setState('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Error');
+    }
+  }
+
+  const reset = () => { setState('idle'); setProgress(null); setErrorMsg(null); };
+
+  return (
+    <div className="glass-panel p-6">
+      <h2 className="font-display font-bold text-bark-700 dark:text-cream-200 mb-1">Crawl</h2>
+      <p className="text-xs text-bark-300 mb-4">Update existing camps or discover new programs from this provider's website.</p>
+
+      {state === 'idle' && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => startCrawl(false)}
+            disabled={campCount === 0}
+            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl border border-cream-300 dark:border-bark-500 text-bark-500 hover:border-pine-300 hover:text-pine-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Update {campCount} camp{campCount !== 1 ? 's' : ''}
+          </button>
+          <button
+            onClick={() => startCrawl(true)}
+            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl border border-cream-300 dark:border-bark-500 text-bark-500 hover:border-pine-300 hover:text-pine-600 transition-colors"
+          >
+            <Telescope className="w-3.5 h-3.5" />
+            Discover + Update
+          </button>
+        </div>
+      )}
+
+      {state === 'running' && (
+        <div className="flex items-center gap-3 py-1">
+          <Loader2 className="w-4 h-4 text-pine-500 animate-spin shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-bark-600">
+              {progress?.processed ?? 0} / {progress?.total ?? '?'} camps
+              {(progress?.proposals ?? 0) > 0 ? ` · ${progress!.proposals} changes found` : ''}
+              {(progress?.errors ?? 0) > 0 ? ` · ${progress!.errors} errors` : ''}
+            </p>
+            <p className="text-xs text-bark-300">Running in background…</p>
+          </div>
+        </div>
+      )}
+
+      {state === 'done' && (
+        <div className="flex items-center gap-3">
+          <CheckCircle className="w-4 h-4 text-pine-500 shrink-0" />
+          <p className="text-sm text-bark-600">
+            Done · {progress?.processed} camps · {progress?.proposals} proposals · {progress?.errors} errors
+          </p>
+          <button onClick={reset} className="text-xs text-bark-300 hover:text-bark-500 ml-auto">Reset</button>
+        </div>
+      )}
+
+      {state === 'error' && (
+        <div className="flex items-center gap-3">
+          <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+          <p className="text-sm text-red-400">{errorMsg}</p>
+          <button onClick={reset} className="text-xs text-bark-300 hover:text-bark-500 ml-auto">Reset</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function ProviderEditor({ provider, siteHints }: { provider: Provider; siteHints: SiteHint[] }) {
+export function ProviderEditor({ provider, siteHints, campCount = 0 }: { provider: Provider; siteHints: SiteHint[]; campCount?: number }) {
   return (
     <div className="space-y-6">
       {/* Provider info — inline editable */}
@@ -204,7 +307,7 @@ export function ProviderEditor({ provider, siteHints }: { provider: Provider; si
           <EditableField providerId={provider.id} field="name" label="Name" value={provider.name} />
           <EditableField providerId={provider.id} field="websiteUrl" label="Website" value={provider.websiteUrl} type="url" />
           <EditableField providerId={provider.id} field="crawlRootUrl" label="Crawl Root URL" value={provider.crawlRootUrl} type="url"
-            helper="Entry point for discovery crawl — leave blank to use Website URL" />
+            helper="Entry point for discovery — leave blank to use Website URL" />
           <EditableField providerId={provider.id} field="logoUrl" label="Logo URL" value={provider.logoUrl} type="url" />
           <EditableField providerId={provider.id} field="address" label="Address" value={provider.address} />
           <EditableField providerId={provider.id} field="city" label="City" value={provider.city} />
@@ -214,6 +317,9 @@ export function ProviderEditor({ provider, siteHints }: { provider: Provider; si
           <EditableField providerId={provider.id} field="notes" label="Internal Notes" value={provider.notes} type="textarea" />
         </dl>
       </div>
+
+      {/* Crawl controls */}
+      <ProviderCrawlSection providerId={provider.id} campCount={campCount} />
 
       {/* Crawl hints */}
       <div className="glass-panel p-6">

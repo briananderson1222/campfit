@@ -17,10 +17,13 @@ interface Camp {
   id: string; name: string; slug: string; communitySlug: string;
   organizationName: string | null; providerId: string | null;
   description: string | null; notes: string | null;
-  campType: string | null; category: string | null; websiteUrl: string | null;
+  campType: string | null; category: string | null;
+  campTypes: string[]; categories: string[];
+  state: string | null; zip: string | null;
+  websiteUrl: string | null;
   interestingDetails: string | null; city: string | null; neighborhood: string | null;
   address: string | null; lunchIncluded: boolean | null;
-  registrationOpenDate: string | null; registrationStatus: string | null;
+  registrationOpenDate: string | null; registrationCloseDate: string | null; registrationStatus: string | null;
   dataConfidence: string | null; lastVerifiedAt: string | null;
   fieldSources: Record<string, FieldSource> | null;
   createdAt: string; updatedAt: string;
@@ -688,6 +691,54 @@ function SiteHintsSection({ domain, initialHints }: { domain: string; initialHin
   );
 }
 
+// ── Multi-select checkbox field ───────────────────────────────────────────────
+
+function MultiSelectField({ campId, field, label, value, options }: {
+  campId: string;
+  field: string;
+  label: string;
+  value: string[];
+  options: { value: string; label: string }[];
+}) {
+  const [current, setCurrent] = useState<string[]>(value ?? []);
+  const [saving, setSaving] = useState(false);
+
+  async function toggle(opt: string) {
+    const next = current.includes(opt)
+      ? current.filter(v => v !== opt)
+      : [...current, opt];
+    if (next.length === 0) return; // require at least one
+    setSaving(true);
+    const res = await fetch(`/api/admin/camps/${campId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: next }),
+    }).catch(() => null);
+    setSaving(false);
+    if (res?.ok) setCurrent(next);
+  }
+
+  return (
+    <div>
+      <dt className="text-xs text-bark-300 dark:text-bark-300 font-semibold uppercase tracking-wide mb-1">
+        {label} {saving && <Loader2 className="inline w-3 h-3 animate-spin ml-1" />}
+      </dt>
+      <dd className="flex flex-wrap gap-2">
+        {options.map(opt => (
+          <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={current.includes(opt.value)}
+              onChange={() => toggle(opt.value)}
+              className="rounded border-cream-300 text-pine-500 focus:ring-pine-400"
+            />
+            <span className="text-sm text-bark-500 dark:text-cream-300">{opt.label}</span>
+          </label>
+        ))}
+      </dd>
+    </div>
+  );
+}
+
 // ── Main editor ───────────────────────────────────────────────────────────────
 
 export function CampEditor({
@@ -766,13 +817,32 @@ export function CampEditor({
           <ProviderField campId={camp.id} providerId={camp.providerId} organizationName={camp.organizationName} provider={provider} />
           <EditableField campId={camp.id} field="websiteUrl" label="Website URL" value={camp.websiteUrl}
             onAttest={attestProp('websiteUrl')} isAttested={isAttested('websiteUrl')} />
-          <EditableField campId={camp.id} field="campType" label="Camp Type" value={camp.campType} type="select"
-            onAttest={attestProp('campType')} isAttested={isAttested('campType')} />
-          <EditableField campId={camp.id} field="category" label="Category" value={camp.category} type="select"
-            onAttest={attestProp('category')} isAttested={isAttested('category')} />
+          <MultiSelectField campId={camp.id} field="campTypes" label="Camp Types" value={camp.campTypes ?? []}
+            options={[
+              { value: 'SUMMER_DAY', label: 'Summer Day' },
+              { value: 'SLEEPAWAY', label: 'Sleepaway' },
+              { value: 'FAMILY', label: 'Family' },
+              { value: 'VIRTUAL', label: 'Virtual' },
+              { value: 'WINTER_BREAK', label: 'Winter Break' },
+              { value: 'SCHOOL_BREAK', label: 'School Break' },
+            ]} />
+          <MultiSelectField campId={camp.id} field="categories" label="Categories" value={camp.categories ?? []}
+            options={[
+              { value: 'SPORTS', label: 'Sports' },
+              { value: 'ARTS', label: 'Arts' },
+              { value: 'STEM', label: 'STEM' },
+              { value: 'NATURE', label: 'Nature' },
+              { value: 'ACADEMIC', label: 'Academic' },
+              { value: 'MUSIC', label: 'Music' },
+              { value: 'THEATER', label: 'Theater' },
+              { value: 'COOKING', label: 'Cooking' },
+              { value: 'MULTI_ACTIVITY', label: 'Multi-Activity' },
+              { value: 'OTHER', label: 'Other' },
+            ]} />
           <EditableField campId={camp.id} field="registrationStatus" label="Registration Status" value={camp.registrationStatus} type="select"
             onAttest={attestProp('registrationStatus')} isAttested={isAttested('registrationStatus')} />
           <EditableField campId={camp.id} field="registrationOpenDate" label="Registration Open Date" value={camp.registrationOpenDate} type="date" />
+          <EditableField campId={camp.id} field="registrationCloseDate" label="Registration Close Date" value={camp.registrationCloseDate} type="date" />
           <EditableField campId={camp.id} field="dataConfidence" label="Data Confidence" value={camp.dataConfidence} type="select" />
           <EditableField campId={camp.id} field="lunchIncluded" label="Lunch Included" value={camp.lunchIncluded} type="boolean" />
         </dl>
@@ -795,6 +865,8 @@ export function CampEditor({
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
           <EditableField campId={camp.id} field="city" label="City" value={camp.city}
             onAttest={attestProp('city')} isAttested={isAttested('city')} />
+          <EditableField campId={camp.id} field="state" label="State" value={camp.state} />
+          <EditableField campId={camp.id} field="zip" label="ZIP Code" value={camp.zip} />
           <NeighborhoodField campId={camp.id} value={camp.neighborhood} communitySlug={camp.communitySlug} />
           <div className="sm:col-span-2">
             <EditableField campId={camp.id} field="address" label="Street Address" value={camp.address} />

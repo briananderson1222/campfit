@@ -8,7 +8,7 @@ import {
   Trash2, ExternalLink, Crown, MapPin, Calendar, CalendarArrowDown, Loader2,
 } from "lucide-react";
 import {
-  CATEGORY_LABELS, CATEGORY_COLORS, STATUS_CONFIG, SavedCamp,
+  CATEGORY_LABELS, CATEGORY_COLORS, STATUS_CONFIG, SavedCamp, primaryCategory,
 } from "@/lib/types";
 import { cn, formatCurrency, getLowestPrice } from "@/lib/utils";
 import { routes } from "@/lib/routes";
@@ -133,7 +133,7 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
           savedCamps.map((saved, i) => {
             const camp = saved.camp;
             const status = STATUS_CONFIG[camp.registrationStatus];
-            const categoryColor = CATEGORY_COLORS[camp.category];
+            const categoryColor = CATEGORY_COLORS[primaryCategory(camp)];
             const lowestPrice = getLowestPrice(camp.pricing);
 
             return (
@@ -146,7 +146,7 @@ export function DashboardClient({ initialSaves, userEmail, isPremium = false }: 
                   <div>
                     <div className="flex flex-wrap items-center gap-2 mb-1.5">
                       <span className={cn("badge", categoryColor)}>
-                        {CATEGORY_LABELS[camp.category]}
+                        {CATEGORY_LABELS[primaryCategory(camp)]}
                       </span>
                       <span className={cn("badge", status.color)}>
                         {status.label}

@@ -24,6 +24,8 @@ import {
   STATUS_CONFIG,
   CAMP_TYPE_LABELS,
   SUMMER_WEEKS,
+  primaryCategory,
+  primaryCampType,
 } from "@/lib/types";
 import { cn, formatCurrency, getAgeRangeSummary } from "@/lib/utils";
 import { useCommunity } from "@/lib/community-context";
@@ -157,10 +159,10 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
                         <span
                           className={cn(
                             "badge text-[10px]",
-                            CATEGORY_COLORS[camp.category]
+                            CATEGORY_COLORS[primaryCategory(camp)]
                           )}
                         >
-                          {CATEGORY_LABELS[camp.category]}
+                          {CATEGORY_LABELS[primaryCategory(camp)]}
                         </span>
                         <span
                           className={cn(

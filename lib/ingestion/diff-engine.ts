@@ -7,12 +7,14 @@ const SUPPRESS_DAYS = 30;  // Re-suppress recently-approved fields at low confid
 const SUPPRESS_CONFIDENCE = 0.8; // Threshold below which suppression applies
 
 const SCALAR_FIELDS = [
-  'name', 'description', 'campType', 'category', 'registrationStatus',
+  'name', 'description', 'registrationStatus',
   'registrationOpenDate', 'lunchIncluded', 'address', 'neighborhood',
-  'city', 'websiteUrl', 'interestingDetails',
+  'city', 'websiteUrl', 'interestingDetails', 'state', 'zip',
 ] as const;
 
 const ARRAY_FIELDS = ['ageGroups', 'schedules', 'pricing'] as const;
+
+const ENUM_ARRAY_FIELDS = ['campTypes', 'categories'] as const;
 
 export function computeDiff(
   current: Camp,
@@ -46,6 +48,43 @@ export function computeDiff(
       const isEmpty = currentVal === null || currentVal === undefined || currentVal === '';
       changes[field] = {
         old: currentVal,
+        new: extractedVal,
+        confidence: conf,
+        mode: isEmpty ? 'populate' : 'update',
+        ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
+      };
+    }
+  }
+
+  // Enum array fields (campTypes, categories) — support string or array from LLM
+  for (const field of ENUM_ARRAY_FIELDS) {
+    const conf = confidence[field] ?? 0;
+    if (conf < MIN_CONFIDENCE) continue;
+
+    let extractedVal = (extracted as Record<string, unknown>)[field];
+    if (extractedVal === undefined || extractedVal === null) continue;
+
+    // If LLM returned a single string, wrap in array
+    if (typeof extractedVal === 'string') extractedVal = [extractedVal];
+    if (!Array.isArray(extractedVal) || extractedVal.length === 0) continue;
+
+    const currentArr = (current as unknown as Record<string, unknown>)[field];
+    const currentItems = Array.isArray(currentArr) ? currentArr : [];
+
+    const sortedCurrent = [...currentItems].sort().join(',');
+    const sortedExtracted = [...(extractedVal as unknown[])].sort().join(',');
+
+    if (sortedCurrent !== sortedExtracted) {
+      const src = fieldSources[field];
+      if (src?.approvedAt) {
+        const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
+        if (daysSince < SUPPRESS_DAYS && conf < SUPPRESS_CONFIDENCE) continue;
+      }
+
+      const isEmpty = currentItems.length === 0;
+      changes[field] = {
+        old: currentItems,
         new: extractedVal,
         confidence: conf,
         mode: isEmpty ? 'populate' : 'update',

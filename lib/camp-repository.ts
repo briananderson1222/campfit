@@ -13,8 +13,10 @@ import { Camp, CampCategory, CampType, Community } from "@/lib/types";
 const CAMPS_WITH_RELATIONS_SQL = `
   SELECT
     c.*,
+    c."campTypes", c."categories", c.state, c.zip,
     c."communitySlug", c."displayName",
     c."registrationOpenDate"::text AS "registrationOpenDate",
+    c."registrationCloseDate"::text AS "registrationCloseDate",
     COALESCE((
       SELECT json_agg(jsonb_build_object(
         'id', ag."id", 'label', ag."label",

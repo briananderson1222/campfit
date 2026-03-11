@@ -12,9 +12,14 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const campIds: string[] | undefined = body.campIds;
   const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
+  const discover: boolean = body.discover === true;
 
   let resolveRunId!: (id: string) => void;
-  const runIdPromise = new Promise<string>(resolve => { resolveRunId = resolve; });
+  let rejectRunId!: (err: Error) => void;
+  const runIdPromise = new Promise<string>((resolve, reject) => {
+    resolveRunId = resolve;
+    rejectRunId = reject;
+  });
 
   // Start pipeline — it emits 'started' event with runId synchronously at boot
   runCrawlPipeline({
@@ -22,10 +27,14 @@ export async function POST(request: Request) {
     trigger: 'MANUAL',
     campIds,
     model,
+    discover,
     onProgress: (event) => {
       if (event.type === 'started') resolveRunId(event.runId);
     },
-  }).catch(console.error);
+  }).catch(err => {
+    rejectRunId(err instanceof Error ? err : new Error(String(err)));
+    console.error('[crawl/start] pipeline error:', err);
+  });
 
   // Wait for the run to be created (happens at pipeline start before any camp processing)
   try {

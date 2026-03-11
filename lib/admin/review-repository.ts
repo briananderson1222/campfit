@@ -166,3 +166,41 @@ export async function getPendingCount(): Promise<number> {
   const result = await pool.query(`SELECT COUNT(*) FROM "CampChangeProposal" WHERE status = 'PENDING'`);
   return parseInt(result.rows[0].count);
 }
+
+export interface CampReport {
+  id: string;
+  campId: string;
+  campName: string;
+  campSlug: string;
+  communitySlug: string;
+  userId: string | null;
+  userEmail: string | null;
+  type: 'WRONG_INFO' | 'MISSING_INFO' | 'CAMP_CLOSED' | 'OTHER';
+  description: string;
+  status: 'PENDING' | 'REVIEWED' | 'DISMISSED';
+  adminNotes: string | null;
+  createdAt: string;
+}
+
+export async function getPendingReports(opts: {
+  limit?: number;
+  offset?: number;
+}): Promise<{ reports: CampReport[]; total: number }> {
+  const pool = getPool();
+  const { limit = 25, offset = 0 } = opts;
+
+  const [rows, countRow] = await Promise.all([
+    pool.query(
+      `SELECT r.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug"
+       FROM "CampReport" r
+       JOIN "Camp" c ON c.id = r."campId"
+       WHERE r.status = 'PENDING'
+       ORDER BY r."createdAt" DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    ),
+    pool.query(`SELECT COUNT(*) FROM "CampReport" WHERE status = 'PENDING'`),
+  ]);
+
+  return { reports: rows.rows, total: parseInt(countRow.rows[0].count) };
+}

@@ -79,6 +79,10 @@ export interface Camp {
   notes: string | null;
   campType: CampType;
   category: CampCategory;
+  campTypes: CampType[];
+  categories: CampCategory[];
+  state: string | null;
+  zip: string | null;
   websiteUrl: string;
   interestingDetails: string | null;
 
@@ -95,6 +99,7 @@ export interface Camp {
 
   registrationOpenDate: string | null;
   registrationOpenTime: string | null;
+  registrationCloseDate?: string | null;
   registrationStatus: RegistrationStatus;
 
   dataConfidence: DataConfidence;
@@ -224,6 +229,39 @@ export const STATUS_CONFIG: Record<
   },
   UNKNOWN: { label: "Check Website", color: "bg-gray-100 text-gray-600" },
 };
+
+/**
+ * Compute the effective registration status at display time.
+ * Overrides the stored status based on registrationOpenDate / registrationCloseDate
+ * so stale data auto-degrades without waiting for the next crawl.
+ *
+ * Rules (applied in priority order):
+ *  1. If registrationCloseDate is in the past → CLOSED
+ *  2. If registrationOpenDate is in the future → COMING_SOON
+ *  3. If stored status is COMING_SOON but registrationOpenDate is in the past → OPEN
+ *  4. Otherwise return stored status unchanged
+ */
+export function getEffectiveStatus(
+  status: RegistrationStatus,
+  registrationOpenDate: string | null,
+  registrationCloseDate: string | null,
+): RegistrationStatus {
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD comparable string
+  if (registrationCloseDate && registrationCloseDate < today) return 'CLOSED';
+  if (registrationOpenDate && registrationOpenDate > today) return 'COMING_SOON';
+  if (status === 'COMING_SOON' && registrationOpenDate && registrationOpenDate <= today) return 'OPEN';
+  return status;
+}
+
+/** Primary category for display (first element or fall back to singular). */
+export function primaryCategory(camp: Camp): CampCategory {
+  return camp.categories?.[0] ?? camp.category;
+}
+
+/** Primary campType for display (first element or fall back to singular). */
+export function primaryCampType(camp: Camp): CampType {
+  return camp.campTypes?.[0] ?? camp.campType;
+}
 
 export const SUMMER_WEEKS = [
   { label: "Jun 1-5", start: "2026-06-01", end: "2026-06-05" },

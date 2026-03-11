@@ -24,11 +24,15 @@ import {
   CAMP_TYPE_LABELS,
   CAMP_TYPE_DESCRIPTIONS,
   SUMMER_WEEKS,
+  getEffectiveStatus,
+  primaryCategory,
+  primaryCampType,
 } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
 import { CompareButton } from "@/components/compare-button";
 import { LinkifiedText } from "@/components/linkified-text";
+import { ReportButton } from "@/components/report-button";
 import { routes } from "@/lib/routes";
 
 export const revalidate = 3600;
@@ -106,8 +110,11 @@ export default async function CommunityDetailPage({
 
   if (!camp) notFound();
 
-  const status = STATUS_CONFIG[camp.registrationStatus];
-  const categoryColor = CATEGORY_COLORS[camp.category];
+  const effectiveStatus = getEffectiveStatus(camp.registrationStatus, camp.registrationOpenDate, camp.registrationCloseDate ?? null);
+  const status = STATUS_CONFIG[effectiveStatus];
+  const campCategory = primaryCategory(camp);
+  const campTypeVal = primaryCampType(camp);
+  const categoryColor = CATEGORY_COLORS[campCategory];
   const firstSchedule = camp.schedules[0];
 
   const weekAvailability = SUMMER_WEEKS.map((week) => ({
@@ -185,13 +192,13 @@ export default async function CommunityDetailPage({
       <div className="mb-8 animate-fade-up">
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className={cn("badge", categoryColor)}>
-            {CATEGORY_LABELS[camp.category]}
+            {CATEGORY_LABELS[campCategory]}
           </span>
           <span
             className="badge bg-clay-100 text-clay-500"
-            title={CAMP_TYPE_DESCRIPTIONS[camp.campType]}
+            title={CAMP_TYPE_DESCRIPTIONS[campTypeVal]}
           >
-            {CAMP_TYPE_LABELS[camp.campType]}
+            {CAMP_TYPE_LABELS[campTypeVal]}
           </span>
           <span className={cn("badge", status.color)}>{status.label}</span>
           {camp.dataConfidence === "PLACEHOLDER" && (
@@ -269,7 +276,7 @@ export default async function CommunityDetailPage({
           </section>
 
           {/* Weekly Availability (summer camps only) */}
-          {camp.campType === "SUMMER_DAY" && (
+          {campTypeVal === "SUMMER_DAY" && (
             <section className="glass-panel p-6 animate-fade-up stagger-2">
               <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-pine-400" />
@@ -314,7 +321,7 @@ export default async function CommunityDetailPage({
           )}
 
           {/* Non-summer schedules */}
-          {camp.campType !== "SUMMER_DAY" && camp.schedules.length > 0 && (
+          {campTypeVal !== "SUMMER_DAY" && camp.schedules.length > 0 && (
             <section className="glass-panel p-6 animate-fade-up stagger-2">
               <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-pine-400" />
@@ -530,6 +537,11 @@ export default async function CommunityDetailPage({
               Add to Calendar (.ics)
             </a>
           )}
+
+          {/* Report */}
+          <div className="flex justify-center pt-2">
+            <ReportButton campId={camp.id} />
+          </div>
         </div>
       </div>
     </div>

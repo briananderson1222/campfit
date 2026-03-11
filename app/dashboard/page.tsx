@@ -26,6 +26,7 @@ export default async function DashboardPage() {
       sc.notes,
       c.*,
       c."registrationOpenDate"::text AS "registrationOpenDate",
+      c."registrationCloseDate"::text AS "registrationCloseDate",
       COALESCE(
         json_agg(DISTINCT jsonb_build_object(
           'id', ag."id", 'label', ag."label",
@@ -78,6 +79,10 @@ export default async function DashboardPage() {
       notes: row.notes,
       campType: row.campType,
       category: row.category,
+      campTypes: row.campTypes ?? (row.campType ? [row.campType] : []),
+      categories: row.categories ?? (row.category ? [row.category] : []),
+      state: row.state ?? null,
+      zip: row.zip ?? null,
       websiteUrl: row.websiteUrl,
       interestingDetails: row.interestingDetails,
       city: row.city,

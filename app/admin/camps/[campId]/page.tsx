@@ -21,6 +21,11 @@ async function getCamp(campId: string) {
   if (c.registrationOpenDate instanceof Date) {
     c.registrationOpenDate = c.registrationOpenDate.toISOString().split('T')[0];
   }
+  if (c.registrationCloseDate instanceof Date) {
+    c.registrationCloseDate = c.registrationCloseDate.toISOString().split('T')[0];
+  }
+  if (!Array.isArray(c.campTypes)) c.campTypes = c.campType ? [c.campType] : [];
+  if (!Array.isArray(c.categories)) c.categories = c.category ? [c.category] : [];
   return { ...c, ageGroups: ageRes.rows, schedules: schedRes.rows, pricing: priceRes.rows };
 }
 

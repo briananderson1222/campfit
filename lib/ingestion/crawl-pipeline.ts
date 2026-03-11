@@ -4,6 +4,7 @@ import { computeDiff, computeOverallConfidence } from './diff-engine';
 import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
 import { createProposal } from '@/lib/admin/review-repository';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
+import { discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
 import type { CrawlProgressEvent, CrawlRun } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 
@@ -114,6 +115,7 @@ export interface CrawlOptions {
   limit?: number;
   model?: string;
   concurrency?: number;  // max simultaneous domains being crawled (default 3)
+  discover?: boolean;    // run discovery pre-pass on listing pages
   onProgress?: (event: CrawlProgressEvent) => void | Promise<void>;
 }
 
@@ -135,12 +137,14 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
   const campsResult = await pool.query<Camp & { id: string; name: string; websiteUrl: string; communitySlug: string; fieldSources: Record<string, { approvedAt?: string }> }>(
     resolvedCampIds?.length
       ? `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
-               "campType", category, "registrationStatus", "registrationOpenDate", "lunchIncluded",
+               "campType", category, "campTypes", "categories", state, zip,
+               "registrationStatus", "registrationOpenDate", "lunchIncluded",
                address, "interestingDetails", "providerId",
                COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE id = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
       : `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
-               "campType", category, "registrationStatus", "registrationOpenDate", "lunchIncluded",
+               "campType", category, "campTypes", "categories", state, zip,
+               "registrationStatus", "registrationOpenDate", "lunchIncluded",
                address, "interestingDetails", "providerId",
                COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != '' ORDER BY "lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
@@ -195,6 +199,57 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
 
   const domainTasks = Array.from(domainMap.values()).map(domainCamps =>
     semaphore.run(async () => {
+      // ── Discovery pre-pass ──────────────────────────────────────────────────
+      // When 2+ camps share the same URL it's likely a listing page.
+      // Run discovery to find new programs and inject them into domainCamps.
+      if (options.discover === true && domainCamps.length >= 2) {
+        const listingUrl = domainCamps[0].websiteUrl;
+        const sharedUrl = domainCamps.every(c => c.websiteUrl === listingUrl);
+        if (sharedUrl) {
+          const existingNames = domainCamps.map(c => c.name);
+          const discovery = await discoverCampsFromUrl(listingUrl, { model: options.model }).catch(err => {
+            console.error(`[crawl] discovery failed for ${listingUrl}:`, err);
+            return null;
+          });
+          if (discovery && !discovery.error && discovery.isListingPage && discovery.stubs.length > 0) {
+            const newStubs = filterNewDiscoveries(discovery.stubs, existingNames);
+            if (newStubs.length > 0) {
+              console.log(`[crawl] discovery found ${newStubs.length} new programs at ${listingUrl}`);
+              // Resolve community/provider info from first camp in group
+              const refCamp = domainCamps[0] as unknown as { communitySlug: string; city: string | null; providerId: string | null };
+              for (const stub of newStubs) {
+                try {
+                  const campUrl = stub.detailUrl ?? listingUrl;
+                  const campSlug = toSlug(stub.name) + '-' + Math.random().toString(36).slice(2, 6);
+                  const { rows: [newCamp] } = await pool.query<{ id: string; name: string; websiteUrl: string; communitySlug: string; city: string | null; fieldSources: Record<string, unknown> }>(
+                    `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", city, "dataConfidence", "campType", category, "campTypes", "categories", "providerId")
+                     VALUES ($1, $2, $3, $4, $5, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $6)
+                     ON CONFLICT (slug) DO NOTHING
+                     RETURNING id, name, "websiteUrl", "communitySlug", city, COALESCE("fieldSources", '{}') AS "fieldSources"`,
+                    [stub.name, campSlug, campUrl, refCamp.communitySlug, refCamp.city, refCamp.providerId]
+                  );
+                  if (newCamp) {
+                    console.log(`[crawl] created discovered camp: ${newCamp.name} (${newCamp.id})`);
+                    domainCamps.push({
+                      ...newCamp,
+                      slug: campSlug,
+                      neighborhood: null, description: null, campType: null, category: null,
+                      registrationStatus: null, registrationOpenDate: null, lunchIncluded: null,
+                      address: null, interestingDetails: null, providerId: refCamp.providerId,
+                      ageGroups: [] as Camp['ageGroups'],
+                      schedules: [] as Camp['schedules'],
+                      pricing: [] as Camp['pricing'],
+                    } as unknown as typeof camps[0]);
+                  }
+                } catch (err) {
+                  console.error(`[crawl] failed to insert discovered camp "${stub.name}":`, err);
+                }
+              }
+            }
+          }
+        }
+      }
+
       for (let di = 0; di < domainCamps.length; di++) {
         const camp = domainCamps[di];
         const campIndex = globalIndex++;
@@ -314,7 +369,12 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
 
   await Promise.all(domainTasks);
 
-  const finalStatus = errorCount === camps.length && camps.length > 0 ? 'FAILED' : 'COMPLETED';
+  // If discovery added new camps, processedCamps > original totalCamps — fix the DB record
+  if (processedCamps > camps.length) {
+    await updateCrawlRunProgress(run.id, { totalCamps: processedCamps });
+  }
+
+  const finalStatus = errorCount === processedCamps && processedCamps > 0 ? 'FAILED' : 'COMPLETED';
   await completeCrawlRun(run.id, finalStatus, errorLog);
 
   const finalRun = { ...run, status: finalStatus as 'COMPLETED' | 'FAILED', processedCamps, errorCount, newProposals };

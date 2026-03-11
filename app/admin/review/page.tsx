@@ -1,27 +1,47 @@
 import Link from 'next/link';
-import { getPendingProposals, getUnverifiedCamps } from '@/lib/admin/review-repository';
+import { getPendingProposals, getUnverifiedCamps, getPendingReports } from '@/lib/admin/review-repository';
 import { cn } from '@/lib/utils';
-import { ChevronRight, AlertTriangle, Clock } from 'lucide-react';
+import { ChevronRight, AlertTriangle, Clock, Flag } from 'lucide-react';
+import { ReportActions } from './report-actions';
 
 export const dynamic = 'force-dynamic';
+
+const REPORT_TYPE_LABELS: Record<string, string> = {
+  WRONG_INFO:   'Wrong info',
+  MISSING_INFO: 'Missing info',
+  CAMP_CLOSED:  'Camp closed',
+  OTHER:        'Other',
+};
+
+const REPORT_TYPE_COLORS: Record<string, string> = {
+  WRONG_INFO:   'bg-red-100 text-red-600',
+  MISSING_INFO: 'bg-amber-100 text-amber-700',
+  CAMP_CLOSED:  'bg-bark-100 text-bark-600',
+  OTHER:        'bg-cream-200 text-bark-500',
+};
 
 export default async function ReviewQueuePage({
   searchParams,
 }: {
   searchParams: { page?: string; tab?: string };
 }) {
-  const tab = searchParams.tab === 'unverified' ? 'unverified' : 'proposals';
+  const tab = searchParams.tab === 'unverified' ? 'unverified'
+    : searchParams.tab === 'reports' ? 'reports'
+    : 'proposals';
   const page = Math.max(1, parseInt(searchParams.page ?? '1'));
   const limit = 25;
   const offset = (page - 1) * limit;
 
-  const [{ proposals, total: proposalTotal }, { camps: unverifiedCamps, total: unverifiedTotal }] =
+  const [{ proposals, total: proposalTotal }, { camps: unverifiedCamps, total: unverifiedTotal }, { reports, total: reportTotal }] =
     await Promise.all([
       getPendingProposals({ limit, offset }).catch(() => ({ proposals: [], total: 0 })),
       getUnverifiedCamps({ limit, offset }).catch(() => ({ camps: [], total: 0 })),
+      getPendingReports({ limit, offset }).catch(() => ({ reports: [], total: 0 })),
     ]);
 
-  const activeTotal = tab === 'unverified' ? unverifiedTotal : proposalTotal;
+  const activeTotal = tab === 'unverified' ? unverifiedTotal
+    : tab === 'reports' ? reportTotal
+    : proposalTotal;
   const totalPages = Math.ceil(activeTotal / limit);
 
   return (
@@ -31,7 +51,8 @@ export default async function ReviewQueuePage({
           <h1 className="font-display text-3xl font-extrabold text-bark-700">Review Queue</h1>
           <p className="text-bark-400 text-sm mt-1">
             {proposalTotal} pending proposal{proposalTotal !== 1 ? 's' : ''} ·{' '}
-            {unverifiedTotal} unverified camp{unverifiedTotal !== 1 ? 's' : ''}
+            {unverifiedTotal} unverified camp{unverifiedTotal !== 1 ? 's' : ''} ·{' '}
+            {reportTotal} user report{reportTotal !== 1 ? 's' : ''}
           </p>
         </div>
       </div>
@@ -51,6 +72,14 @@ export default async function ReviewQueuePage({
           {unverifiedTotal > 0 && (
             <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-red-400 text-white text-[10px] font-bold leading-none">
               {unverifiedTotal}
+            </span>
+          )}
+        </TabLink>
+        <TabLink href="/admin/review?tab=reports" active={tab === 'reports'}>
+          User Reports
+          {reportTotal > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none">
+              {reportTotal}
             </span>
           )}
         </TabLink>
@@ -144,6 +173,45 @@ export default async function ReviewQueuePage({
                 </div>
                 <ChevronRight className="w-5 h-5 text-bark-300 shrink-0 group-hover:text-pine-500 transition-colors" />
               </Link>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── User Reports tab ── */}
+      {tab === 'reports' && (
+        reports.length === 0 ? (
+          <div className="glass-panel p-16 text-center">
+            <Flag className="w-8 h-8 text-bark-200 mx-auto mb-3" />
+            <p className="text-bark-300 text-lg">No pending reports</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {reports.map(report => (
+              <div key={report.id} className="glass-panel p-5 flex items-start gap-4">
+                <div className={cn(
+                  'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
+                  REPORT_TYPE_COLORS[report.type] ?? 'bg-cream-200 text-bark-400'
+                )}>
+                  <Flag className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Link href={`/admin/camps/${report.campId}`} className="font-semibold text-bark-700 hover:text-pine-600 transition-colors">
+                      {report.campName}
+                    </Link>
+                    <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', REPORT_TYPE_COLORS[report.type])}>
+                      {REPORT_TYPE_LABELS[report.type] ?? report.type}
+                    </span>
+                  </div>
+                  <p className="text-sm text-bark-500 mt-1.5 leading-relaxed">{report.description}</p>
+                  <p className="text-xs text-bark-300 mt-2">
+                    {report.userEmail ?? 'Anonymous'} ·{' '}
+                    {new Date(report.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                  </p>
+                </div>
+                <ReportActions reportId={report.id} campId={report.campId} campSlug={report.campSlug} communitySlug={report.communitySlug} />
+              </div>
             ))}
           </div>
         )

@@ -28,6 +28,7 @@ const DENVER_NEIGHBORHOODS = [
 ];
 
 export function buildPrompt(campName: string, url: string, text: string, siteHints: string[] = [], neighborhoods: string[] = DENVER_NEIGHBORHOODS): string {
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const hintsSection = siteHints.length > 0
     ? `\nSITE-SPECIFIC NOTES (apply these when extracting from this domain):\n${siteHints.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n`
     : '';
@@ -40,6 +41,7 @@ export function buildPrompt(campName: string, url: string, text: string, siteHin
 
 Camp name: ${campName}
 Source URL: ${url}
+Today's date: ${today}
 ${hintsSection}
 RULES:
 - Only extract fields you find EXPLICIT evidence for on the page. Never guess or infer beyond what is written.
@@ -48,10 +50,22 @@ RULES:
 - city must be a real city name (e.g. "Arvada", "Denver") — NOT a state name.
 - address must be a street address only (e.g. "4001 E Iliff Ave") — NOT a neighborhood or park name.
 ${nbhdRule}
-- campType must be one of: SUMMER_DAY (drop-off day camp during summer), SLEEPAWAY (overnight/residential, kids stay on-site), FAMILY (parents attend with kids), VIRTUAL (fully online), WINTER_BREAK (runs during winter/holiday school break), SCHOOL_BREAK (spring break, fall break, or other non-summer school holiday)
-- category must be one of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER
+- campTypes must be an array containing one or more of: SUMMER_DAY, SLEEPAWAY, FAMILY, VIRTUAL, WINTER_BREAK, SCHOOL_BREAK — list all that apply (SUMMER_DAY = drop-off day camp during summer, SLEEPAWAY = overnight/residential, FAMILY = parents attend with kids, VIRTUAL = fully online, WINTER_BREAK = runs during winter/holiday school break, SCHOOL_BREAK = spring break, fall break, or other non-summer school holiday)
+- categories must be an array containing one or more of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER — list all that apply
+- state must be a 2-letter US state abbreviation (e.g. 'CO') if found on the page, or null
+- zip must be a 5-digit US zip code if found on the page, or null
 - registrationStatus must be one of: OPEN, FULL, WAITLIST, CLOSED, COMING_SOON, UNKNOWN
-  OPEN=accepting registrations, FULL=at capacity (no spots left), WAITLIST=full but waitlist available, CLOSED=registration period ended
+  Use today's date (${today}) to reason about which status is correct:
+  COMING_SOON = registration opens in the FUTURE (open date is after today)
+  OPEN = registration is currently open (open date is in the past OR page says "register now" / "enroll today")
+  FULL = at capacity, no spots left
+  WAITLIST = full but waitlist is available
+  CLOSED = registration period has ended
+  UNKNOWN = no clear registration information found
+  IMPORTANT: If the page mentions a registration open date that has already passed (before ${today}), do NOT use COMING_SOON — use OPEN or UNKNOWN depending on whether the page confirms registration is still active.
+
+- registrationOpenDate: the date registration opens, as YYYY-MM-DD. Only set if an explicit future or past date is stated on the page.
+- registrationCloseDate: the date registration closes or the deadline to register, as YYYY-MM-DD. Only set if explicitly stated.
 
 Return ONLY valid JSON matching this exact shape — no markdown fences, no explanation:
 
@@ -63,8 +77,12 @@ Return ONLY valid JSON matching this exact shape — no markdown fences, no expl
     "address": string | null,
     "lunchIncluded": boolean | null,
     "registrationStatus": "OPEN"|"FULL"|"WAITLIST"|"CLOSED"|"COMING_SOON"|"UNKNOWN"|null,
-    "campType": "SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK"|null,
-    "category": "SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER"|null
+    "registrationOpenDate": "YYYY-MM-DD" | null,
+    "registrationCloseDate": "YYYY-MM-DD" | null,
+    "campTypes": ["SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK"],
+    "categories": ["SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER"],
+    "state": "CO" | null,
+    "zip": "80000" | null
   },
   "confidence": {
     "description": 0,
@@ -73,8 +91,12 @@ Return ONLY valid JSON matching this exact shape — no markdown fences, no expl
     "address": 0,
     "lunchIncluded": 0,
     "registrationStatus": 0,
-    "campType": 0,
-    "category": 0
+    "registrationOpenDate": 0,
+    "registrationCloseDate": 0,
+    "campTypes": 0,
+    "categories": 0,
+    "state": 0,
+    "zip": 0
   },
   "excerpts": {
     "description": "verbatim quote from page or null",
@@ -83,8 +105,12 @@ Return ONLY valid JSON matching this exact shape — no markdown fences, no expl
     "address": "verbatim quote from page or null",
     "lunchIncluded": "verbatim quote from page or null",
     "registrationStatus": "verbatim quote from page or null",
-    "campType": "verbatim quote from page or null",
-    "category": "verbatim quote from page or null"
+    "registrationOpenDate": "verbatim quote from page or null",
+    "registrationCloseDate": "verbatim quote from page or null",
+    "campTypes": "verbatim quote from page or null",
+    "categories": "verbatim quote from page or null",
+    "state": "verbatim quote from page or null",
+    "zip": "verbatim quote from page or null"
   }
 }
 

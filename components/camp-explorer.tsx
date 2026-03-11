@@ -42,8 +42,8 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
         if (!searchable.includes(q)) return false;
       }
 
-      if (filters.category && camp.category !== filters.category) return false;
-      if (filters.campType && camp.campType !== filters.campType) return false;
+      if (filters.category && !camp.categories?.includes(filters.category)) return false;
+      if (filters.campType && !camp.campTypes?.includes(filters.campType)) return false;
       if (filters.neighborhood && camp.neighborhood !== filters.neighborhood)
         return false;
 

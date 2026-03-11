@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Camp, SUMMER_WEEKS, CATEGORY_LABELS, CampCategory } from "@/lib/types";
+import { Camp, SUMMER_WEEKS, CATEGORY_LABELS, CampCategory, primaryCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useCommunity } from "@/lib/community-context";
 import { routes } from "@/lib/routes";
@@ -50,7 +50,7 @@ export function WeekCalendar({ camps, compact = false }: WeekCalendarProps) {
         {/* Camp rows */}
         <div className="space-y-1">
           {camps.map((camp) => {
-            const barColor = CATEGORY_BAR_COLORS[camp.category];
+            const barColor = CATEGORY_BAR_COLORS[primaryCategory(camp)];
 
             return (
               <div key={camp.id} className="flex items-center gap-0 group">
@@ -64,7 +64,7 @@ export function WeekCalendar({ camps, compact = false }: WeekCalendarProps) {
                   </Link>
                   {!compact && (
                     <span className="text-xs text-bark-300">
-                      {CATEGORY_LABELS[camp.category]}
+                      {CATEGORY_LABELS[primaryCategory(camp)]}
                     </span>
                   )}
                 </div>

@@ -68,9 +68,7 @@ export default async function AdminProvidersPage() {
       {providers.length === 0 ? (
         <div className="glass-panel p-16 text-center">
           <p className="text-bark-300 text-lg">No providers yet</p>
-          <p className="text-bark-200 text-sm mt-2">
-            Run <code className="bg-cream-200 px-1.5 py-0.5 rounded text-bark-500 font-mono text-xs">npm run backfill:providers</code> to auto-create from existing camp data, or add one manually above.
-          </p>
+          <p className="text-bark-200 text-sm mt-2">Add one manually above.</p>
         </div>
       ) : (
         <div className="glass-panel overflow-hidden">
@@ -172,12 +170,6 @@ export default async function AdminProvidersPage() {
         </div>
       )}
 
-      {/* Backfill callout */}
-      <div className="mt-6 px-4 py-3 rounded-xl bg-cream-200/60 border border-cream-300/60 text-xs text-bark-400">
-        <span className="font-semibold text-bark-500">Tip:</span> Run{' '}
-        <code className="bg-cream-300 px-1.5 py-0.5 rounded font-mono text-bark-500">npm run backfill:providers</code>{' '}
-        to auto-create providers from existing camp organization names.
-      </div>
     </div>
   );
 }

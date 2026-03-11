@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Play, X, RefreshCw, Loader2, CheckCircle, XCircle,
-  AlertTriangle, Clock, Zap, Calendar, Database, Search,
+  AlertTriangle, Clock, Zap, Calendar, Database, Search, Telescope,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CrawlPriority, CrawlPreviewCamp } from '@/app/api/admin/crawl/preview/route';
@@ -88,6 +88,9 @@ export function CrawlModal({
       .finally(() => setSearchLoading(false));
   }, [open, isRetry, retryWithCampIds, searchResults.length]);
 
+  // Options
+  const [discover, setDiscover] = useState(false);
+
   // Run state
   const [runState, setRunState] = useState<RunState>('idle');
   const [runProgress, setRunProgress] = useState<{ processed: number; total: number; proposals: number; errors: number } | null>(null);
@@ -164,7 +167,7 @@ export function CrawlModal({
       const res = await fetch('/api/admin/crawl/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campIds, model: selectedModel || undefined }),
+        body: JSON.stringify({ campIds, model: selectedModel || undefined, discover }),
       });
       if (!res.ok) throw new Error(await res.text());
       const { runId } = await res.json();
@@ -400,6 +403,26 @@ export function CrawlModal({
                       </div>
                     </div>
                   )}
+
+                  {/* Discover toggle */}
+                  <div>
+                    <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Options</label>
+                    <button
+                      onClick={() => setDiscover(d => !d)}
+                      className={cn(
+                        'flex items-center gap-2.5 w-full p-3 rounded-xl border text-left transition-all',
+                        discover
+                          ? 'border-pine-400 bg-pine-50 text-pine-700'
+                          : 'border-cream-300/60 hover:border-cream-400 hover:bg-cream-100/60 text-bark-500'
+                      )}
+                    >
+                      <Telescope className={cn('w-4 h-4 shrink-0', discover ? 'text-pine-500' : 'text-bark-300')} />
+                      <div>
+                        <p className="text-sm font-semibold leading-tight">Discover new programs</p>
+                        <p className="text-xs opacity-70 mt-0.5">On listing pages with multiple camps, find and create new programs automatically</p>
+                      </div>
+                    </button>
+                  </div>
 
                   {/* Priority preview list */}
                   {priority !== 'specific' && (

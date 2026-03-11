@@ -19,7 +19,7 @@ function weeksToSchedules(
   }));
 }
 
-export const MOCK_CAMPS: Camp[] = [
+const RAW_MOCK_CAMPS = [
   {
     id: "c1",
     communitySlug: "denver",
@@ -635,6 +635,14 @@ export const MOCK_CAMPS: Camp[] = [
     ],
   },
 ];
+
+export const MOCK_CAMPS: Camp[] = RAW_MOCK_CAMPS.map(c => ({
+  ...c,
+  campTypes: [c.campType] as Camp['campTypes'],
+  categories: [c.category] as Camp['categories'],
+  state: null as string | null,
+  zip: null as string | null,
+})) as Camp[];
 
 export const MOCK_SAVED_CAMPS: SavedCamp[] = [
   {
