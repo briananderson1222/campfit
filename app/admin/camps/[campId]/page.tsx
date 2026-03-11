@@ -15,7 +15,13 @@ async function getCamp(campId: string) {
     pool.query(`SELECT * FROM "CampPricing" WHERE "campId" = $1 ORDER BY amount ASC`, [campId]),
   ]);
   if (!campRes.rows[0]) return null;
-  return { ...campRes.rows[0], ageGroups: ageRes.rows, schedules: schedRes.rows, pricing: priceRes.rows };
+  const c = campRes.rows[0];
+  // pg returns `date` columns as Date objects — normalize to YYYY-MM-DD string
+  // so it passes cleanly through EditableField's string display logic.
+  if (c.registrationOpenDate instanceof Date) {
+    c.registrationOpenDate = c.registrationOpenDate.toISOString().split('T')[0];
+  }
+  return { ...c, ageGroups: ageRes.rows, schedules: schedRes.rows, pricing: priceRes.rows };
 }
 
 async function getPendingProposals(campId: string) {
@@ -52,8 +58,8 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
 
   const domain = domainOf(camp.websiteUrl);
   const [pendingProposals, siteHints] = await Promise.all([
-    getPendingProposals(params.campId),
-    getSiteHints(domain),
+    getPendingProposals(params.campId).catch(() => []),
+    getSiteHints(domain).catch(() => []),
   ]);
 
   return (
