@@ -213,7 +213,7 @@ export default async function CommunityDetailPage({
 
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 tracking-tight">
+            <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-bark-700 dark:text-cream-100 tracking-tight">
               {camp.name}
             </h1>
             {camp.websiteUrl && (
@@ -234,7 +234,7 @@ export default async function CommunityDetailPage({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-bark-400">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-bark-400 dark:text-cream-400">
           {camp.address && (
             <span className="flex items-center gap-1.5">
               <MapPin className="w-4 h-4 text-pine-400" />
@@ -262,15 +262,15 @@ export default async function CommunityDetailPage({
         <div className="lg:col-span-2 space-y-6">
           {/* About */}
           <section className="glass-panel p-6 animate-fade-up stagger-1">
-            <h2 className="font-display font-bold text-bark-700 text-lg mb-3">
+            <h2 className="font-display font-bold text-bark-700 dark:text-cream-100 text-lg mb-3">
               About
             </h2>
-            <p className="text-bark-500 leading-relaxed">
+            <p className="text-bark-500 dark:text-cream-300 leading-relaxed">
               <LinkifiedText text={camp.description} />
             </p>
             {camp.interestingDetails && (
               <div className="mt-4 px-4 py-3 rounded-2xl bg-amber-300/10 border border-amber-300/30">
-                <p className="text-sm text-amber-600 font-medium">
+                <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">
                   <LinkifiedText text={camp.interestingDetails} />
                 </p>
               </div>
@@ -280,12 +280,12 @@ export default async function CommunityDetailPage({
           {/* Weekly Availability (summer camps only) */}
           {campTypeVal === "SUMMER_DAY" && (
             <section className="glass-panel p-6 animate-fade-up stagger-2">
-              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <h2 className="font-display font-bold text-bark-700 dark:text-cream-100 text-lg mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-pine-400" />
                 Weekly Availability
               </h2>
               {camp.schedules.length === 0 ? (
-                <p className="text-sm text-bark-400">
+                <p className="text-sm text-bark-400 dark:text-cream-400">
                   Weekly schedule not yet available — check the camp website for dates.
                 </p>
               ) : (
@@ -314,7 +314,7 @@ export default async function CommunityDetailPage({
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-bark-300 mt-3">
+                  <p className="text-xs text-bark-300 dark:text-bark-200 mt-3">
                     {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
                   </p>
                 </>
@@ -325,7 +325,7 @@ export default async function CommunityDetailPage({
           {/* Non-summer schedules */}
           {campTypeVal !== "SUMMER_DAY" && camp.schedules.length > 0 && (
             <section className="glass-panel p-6 animate-fade-up stagger-2">
-              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <h2 className="font-display font-bold text-bark-700 dark:text-cream-100 text-lg mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-pine-400" />
                 Schedule
               </h2>
@@ -348,20 +348,20 @@ export default async function CommunityDetailPage({
                   return (
                   <div
                     key={s.id}
-                    className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl bg-pine-50 border border-pine-200/40"
+                    className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl bg-pine-50 dark:bg-pine-900/30 border border-pine-200/40 dark:border-pine-700/30"
                   >
                     <div>
-                      <span className="text-sm font-medium text-bark-600">
+                      <span className="text-sm font-medium text-bark-600 dark:text-cream-300">
                         {s.label}
                       </span>
                       {dateRange ? (
                         <p className="text-xs text-pine-500 mt-0.5">{dateRange}</p>
                       ) : (
-                        <p className="text-xs text-bark-300 mt-0.5 italic">Dates TBD — check camp website</p>
+                        <p className="text-xs text-bark-300 dark:text-bark-200 mt-0.5 italic">Dates TBD — check camp website</p>
                       )}
                     </div>
                     {s.startTime && (
-                      <span className="text-xs text-bark-400 shrink-0 mt-0.5">
+                      <span className="text-xs text-bark-400 dark:text-cream-400 shrink-0 mt-0.5">
                         {s.startTime} – {s.endTime}
                       </span>
                     )}
@@ -375,7 +375,7 @@ export default async function CommunityDetailPage({
           {/* Ages & Grades */}
           {camp.ageGroups.length > 0 && (
             <section className="glass-panel p-6 animate-fade-up stagger-3">
-              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <h2 className="font-display font-bold text-bark-700 dark:text-cream-100 text-lg mb-4 flex items-center gap-2">
                 <Users className="w-5 h-5 text-pine-400" />
                 Ages & Grades
               </h2>
@@ -383,13 +383,13 @@ export default async function CommunityDetailPage({
                 {camp.ageGroups.map((ag) => (
                   <div
                     key={ag.id}
-                    className="px-4 py-3 rounded-2xl bg-pine-50 border border-pine-200/50"
+                    className="px-4 py-3 rounded-2xl bg-pine-50 dark:bg-pine-900/30 border border-pine-200/50 dark:border-pine-700/40"
                   >
-                    <span className="font-display font-semibold text-pine-600 text-sm">
+                    <span className="font-display font-semibold text-pine-600 dark:text-pine-300 text-sm">
                       {ag.label}
                     </span>
                     {ag.minAge !== null && ag.maxAge !== null && (
-                      <p className="text-xs text-pine-400 mt-0.5">
+                      <p className="text-xs text-pine-400 dark:text-pine-300 mt-0.5">
                         Ages {ag.minAge}–{ag.maxAge}
                       </p>
                     )}
@@ -405,7 +405,7 @@ export default async function CommunityDetailPage({
           {/* Pricing */}
           {camp.pricing.length > 0 && (
             <section className="glass-panel p-6 animate-fade-up stagger-1">
-              <h2 className="font-display font-bold text-bark-700 text-lg mb-4 flex items-center gap-2">
+              <h2 className="font-display font-bold text-bark-700 dark:text-cream-100 text-lg mb-4 flex items-center gap-2">
                 <DollarSign className="w-5 h-5 text-pine-400" />
                 Pricing
               </h2>
@@ -413,21 +413,21 @@ export default async function CommunityDetailPage({
                 {camp.pricing.map((p) => (
                   <div
                     key={p.id}
-                    className="flex items-start justify-between p-3 rounded-xl bg-cream-200/40"
+                    className="flex items-start justify-between p-3 rounded-xl bg-cream-200/40 dark:bg-bark-600/40"
                   >
                     <div>
-                      <span className="text-sm font-medium text-bark-500">
+                      <span className="text-sm font-medium text-bark-500 dark:text-cream-300">
                         {p.label}
                       </span>
                       {p.ageQualifier && (
-                        <p className="text-xs text-bark-300">{p.ageQualifier}</p>
+                        <p className="text-xs text-bark-300 dark:text-bark-200">{p.ageQualifier}</p>
                       )}
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <span className="font-display font-bold text-bark-700">
+                      <span className="font-display font-bold text-bark-700 dark:text-cream-100">
                         {formatCurrency(p.amount)}
                       </span>
-                      <span className="text-xs text-bark-300 block">
+                      <span className="text-xs text-bark-300 dark:text-bark-200 block">
                         {p.unit === "FLAT"
                           ? "total"
                           : p.unit === "PER_CAMP"
@@ -454,7 +454,7 @@ export default async function CommunityDetailPage({
 
           {/* Details */}
           <section className="glass-panel p-6 animate-fade-up stagger-2">
-            <h2 className="font-display font-bold text-bark-700 text-lg mb-4">
+            <h2 className="font-display font-bold text-bark-700 dark:text-cream-100 text-lg mb-4">
               Details
             </h2>
             <div className="space-y-3">
@@ -563,10 +563,10 @@ function DetailRow({
     <div className="flex items-start gap-3">
       <div className="mt-0.5 shrink-0">{icon}</div>
       <div>
-        <span className="text-xs text-bark-300 uppercase tracking-wide font-semibold">
+        <span className="text-xs text-bark-300 dark:text-bark-200 uppercase tracking-wide font-semibold">
           {label}
         </span>
-        <p className="text-sm text-bark-500">{value}</p>
+        <p className="text-sm text-bark-500 dark:text-cream-300">{value}</p>
       </div>
     </div>
   );

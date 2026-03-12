@@ -47,7 +47,7 @@ async function makeUniqueSlug(pool: import('pg').Pool, name: string): Promise<st
  */
 async function matchOrCreateProvider(
   pool: import('pg').Pool,
-  camp: { id: string; websiteUrl: string; communitySlug: string; city: string | null; providerId: string | null }
+  camp: { id: string; websiteUrl: string; communitySlug: string; city: string | null; providerId: string | null; organizationName?: string | null }
 ): Promise<string | null> {
   if (camp.providerId) return null; // already linked
 
@@ -67,7 +67,7 @@ async function matchOrCreateProvider(
     providerId = existing[0].id;
     action = `matched → ${existing[0].name}`;
   } else {
-    const name = domainToName(domain);
+    const name = camp.organizationName?.trim() || domainToName(domain);
     const slug = await makeUniqueSlug(pool, name);
     const { rows: [created] } = await pool.query<{ id: string }>(
       `INSERT INTO "Provider" (name, slug, "websiteUrl", domain, city, "communitySlug")
@@ -139,13 +139,13 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
       ? `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
                "campType", category, "campTypes", "categories", state, zip,
                "registrationStatus", "registrationOpenDate", "lunchIncluded",
-               address, "interestingDetails", "providerId",
+               address, "interestingDetails", "providerId", "organizationName",
                COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE id = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
       : `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
                "campType", category, "campTypes", "categories", state, zip,
                "registrationStatus", "registrationOpenDate", "lunchIncluded",
-               address, "interestingDetails", "providerId",
+               address, "interestingDetails", "providerId", "organizationName",
                COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != '' ORDER BY "lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
     resolvedCampIds?.length ? [resolvedCampIds] : []
@@ -329,6 +329,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               communitySlug: camp.communitySlug,
               city: camp.city ?? null,
               providerId: (camp as unknown as { providerId: string | null }).providerId ?? null,
+              organizationName: (camp as any).organizationName ?? null,
             }).catch(err => {
               console.error(`[crawl] provider match failed for camp ${camp.id}:`, err);
               return null;

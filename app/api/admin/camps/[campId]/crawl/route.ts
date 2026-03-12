@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 
+export const maxDuration = 300;
+
 export async function POST(
   _req: Request,
   { params }: { params: { campId: string } }
@@ -20,19 +22,42 @@ export async function POST(
   if (rows.length === 0) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
   if (!rows[0].websiteUrl) return NextResponse.json({ error: 'Camp has no websiteUrl to crawl' }, { status: 400 });
 
-  // Immediately skip any existing PENDING proposals for this camp so it
-  // falls out of the review queue until the new crawl produces a replacement.
+  // Skip any existing PENDING proposals so they fall out of the review queue
   await pool.query(
     `UPDATE "CampChangeProposal" SET status = 'SKIPPED', "updatedAt" = now()
      WHERE "campId" = $1 AND status = 'PENDING'`,
     [params.campId]
   );
 
-  const run = await runCrawlPipeline({
+  // Fire-and-forget — same pattern as /api/admin/crawl/start
+  let resolveRunId!: (id: string) => void;
+  let rejectRunId!: (err: Error) => void;
+  const runIdPromise = new Promise<string>((resolve, reject) => {
+    resolveRunId = resolve;
+    rejectRunId = reject;
+  });
+
+  runCrawlPipeline({
     triggeredBy: user.email,
     trigger: 'MANUAL',
     campIds: [params.campId],
+    onProgress: (event) => {
+      if (event.type === 'started') resolveRunId(event.runId);
+    },
+  }).catch(err => {
+    rejectRunId(err instanceof Error ? err : new Error(String(err)));
+    console.error('[camps/crawl] pipeline error:', err);
   });
 
-  return NextResponse.json({ runId: run.id, status: run.status });
+  try {
+    const runId = await Promise.race([
+      runIdPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Timed out waiting for crawl to start')), 5000)
+      ),
+    ]);
+    return NextResponse.json({ runId });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
 }

@@ -3,21 +3,23 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Play, X, RefreshCw, Loader2, CheckCircle, XCircle,
-  AlertTriangle, Clock, Zap, Calendar, Database, Search, Telescope,
+  AlertTriangle, Clock, Zap, Calendar, Database, Search, Telescope, Globe,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CrawlPriority, CrawlPreviewCamp } from '@/app/api/admin/crawl/preview/route';
 import type { LLMModel } from '@/app/api/admin/crawl/models/route';
 
 type RunState = 'idle' | 'running' | 'done' | 'error';
+type ModalPriority = CrawlPriority | 'onboard_url';
 
-const PRIORITY_OPTIONS: { value: CrawlPriority; label: string; description: string; icon: React.ReactNode }[] = [
+const PRIORITY_OPTIONS: { value: ModalPriority; label: string; description: string; icon: React.ReactNode }[] = [
   { value: 'all',          label: 'Highest Priority', description: 'Combined score: staleness + missing fields + time-sensitive', icon: <Zap className="w-4 h-4" /> },
   { value: 'stale',        label: 'Most Stale',       description: 'Not verified recently, scored by days since last crawl',    icon: <Clock className="w-4 h-4" /> },
   { value: 'missing',      label: 'Missing Data',     description: 'Empty description, neighborhood, or unknown status',        icon: <Database className="w-4 h-4" /> },
   { value: 'coming_soon',  label: 'Opening Soon',     description: 'Registration opening soon — time-sensitive accuracy',       icon: <Calendar className="w-4 h-4" /> },
   { value: 'never_crawled',label: 'Never Crawled',    description: 'Camps that have never been verified by the crawler',        icon: <AlertTriangle className="w-4 h-4" /> },
   { value: 'specific',     label: 'Specific Camp',    description: 'Search for and crawl one or more camps by name',           icon: <Search className="w-4 h-4" /> },
+  { value: 'onboard_url', label: 'Onboard New Site', description: 'Discover all programs from a new website and add them to the database', icon: <Globe className="w-4 h-4" /> },
 ];
 
 const LIMIT_OPTIONS = [5, 10, 20, 50];
@@ -57,8 +59,9 @@ export function CrawlModal({
 } = {}) {
   const isRetry = !!retryWithCampIds?.length;
   const [open, setOpen] = useState(forceOpen ?? false);
-  const [priority, setPriority] = useState<CrawlPriority>(isRetry ? 'specific' : 'all');
+  const [priority, setPriority] = useState<ModalPriority>(isRetry ? 'specific' : 'all');
   const [limit, setLimit] = useState(10);
+  const [onboardUrl, setOnboardUrl] = useState('');
 
   // Model selection
   const [models, setModels] = useState<LLMModel[]>([]);
@@ -109,7 +112,7 @@ export function CrawlModal({
   }, [open, models.length, selectedModel]);
 
   const fetchPreview = useCallback(async () => {
-    if (priority === 'specific') return;
+    if (priority === 'specific' || priority === 'onboard_url') return;
     setPreviewLoading(true);
     try {
       const res = await fetch(`/api/admin/crawl/preview?priority=${priority}&limit=${limit}`);
@@ -120,7 +123,7 @@ export function CrawlModal({
   }, [priority, limit]);
 
   useEffect(() => {
-    if (open && runState === 'idle' && priority !== 'specific') fetchPreview();
+    if (open && runState === 'idle' && priority !== 'specific' && priority !== 'onboard_url') fetchPreview();
   }, [open, priority, limit, fetchPreview, runState]);
 
   // Debounced search for specific camp
@@ -156,6 +159,45 @@ export function CrawlModal({
     : (preview?.camps ?? []);
 
   const startCrawl = async () => {
+    // Onboard URL mode — separate flow
+    if (priority === 'onboard_url') {
+      if (!onboardUrl.trim()) return;
+      setRunState('running');
+      setRunProgress({ processed: 0, total: 0, proposals: 0, errors: 0 });
+      setErrorMsg(null);
+      try {
+        const res = await fetch('/api/admin/crawl/onboard-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: onboardUrl.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setRunState('error');
+          setErrorMsg(data.error ?? 'Failed to onboard site');
+          return;
+        }
+        const { runId, creating } = data as { runId: string; creating: number };
+        setRunProgress({ processed: 0, total: creating, proposals: 0, errors: 0 });
+
+        const poll = setInterval(async () => {
+          const r = await fetch(`/api/admin/crawl/${runId}/status-json`).catch(() => null);
+          if (!r) return;
+          const d = await r.json().catch(() => null);
+          if (!d) return;
+          setRunProgress({ processed: d.processedCamps ?? 0, total: d.totalCamps ?? creating, proposals: d.newProposals ?? 0, errors: d.errorCount ?? 0 });
+          if (d.status === 'COMPLETED') { clearInterval(poll); setRunState('done'); }
+          else if (d.status === 'FAILED') { clearInterval(poll); setRunState('error'); setErrorMsg('Crawl failed'); }
+        }, 3000);
+
+        setTimeout(() => clearInterval(poll), 310_000);
+      } catch (err) {
+        setRunState('error');
+        setErrorMsg(err instanceof Error ? err.message : 'Error');
+      }
+      return;
+    }
+
     if (!crawlCamps.length) return;
     const campIds = crawlCamps.map(c => c.id);
 
@@ -193,6 +235,7 @@ export function CrawlModal({
     setRunState('idle'); setRunProgress(null); setErrorMsg(null);
     setPreview(null);
     setSearchQuery('');
+    setOnboardUrl('');
     if (!isRetry) {
       setSelectedCampIds(new Set());
       setSearchResults([]);
@@ -357,8 +400,24 @@ export function CrawlModal({
                     </div>
                   )}
 
-                  {/* Limit — hide for specific mode */}
-                  {priority !== 'specific' && (
+                  {/* Onboard URL input */}
+                  {priority === 'onboard_url' && (
+                    <div>
+                      <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Site URL</label>
+                      <input
+                        type="text"
+                        value={onboardUrl}
+                        onChange={e => setOnboardUrl(e.target.value)}
+                        placeholder="https://example.com/camps"
+                        className="w-full px-4 py-2 rounded-xl border border-cream-300/60 text-sm text-bark-700 bg-white/60 focus:outline-none focus:border-pine-400"
+                        autoFocus
+                      />
+                      <p className="text-xs text-bark-300 mt-1.5">Enter the URL of a page listing camp programs. Discovery will find all programs and add them to the database.</p>
+                    </div>
+                  )}
+
+                  {/* Limit — hide for specific and onboard_url modes */}
+                  {priority !== 'specific' && priority !== 'onboard_url' && (
                     <div>
                       <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Batch size</label>
                       <div className="flex gap-2">
@@ -425,7 +484,7 @@ export function CrawlModal({
                   </div>
 
                   {/* Priority preview list */}
-                  {priority !== 'specific' && (
+                  {priority !== 'specific' && priority !== 'onboard_url' && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide">Preview</label>
@@ -465,15 +524,17 @@ export function CrawlModal({
                 {/* Footer */}
                 <div className="flex items-center justify-between px-6 py-4 border-t border-cream-300/40 bg-cream-50/30">
                   <p className="text-sm text-bark-400">
-                    {crawlCamps.length > 0
-                      ? `Will crawl ${crawlCamps.length} camp${crawlCamps.length !== 1 ? 's' : ''}`
-                      : priority === 'specific' ? 'Search and select camps above' : 'Select a strategy to preview'}
+                    {priority === 'onboard_url'
+                      ? (onboardUrl.trim() ? 'Will discover and crawl programs from that URL' : 'Enter a URL above to onboard a new site')
+                      : crawlCamps.length > 0
+                        ? `Will crawl ${crawlCamps.length} camp${crawlCamps.length !== 1 ? 's' : ''}`
+                        : priority === 'specific' ? 'Search and select camps above' : 'Select a strategy to preview'}
                   </p>
                   <div className="flex gap-2">
                     <button onClick={close} className="btn-secondary text-sm">Cancel</button>
                     <button
                       onClick={startCrawl}
-                      disabled={!crawlCamps.length || previewLoading}
+                      disabled={priority === 'onboard_url' ? !onboardUrl.trim() : (!crawlCamps.length || previewLoading)}
                       className="btn-primary text-sm gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Play className="w-3.5 h-3.5" />
