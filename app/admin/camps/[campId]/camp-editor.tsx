@@ -161,7 +161,7 @@ function ProviderField({ campId, providerId, organizationName, provider }: {
       </dd>
       {!currentOrgName && (
         <p className="text-xs text-bark-200 mt-1">
-          Set org name, then run <code className="bg-cream-100 dark:bg-bark-700 px-1 rounded">npm run backfill:providers</code> to create a Provider record.
+          Set org name — a Provider record will be linked automatically on the next crawl.
         </p>
       )}
     </div>
@@ -523,38 +523,73 @@ function AttestInlineButton({ isAttested, onAttest }: { isAttested: boolean; onA
 // ── Crawl button ──────────────────────────────────────────────────────────────
 
 function CrawlButton({ campId, websiteUrl }: { campId: string; websiteUrl: string | null }) {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'queued' | 'crawling' | 'done' | 'error'>('idle');
   const [msg, setMsg] = useState('');
+  const [runId, setRunId] = useState<string | null>(null);
 
   if (!websiteUrl) return null;
 
   async function crawl() {
-    setStatus('loading');
+    setPhase('queued');
     setMsg('');
     const res = await fetch(`/api/admin/camps/${campId}/crawl`, { method: 'POST' }).catch(() => null);
-    if (res?.ok) {
-      setStatus('done');
-      setMsg('Crawling… check back in ~30s for a new proposal.');
-    } else {
-      setStatus('error');
-      setMsg('Failed to start crawl.');
+    if (!res?.ok) {
+      const errText = await res?.text().catch(() => '');
+      setPhase('error');
+      setMsg(errText || 'Failed to start crawl.');
+      setTimeout(() => { setPhase('idle'); setMsg(''); }, 8000);
+      return;
     }
-    setTimeout(() => { setStatus('idle'); setMsg(''); }, 10000);
+    const { runId: rid } = await res.json();
+    setRunId(rid);
+    setPhase('crawling');
+
+    // Poll until done
+    const poll = setInterval(async () => {
+      const r = await fetch(`/api/admin/crawl/${rid}/status-json`).catch(() => null);
+      if (!r?.ok) return;
+      const data = await r.json().catch(() => null);
+      if (!data) return;
+      if (data.status === 'COMPLETED') {
+        clearInterval(poll);
+        setPhase('done');
+        setMsg(data.newProposals > 0
+          ? `Done · ${data.newProposals} proposal${data.newProposals !== 1 ? 's' : ''} generated`
+          : 'Done · no changes detected');
+        setTimeout(() => { setPhase('idle'); setMsg(''); setRunId(null); }, 12000);
+      } else if (data.status === 'FAILED') {
+        clearInterval(poll);
+        setPhase('error');
+        setMsg('Crawl failed — check Crawl Monitor for details');
+        setTimeout(() => { setPhase('idle'); setMsg(''); setRunId(null); }, 10000);
+      }
+    }, 3000);
+    setTimeout(() => clearInterval(poll), 310_000);
   }
 
+  const isActive = phase === 'queued' || phase === 'crawling';
+  const label = phase === 'queued' ? 'Queued…' : phase === 'crawling' ? 'Crawling…' : 'Crawl';
+
   return (
-    <div className="flex items-center gap-2">
-      {msg && <span className="text-xs text-bark-400 dark:text-bark-300">{msg}</span>}
+    <div className="flex items-center gap-2 flex-wrap">
+      {msg && (
+        <span className={`text-xs ${phase === 'error' ? 'text-red-400' : phase === 'done' ? 'text-pine-600 dark:text-pine-400' : 'text-bark-400 dark:text-bark-300'}`}>
+          {msg}
+        </span>
+      )}
+      {runId && (phase === 'done' || phase === 'error') && (
+        <a href={`/admin/crawls?runId=${runId}`} className="text-xs text-pine-500 hover:text-pine-600 underline">
+          View log
+        </a>
+      )}
       <button
         onClick={crawl}
-        disabled={status === 'loading'}
+        disabled={isActive}
         className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-cream-300 dark:border-bark-500 text-bark-400 hover:text-pine-600 hover:border-pine-300 dark:hover:border-pine-500 dark:hover:text-pine-400 transition-colors disabled:opacity-50"
         title="Crawl this camp's website and generate a change proposal"
       >
-        {status === 'loading'
-          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          : <RefreshCw className="w-3.5 h-3.5" />}
-        {status === 'loading' ? 'Crawling…' : 'Crawl'}
+        {isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+        {label}
       </button>
     </div>
   );
