@@ -3,6 +3,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ExternalLink, ArrowLeft } from 'lucide-react';
 import { CampEditor } from './camp-editor';
+import { EntityOpsPanel } from '@/components/admin/entity-ops-panel';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +61,9 @@ function domainOf(url: string | null): string {
 }
 
 export default async function AdminCampDetailPage({ params }: { params: { campId: string } }) {
+  const communitySlug = await getCampCommunitySlug(params.campId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) notFound();
   const camp = await getCamp(params.campId).catch(() => null);
   if (!camp) notFound();
 
@@ -78,7 +84,14 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
           {camp.organizationName && (
             <p className="text-sm text-bark-400 dark:text-bark-300 mt-0.5">{camp.organizationName}</p>
           )}
-          <p className="text-xs text-bark-300 mt-0.5">{camp.communitySlug} · {camp.id}</p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            <p className="text-xs text-bark-300">{camp.communitySlug} · {camp.id}</p>
+            {camp.archivedAt && (
+              <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                Archived
+              </span>
+            )}
+          </div>
         </div>
         <Link
           href={`/c/${camp.communitySlug}/camps/${camp.slug}`}
@@ -95,6 +108,8 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
         siteHints={siteHints}
         domain={domain}
       />
+
+      <EntityOpsPanel entityType="CAMP" entityId={camp.id} allowAccreditation />
     </div>
   );
 }

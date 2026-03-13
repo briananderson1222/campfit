@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export async function GET(req: Request) {
+  const auth = await requireAdminAccess();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const { searchParams } = new URL(req.url);
   const domain = searchParams.get('domain');
   if (!domain) return NextResponse.json({ error: 'domain required' }, { status: 400 });
@@ -16,9 +19,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminAccess();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { domain, hint, source = 'manual', sourceId } = await req.json();
   if (!domain || !hint) return NextResponse.json({ error: 'domain and hint required' }, { status: 400 });
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
   const { rows } = await pool.query(
     `INSERT INTO "CrawlSiteHint" (domain, hint, source, "sourceId", "createdBy")
      VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [domain, hint.trim(), source, sourceId ?? null, user.email]
+    [domain, hint.trim(), source, sourceId ?? null, auth.access.email]
   );
   return NextResponse.json(rows[0], { status: 201 });
 }

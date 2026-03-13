@@ -8,6 +8,7 @@
  */
 
 import { Pool } from "pg";
+import { resolvePgConfig } from "./db-config";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -15,12 +16,17 @@ declare global {
 }
 
 function createPool(): Pool {
+  const config = resolvePgConfig();
+  if (!config) {
+    throw new Error("Missing database env vars: set PGHOST/PGUSER/PGPASSWORD or DATABASE_URL");
+  }
+
   return new Pool({
-    host: process.env.PGHOST ?? "aws-0-us-west-2.pooler.supabase.com",
-    port: parseInt(process.env.PGPORT ?? "6543"),
-    database: process.env.PGDATABASE ?? "postgres",
-    user: process.env.PGUSER ?? "postgres.rpnzolnnhbzhuspwpajq",
-    password: process.env.PGPASSWORD ?? "eDG*8dX-c#eD2Z2",
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    user: config.user,
+    password: config.password,
     ssl: { rejectUnauthorized: false },
     // Keep small — Supabase free tier has a 60-connection limit.
     // A singleton is used globally so this is the max for the whole process.

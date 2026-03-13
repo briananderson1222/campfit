@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
 interface AgeGroupInput {
   label: string;
@@ -12,9 +13,9 @@ interface AgeGroupInput {
 
 /** Replace all age groups for a camp. */
 export async function PUT(req: Request, { params }: { params: { campId: string } }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getCampCommunitySlug(params.campId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { ageGroups } = await req.json() as { ageGroups: AgeGroupInput[] };
   if (!Array.isArray(ageGroups)) return NextResponse.json({ error: 'ageGroups array required' }, { status: 400 });

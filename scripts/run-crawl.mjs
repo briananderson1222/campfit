@@ -39,15 +39,19 @@ loadEnv('.env.prod');
 loadEnv('.env.local');
 loadEnv('.env');
 
-const PGHOST     = 'aws-0-us-west-2.pooler.supabase.com';
-const PGPORT     = 6543;
-const PGDATABASE = 'postgres';
-const PGUSER     = 'postgres.rpnzolnnhbzhuspwpajq';
-const PGPASSWORD = process.env.PGPASSWORD || 'eDG*8dX-c#eD2Z2';
+const PGHOST     = process.env.PGHOST;
+const PGPORT     = parseInt(process.env.PGPORT ?? '6543', 10);
+const PGDATABASE = process.env.PGDATABASE ?? 'postgres';
+const PGUSER     = process.env.PGUSER;
+const PGPASSWORD = process.env.PGPASSWORD;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
+
+if (!PGHOST || !PGUSER || !PGPASSWORD) {
+  throw new Error('Missing PGHOST, PGUSER, or PGPASSWORD for local crawl runner');
+}
 
 const pool = new Pool({ host: PGHOST, port: PGPORT, database: PGDATABASE, user: PGUSER, password: PGPASSWORD, ssl: { rejectUnauthorized: false }, max: 3 });
 

@@ -84,6 +84,10 @@ export interface Camp {
   state: string | null;
   zip: string | null;
   websiteUrl: string;
+  applicationUrl?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  socialLinks?: Record<string, string> | null;
   interestingDetails: string | null;
 
   city: string;
@@ -104,6 +108,10 @@ export interface Camp {
 
   dataConfidence: DataConfidence;
   lastVerifiedAt: string | null;
+  lastCrawledAt?: string | null;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
   sourceUrl: string | null;
   fieldSources?: Record<string, FieldSource> | null;
 
@@ -127,11 +135,123 @@ export interface Provider {
   neighborhood: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  applicationUrl?: string | null;
+  socialLinks?: Record<string, string> | null;
   notes: string | null;
   crawlRootUrl: string | null;
   communitySlug: string;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
+  lastVerifiedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReviewFlag {
+  id: string;
+  entityType: 'CAMP' | 'PROVIDER' | 'PERSON';
+  entityId: string;
+  comment: string;
+  status: 'OPEN' | 'RESOLVED' | 'DISMISSED';
+  createdBy: string;
+  createdAt: string;
+  resolvedBy?: string | null;
+  resolvedAt?: string | null;
+}
+
+export interface FieldAttestation {
+  id: string;
+  entityType: 'CAMP' | 'PROVIDER' | 'PERSON';
+  entityId: string;
+  fieldKey: string;
+  valueSnapshot?: unknown;
+  excerpt?: string | null;
+  sourceUrl?: string | null;
+  observedAt: string;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  status: 'ACTIVE' | 'STALE' | 'INVALIDATED';
+  lastRecheckedAt?: string | null;
+  invalidatedAt?: string | null;
+  invalidationReason?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface AccreditationBody {
+  id: string;
+  name: string;
+  slug: string;
+  websiteUrl?: string | null;
+  createdAt: string;
+}
+
+export interface CampAccreditation {
+  id: string;
+  campId: string;
+  bodyId: string;
+  bodyName?: string;
+  status: string;
+  scope?: string | null;
+  sourceUrl?: string | null;
+  excerpt?: string | null;
+  observedAt: string;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  lastVerifiedAt?: string | null;
+  expiresAt?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface Person {
+  id: string;
+  fullName: string;
+  slug: string;
+  bio?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonContactMethod {
+  id: string;
+  personId: string;
+  type: string;
+  value: string;
+  label?: string | null;
+  createdAt: string;
+}
+
+export interface EntityPersonRole {
+  id: string;
+  personId: string;
+  title?: string | null;
+  roleType: string;
+  notes?: string | null;
+  sourceUrl?: string | null;
+  excerpt?: string | null;
+  observedAt: string;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  createdAt: string;
+}
+
+export interface AiActionLog {
+  id: string;
+  capability: 'READ' | 'PROPOSE' | 'WRITE';
+  action: string;
+  entityType?: 'CAMP' | 'PROVIDER' | 'PERSON' | null;
+  entityId?: string | null;
+  status: 'REQUESTED' | 'CONFIRMED' | 'REJECTED' | 'COMPLETED' | 'FAILED';
+  requestedBy: string;
+  confirmedBy?: string | null;
+  requiresConfirmation: boolean;
+  input?: unknown;
+  output?: unknown;
+  error?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
 }
 
 export interface ProviderWithStats extends Provider {

@@ -46,13 +46,39 @@
 
 ---
 
-### 6. GitHub Actions (web scraper — runs weekly)
+### 6. GitHub Actions (CI + deploy + scraper)
 1. Go to your GitHub repo → Settings → Secrets and variables → Actions
-2. Add secret: `SUPABASE_DB_PASSWORD` = `eDG*8dX-c#eD2Z2`
-3. (Optional) Add `VERCEL_REVALIDATE_URL` to auto-refresh the site after scraping
-4. The scraper runs every Monday at 6am UTC automatically
-5. To test locally: `npm run scrape:dry` (no DB writes)
-6. To add a new camp site scraper, create a new file in `lib/ingestion/scrapers/` following the Avid4 pattern, then register it in `scripts/scrape.ts`
+2. Add CI/build secrets:
+   - `ADMIN_EMAILS`
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `PGHOST`
+   - `PGPORT`
+   - `PGDATABASE`
+   - `PGUSER`
+   - `PGPASSWORD`
+   - `CRON_SECRET`
+3. Add optional service secrets if those features are enabled:
+   - `ANTHROPIC_API_KEY`
+   - `GEMINI_API_KEY`
+   - `RESEND_API_KEY`
+   - `STRIPE_SECRET_KEY`
+   - `STRIPE_WEBHOOK_SECRET`
+   - `VERCEL_REVALIDATE_URL`
+4. Add Actions variables:
+   - `NEXT_PUBLIC_APP_URL`
+   - `RESEND_FROM_EMAIL`
+   - `STRIPE_PRICE_ID`
+   - `VERCEL_PROJECT_ID`
+   - `VERCEL_ORG_ID`
+5. Add deploy secret:
+   - `VERCEL_TOKEN`
+6. `CI` runs Prisma validation and `tsc` on every push/PR, then runs `next build` and `npm run verify:admin` when the required secrets are present
+7. `Deploy` runs on pushes to `main` and deploys the production build to Vercel
+8. The scraper runs every Monday at 6am UTC automatically
+9. To test locally: `npm run scrape:dry` (no DB writes)
+10. To add a new camp site scraper, create a new file in `lib/ingestion/scrapers/` following the Avid4 pattern, then register it in `scripts/scrape.ts`
 
 ---
 

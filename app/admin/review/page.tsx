@@ -3,40 +3,85 @@ import { getPendingProposals, getUnverifiedCamps, getPendingReports } from '@/li
 import { cn } from '@/lib/utils';
 import { ChevronRight, AlertTriangle, Clock, Flag } from 'lucide-react';
 import { ReportActions } from './report-actions';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export const dynamic = 'force-dynamic';
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
-  WRONG_INFO:   'Wrong info',
+  WRONG_INFO: 'Wrong info',
   MISSING_INFO: 'Missing info',
-  CAMP_CLOSED:  'Camp closed',
-  OTHER:        'Other',
+  CAMP_CLOSED: 'Camp closed',
+  OTHER: 'Other',
 };
 
 const REPORT_TYPE_COLORS: Record<string, string> = {
-  WRONG_INFO:   'bg-red-100 text-red-600',
+  WRONG_INFO: 'bg-red-100 text-red-600',
   MISSING_INFO: 'bg-amber-100 text-amber-700',
-  CAMP_CLOSED:  'bg-bark-100 text-bark-600',
-  OTHER:        'bg-cream-200 text-bark-500',
+  CAMP_CLOSED: 'bg-bark-100 text-bark-600',
+  OTHER: 'bg-cream-200 text-bark-500',
 };
+
+function buildReviewHref(params: {
+  tab?: string;
+  page?: number | string;
+  campId?: string;
+  providerId?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params.tab) qs.set('tab', params.tab);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.campId) qs.set('campId', params.campId);
+  if (params.providerId) qs.set('providerId', params.providerId);
+  return `/admin/review?${qs.toString()}`;
+}
+
+function buildDetailHref(proposalId: string, params: {
+  page?: number | string;
+  campId?: string;
+  providerId?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set('page', String(params.page));
+  if (params.campId) qs.set('campId', params.campId);
+  if (params.providerId) qs.set('providerId', params.providerId);
+  return `/admin/review/${proposalId}${qs.toString() ? `?${qs.toString()}` : ''}`;
+}
 
 export default async function ReviewQueuePage({
   searchParams,
 }: {
-  searchParams: { page?: string; tab?: string };
+  searchParams: { page?: string; tab?: string; campId?: string; providerId?: string };
 }) {
+  const auth = await requireAdminAccess({ allowModerator: true });
+  if ('error' in auth) return null;
   const tab = searchParams.tab === 'unverified' ? 'unverified'
     : searchParams.tab === 'reports' ? 'reports'
     : 'proposals';
   const page = Math.max(1, parseInt(searchParams.page ?? '1'));
+  const campId = searchParams.campId || undefined;
+  const providerId = searchParams.providerId || undefined;
   const limit = 25;
   const offset = (page - 1) * limit;
 
   const [{ proposals, total: proposalTotal }, { camps: unverifiedCamps, total: unverifiedTotal }, { reports, total: reportTotal }] =
     await Promise.all([
-      getPendingProposals({ limit, offset }).catch(() => ({ proposals: [], total: 0 })),
-      getUnverifiedCamps({ limit, offset }).catch(() => ({ camps: [], total: 0 })),
-      getPendingReports({ limit, offset }).catch(() => ({ reports: [], total: 0 })),
+      getPendingProposals({
+        limit,
+        offset,
+        campId,
+        providerId,
+        communitySlugs: auth.access.isAdmin ? undefined : auth.access.communities,
+      }).catch(() => ({ proposals: [], total: 0 })),
+      getUnverifiedCamps({
+        limit,
+        offset,
+        communitySlugs: auth.access.isAdmin ? undefined : auth.access.communities,
+      }).catch(() => ({ camps: [], total: 0 })),
+      getPendingReports({
+        limit,
+        offset,
+        communitySlugs: auth.access.isAdmin ? undefined : auth.access.communities,
+      }).catch(() => ({ reports: [], total: 0 })),
     ]);
 
   const activeTotal = tab === 'unverified' ? unverifiedTotal
@@ -57,9 +102,27 @@ export default async function ReviewQueuePage({
         </div>
       </div>
 
-      {/* Tabs */}
+      {(campId || providerId) && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-bark-300 uppercase tracking-wide">Active filters</span>
+          {campId && (
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+              Camp: {campId}
+            </span>
+          )}
+          {providerId && (
+            <span className="inline-flex items-center rounded-full bg-pine-100 px-2.5 py-1 text-xs font-semibold text-pine-700">
+              Provider: {providerId}
+            </span>
+          )}
+          <Link href="/admin/review" className="text-xs text-bark-400 hover:text-pine-600">
+            Clear filters
+          </Link>
+        </div>
+      )}
+
       <div className="flex gap-1 mb-5 border-b border-cream-300/60">
-        <TabLink href="/admin/review?tab=proposals" active={tab === 'proposals'}>
+        <TabLink href={buildReviewHref({ tab: 'proposals', page: 1, campId, providerId })} active={tab === 'proposals'}>
           Pending Proposals
           {proposalTotal > 0 && (
             <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-amber-400 text-white text-[10px] font-bold leading-none">
@@ -67,7 +130,7 @@ export default async function ReviewQueuePage({
             </span>
           )}
         </TabLink>
-        <TabLink href="/admin/review?tab=unverified" active={tab === 'unverified'}>
+        <TabLink href={buildReviewHref({ tab: 'unverified', page: 1, campId, providerId })} active={tab === 'unverified'}>
           Unverified Camps
           {unverifiedTotal > 0 && (
             <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-red-400 text-white text-[10px] font-bold leading-none">
@@ -75,7 +138,7 @@ export default async function ReviewQueuePage({
             </span>
           )}
         </TabLink>
-        <TabLink href="/admin/review?tab=reports" active={tab === 'reports'}>
+        <TabLink href={buildReviewHref({ tab: 'reports', page: 1, campId, providerId })} active={tab === 'reports'}>
           User Reports
           {reportTotal > 0 && (
             <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none">
@@ -85,7 +148,6 @@ export default async function ReviewQueuePage({
         </TabLink>
       </div>
 
-      {/* ── Pending Proposals tab ── */}
       {tab === 'proposals' && (
         proposals.length === 0 ? (
           <div className="glass-panel p-16 text-center">
@@ -100,24 +162,26 @@ export default async function ReviewQueuePage({
               return (
                 <Link
                   key={proposal.id}
-                  href={`/admin/review/${proposal.id}`}
+                  href={buildDetailHref(proposal.id, { page, campId, providerId })}
                   className="glass-panel p-5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
                 >
                   <ConfidenceBadge value={conf} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors">
-                      {proposal.campName}
-                    </p>
-                    <p className="text-sm text-bark-400 mt-0.5">
-                      {changeCount} field{changeCount !== 1 ? 's' : ''} changed ·{' '}
-                      {new Date(proposal.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      {proposal.crawlStartedAt && (
-                        <span className="text-bark-300"> · crawl {new Date(proposal.crawlStartedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors truncate">
+                        {proposal.campName}
+                      </h3>
+                      <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
+                    </div>
+                    <p className="text-xs text-bark-400 mb-2">
+                      {changeCount} field{changeCount !== 1 ? 's' : ''} changed
+                      {proposal.crawlCompletedAt && (
+                        <span> · Crawled {new Date(proposal.crawlCompletedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>
                       )}
                     </p>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {Object.keys(proposal.proposedChanges).slice(0, 5).map(field => (
-                        <span key={field} className="text-xs bg-cream-200 text-bark-400 px-2 py-0.5 rounded-full">
+                        <span key={field} className="px-2 py-0.5 rounded-full bg-cream-100 text-bark-500 text-xs">
                           {field}
                         </span>
                       ))}
@@ -134,7 +198,6 @@ export default async function ReviewQueuePage({
         )
       )}
 
-      {/* ── Unverified Camps tab ── */}
       {tab === 'unverified' && (
         unverifiedCamps.length === 0 ? (
           <div className="glass-panel p-16 text-center">
@@ -178,7 +241,6 @@ export default async function ReviewQueuePage({
         )
       )}
 
-      {/* ── User Reports tab ── */}
       {tab === 'reports' && (
         reports.length === 0 ? (
           <div className="glass-panel p-16 text-center">
@@ -220,11 +282,11 @@ export default async function ReviewQueuePage({
       {totalPages > 1 && (
         <div className="flex justify-center gap-2 mt-8">
           {page > 1 && (
-            <Link href={`/admin/review?tab=${tab}&page=${page - 1}`} className="btn-secondary text-sm">Previous</Link>
+            <Link href={buildReviewHref({ tab, page: page - 1, campId, providerId })} className="btn-secondary text-sm">Previous</Link>
           )}
           <span className="px-4 py-2 text-sm text-bark-400">Page {page} of {totalPages}</span>
           {page < totalPages && (
-            <Link href={`/admin/review?tab=${tab}&page=${page + 1}`} className="btn-secondary text-sm">Next</Link>
+            <Link href={buildReviewHref({ tab, page: page + 1, campId, providerId })} className="btn-secondary text-sm">Next</Link>
           )}
         </div>
       )}
@@ -262,14 +324,15 @@ function ConfidenceBadge({ value }: { value: number }) {
 }
 
 function ConfidencePill({ confidence }: { confidence: string }) {
-  const cfg: Record<string, { label: string; cls: string }> = {
-    PLACEHOLDER: { label: 'Placeholder', cls: 'bg-red-100 text-red-600' },
-    STALE:       { label: 'Stale',       cls: 'bg-amber-100 text-amber-700' },
-  };
-  const { label, cls } = cfg[confidence] ?? { label: confidence, cls: 'bg-cream-200 text-bark-400' };
+  const color = confidence === 'VERIFIED'
+    ? 'bg-pine-100 text-pine-700'
+    : confidence === 'STALE'
+      ? 'bg-amber-100 text-amber-700'
+      : 'bg-red-100 text-red-600';
+
   return (
-    <span className={cn('text-xs font-semibold px-2.5 py-1 rounded-full shrink-0', cls)}>
-      {label}
+    <span className={cn('px-2 py-1 rounded-full text-xs font-semibold shrink-0', color)}>
+      {confidence}
     </span>
   );
 }

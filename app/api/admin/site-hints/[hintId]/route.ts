@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export async function PATCH(req: Request, { params }: { params: { hintId: string } }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminAccess();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json() as { active?: boolean; hint?: string };
   const pool = getPool();
@@ -23,9 +22,8 @@ export async function PATCH(req: Request, { params }: { params: { hintId: string
 }
 
 export async function DELETE(_req: Request, { params }: { params: { hintId: string } }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminAccess();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const pool = getPool();
   await pool.query(`DELETE FROM "CrawlSiteHint" WHERE id = $1`, [params.hintId]);

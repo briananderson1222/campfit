@@ -6,18 +6,35 @@ import { CrawlModal } from './crawl-modal';
 import { ClipboardList, TrendingUp, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampIdsCommunitySlugs } from '@/lib/admin/community-access';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminDashboard() {
-  const [pendingCount, recentRuns, changedFields, metrics] = await Promise.all([
-    getPendingCount().catch(() => 0),
-    getRecentCrawlRuns(5).catch(() => []),
-    getMostChangedFields(30, 5).catch(() => []),
-    getDashboardMetrics().catch(() => ({
-      approvalRate: 0, avgConfidence: 0, siteFailureRates: [], fieldRejectionRates: []
-    })),
+  const auth = await requireAdminAccess({ allowModerator: true });
+  if ('error' in auth) return null;
+
+  const [pendingCount, recentRunsRaw, changedFields, metrics] = await Promise.all([
+    getPendingCount(auth.access.isAdmin ? undefined : auth.access.communities).catch(() => 0),
+    getRecentCrawlRuns(10).catch(() => []),
+    auth.access.isAdmin ? getMostChangedFields(30, 5).catch(() => []) : Promise.resolve([]),
+    auth.access.isAdmin
+      ? getDashboardMetrics().catch(() => ({
+          approvalRate: 0, avgConfidence: 0, siteFailureRates: [], fieldRejectionRates: []
+        }))
+      : Promise.resolve({
+          approvalRate: 0, avgConfidence: 0, siteFailureRates: [], fieldRejectionRates: []
+        }),
   ]);
+  const recentRuns = auth.access.isAdmin
+    ? recentRunsRaw.slice(0, 5)
+    : (await Promise.all(recentRunsRaw.map(async (run) => {
+        const communities = await getCampIdsCommunitySlugs(run.campIds ?? []);
+        return communities.length > 0 && communities.every((community) => auth.access.communities.includes(community))
+          ? run
+          : null;
+      }))).filter((run): run is NonNullable<typeof run> => run !== null).slice(0, 5);
 
   return (
     <div>
@@ -39,18 +56,18 @@ export default async function AdminDashboard() {
           highlight={pendingCount > 0}
         />
         <StatCard
-          label="Approval Rate (30d)"
-          value={`${Math.round(metrics.approvalRate * 100)}%`}
+          label={auth.access.isAdmin ? 'Approval Rate (30d)' : 'Access Scope'}
+          value={auth.access.isAdmin ? `${Math.round(metrics.approvalRate * 100)}%` : auth.access.communities.length}
           icon={<CheckCircle className="w-5 h-5 text-pine-500" />}
         />
         <StatCard
-          label="Avg Confidence (30d)"
-          value={`${Math.round(metrics.avgConfidence * 100)}%`}
+          label={auth.access.isAdmin ? 'Avg Confidence (30d)' : 'Scoped Communities'}
+          value={auth.access.isAdmin ? `${Math.round(metrics.avgConfidence * 100)}%` : auth.access.communities.join(', ')}
           icon={<Activity className="w-5 h-5 text-pine-500" />}
         />
         <StatCard
-          label="Site Failures (30d)"
-          value={metrics.siteFailureRates.filter(s => s.failureRate > 0.5).length}
+          label={auth.access.isAdmin ? 'Site Failures (30d)' : 'Moderator View'}
+          value={auth.access.isAdmin ? metrics.siteFailureRates.filter(s => s.failureRate > 0.5).length : 'Scoped'}
           icon={<AlertTriangle className="w-5 h-5 text-terracotta-400" />}
         />
       </div>
@@ -100,7 +117,9 @@ export default async function AdminDashboard() {
         {/* Field quality */}
         <div className="glass-panel p-6">
           <h2 className="font-display font-bold text-bark-700 mb-4">Field Rejection Rates (30d)</h2>
-          {metrics.fieldRejectionRates.length === 0 ? (
+          {!auth.access.isAdmin ? (
+            <p className="text-bark-300 text-sm">Global field analytics stay admin-only. Moderators use the scoped queue and crawl monitor.</p>
+          ) : metrics.fieldRejectionRates.length === 0 ? (
             <p className="text-bark-300 text-sm">No review data yet.</p>
           ) : (
             <div className="space-y-3">

@@ -1,5 +1,6 @@
 import { getPool } from '@/lib/db';
 import type { CampChangeProposal, ProposedChanges, ProposalStatus } from './types';
+import { communityScopeSql } from './community-access';
 
 export async function createProposal(opts: {
   campId: string;
@@ -37,25 +38,51 @@ export async function getPendingProposals(opts: {
   limit?: number;
   offset?: number;
   minConfidence?: number;
+  campId?: string;
+  providerId?: string;
+  communitySlugs?: string[];
 }): Promise<{ proposals: CampChangeProposal[]; total: number }> {
   const pool = getPool();
-  const { limit = 20, offset = 0, minConfidence = 0 } = opts;
+  const { limit = 20, offset = 0, minConfidence = 0, campId, providerId, communitySlugs } = opts;
+  const filters = [`p.status = 'PENDING'`, `p."overallConfidence" >= $1`];
+  const filterValues: unknown[] = [minConfidence];
+  const communityScope = communityScopeSql(communitySlugs, `c."communitySlug"`, filterValues.length + 1);
+
+  if (communityScope.values.length > 0) {
+    filterValues.push(...communityScope.values);
+  }
+
+  if (campId) {
+    filterValues.push(campId);
+    filters.push(`p."campId" = $${filterValues.length}`);
+  }
+  if (providerId) {
+    filterValues.push(providerId);
+    filters.push(`c."providerId" = $${filterValues.length}`);
+  }
+
+  const whereClause = filters.join(' AND ');
+  const rowValues = [...filterValues, limit, offset];
 
   const [rows, countRow] = await Promise.all([
     pool.query(
       `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
-              r."startedAt" AS "crawlStartedAt", r.trigger AS "crawlTrigger"
+              c."providerId", c."lastVerifiedAt",
+              r."startedAt" AS "crawlStartedAt", r."completedAt" AS "crawlCompletedAt", r.trigger AS "crawlTrigger"
        FROM "CampChangeProposal" p
        JOIN "Camp" c ON c.id = p."campId"
        LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
-       WHERE p.status = 'PENDING' AND p."overallConfidence" >= $1
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScope.clause}
        ORDER BY p.priority DESC, p."createdAt" DESC
-       LIMIT $2 OFFSET $3`,
-      [minConfidence, limit, offset]
+       LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
+      rowValues
     ),
     pool.query(
-      `SELECT COUNT(*) FROM "CampChangeProposal" WHERE status = 'PENDING' AND "overallConfidence" >= $1`,
-      [minConfidence]
+      `SELECT COUNT(*)
+       FROM "CampChangeProposal" p
+       JOIN "Camp" c ON c.id = p."campId"
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScope.clause}`,
+      filterValues
     ),
   ]);
 
@@ -70,7 +97,9 @@ export async function getProposal(id: string): Promise<CampChangeProposal | null
   const result = await pool.query(
     `SELECT p.*,
             c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
-            r."startedAt" AS "crawlStartedAt", r.trigger AS "crawlTrigger", r."triggeredBy" AS "crawlTriggeredBy",
+            c."providerId", c."lastVerifiedAt",
+            r."startedAt" AS "crawlStartedAt", r."completedAt" AS "crawlCompletedAt",
+            r.trigger AS "crawlTrigger", r."triggeredBy" AS "crawlTriggeredBy",
             row_to_json(c.*) AS "campData"
      FROM "CampChangeProposal" p
      JOIN "Camp" c ON c.id = p."campId"
@@ -79,6 +108,30 @@ export async function getProposal(id: string): Promise<CampChangeProposal | null
     [id]
   );
   return result.rows[0] ?? null;
+}
+
+export async function getPendingProposalQueue(opts: {
+  currentId: string;
+  campId?: string;
+  providerId?: string;
+  minConfidence?: number;
+  communitySlugs?: string[];
+}): Promise<{ previousId: string | null; nextId: string | null }> {
+  const { proposals } = await getPendingProposals({
+    limit: 500,
+    offset: 0,
+    campId: opts.campId,
+    providerId: opts.providerId,
+    minConfidence: opts.minConfidence,
+    communitySlugs: opts.communitySlugs,
+  });
+  const index = proposals.findIndex((proposal) => proposal.id === opts.currentId);
+  if (index === -1) return { previousId: null, nextId: null };
+
+  return {
+    previousId: proposals[index - 1]?.id ?? null,
+    nextId: proposals[index + 1]?.id ?? null,
+  };
 }
 
 export async function updateProposalStatus(
@@ -135,12 +188,17 @@ export interface UnverifiedCamp {
 export async function getUnverifiedCamps(opts: {
   limit?: number;
   offset?: number;
+  communitySlugs?: string[];
 }): Promise<{ camps: UnverifiedCamp[]; total: number }> {
   const pool = getPool();
-  const { limit = 50, offset = 0 } = opts;
+  const { limit = 50, offset = 0, communitySlugs } = opts;
+  const communityScope = communityScopeSql(communitySlugs, `c."communitySlug"`, 1);
+  const countCommunityScope = communityScopeSql(communitySlugs, `c."communitySlug"`, 1);
 
   const base = `FROM "Camp" c
     WHERE c."dataConfidence" != 'VERIFIED'
+      AND c."archivedAt" IS NULL
+      ${communityScope.clause.trim()}
       AND NOT EXISTS (
         SELECT 1 FROM "CampChangeProposal" p
         WHERE p."campId" = c.id AND p.status = 'PENDING'
@@ -152,18 +210,25 @@ export async function getUnverifiedCamps(opts: {
               c."websiteUrl", c."lastVerifiedAt", c."updatedAt"
        ${base}
        ORDER BY c."dataConfidence" ASC, c."updatedAt" ASC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
+       LIMIT $${communityScope.values.length + 1} OFFSET $${communityScope.values.length + 2}`,
+      [...communityScope.values, limit, offset]
     ),
-    pool.query(`SELECT COUNT(*) ${base}`),
+    pool.query(`SELECT COUNT(*) ${base.replace(communityScope.clause, countCommunityScope.clause)}`, countCommunityScope.values),
   ]);
 
   return { camps: rows.rows, total: parseInt(countRow.rows[0].count) };
 }
 
-export async function getPendingCount(): Promise<number> {
+export async function getPendingCount(communitySlugs?: string[]): Promise<number> {
   const pool = getPool();
-  const result = await pool.query(`SELECT COUNT(*) FROM "CampChangeProposal" WHERE status = 'PENDING'`);
+  const communityScope = communityScopeSql(communitySlugs, `c."communitySlug"`, 1);
+  const result = await pool.query(
+    `SELECT COUNT(*)
+     FROM "CampChangeProposal" p
+     JOIN "Camp" c ON c.id = p."campId"
+     WHERE p.status = 'PENDING'${communityScope.clause} AND c."archivedAt" IS NULL`,
+    communityScope.values,
+  );
   return parseInt(result.rows[0].count);
 }
 
@@ -185,21 +250,29 @@ export interface CampReport {
 export async function getPendingReports(opts: {
   limit?: number;
   offset?: number;
+  communitySlugs?: string[];
 }): Promise<{ reports: CampReport[]; total: number }> {
   const pool = getPool();
-  const { limit = 25, offset = 0 } = opts;
+  const { limit = 25, offset = 0, communitySlugs } = opts;
+  const communityScope = communityScopeSql(communitySlugs, `c."communitySlug"`, 1);
 
   const [rows, countRow] = await Promise.all([
     pool.query(
       `SELECT r.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug"
        FROM "CampReport" r
        JOIN "Camp" c ON c.id = r."campId"
-       WHERE r.status = 'PENDING'
+       WHERE r.status = 'PENDING'${communityScope.clause}
        ORDER BY r."createdAt" DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
+       LIMIT $${communityScope.values.length + 1} OFFSET $${communityScope.values.length + 2}`,
+      [...communityScope.values, limit, offset]
     ),
-    pool.query(`SELECT COUNT(*) FROM "CampReport" WHERE status = 'PENDING'`),
+    pool.query(
+      `SELECT COUNT(*)
+       FROM "CampReport" r
+       JOIN "Camp" c ON c.id = r."campId"
+       WHERE r.status = 'PENDING'${communityScope.clause}`,
+      communityScope.values,
+    ),
   ]);
 
   return { reports: rows.rows, total: parseInt(countRow.rows[0].count) };

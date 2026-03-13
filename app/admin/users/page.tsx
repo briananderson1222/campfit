@@ -2,6 +2,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { getPool } from "@/lib/db";
 import { Users } from "lucide-react";
 import { UsersTable } from "./users-table";
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,17 @@ async function getUsers() {
 
   const pool = getPool();
   const { rows: profiles } = await pool.query(
-    `SELECT id, tier, "isAdmin", name,
-      COALESCE((SELECT COUNT(*) FROM "SavedCamp" sc WHERE sc."userId" = "User".id), 0)::int AS "savedCount"
-     FROM "User"`
+    `SELECT u.id, u.tier, u."isAdmin", u.name,
+      COALESCE(
+        json_agg(
+          json_build_object('communitySlug', cma."communitySlug", 'role', cma.role)
+        ) FILTER (WHERE cma.id IS NOT NULL),
+        '[]'::json
+      ) AS assignments,
+      COALESCE((SELECT COUNT(*) FROM "SavedCamp" sc WHERE sc."userId" = u.id), 0)::int AS "savedCount"
+     FROM "User" u
+     LEFT JOIN "CommunityModeratorAssignment" cma ON cma."userId" = u.id
+     GROUP BY u.id`
   );
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
 
@@ -31,11 +40,14 @@ async function getUsers() {
     name: profileMap[u.id]?.name ?? null,
     tier: profileMap[u.id]?.tier ?? 'FREE',
     isAdmin: profileMap[u.id]?.isAdmin ?? false,
+    assignments: profileMap[u.id]?.assignments ?? [],
     savedCount: profileMap[u.id]?.savedCount ?? 0,
   }));
 }
 
 export default async function AdminUsersPage() {
+  const auth = await requireAdminAccess();
+  if ('error' in auth) return null;
   const users = await getUsers();
 
   return (

@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getProposal, updateProposalStatus, partialApprove } from '@/lib/admin/review-repository';
 import { writeChangeLogs } from '@/lib/admin/changelog-repository';
 import { recordReviewDecision } from '@/lib/admin/metrics-repository';
 import { isFullyVerified } from '@/lib/admin/verification';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getProposalCommunitySlug } from '@/lib/admin/community-access';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getProposalCommunitySlug(params.id);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { approvedFields = [], reviewerNotes, feedbackTags, overrides, keepPending = false }: {
     approvedFields: string[];
@@ -68,7 +69,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         changeLogs.push({
           campId: proposal.campId,
           proposalId: proposal.id,
-          changedBy: user.email!,
+          changedBy: auth.access.email,
           fieldName: field,
           oldValue: diff.old,
           newValue: diff.new,
@@ -107,7 +108,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         changeLogs.push({
           campId: proposal.campId,
           proposalId: proposal.id,
-          changedBy: user.email!,
+          changedBy: auth.access.email,
           fieldName: field,
           oldValue: diff.old,
           newValue: diff.new,
@@ -166,14 +167,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (keepPending) {
       // Partial approval: apply fields, keep proposal in queue at lower priority
       try {
-        await partialApprove(params.id, approvedFields, user.email, reviewerNotes);
+        await partialApprove(params.id, approvedFields, auth.access.email, reviewerNotes);
       } catch (err) {
         console.error('partialApprove failed:', err);
         return NextResponse.json({ error: String(err) }, { status: 500 });
       }
     } else {
       try {
-        await updateProposalStatus(params.id, 'APPROVED', user.email, reviewerNotes, feedbackTags);
+        await updateProposalStatus(params.id, 'APPROVED', auth.access.email, reviewerNotes, feedbackTags);
       } catch (statusErr) {
         console.error('updateProposalStatus failed:', statusErr);
         return NextResponse.json({ error: String(statusErr) }, { status: 500 });

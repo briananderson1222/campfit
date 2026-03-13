@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getProposal, updateProposalStatus } from '@/lib/admin/review-repository';
 import { recordReviewDecision } from '@/lib/admin/metrics-repository';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getProposalCommunitySlug } from '@/lib/admin/community-access';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getProposalCommunitySlug(params.id);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { reviewerNotes, feedbackTags }: {
     reviewerNotes?: string;
@@ -17,7 +18,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (!proposal) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (proposal.status !== 'PENDING') return NextResponse.json({ error: 'Already reviewed' }, { status: 409 });
 
-  await updateProposalStatus(params.id, 'REJECTED', user.email, reviewerNotes, feedbackTags);
+  await updateProposalStatus(params.id, 'REJECTED', auth.access.email, reviewerNotes, feedbackTags);
   await recordReviewDecision({
     proposalId: params.id,
     runId: proposal.crawlRunId,

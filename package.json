@@ -12,7 +12,9 @@
     "harvest": "tsx scripts/harvest-aggregator.ts",
     "seed": "tsx scripts/seed.ts",
     "scrape": "tsx scripts/scrape.ts",
-    "scrape:dry": "tsx scripts/scrape.ts --dry-run"
+    "scrape:dry": "tsx scripts/scrape.ts --dry-run",
+    "test:access": "tsx scripts/test-access.ts",
+    "verify:admin": "tsx scripts/verify-admin-platform.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getProvider, getProviderCamps, getProviderPendingProposals, updateProvider } from '@/lib/admin/provider-repository';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getProviderCommunitySlug } from '@/lib/admin/community-access';
 
 export async function GET(
   _req: Request,
   { params }: { params: { providerId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getProviderCommunitySlug(params.providerId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const [provider, camps, proposals] = await Promise.all([
     getProvider(params.providerId),
@@ -25,9 +26,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: { providerId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getProviderCommunitySlug(params.providerId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await request.json().catch(() => ({}));
   const provider = await updateProvider(params.providerId, body);

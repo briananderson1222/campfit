@@ -1,20 +1,22 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
 const EDITABLE_FIELDS = new Set([
   'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes', 'interestingDetails',
   'campType', 'category', 'campTypes', 'categories', 'registrationStatus', 'registrationOpenDate',
   'dataConfidence', 'lunchIncluded', 'city', 'neighborhood', 'address', 'state', 'zip',
+  'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
 ]);
 
 export async function PATCH(
   req: Request,
   { params }: { params: { campId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getCampCommunitySlug(params.campId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
 
@@ -38,9 +40,9 @@ export async function POST(
   req: Request,
   { params }: { params: { campId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getCampCommunitySlug(params.campId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { action } = await req.json().catch(() => ({})) as { action?: string };
   if (action !== 'mark_verified') return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
@@ -52,4 +54,3 @@ export async function POST(
   );
   return NextResponse.json({ ok: true });
 }
-

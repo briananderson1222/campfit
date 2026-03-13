@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, History, Database,
-  ExternalLink, Menu, X, Users, LogOut, Building2,
+  ExternalLink, Menu, X, Users, LogOut, Building2, ShieldCheck, GitBranch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -14,9 +14,12 @@ import { createClient } from "@/lib/supabase/client";
 interface AdminSidebarProps {
   userEmail: string;
   pendingCount: number;
+  pendingProviderCount: number;
+  isAdmin: boolean;
+  moderatorCommunities: string[];
 }
 
-export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
+export function AdminSidebar({ userEmail, pendingCount, pendingProviderCount, isAdmin, moderatorCommunities }: AdminSidebarProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -31,11 +34,14 @@ export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
   const navLinks = [
     { href: "/admin", icon: <LayoutDashboard className="w-4 h-4" />, label: "Dashboard", exact: true },
     { href: "/admin/review", icon: <ClipboardList className="w-4 h-4" />, label: "Review Queue", badge: pendingCount },
+    { href: "/admin/provider-review", icon: <GitBranch className="w-4 h-4" />, label: "Provider Review", badge: pendingProviderCount },
     { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl Monitor" },
     { href: "/admin/providers", icon: <Building2 className="w-4 h-4" />, label: "Providers" },
     { href: "/admin/camps", icon: <Database className="w-4 h-4" />, label: "Camp Data" },
+    { href: "/admin/people", icon: <Users className="w-4 h-4" />, label: "People" },
+    { href: "/admin/trust", icon: <ShieldCheck className="w-4 h-4" />, label: "Trust Ops" },
     { href: "/admin/users", icon: <Users className="w-4 h-4" />, label: "Users" },
-  ];
+  ].filter((link) => isAdmin || !['/admin/trust', '/admin/users', '/admin/people'].includes(link.href));
 
   const isActive = (href: string, exact = false) =>
     exact ? pathname === href : pathname.startsWith(href);
@@ -49,6 +55,9 @@ export function AdminSidebar({ userEmail, pendingCount }: AdminSidebarProps) {
             <span className="text-pine-300 font-normal text-sm">Admin</span>
           </Link>
           <p className="text-xs text-pine-400 mt-0.5 truncate max-w-[160px]">{userEmail}</p>
+          <p className="text-[11px] text-pine-300 mt-1">
+            {isAdmin ? 'Global admin' : `Moderator · ${moderatorCommunities.join(', ') || 'scoped'}`}
+          </p>
         </div>
         <button
           className="sm:hidden p-1.5 rounded-lg hover:bg-pine-600 text-pine-300"

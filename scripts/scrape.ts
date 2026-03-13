@@ -16,6 +16,10 @@ import { BaseScraper } from "@/lib/ingestion/scraper-base";
 import { Avid4Scraper } from "@/lib/ingestion/scrapers/avid4";
 import { DenverArtMuseumScraper } from "@/lib/ingestion/scrapers/denver-arts";
 import { CampInput } from "@/lib/ingestion/adapter";
+import { resolvePgConfig } from "@/lib/db-config";
+import { loadLocalEnv } from "./load-env";
+
+loadLocalEnv();
 
 // ─── Registry — add new scrapers here ─────────────────────────────────────
 
@@ -30,12 +34,17 @@ const SCRAPERS: BaseScraper[] = [
 // ─── DB connection ────────────────────────────────────────────────────────
 
 function getClient(): Client {
+  const config = resolvePgConfig();
+  if (!config) {
+    throw new Error("Missing database env vars for scrape script");
+  }
+
   return new Client({
-    host: "aws-0-us-west-2.pooler.supabase.com",
-    port: 6543,
-    database: "postgres",
-    user: "postgres.rpnzolnnhbzhuspwpajq",
-    password: "eDG*8dX-c#eD2Z2",
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    user: config.user,
+    password: config.password,
     ssl: { rejectUnauthorized: false },
   });
 }
@@ -126,17 +135,6 @@ async function main() {
     : null;
 
   console.log(`\n🕷️  CampScout Scraper${dryRun ? " (DRY RUN)" : ""}\n`);
-
-  // Load .env manually if present
-  try {
-    const envContent = fs.readFileSync(path.join(process.cwd(), ".env"), "utf-8");
-    for (const line of envContent.split("\n")) {
-      const match = line.match(/^([A-Z_]+)="?([^"]*)"?$/);
-      if (match) process.env[match[1]] = match[2];
-    }
-  } catch {
-    // rely on environment
-  }
 
   const scrapers = onlyScraper
     ? SCRAPERS.filter((s) => s.scraperName.toLowerCase().includes(onlyScraper.toLowerCase()))

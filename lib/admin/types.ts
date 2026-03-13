@@ -71,11 +71,31 @@ export interface CampChangeProposal {
   campName?: string;
   campSlug?: string;
   communitySlug?: string;
+  providerId?: string | null;
+  lastVerifiedAt?: string | null;
   campData?: Record<string, unknown>; // full camp row for context
   // joined from CrawlRun
   crawlStartedAt?: string;
+  crawlCompletedAt?: string | null;
   crawlTrigger?: string;
   crawlTriggeredBy?: string;
+}
+
+export interface ProviderChangeProposal {
+  id: string;
+  providerId: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  status: ProposalStatus;
+  sourceUrl: string;
+  proposedChanges: ProposedChanges;
+  overallConfidence: number;
+  reviewerNotes: string | null;
+  providerName?: string;
+  providerSlug?: string;
+  communitySlug?: string;
+  providerData?: Record<string, unknown>;
 }
 
 export interface CampChangeLog {

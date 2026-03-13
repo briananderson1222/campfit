@@ -1,17 +1,21 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export async function PATCH(
   request: Request,
   { params }: { params: { userId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminAccess();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await request.json();
-  const { tier, isAdmin, email } = body as { tier?: string; isAdmin?: boolean; email?: string };
+  const { tier, isAdmin, email, assignments } = body as {
+    tier?: string;
+    isAdmin?: boolean;
+    email?: string;
+    assignments?: Array<{ communitySlug: string; role?: 'ADMIN' | 'MODERATOR' }>;
+  };
 
   const pool = getPool();
 
@@ -39,6 +43,18 @@ export async function PATCH(
      ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')}, "updatedAt" = now()`,
     queryValues
   );
+
+  if (assignments) {
+    await pool.query(`DELETE FROM "CommunityModeratorAssignment" WHERE "userId" = $1`, [params.userId]);
+    for (const assignment of assignments) {
+      if (!assignment.communitySlug) continue;
+      await pool.query(
+        `INSERT INTO "CommunityModeratorAssignment" ("userId", "communitySlug", role, "createdBy")
+         VALUES ($1, $2, $3, $4)`,
+        [params.userId, assignment.communitySlug, assignment.role ?? 'MODERATOR', auth.access.email],
+      );
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

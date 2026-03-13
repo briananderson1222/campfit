@@ -1,19 +1,27 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampIdsCommunitySlugs } from '@/lib/admin/community-access';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireAdminAccess({ allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const pool = getPool();
   const result = await pool.query(
     `SELECT * FROM "CrawlRun" ORDER BY "startedAt" DESC LIMIT 50`
   );
-  const runs = result.rows;
+  const rawRuns = result.rows;
+  const runs = auth.access.isAdmin
+    ? rawRuns
+    : (await Promise.all(rawRuns.map(async (run: { campIds: string[] | null }) => {
+        const communities = await getCampIdsCommunitySlugs(run.campIds ?? []);
+        return communities.length > 0 && communities.every((community) => auth.access.communities.includes(community))
+          ? run
+          : null;
+      }))).filter(Boolean);
 
   // Resolve campIds → camp names for targeted runs
   const allCampIds = Array.from(new Set(runs.flatMap((r: { campIds: string[] | null }) => r.campIds ?? [])));

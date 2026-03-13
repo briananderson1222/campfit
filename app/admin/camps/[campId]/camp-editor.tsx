@@ -21,6 +21,10 @@ interface Camp {
   campTypes: string[]; categories: string[];
   state: string | null; zip: string | null;
   websiteUrl: string | null;
+  applicationUrl?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  socialLinks?: Record<string, string> | null;
   interestingDetails: string | null; city: string | null; neighborhood: string | null;
   address: string | null; lunchIncluded: boolean | null;
   registrationOpenDate: string | null; registrationCloseDate: string | null; registrationStatus: string | null;
@@ -907,6 +911,16 @@ export function CampEditor({
             <EditableField campId={camp.id} field="address" label="Street Address" value={camp.address} />
             <p className="text-xs text-bark-200 mt-1">Street address only (e.g. "4001 E Iliff Ave") — not the neighborhood name</p>
           </div>
+        </dl>
+      </div>
+
+      <div className="glass-panel p-5">
+        <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-4">Contact & Apply</h2>
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+          <EditableField campId={camp.id} field="applicationUrl" label="Application URL" value={camp.applicationUrl ?? null} />
+          <EditableField campId={camp.id} field="contactEmail" label="Contact Email" value={camp.contactEmail ?? null} />
+          <EditableField campId={camp.id} field="contactPhone" label="Contact Phone" value={camp.contactPhone ?? null} />
+          <EditableField campId={camp.id} field="socialLinks" label="Social Links JSON" value={camp.socialLinks ? JSON.stringify(camp.socialLinks) : null} />
         </dl>
       </div>
 

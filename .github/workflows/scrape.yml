@@ -41,11 +41,11 @@ jobs:
           if [ -n "${{ inputs.scraper }}" ]; then ARGS="$ARGS --scraper ${{ inputs.scraper }}"; fi
           npx tsx scripts/scrape.ts $ARGS
         env:
-          PGHOST: aws-0-us-west-2.pooler.supabase.com
-          PGPORT: 6543
-          PGDATABASE: postgres
-          PGUSER: postgres.rpnzolnnhbzhuspwpajq
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ secrets.PGHOST }}
+          PGPORT: ${{ secrets.PGPORT }}
+          PGDATABASE: ${{ secrets.PGDATABASE }}
+          PGUSER: ${{ secrets.PGUSER }}
+          PGPASSWORD: ${{ secrets.PGPASSWORD }}
 
       - name: Trigger Vercel revalidation
         if: ${{ inputs.dry_run != 'true' }}

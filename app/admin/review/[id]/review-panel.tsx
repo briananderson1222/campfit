@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
@@ -33,7 +34,18 @@ const INLINE_EDITABLE = new Set([
   'registrationStatus', 'campType', 'category',
 ]);
 
-export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
+export function ReviewPanel({
+  proposal,
+  queueContext,
+}: {
+  proposal: CampChangeProposal;
+  queueContext?: {
+    backHref: string;
+    campHref: string;
+    nextHref: string | null;
+    previousHref: string | null;
+  };
+}) {
   const router = useRouter();
   const [proposedChanges, setProposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
   // Fields already applied in previous partial-approval rounds
@@ -54,6 +66,7 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
   const [campEdits, setCampEdits] = useState<Record<string, string>>({});
   const [campEditFields, setCampEditFields] = useState<Record<string, boolean>>({});
   const [savingCampField, setSavingCampField] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const campData = (proposal.campData ?? {}) as Record<string, unknown>;
   const campDomain = (() => {
@@ -104,23 +117,27 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
     const val = campEdits[field];
     if (val === undefined) return;
     setSavingCampField(field);
+    setErrorMessage(null);
     try {
       const res = await fetch(`/api/admin/camps/${proposal.campId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: val }),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to save field'));
       setCampEditFields(prev => { const n = { ...prev }; delete n[field]; return n; });
       // Optimistically update campData display
       campData[field] = val;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to save field');
     } finally {
       setSavingCampField(null);
     }
   };
 
-  const callApprove = async (keepPending: boolean) => {
+  const callApprove = async (keepPending: boolean, moveToNext = false) => {
     setLoading(keepPending ? 'keep' : 'approve');
+    setErrorMessage(null);
     try {
       const res = await fetch(`/api/admin/review/${proposal.id}/approve`, {
         method: 'POST',
@@ -132,34 +149,41 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
           keepPending,
         }),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to apply proposal'));
       if (keepPending) {
         // Stay on page — refresh to show updated applied state
         router.refresh();
+      } else if (moveToNext && queueContext?.nextHref) {
+        router.push(queueContext.nextHref);
+        router.refresh();
       } else {
-        router.push('/admin/review');
+        router.push(queueContext?.backHref ?? '/admin/review');
         router.refresh();
       }
-    } catch {
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to apply proposal');
       setLoading(null);
     }
   };
 
   const handleApprove = () => callApprove(false);
   const handleKeep = () => callApprove(true);
+  const handleApproveAndNext = () => callApprove(false, true);
 
   const handleReject = async () => {
     setLoading('reject');
+    setErrorMessage(null);
     try {
       const res = await fetch(`/api/admin/review/${proposal.id}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reviewerNotes: notes }),
       });
-      if (!res.ok) throw new Error('Failed');
-      router.push('/admin/review');
+      if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to reject proposal'));
+      router.push(queueContext?.backHref ?? '/admin/review');
       router.refresh();
-    } catch {
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to reject proposal');
       setLoading(null);
     }
   };
@@ -335,6 +359,12 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
       {recrawlMsg && (
         <p className="text-xs text-pine-600 bg-pine-50 border border-pine-200/60 rounded-lg px-3 py-2">{recrawlMsg}</p>
       )}
+      {errorMessage && (
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
 
       {!proposedCollapsed && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -490,6 +520,12 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
             />
 
             <div className="space-y-2 mt-4">
+              {queueContext?.campHref && (
+                <Link href={queueContext.campHref} className="btn-secondary w-full gap-2">
+                  <ExternalLink className="w-4 h-4" />
+                  Open Camp Data
+                </Link>
+              )}
               <button
                 onClick={handleApprove}
                 disabled={loading !== null || selected.size === 0}
@@ -498,6 +534,15 @@ export function ReviewPanel({ proposal }: { proposal: CampChangeProposal }) {
               >
                 {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 Apply & Resolve
+              </button>
+              <button
+                onClick={handleApproveAndNext}
+                disabled={loading !== null || selected.size === 0 || !queueContext?.nextHref}
+                className="btn-secondary w-full gap-2 disabled:opacity-50"
+                title="Apply selected fields and move straight to the next proposal in this queue"
+              >
+                {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                Apply & Next
               </button>
               <button
                 onClick={handleKeep}
@@ -712,4 +757,12 @@ function FieldInput({ field, value, onChange, onCommit, onCancel }: {
       className="flex-1 text-xs border border-pine-300 rounded px-2 py-1 focus:outline-none focus:border-pine-500 bg-white"
     />
   );
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  const body = await response.json().catch(() => null);
+  if (body && typeof body.error === 'string' && body.error.trim()) {
+    return body.error;
+  }
+  return fallback;
 }

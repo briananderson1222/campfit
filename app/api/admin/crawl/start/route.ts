@@ -1,18 +1,22 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampIdsCommunitySlugs } from '@/lib/admin/community-access';
 
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
   const body = await request.json().catch(() => ({}));
   const campIds: string[] | undefined = body.campIds;
   const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
   const discover: boolean = body.discover === true;
+  const communities = await getCampIdsCommunitySlugs(campIds ?? []);
+  const communitySlug = communities.length === 1 ? communities[0] : null;
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: (campIds?.length ?? 0) > 0 && communities.length <= 1 });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (auth.access.isModerator && communities.length > 1) {
+    return NextResponse.json({ error: 'Moderators can only start crawls within a single assigned community' }, { status: 403 });
+  }
 
   let resolveRunId!: (id: string) => void;
   let rejectRunId!: (err: Error) => void;
@@ -23,7 +27,7 @@ export async function POST(request: Request) {
 
   // Start pipeline — it emits 'started' event with runId synchronously at boot
   runCrawlPipeline({
-    triggeredBy: user.email,
+    triggeredBy: auth.access.email,
     trigger: 'MANUAL',
     campIds,
     model,

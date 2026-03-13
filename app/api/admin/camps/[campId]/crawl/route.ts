@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
 export const maxDuration = 300;
 
@@ -9,9 +10,9 @@ export async function POST(
   req: Request,
   { params }: { params: { campId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getCampCommunitySlug(params.campId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json().catch(() => ({}));
   const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
@@ -41,7 +42,7 @@ export async function POST(
   });
 
   runCrawlPipeline({
-    triggeredBy: user.email,
+    triggeredBy: auth.access.email,
     trigger: 'MANUAL',
     campIds: [params.campId],
     model,

@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getReportCommunitySlug } from '@/lib/admin/community-access';
 
 export async function PATCH(
   req: Request,
   { params }: { params: { reportId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getReportCommunitySlug(params.reportId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json().catch(() => ({}));
   const status = body.status === 'REVIEWED' ? 'REVIEWED' : 'DISMISSED';

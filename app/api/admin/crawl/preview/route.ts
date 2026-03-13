@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export type CrawlPriority = 'stale' | 'missing' | 'coming_soon' | 'never_crawled' | 'all' | 'specific';
 
@@ -17,16 +17,15 @@ export interface CrawlPreviewCamp {
 }
 
 export async function GET(req: Request) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
   const url = new URL(req.url);
   const priority = (url.searchParams.get('priority') ?? 'stale') as CrawlPriority;
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '10', 10), 100);
   const community = url.searchParams.get('community') ?? null;
+  const auth = await requireAdminAccess({ communitySlug: community, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const campId = url.searchParams.get('campId') ?? null;
   const q = url.searchParams.get('q') ?? null;
+  const scopedCommunities = auth.access.isAdmin ? null : auth.access.communities;
 
   const pool = getPool();
 
@@ -34,6 +33,7 @@ export async function GET(req: Request) {
   const ids = url.searchParams.get('ids');
   if (ids) {
     const idList = ids.split(',').filter(Boolean);
+    const communityFilter = scopedCommunities ? ` AND "communitySlug" = ANY($2::text[])` : '';
     const result = await pool.query(`
       SELECT
         id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
@@ -43,13 +43,14 @@ export async function GET(req: Request) {
          CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
         0 AS "priorityScore"
       FROM "Camp"
-      WHERE id = ANY($1)
-    `, [idList]);
+      WHERE id = ANY($1)${communityFilter}
+    `, scopedCommunities ? [idList, scopedCommunities] : [idList]);
     return NextResponse.json({ camps: result.rows as CrawlPreviewCamp[], totalCrawlable: result.rows.length });
   }
 
   // --- Single camp lookup by ID ---
   if (campId) {
+    const communityFilter = scopedCommunities ? ` AND "communitySlug" = ANY($2::text[])` : '';
     const result = await pool.query(`
       SELECT
         id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
@@ -60,10 +61,13 @@ export async function GET(req: Request) {
         0 AS "priorityScore"
       FROM "Camp"
       WHERE id = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''
-    `, [campId]);
+      ${communityFilter}
+    `, scopedCommunities ? [campId, scopedCommunities] : [campId]);
 
     const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
+      `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''` +
+      (scopedCommunities ? ` AND "communitySlug" = ANY($1::text[])` : ''),
+      scopedCommunities ? [scopedCommunities] : [],
     );
 
     return NextResponse.json({
@@ -75,6 +79,7 @@ export async function GET(req: Request) {
   // --- Text search (priority=specific with q=<query>) ---
   if (priority === 'specific' && q) {
     const searchLimit = Math.min(limit, 10);
+    const communityFilter = scopedCommunities ? ` AND "communitySlug" = ANY($3::text[])` : '';
     const result = await pool.query(`
       SELECT
         id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
@@ -86,12 +91,15 @@ export async function GET(req: Request) {
       FROM "Camp"
       WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''
         AND name ILIKE $1
+        ${communityFilter}
       ORDER BY name ASC
       LIMIT $2
-    `, [`%${q}%`, searchLimit]);
+    `, scopedCommunities ? [`%${q}%`, searchLimit, scopedCommunities] : [`%${q}%`, searchLimit]);
 
     const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
+      `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''` +
+      (scopedCommunities ? ` AND "communitySlug" = ANY($1::text[])` : ''),
+      scopedCommunities ? [scopedCommunities] : [],
     );
 
     return NextResponse.json({
@@ -107,6 +115,9 @@ export async function GET(req: Request) {
   if (community) {
     params.push(community);
     whereClause += ` AND "communitySlug" = $${params.length}`;
+  } else if (scopedCommunities) {
+    params.push(scopedCommunities);
+    whereClause += ` AND "communitySlug" = ANY($${params.length}::text[])`;
   }
 
   // Priority-specific filters
@@ -154,7 +165,11 @@ export async function GET(req: Request) {
   const countResult = await pool.query(
     `SELECT COUNT(*)::int AS total FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != ''` +
     (community ? ` AND "communitySlug" = $1` : ''),
-    community ? [community] : []
+    community
+      ? [community]
+      : scopedCommunities
+        ? [scopedCommunities]
+        : []
   );
 
   return NextResponse.json({

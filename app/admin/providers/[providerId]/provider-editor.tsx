@@ -14,6 +14,8 @@ interface Provider {
   address: string | null; city: string | null; neighborhood: string | null;
   contactEmail: string | null; contactPhone: string | null;
   notes: string | null; crawlRootUrl: string | null; communitySlug: string;
+  applicationUrl?: string | null;
+  socialLinks?: Record<string, string> | null;
 }
 
 interface SiteHint {
@@ -314,6 +316,8 @@ export function ProviderEditor({ provider, siteHints, campCount = 0 }: { provide
           <EditableField providerId={provider.id} field="neighborhood" label="Neighborhood" value={provider.neighborhood} />
           <EditableField providerId={provider.id} field="contactEmail" label="Contact Email" value={provider.contactEmail} />
           <EditableField providerId={provider.id} field="contactPhone" label="Contact Phone" value={provider.contactPhone} />
+          <EditableField providerId={provider.id} field="applicationUrl" label="Application URL" value={provider.applicationUrl ?? null} type="url" />
+          <EditableField providerId={provider.id} field="socialLinks" label="Social Links JSON" value={provider.socialLinks ? JSON.stringify(provider.socialLinks) : null} />
           <EditableField providerId={provider.id} field="notes" label="Internal Notes" value={provider.notes} type="textarea" />
         </dl>
       </div>

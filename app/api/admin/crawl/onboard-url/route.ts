@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
 import { discoverCampsFromUrl, filterNewDiscoveries } from '@/lib/ingestion/llm-discovery';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export const maxDuration = 300;
 
@@ -31,12 +31,13 @@ async function makeUniqueSlug(pool: any, name: string): Promise<string> {
 }
 
 export async function POST(req: Request) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
   const body = await req.json().catch(() => ({}));
   const url: string = typeof body.url === 'string' ? body.url.trim() : '';
+  const communitySlug = typeof body.communitySlug === 'string' && body.communitySlug.trim()
+    ? body.communitySlug.trim()
+    : 'denver';
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   if (!url) return NextResponse.json({ error: 'URL required' }, { status: 400 });
 
   const domain = parseDomain(url);
@@ -57,9 +58,9 @@ export async function POST(req: Request) {
     const slug = await makeUniqueSlug(pool, name);
     const { rows: [created] } = await pool.query<{ id: string }>(
       `INSERT INTO "Provider" (name, slug, "websiteUrl", domain, "crawlRootUrl", "communitySlug")
-       VALUES ($1, $2, $3, $4, $5, 'denver')
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (slug) DO UPDATE SET domain = EXCLUDED.domain RETURNING id`,
-      [name, slug, url, domain, url]
+      [name, slug, url, domain, url, communitySlug]
     );
     providerId = created.id;
   }
@@ -88,9 +89,9 @@ export async function POST(req: Request) {
     const campSlug = toSlug(stub.name) + '-' + Math.random().toString(36).slice(2, 6);
     const { rows: [camp] } = await pool.query<{ id: string }>(
       `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", "dataConfidence", "campType", category, "campTypes", "categories", "providerId")
-       VALUES ($1, $2, $3, 'denver', 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $4)
+       VALUES ($1, $2, $3, $4, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $5)
        ON CONFLICT (slug) DO NOTHING RETURNING id`,
-      [stub.name, campSlug, campUrl, providerId]
+      [stub.name, campSlug, campUrl, communitySlug, providerId]
     );
     if (camp) newCampIds.push(camp.id);
   }
@@ -107,7 +108,7 @@ export async function POST(req: Request) {
   });
 
   runCrawlPipeline({
-    triggeredBy: user.email!,
+    triggeredBy: auth.access.email,
     trigger: 'MANUAL',
     campIds: newCampIds,
     onProgress: (event) => {

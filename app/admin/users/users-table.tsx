@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Shield, ShieldOff, Crown, User as UserIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useEffect } from "react";
 
 interface UserRow {
   id: string;
@@ -12,13 +13,14 @@ interface UserRow {
   lastSignInAt: string | null;
   tier: "FREE" | "PREMIUM" | null;
   isAdmin: boolean | null;
+  assignments: Array<{ communitySlug: string; role: "ADMIN" | "MODERATOR" }>;
   savedCount: number;
 }
 
 interface ConfirmModal {
   userId: string;
   email: string;
-  action: "make_admin" | "remove_admin" | "upgrade" | "downgrade";
+  action: "make_admin" | "remove_admin" | "upgrade" | "downgrade" | "save_moderators";
 }
 
 export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
@@ -49,7 +51,23 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
       description: "This user will lose Premium features.",
       color: "text-bark-500",
     },
+    save_moderators: {
+      label: "Save Moderator Communities",
+      description: "This user will have moderator access only for the communities listed.",
+      color: "text-sky-600",
+    },
   };
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>(
+    Object.fromEntries(initialUsers.map(user => [user.id, user.assignments.map(a => a.communitySlug).join(", ")]))
+  );
+  const [communities, setCommunities] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch('/api/admin/communities')
+      .then(r => r.json())
+      .then(data => setCommunities(Array.isArray(data?.communities) ? data.communities.map((row: { communitySlug: string }) => row.communitySlug) : []))
+      .catch(() => {});
+  }, []);
 
   async function applyAction(modal: ConfirmModal) {
     setLoading(modal.userId);
@@ -60,6 +78,13 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
     if (modal.action === "remove_admin") patch.isAdmin = false;
     if (modal.action === "upgrade") patch.tier = "PREMIUM";
     if (modal.action === "downgrade") patch.tier = "FREE";
+    if (modal.action === "save_moderators") {
+      patch.assignments = assignmentDrafts[modal.userId]
+        .split(",")
+        .map(v => v.trim())
+        .filter(Boolean)
+        .map(communitySlug => ({ communitySlug, role: "MODERATOR" }));
+    }
 
     try {
       const res = await fetch(`/api/admin/users/${modal.userId}`, {
@@ -70,7 +95,13 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
       if (!res.ok) throw new Error(await res.text());
 
       setUsers(prev => prev.map(u =>
-        u.id === modal.userId ? { ...u, ...patch } : u
+        u.id === modal.userId ? {
+          ...u,
+          ...patch,
+          ...(modal.action === "save_moderators"
+            ? { assignments: patch.assignments as UserRow["assignments"] }
+            : null),
+        } : u
       ));
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -95,6 +126,7 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
               <th className="text-left px-4 py-3 text-xs font-semibold text-bark-400 uppercase tracking-wide">Tier</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-bark-400 uppercase tracking-wide">Saves</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-bark-400 uppercase tracking-wide">Admin</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-bark-400 uppercase tracking-wide">Moderator Communities</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -126,6 +158,27 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
                   }
                 </td>
                 <td className="px-4 py-3">
+                  <div className="space-y-2">
+                    <datalist id={`communities-${u.id}`}>
+                      {communities.map(community => <option key={community} value={community} />)}
+                    </datalist>
+                    <input
+                      list={`communities-${u.id}`}
+                      value={assignmentDrafts[u.id] ?? ""}
+                      onChange={(e) => setAssignmentDrafts(prev => ({ ...prev, [u.id]: e.target.value }))}
+                      placeholder="denver, boulder"
+                      className="w-44 rounded-lg border border-cream-300 px-2.5 py-1.5 text-xs"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {u.assignments.map(assignment => (
+                        <span key={`${u.id}-${assignment.communitySlug}`} className="inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 border border-sky-200">
+                          {assignment.communitySlug}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
                   <div className="flex items-center gap-2 justify-end">
                     {u.tier === "PREMIUM" ? (
                       <button
@@ -142,6 +195,12 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
                         Upgrade
                       </button>
                     )}
+                    <button
+                      onClick={() => setConfirm({ userId: u.id, email: u.email, action: "save_moderators" })}
+                      className="text-xs text-sky-600 hover:text-sky-800 transition-colors"
+                    >
+                      Save Mods
+                    </button>
                     {u.isAdmin ? (
                       <button
                         onClick={() => setConfirm({ userId: u.id, email: u.email, action: "remove_admin" })}

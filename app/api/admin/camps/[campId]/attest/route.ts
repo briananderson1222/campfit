@@ -10,17 +10,18 @@
  */
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getPool } from '@/lib/db';
 import { REQUIRED_FOR_VERIFIED } from '@/lib/admin/verification';
+import { requireAdminAccess } from '@/lib/admin/access';
+import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
 export async function POST(
   req: Request,
   { params }: { params: { campId: string } }
 ) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const communitySlug = await getCampCommunitySlug(params.campId);
+  const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { fields, notes }: { fields: string[]; notes?: string } = await req.json();
   if (!Array.isArray(fields) || fields.length === 0) {
@@ -42,9 +43,9 @@ export async function POST(
   for (const field of fields) {
     patch[field] = {
       excerpt: null,
-      sourceUrl: `admin:${user.email}`,
+      sourceUrl: `admin:${auth.access.email}`,
       approvedAt: now,
-      attestedBy: user.email,
+      attestedBy: auth.access.email,
       ...(notes ? { notes } : {}),
     };
   }

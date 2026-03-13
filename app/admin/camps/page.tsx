@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { ExternalLink } from 'lucide-react';
 import { RecrawlButton } from './recrawl-button';
 import { UrlEditor } from './url-editor';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,8 +22,16 @@ interface CampRow {
   pendingProposals: number;
 }
 
-async function getCampsWithQuality(): Promise<CampRow[]> {
+async function getCampsWithQuality(
+  archived: 'active' | 'archived' = 'active',
+  communitySlugs?: string[],
+): Promise<CampRow[]> {
   const pool = getPool();
+  const values: unknown[] = [];
+  const communityClause = communitySlugs && communitySlugs.length > 0
+    ? `AND c."communitySlug" = ANY($1::text[])`
+    : '';
+  if (communityClause) values.push(communitySlugs);
   const result = await pool.query<CampRow>(`
     SELECT
       c.id,
@@ -41,21 +50,40 @@ async function getCampsWithQuality(): Promise<CampRow[]> {
       (SELECT COUNT(*)::int FROM "CampChangeProposal"
        WHERE "campId" = c.id AND status = 'PENDING') AS "pendingProposals"
     FROM "Camp" c
+    WHERE c."archivedAt" IS ${archived === 'archived' ? 'NOT NULL' : 'NULL'}
+      ${communityClause}
     ORDER BY "missingFieldCount" DESC, "lastVerifiedAt" ASC NULLS FIRST
-  `);
+  `, values);
   return result.rows;
 }
 
-export default async function AdminCampsPage() {
-  const camps = await getCampsWithQuality().catch(() => [] as CampRow[]);
+export default async function AdminCampsPage({
+  searchParams,
+}: {
+  searchParams: { archived?: string };
+}) {
+  const auth = await requireAdminAccess({ allowModerator: true });
+  if ('error' in auth) return null;
+  const archived = searchParams.archived === '1' ? 'archived' : 'active';
+  const camps = await getCampsWithQuality(
+    archived,
+    auth.access.isAdmin ? undefined : auth.access.communities,
+  ).catch(() => [] as CampRow[]);
 
   return (
     <div>
       <div className="mb-8">
-        <h1 className="font-display text-3xl font-extrabold text-bark-700">Camp Data</h1>
-        <p className="text-bark-400 text-sm mt-1">
-          {camps.length} camps · sorted by missing fields then oldest verified · click Crawl to refresh a camp
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="font-display text-3xl font-extrabold text-bark-700">Camp Data</h1>
+            <p className="text-bark-400 text-sm mt-1">
+              {camps.length} camps · sorted by missing fields then oldest verified · click Crawl to refresh a camp
+            </p>
+          </div>
+          <Link href={archived === 'archived' ? '/admin/camps' : '/admin/camps?archived=1'} className="btn-secondary text-sm">
+            {archived === 'archived' ? 'View Active' : 'View Archived'}
+          </Link>
+        </div>
       </div>
 
       {/* Mobile: card list */}

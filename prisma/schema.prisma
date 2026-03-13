@@ -7,8 +7,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─── Enums ──────────────────────────────────────────────
-
 enum CampType {
   SUMMER_DAY
   SLEEPAWAY
@@ -33,6 +31,7 @@ enum CampCategory {
 
 enum RegistrationStatus {
   OPEN
+  FULL
   CLOSED
   WAITLIST
   COMING_SOON
@@ -94,55 +93,92 @@ enum DataSourceStatus {
   PARTIAL
 }
 
-// ─── Camp & Related ─────────────────────────────────────
+enum AdminEntityType {
+  CAMP
+  PROVIDER
+  PERSON
+}
+
+enum ReviewFlagStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+enum AttestationStatus {
+  ACTIVE
+  STALE
+  INVALIDATED
+}
+
+enum AiActionCapability {
+  READ
+  PROPOSE
+  WRITE
+}
+
+enum AiActionStatus {
+  REQUESTED
+  CONFIRMED
+  REJECTED
+  COMPLETED
+  FAILED
+}
 
 model Camp {
-  id                   String             @id @default(uuid())
-  slug                 String             @unique
-  name                 String
-  description          String             @default("")
-  notes                String?
-  campType             CampType
-  category             CampCategory
-  websiteUrl           String             @default("")
-  interestingDetails   String?
-
-  // Community
-  communitySlug        String             @default("denver")
-  displayName          String             @default("Denver")
-
-  // Location
-  city                 String             @default("Denver")
-  region               String?
-  neighborhood         String             @default("")
-  address              String             @default("")
-  latitude             Float?
-  longitude            Float?
-
-  // Logistics
-  lunchIncluded        Boolean            @default(false)
-
-  // Registration
-  registrationOpenDate DateTime?          @db.Date
-  registrationOpenTime String?            // stored as "9:00 AM" for display
-  registrationStatus   RegistrationStatus @default(UNKNOWN)
-
-  // Data provenance
-  sourceType           SourceType         @default(CSV)
-  sourceUrl            String?
-  lastVerifiedAt       DateTime?
-  dataConfidence       DataConfidence     @default(PLACEHOLDER)
-
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-
-  // Relations
-  ageGroups            CampAgeGroup[]
-  schedules            CampSchedule[]
-  pricing              CampPricing[]
-  savedBy              SavedCamp[]
-  notifications        Notification[]
-  dataSourceCamps      DataSourceCamp[]
+  id                    String             @id @default(uuid())
+  slug                  String             @unique
+  name                  String
+  description           String             @default("")
+  notes                 String?
+  campType              CampType
+  category              CampCategory
+  campTypes             CampType[]         @default([])
+  categories            CampCategory[]     @default([])
+  websiteUrl            String             @default("")
+  applicationUrl        String?
+  contactEmail          String?
+  contactPhone          String?
+  socialLinks           Json?
+  interestingDetails    String?
+  organizationName      String?
+  providerId            String?
+  provider              Provider?          @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  communitySlug         String             @default("denver")
+  displayName           String             @default("Denver")
+  city                  String             @default("Denver")
+  region                String?
+  state                 String?
+  zip                   String?
+  neighborhood          String             @default("")
+  address               String             @default("")
+  latitude              Float?
+  longitude             Float?
+  lunchIncluded         Boolean            @default(false)
+  registrationOpenDate  DateTime?          @db.Date
+  registrationOpenTime  String?
+  registrationCloseDate DateTime?          @db.Date
+  registrationStatus    RegistrationStatus @default(UNKNOWN)
+  sourceType            SourceType         @default(CSV)
+  sourceUrl             String?
+  fieldSources          Json?
+  lastVerifiedAt        DateTime?
+  lastCrawledAt         DateTime?
+  dataConfidence        DataConfidence     @default(PLACEHOLDER)
+  archivedAt            DateTime?
+  archivedBy            String?
+  archiveReason         String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  ageGroups             CampAgeGroup[]
+  schedules             CampSchedule[]
+  pricing               CampPricing[]
+  savedBy               SavedCamp[]
+  notifications         Notification[]
+  dataSourceCamps       DataSourceCamp[]
+  reports               CampReport[]
+  accreditations        CampAccreditation[]
+  people                CampPersonRole[]
 
   @@index([category])
   @@index([campType])
@@ -150,54 +186,80 @@ model Camp {
   @@index([registrationStatus])
   @@index([city])
   @@index([communitySlug])
+  @@index([providerId])
 }
 
 model CampAgeGroup {
   id       String @id @default(uuid())
   campId   String
   camp     Camp   @relation(fields: [campId], references: [id], onDelete: Cascade)
-  label    String // "PreK", "Ages 6-teen", "Grades 1-5"
+  label    String
   minAge   Int?
   maxAge   Int?
-  minGrade Int?   // -1 = PreK, 0 = K, 1 = 1st, etc.
+  minGrade Int?
   maxGrade Int?
 
   @@index([campId])
-  @@index([minAge, maxAge])
 }
 
 model CampSchedule {
   id           String   @id @default(uuid())
   campId       String
   camp         Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
-  label        String   // "Week of June 1-5", "First Term", "Morning Session"
+  label        String
   startDate    DateTime @db.Date
   endDate      DateTime @db.Date
-  startTime    String?  // "9:00 AM"
-  endTime      String?  // "3:00 PM"
-  earlyDropOff String?  // "8:00 AM"
-  latePickup   String?  // "5:30 PM"
+  startTime    String?
+  endTime      String?
+  earlyDropOff String?
+  latePickup   String?
 
   @@index([campId])
-  @@index([startDate])
-  @@index([startDate, endDate])
 }
 
 model CampPricing {
   id            String      @id @default(uuid())
   campId        String
   camp          Camp        @relation(fields: [campId], references: [id], onDelete: Cascade)
-  label         String      // "Full Day", "Half Day", "2-Week Bundle"
+  label         String
   amount        Decimal     @db.Decimal(10, 2)
   unit          PricingUnit
   durationWeeks Int?
-  ageQualifier  String?     // "8 year olds", "Ages 9-17"
+  ageQualifier  String?
   discountNotes String?
 
   @@index([campId])
 }
 
-// ─── Users & Saves ──────────────────────────────────────
+model Provider {
+  id             String             @id @default(uuid())
+  name           String
+  slug           String             @unique
+  websiteUrl     String?
+  domain         String?
+  logoUrl        String?
+  address        String?
+  city           String?
+  neighborhood   String?
+  contactEmail   String?
+  contactPhone   String?
+  applicationUrl String?
+  socialLinks    Json?
+  notes          String?
+  crawlRootUrl   String?
+  communitySlug  String             @default("denver")
+  lastVerifiedAt DateTime?
+  archivedAt     DateTime?
+  archivedBy     String?
+  archiveReason  String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  camps          Camp[]
+  people         ProviderPersonRole[]
+
+  @@index([domain])
+  @@index([communitySlug])
+}
 
 model User {
   id                     String              @id @default(uuid())
@@ -207,23 +269,16 @@ model User {
   tier                   UserTier            @default(FREE)
   stripeCustomerId       String?             @unique
   stripeSubscriptionId   String?
-
-  // Notification preferences
   notifyEmail            Boolean             @default(true)
   notifyPush             Boolean             @default(false)
   notifySms              Boolean             @default(false)
   phoneNumber            String?
-
-  // Parent profile for matching
   childAgeMin            Int?
   childAgeMax            Int?
   preferredNeighborhoods String[]            @default([])
   preferredCategories    CampCategory[]      @default([])
-
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
-
-  // Relations
   savedCamps             SavedCamp[]
   notifications          Notification[]
   pushSubscriptions      PushSubscription[]
@@ -242,11 +297,7 @@ model SavedCamp {
   savedAt     DateTime @default(now())
 
   @@unique([userId, campId])
-  @@index([userId])
-  @@index([campId])
 }
-
-// ─── Notifications ──────────────────────────────────────
 
 model Notification {
   id           String              @id @default(uuid())
@@ -262,10 +313,6 @@ model Notification {
   sentAt       DateTime?
   status       NotificationStatus  @default(PENDING)
   createdAt    DateTime            @default(now())
-
-  @@index([userId])
-  @@index([status, scheduledFor])
-  @@index([campId])
 }
 
 model PushSubscription {
@@ -276,26 +323,20 @@ model PushSubscription {
   p256dh    String
   auth      String
   createdAt DateTime @default(now())
-
-  @@index([userId])
 }
-
-// ─── Data Sources (Phase 4) ─────────────────────────────
 
 model DataSource {
   id           String           @id @default(uuid())
   name         String
   type         SourceType
   targetUrl    String           @default("")
-  schedule     String?          // cron expression
-  parserConfig Json?            // scraper-specific config
+  schedule     String?
+  parserConfig Json?
   lastRunAt    DateTime?
   lastStatus   DataSourceStatus?
   campCount    Int              @default(0)
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
-
-  // Relations
   camps        DataSourceCamp[]
 }
 
@@ -305,10 +346,160 @@ model DataSourceCamp {
   dataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
   campId       String
   camp         Camp       @relation(fields: [campId], references: [id], onDelete: Cascade)
-  externalId   String?    // ID from the source system
+  externalId   String?
   lastSyncedAt DateTime   @default(now())
 
   @@unique([dataSourceId, campId])
-  @@index([dataSourceId])
-  @@index([campId])
+}
+
+model CampReport {
+  id         String   @id @default(uuid())
+  campId     String
+  camp       Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  userId     String?
+  userEmail  String?
+  type       String   @default("OTHER")
+  description String
+  status     String   @default("PENDING")
+  adminNotes String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now())
+}
+
+model ReviewFlag {
+  id         String           @id @default(uuid())
+  entityType AdminEntityType
+  entityId   String
+  comment    String
+  status     ReviewFlagStatus @default(OPEN)
+  createdBy  String
+  createdAt  DateTime         @default(now())
+  resolvedBy String?
+  resolvedAt DateTime?
+
+  @@index([entityType, entityId])
+}
+
+model FieldAttestation {
+  id                 String            @id @default(uuid())
+  entityType         AdminEntityType
+  entityId           String
+  fieldKey           String
+  valueSnapshot      Json?
+  excerpt            String?
+  sourceUrl          String?
+  observedAt         DateTime          @default(now())
+  approvedAt         DateTime?
+  approvedBy         String?
+  status             AttestationStatus @default(ACTIVE)
+  lastRecheckedAt    DateTime?
+  invalidatedAt      DateTime?
+  invalidationReason String?
+  notes              String?
+  createdAt          DateTime          @default(now())
+
+  @@index([entityType, entityId, fieldKey])
+}
+
+model AccreditationBody {
+  id           String              @id @default(uuid())
+  name         String
+  slug         String              @unique
+  websiteUrl   String?
+  createdAt    DateTime            @default(now())
+  accreditations CampAccreditation[]
+}
+
+model CampAccreditation {
+  id             String   @id @default(uuid())
+  campId         String
+  camp           Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  bodyId         String
+  body           AccreditationBody @relation(fields: [bodyId], references: [id], onDelete: Cascade)
+  status         String   @default("ACTIVE")
+  scope          String?
+  sourceUrl      String?
+  excerpt        String?
+  observedAt     DateTime @default(now())
+  approvedAt     DateTime?
+  approvedBy     String?
+  lastVerifiedAt DateTime?
+  expiresAt      DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+}
+
+model Person {
+  id         String                @id @default(uuid())
+  fullName   String
+  slug       String                @unique
+  bio        String?
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @default(now())
+  contacts   PersonContactMethod[]
+  campRoles  CampPersonRole[]
+  providerRoles ProviderPersonRole[]
+}
+
+model PersonContactMethod {
+  id        String   @id @default(uuid())
+  personId  String
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  type      String
+  value     String
+  label     String?
+  createdAt DateTime @default(now())
+}
+
+model CampPersonRole {
+  id         String   @id @default(uuid())
+  campId     String
+  camp       Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  personId   String
+  person     Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  title      String?
+  roleType   String   @default("CONTACT")
+  notes      String?
+  sourceUrl  String?
+  excerpt    String?
+  observedAt DateTime @default(now())
+  approvedAt DateTime?
+  approvedBy String?
+  createdAt  DateTime @default(now())
+}
+
+model ProviderPersonRole {
+  id         String   @id @default(uuid())
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  personId   String
+  person     Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  title      String?
+  roleType   String   @default("CONTACT")
+  notes      String?
+  sourceUrl  String?
+  excerpt    String?
+  observedAt DateTime @default(now())
+  approvedAt DateTime?
+  approvedBy String?
+  createdAt  DateTime @default(now())
+}
+
+model AiActionLog {
+  id                   String             @id @default(uuid())
+  capability           AiActionCapability
+  action               String
+  entityType           AdminEntityType?
+  entityId             String?
+  status               AiActionStatus     @default(REQUESTED)
+  requestedBy          String
+  confirmedBy          String?
+  requiresConfirmation Boolean            @default(true)
+  input                Json?
+  output               Json?
+  error                String?
+  createdAt            DateTime           @default(now())
+  completedAt          DateTime?
+
+  @@index([entityType, entityId])
 }

@@ -13,6 +13,10 @@ import { parse } from "csv-parse/sync";
 import { Client } from "pg";
 import { CsvIngestionAdapter, CsvFileType } from "@/lib/ingestion/csv-adapter";
 import { CampInput } from "@/lib/ingestion/adapter";
+import { resolvePgConfig } from "@/lib/db-config";
+import { loadLocalEnv } from "./load-env";
+
+loadLocalEnv();
 
 // ─── Config ──────────────────────────────────────────────────
 
@@ -30,13 +34,17 @@ const CSV_FILES: { file: string; type: CsvFileType }[] = [
 // ─── DB Connection ───────────────────────────────────────────
 
 function getClient(): Client {
-  // Use Supabase connection pooler (direct host is IPv6-only, unreachable from Termux)
+  const config = resolvePgConfig();
+  if (!config) {
+    throw new Error("Missing database env vars for seed script");
+  }
+
   return new Client({
-    host: "aws-0-us-west-2.pooler.supabase.com",
-    port: 6543,
-    database: "postgres",
-    user: "postgres.rpnzolnnhbzhuspwpajq",
-    password: "eDG*8dX-c#eD2Z2",
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    user: config.user,
+    password: config.password,
     ssl: { rejectUnauthorized: false },
   });
 }
@@ -180,17 +188,6 @@ async function upsertCamp(client: Client, camp: CampInput): Promise<string | nul
 
 async function main() {
   console.log("🏕️  CampScout Seed Script\n");
-
-  // Load .env manually
-  try {
-    const envContent = fs.readFileSync(path.join(process.cwd(), ".env"), "utf-8");
-    for (const line of envContent.split("\n")) {
-      const match = line.match(/^([A-Z_]+)="?([^"]*)"?$/);
-      if (match) process.env[match[1]] = match[2];
-    }
-  } catch {
-    // .env not found, rely on environment
-  }
 
   const client = getClient();
 

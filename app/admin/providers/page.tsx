@@ -2,6 +2,7 @@ import { getProviders } from '@/lib/admin/provider-repository';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { ExternalLink, Building2 } from 'lucide-react';
+import { requireAdminAccess } from '@/lib/admin/access';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +18,18 @@ function relativeDate(dateStr: string | null): string {
   return `${Math.floor(months / 12)}yr ago`;
 }
 
-export default async function AdminProvidersPage() {
-  const providers = await getProviders().catch(() => []);
+export default async function AdminProvidersPage({
+  searchParams,
+}: {
+  searchParams: { archived?: string };
+}) {
+  const auth = await requireAdminAccess({ allowModerator: true });
+  if ('error' in auth) return null;
+  const archived = searchParams.archived === '1' ? 'archived' : 'active';
+  const providers = await getProviders(
+    auth.access.isAdmin ? 'denver' : auth.access.communities,
+    archived,
+  ).catch(() => []);
 
   const totalPending = providers.reduce((sum, p) => sum + (p.pendingProposals ?? 0), 0);
 
@@ -32,13 +43,23 @@ export default async function AdminProvidersPage() {
             {providers.length} provider{providers.length !== 1 ? 's' : ''} · camp organizations &amp; scraped sources
           </p>
         </div>
-        <Link
-          href="/admin/providers/new"
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-pine-600 hover:bg-pine-700 text-cream-100 text-sm font-semibold rounded-xl transition-colors"
-        >
-          <span className="text-lg leading-none">+</span>
-          New Provider
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={archived === 'archived' ? '/admin/providers' : '/admin/providers?archived=1'}
+            className="btn-secondary text-sm"
+          >
+            {archived === 'archived' ? 'View Active' : 'View Archived'}
+          </Link>
+          {(auth.access.isAdmin || auth.access.communities.length === 1) && (
+            <Link
+              href="/admin/providers/new"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-pine-600 hover:bg-pine-700 text-cream-100 text-sm font-semibold rounded-xl transition-colors"
+            >
+              <span className="text-lg leading-none">+</span>
+              New Provider
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Summary stats */}
@@ -133,7 +154,7 @@ export default async function AdminProvidersPage() {
                   <td className="px-4 py-3 text-center">
                     {(provider.pendingProposals ?? 0) > 0 ? (
                       <Link
-                        href={`/admin/review?providerId=${provider.id}`}
+                        href={`/admin/provider-review?providerId=${provider.id}`}
                         className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold hover:bg-amber-200 transition-colors min-w-[2rem]"
                       >
                         {provider.pendingProposals}
