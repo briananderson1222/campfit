@@ -30,14 +30,15 @@ export async function GET() {
     { id: 'gemini:gemini-1.5-pro', label: 'Gemini Pro', provider: 'gemini', badge: hasGemini ? 'Slow' : 'No Key' },
   );
 
-  // Ollama models — always available; list glm-5:cloud first if OLLAMA_MODEL points to it
+  // Ollama models — only usable when running locally (dev server / CLI crawl)
+  const isLocal = process.env.NODE_ENV === 'development' || !!process.env.OLLAMA_MODEL;
   const ollamaDefault = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
+  const ollamaBadge = isLocal ? 'Local' : 'Local Only';
   const ollamaModels: LLMModel[] = [
-    { id: `ollama:${ollamaDefault}`, label: ollamaDefault, provider: 'ollama', badge: 'Local' },
+    { id: `ollama:${ollamaDefault}`, label: ollamaDefault, provider: 'ollama', badge: ollamaBadge },
   ];
-  // Add standard models if not already the default
-  if (ollamaDefault !== 'llama3.2:3b') ollamaModels.push({ id: 'ollama:llama3.2:3b', label: 'Llama 3.2 3B', provider: 'ollama', badge: 'Local' });
-  if (ollamaDefault !== 'gemma3:1b') ollamaModels.push({ id: 'ollama:gemma3:1b', label: 'Gemma 3 1B', provider: 'ollama', badge: 'Local' });
+  if (ollamaDefault !== 'llama3.2:3b') ollamaModels.push({ id: 'ollama:llama3.2:3b', label: 'Llama 3.2 3B', provider: 'ollama', badge: ollamaBadge });
+  if (ollamaDefault !== 'gemma3:1b') ollamaModels.push({ id: 'ollama:gemma3:1b', label: 'Gemma 3 1B', provider: 'ollama', badge: ollamaBadge });
   models.push(...ollamaModels);
 
   // Default: first model with a real key, otherwise first Ollama model

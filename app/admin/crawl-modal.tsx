@@ -32,7 +32,12 @@ const PROVIDER_COLORS: Record<string, string> = {
 
 function modelBadgeClass(badge: string, provider: string): string {
   if (badge === 'No Key') return 'bg-red-100 text-red-500 line-through opacity-60';
+  if (badge === 'Local Only') return 'bg-amber-100 text-amber-600';
   return PROVIDER_COLORS[provider] ?? 'bg-gray-100 text-gray-600';
+}
+
+function isModelDisabled(badge: string): boolean {
+  return badge === 'No Key' || badge === 'Local Only';
 }
 
 function formatDate(iso: string | null) {
@@ -448,16 +453,19 @@ export function CrawlModal({
                       <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">LLM Model</label>
                       <div className="flex flex-wrap gap-2">
                         {models.map(m => {
-                          const noKey = m.badge === 'No Key';
+                          const disabled = isModelDisabled(m.badge);
+                          const disabledTitle = m.badge === 'No Key'
+                            ? `Set ${m.provider.toUpperCase()}_API_KEY in environment to enable`
+                            : 'Ollama only works when running the dev server locally';
                           return (
                             <button
                               key={m.id}
-                              onClick={() => !noKey && setSelectedModel(m.id)}
-                              disabled={noKey}
-                              title={noKey ? `Set ${m.provider.toUpperCase()}_API_KEY in environment to enable` : undefined}
+                              onClick={() => !disabled && setSelectedModel(m.id)}
+                              disabled={disabled}
+                              title={disabled ? disabledTitle : undefined}
                               className={cn(
                                 'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-all',
-                                noKey
+                                disabled
                                   ? 'border-cream-200/40 text-bark-300 cursor-not-allowed opacity-50'
                                   : selectedModel === m.id
                                     ? 'border-pine-400 bg-pine-50 text-pine-700'
@@ -472,6 +480,9 @@ export function CrawlModal({
                           );
                         })}
                       </div>
+                      {models.some(m => m.badge === 'Local Only') && (
+                        <p className="text-xs text-bark-300 mt-1.5">Ollama models require the local dev server — use CLI crawl instead: <code className="font-mono bg-cream-200/60 px-1 rounded">npm run crawl</code></p>
+                      )}
                     </div>
                   )}
 

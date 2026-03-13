@@ -192,15 +192,21 @@ export async function callLLM(prompt: string, modelOverride?: string): Promise<L
     throw new Error(`Unknown provider: "${provider}"`);
   }
 
-  // Auto-select: Gemini → Anthropic → Ollama
-  // (Gemini checked first since it has a free tier and Anthropic may lack credits)
+  // Auto-select: try each configured provider in order, skip on quota/auth errors
+  const errors: string[] = [];
+
   if (process.env.GEMINI_API_KEY) {
-    return callGemini(prompt, process.env.GEMINI_API_KEY);
+    try { return await callGemini(prompt, process.env.GEMINI_API_KEY); }
+    catch (e) { errors.push(`gemini: ${e instanceof Error ? e.message.slice(0, 80) : e}`); }
   }
   if (process.env.ANTHROPIC_API_KEY) {
-    return callAnthropic(prompt, process.env.ANTHROPIC_API_KEY);
+    try { return await callAnthropic(prompt, process.env.ANTHROPIC_API_KEY); }
+    catch (e) { errors.push(`anthropic: ${e instanceof Error ? e.message.slice(0, 80) : e}`); }
   }
   // Fall back to local Ollama
   const model = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
-  return callOllama(prompt, model);
+  try { return await callOllama(prompt, model); }
+  catch (e) { errors.push(`ollama: ${e instanceof Error ? e.message.slice(0, 80) : e}`); }
+
+  throw new Error(`All LLM providers failed:\n${errors.join('\n')}`);
 }
