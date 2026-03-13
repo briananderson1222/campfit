@@ -30,6 +30,11 @@ const PROVIDER_COLORS: Record<string, string> = {
   ollama:    'bg-bark-100 text-bark-600',
 };
 
+function modelBadgeClass(badge: string, provider: string): string {
+  if (badge === 'No Key') return 'bg-red-100 text-red-500 line-through opacity-60';
+  return PROVIDER_COLORS[provider] ?? 'bg-gray-100 text-gray-600';
+}
+
 function formatDate(iso: string | null) {
   if (!iso) return 'Never';
   const d = new Date(iso);
@@ -442,23 +447,30 @@ export function CrawlModal({
                     <div>
                       <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">LLM Model</label>
                       <div className="flex flex-wrap gap-2">
-                        {models.map(m => (
-                          <button
-                            key={m.id}
-                            onClick={() => setSelectedModel(m.id)}
-                            className={cn(
-                              'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-all',
-                              selectedModel === m.id
-                                ? 'border-pine-400 bg-pine-50 text-pine-700'
-                                : 'border-cream-300/60 hover:border-cream-400 text-bark-500'
-                            )}
-                          >
-                            {m.label}
-                            <span className={cn('text-xs px-1.5 py-0.5 rounded-md font-semibold', PROVIDER_COLORS[m.provider] ?? 'bg-gray-100 text-gray-600')}>
-                              {m.badge}
-                            </span>
-                          </button>
-                        ))}
+                        {models.map(m => {
+                          const noKey = m.badge === 'No Key';
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => !noKey && setSelectedModel(m.id)}
+                              disabled={noKey}
+                              title={noKey ? `Set ${m.provider.toUpperCase()}_API_KEY in environment to enable` : undefined}
+                              className={cn(
+                                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-all',
+                                noKey
+                                  ? 'border-cream-200/40 text-bark-300 cursor-not-allowed opacity-50'
+                                  : selectedModel === m.id
+                                    ? 'border-pine-400 bg-pine-50 text-pine-700'
+                                    : 'border-cream-300/60 hover:border-cream-400 text-bark-500'
+                              )}
+                            >
+                              {m.label}
+                              <span className={cn('text-xs px-1.5 py-0.5 rounded-md font-semibold', modelBadgeClass(m.badge, m.provider))}>
+                                {m.badge}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

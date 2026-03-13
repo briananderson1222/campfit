@@ -24,7 +24,7 @@ export async function POST(
 
   // Skip any existing PENDING proposals so they fall out of the review queue
   await pool.query(
-    `UPDATE "CampChangeProposal" SET status = 'SKIPPED', "updatedAt" = now()
+    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
      WHERE "campId" = $1 AND status = 'PENDING'`,
     [params.campId]
   );
