@@ -37,68 +37,118 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: validate
-    if: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL != '' && secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.PGHOST != '' && secrets.PGUSER != '' && secrets.PGPASSWORD != '' && secrets.CRON_SECRET != '' }}
     env:
       ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
-      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL != '' && vars.NEXT_PUBLIC_APP_URL || 'https://camp.fit' }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT != '' && secrets.PGPORT || '6543' }}
-      PGDATABASE: ${{ secrets.PGDATABASE != '' && secrets.PGDATABASE || 'postgres' }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
       PGUSER: ${{ secrets.PGUSER }}
       PGPASSWORD: ${{ secrets.PGPASSWORD }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL != '' && vars.RESEND_FROM_EMAIL || 'CampFit <notifications@example.com>' }}
+      RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL }}
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_PRICE_ID: ${{ vars.STRIPE_PRICE_ID }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
 
     steps:
+      - name: Check required build env
+        id: preflight
+        run: |
+          missing=""
+          for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY PGHOST PGUSER PGPASSWORD CRON_SECRET; do
+            eval "value=\${$key}"
+            if [ -z "$value" ]; then
+              missing="$missing $key"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping build job. Missing:$missing"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
+        if: steps.preflight.outputs.enabled == 'true'
         run: npm ci
 
       - name: Build app
-        run: npm run build
+        if: steps.preflight.outputs.enabled == 'true'
+        run: |
+          export NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-https://camp.fit}"
+          export PGPORT="${PGPORT:-6543}"
+          export PGDATABASE="${PGDATABASE:-postgres}"
+          export RESEND_FROM_EMAIL="${RESEND_FROM_EMAIL:-CampFit <notifications@example.com>}"
+          npm run build
 
   verify_admin:
     name: Verify admin platform
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: validate
-    if: ${{ secrets.PGHOST != '' && secrets.PGUSER != '' && secrets.PGPASSWORD != '' }}
     env:
       PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT != '' && secrets.PGPORT || '6543' }}
-      PGDATABASE: ${{ secrets.PGDATABASE != '' && secrets.PGDATABASE || 'postgres' }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
       PGUSER: ${{ secrets.PGUSER }}
       PGPASSWORD: ${{ secrets.PGPASSWORD }}
 
     steps:
+      - name: Check required DB env
+        id: preflight
+        run: |
+          missing=""
+          for key in PGHOST PGUSER PGPASSWORD; do
+            eval "value=\${$key}"
+            if [ -z "$value" ]; then
+              missing="$missing $key"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping admin verification. Missing:$missing"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
+        if: steps.preflight.outputs.enabled == 'true'
         run: npm ci
 
       - name: Verify admin platform
-        run: npm run verify:admin
+        if: steps.preflight.outputs.enabled == 'true'
+        run: |
+          export PGPORT="${PGPORT:-6543}"
+          export PGDATABASE="${PGDATABASE:-postgres}"
+          npm run verify:admin

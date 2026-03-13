@@ -11,33 +11,57 @@ jobs:
     name: Deploy production to Vercel
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_PROJECT_ID != '' && vars.VERCEL_ORG_ID != '' }}
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
 
     steps:
+      - name: Check deploy env
+        id: preflight
+        run: |
+          missing=""
+          for key in VERCEL_TOKEN VERCEL_PROJECT_ID VERCEL_ORG_ID; do
+            eval "value=\${$key}"
+            if [ -z "$value" ]; then
+              missing="$missing $key"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy. Missing:$missing"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
+        if: steps.preflight.outputs.enabled == 'true'
         run: npm ci
 
       - name: Install Vercel CLI
+        if: steps.preflight.outputs.enabled == 'true'
         run: npm install --global vercel@latest
 
       - name: Pull Vercel environment
+        if: steps.preflight.outputs.enabled == 'true'
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build with Vercel
+        if: steps.preflight.outputs.enabled == 'true'
         run: vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output
+        if: steps.preflight.outputs.enabled == 'true'
         run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
