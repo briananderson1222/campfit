@@ -97,17 +97,21 @@ function parseExtractionResponse(raw: string): {
   const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
   const data = JSON.parse(cleaned);
 
-  const { confidence = {}, excerpts: rawExcerpts = {}, ...rest } = data;
+  const { confidence = {}, excerpts: rawExcerpts = {}, extracted: extractedRaw = {}, ...rest } = data;
+
+  // Support both nested { extracted: {...} } and flat top-level shapes from the LLM
+  const source: Record<string, unknown> = Object.keys(extractedRaw).length > 0 ? extractedRaw : rest;
 
   // Map to CampInput shape (remove null values, keep structure)
   const extracted: Partial<CampInput> = {};
-  const fields = ['name', 'description', 'campType', 'category', 'registrationStatus',
-    'registrationOpenDate', 'lunchIncluded', 'address', 'neighborhood', 'city',
+  const fields = ['name', 'description', 'campType', 'category', 'campTypes', 'categories',
+    'registrationStatus', 'registrationOpenDate', 'registrationCloseDate',
+    'lunchIncluded', 'address', 'neighborhood', 'city', 'state', 'zip',
     'websiteUrl', 'interestingDetails', 'ageGroups', 'schedules', 'pricing'] as const;
 
   for (const field of fields) {
-    if (rest[field] !== null && rest[field] !== undefined) {
-      (extracted as Record<string, unknown>)[field] = rest[field];
+    if (source[field] !== null && source[field] !== undefined) {
+      (extracted as Record<string, unknown>)[field] = source[field];
     }
   }
 

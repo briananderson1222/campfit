@@ -8,7 +8,7 @@ const SUPPRESS_CONFIDENCE = 0.8; // Threshold below which suppression applies
 
 const SCALAR_FIELDS = [
   'name', 'description', 'registrationStatus',
-  'registrationOpenDate', 'lunchIncluded', 'address', 'neighborhood',
+  'registrationOpenDate', 'registrationCloseDate', 'lunchIncluded', 'address', 'neighborhood',
   'city', 'websiteUrl', 'interestingDetails', 'state', 'zip',
 ] as const;
 
