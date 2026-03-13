@@ -192,12 +192,13 @@ export async function callLLM(prompt: string, modelOverride?: string): Promise<L
     throw new Error(`Unknown provider: "${provider}"`);
   }
 
-  // Auto-select: first available provider wins
-  if (process.env.ANTHROPIC_API_KEY) {
-    return callAnthropic(prompt, process.env.ANTHROPIC_API_KEY);
-  }
+  // Auto-select: Gemini → Anthropic → Ollama
+  // (Gemini checked first since it has a free tier and Anthropic may lack credits)
   if (process.env.GEMINI_API_KEY) {
     return callGemini(prompt, process.env.GEMINI_API_KEY);
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    return callAnthropic(prompt, process.env.ANTHROPIC_API_KEY);
   }
   // Fall back to local Ollama
   const model = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';

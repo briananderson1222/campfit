@@ -6,12 +6,15 @@ import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 export const maxDuration = 300;
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: { campId: string } }
 ) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
 
   const pool = getPool();
   const { rows } = await pool.query<{ id: string; websiteUrl: string | null }>(
@@ -41,6 +44,7 @@ export async function POST(
     triggeredBy: user.email,
     trigger: 'MANUAL',
     campIds: [params.campId],
+    model,
     onProgress: (event) => {
       if (event.type === 'started') resolveRunId(event.runId);
     },

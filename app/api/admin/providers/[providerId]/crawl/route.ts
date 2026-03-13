@@ -15,6 +15,7 @@ export async function POST(
 
   const body = await req.json().catch(() => ({}));
   const discover: boolean = body.discover === true;
+  const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
 
   const pool = getPool();
 
@@ -53,6 +54,7 @@ export async function POST(
     triggeredBy: user.email,
     trigger: 'MANUAL',
     providerIds: [params.providerId],
+    model,
     discover,
     onProgress: (event) => {
       if (event.type === 'started') resolveRunId(event.runId);
