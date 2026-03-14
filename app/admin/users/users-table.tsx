@@ -25,6 +25,9 @@ interface ConfirmModal {
 
 export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
   const [users, setUsers] = useState(initialUsers);
+  const [search, setSearch] = useState("");
+  const [tierFilter, setTierFilter] = useState<"ALL" | "FREE" | "PREMIUM">("ALL");
+  const [accessFilter, setAccessFilter] = useState<"ALL" | "ADMIN" | "MODERATOR" | "NONE">("ALL");
   const [confirm, setConfirm] = useState<ConfirmModal | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
 
@@ -114,8 +117,60 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
     ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : "—";
 
+  const filteredUsers = users.filter((user) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query
+      || user.email.toLowerCase().includes(query)
+      || (user.name ?? "").toLowerCase().includes(query)
+      || user.assignments.some((assignment) => assignment.communitySlug.toLowerCase().includes(query));
+
+    const matchesTier = tierFilter === "ALL" || (user.tier ?? "FREE") === tierFilter;
+
+    const hasModeratorAssignments = user.assignments.length > 0;
+    const matchesAccess = accessFilter === "ALL"
+      || (accessFilter === "ADMIN" && !!user.isAdmin)
+      || (accessFilter === "MODERATOR" && hasModeratorAssignments)
+      || (accessFilter === "NONE" && !user.isAdmin && !hasModeratorAssignments);
+
+    return matchesSearch && matchesTier && matchesAccess;
+  });
+
   return (
     <>
+      <div className="glass-panel p-4 space-y-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+          <div className="flex-1">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-bark-300">Search</label>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Email, name, or community"
+              className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="w-full md:w-44">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-bark-300">Tier</label>
+            <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value as typeof tierFilter)} className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm">
+              <option value="ALL">All tiers</option>
+              <option value="FREE">Free</option>
+              <option value="PREMIUM">Premium</option>
+            </select>
+          </div>
+          <div className="w-full md:w-48">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-bark-300">Access</label>
+            <select value={accessFilter} onChange={(e) => setAccessFilter(e.target.value as typeof accessFilter)} className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm">
+              <option value="ALL">All access</option>
+              <option value="ADMIN">Admins</option>
+              <option value="MODERATOR">Moderators</option>
+              <option value="NONE">No admin access</option>
+            </select>
+          </div>
+        </div>
+        <p className="text-xs text-bark-400">
+          Showing {filteredUsers.length} of {users.length} users
+        </p>
+      </div>
+
       <div className="overflow-x-auto rounded-xl border border-cream-300">
         <table className="w-full text-sm">
           <thead>
@@ -131,7 +186,7 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-cream-200">
-            {users.map(u => (
+            {filteredUsers.map(u => (
               <tr key={u.id} className={cn("bg-white hover:bg-cream-50 transition-colors", loading === u.id && "opacity-50 pointer-events-none")}>
                 <td className="px-4 py-3">
                   <div className="font-medium text-bark-700">{u.name ?? u.email.split("@")[0]}</div>
@@ -223,7 +278,7 @@ export function UsersTable({ initialUsers }: { initialUsers: UserRow[] }) {
             ))}
           </tbody>
         </table>
-        {users.length === 0 && (
+        {filteredUsers.length === 0 && (
           <div className="text-center py-12 text-bark-300">No users yet.</div>
         )}
       </div>

@@ -147,12 +147,16 @@ export async function addFieldAttestation(opts: {
   entityId: string;
   fieldKey: string;
   actor: string;
+  mode: 'source' | 'override';
   sourceUrl?: string | null;
   excerpt?: string | null;
   notes?: string | null;
   valueSnapshot?: unknown;
 }) {
   const pool = getPool();
+  const normalizedNotes = opts.mode === 'override'
+    ? `Override attestation: ${opts.notes ?? 'Approved by admin review'}`
+    : opts.notes ?? null;
   const { rows } = await pool.query(
     `INSERT INTO "FieldAttestation"
        ("entityType", "entityId", "fieldKey", "valueSnapshot", excerpt, "sourceUrl", "approvedAt", "approvedBy", "lastRecheckedAt", notes)
@@ -166,7 +170,7 @@ export async function addFieldAttestation(opts: {
       opts.excerpt ?? null,
       opts.sourceUrl ?? null,
       opts.actor,
-      opts.notes ?? null,
+      normalizedNotes,
     ],
   );
   return rows[0];

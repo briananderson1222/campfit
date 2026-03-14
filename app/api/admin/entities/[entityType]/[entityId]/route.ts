@@ -18,6 +18,63 @@ function parseEntityType(value: string): AdminEntityType | null {
   return null;
 }
 
+const ENTITY_ATTESTATION_FIELDS: Record<AdminEntityType, string[]> = {
+  CAMP: [
+    'name',
+    'organizationName',
+    'description',
+    'websiteUrl',
+    'applicationUrl',
+    'contactEmail',
+    'contactPhone',
+    'socialLinks',
+    'interestingDetails',
+    'city',
+    'state',
+    'zip',
+    'neighborhood',
+    'address',
+    'lunchIncluded',
+    'registrationStatus',
+    'registrationOpenDate',
+    'registrationCloseDate',
+    'campTypes',
+    'categories',
+    'ageGroups',
+    'schedules',
+    'pricing',
+    'provider',
+  ],
+  PROVIDER: [
+    'name',
+    'websiteUrl',
+    'applicationUrl',
+    'contactEmail',
+    'contactPhone',
+    'socialLinks',
+    'city',
+    'neighborhood',
+    'address',
+    'notes',
+    'crawlRootUrl',
+    'people',
+    'accreditation',
+  ],
+  PERSON: [
+    'fullName',
+    'bio',
+    'contacts',
+  ],
+};
+
+function isAllowedAttestationField(entityType: AdminEntityType, fieldKey: string) {
+  if (ENTITY_ATTESTATION_FIELDS[entityType].includes(fieldKey)) return true;
+  if (entityType === 'CAMP') {
+    return fieldKey.startsWith('ageGroups:') || fieldKey.startsWith('schedules:') || fieldKey.startsWith('pricing:');
+  }
+  return false;
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: { entityType: string; entityId: string } },
@@ -87,11 +144,29 @@ export async function POST(
         if (typeof body.fieldKey !== 'string' || !body.fieldKey.trim()) {
           return NextResponse.json({ error: 'fieldKey is required' }, { status: 400 });
         }
+        if (!isAllowedAttestationField(entityType, body.fieldKey)) {
+          return NextResponse.json({ error: 'fieldKey must be a known attestation target' }, { status: 400 });
+        }
+        if (body.mode !== 'source' && body.mode !== 'override') {
+          return NextResponse.json({ error: 'mode must be source or override' }, { status: 400 });
+        }
+        if (body.mode === 'source') {
+          if (typeof body.sourceUrl !== 'string' || !body.sourceUrl.trim()) {
+            return NextResponse.json({ error: 'sourceUrl is required for source attestations' }, { status: 400 });
+          }
+          if (typeof body.excerpt !== 'string' || !body.excerpt.trim()) {
+            return NextResponse.json({ error: 'excerpt is required for source attestations' }, { status: 400 });
+          }
+        }
+        if (body.mode === 'override' && (typeof body.notes !== 'string' || !body.notes.trim())) {
+          return NextResponse.json({ error: 'override reason is required for override attestations' }, { status: 400 });
+        }
         return NextResponse.json(await addFieldAttestation({
           entityType,
           entityId: params.entityId,
           fieldKey: body.fieldKey,
           actor: auth.access.email,
+          mode: body.mode,
           sourceUrl: typeof body.sourceUrl === 'string' ? body.sourceUrl : null,
           excerpt: typeof body.excerpt === 'string' ? body.excerpt : null,
           notes: typeof body.notes === 'string' ? body.notes : null,

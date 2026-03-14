@@ -2,22 +2,14 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Archive, Bot, Flag, Loader2, Plus, ShieldCheck, Users } from 'lucide-react';
+import { Archive, Flag, Loader2, Plus, ShieldCheck, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AttestationActions } from './attestation-actions';
 import { ReviewFlagActions } from './review-flag-actions';
+import { AdminCopilot } from './admin-copilot';
 
 type EntityType = 'CAMP' | 'PROVIDER';
-type AssistantActionOption =
-  | 'propose'
-  | 'flag'
-  | 'attest'
-  | 'add_person'
-  | 'add_accreditation'
-  | 'mark_verified'
-  | 'trigger_crawl'
-  | 'archive'
-  | 'restore';
+type AttestationMode = 'source' | 'override';
 
 type ContextPayload = {
   snapshot: {
@@ -25,20 +17,97 @@ type ContextPayload = {
     archiveReason?: string | null;
   };
   flags: Array<{ id: string; comment: string; status: string; createdAt: string }>;
-  attestations: Array<{ id: string; fieldKey: string; approvedAt: string | null; status: string; notes?: string | null; invalidationReason?: string | null; lastRecheckedAt?: string | null }>;
-  people: Array<{ id: string; roleId?: string; fullName?: string; title?: string | null; roleType?: string | null; contacts?: Array<{ type: string; value: string }> }>;
-  accreditations: Array<{ id: string; bodyName?: string; status?: string | null; scope?: string | null; lastVerifiedAt?: string | null; expiresAt?: string | null; notes?: string | null }>;
+  attestations: Array<{
+    id: string;
+    fieldKey: string;
+    approvedAt: string | null;
+    status: string;
+    notes?: string | null;
+    invalidationReason?: string | null;
+    lastRecheckedAt?: string | null;
+  }>;
+  people: Array<{
+    id: string;
+    roleId?: string;
+    fullName?: string;
+    title?: string | null;
+    roleType?: string | null;
+    contacts?: Array<{ type: string; value: string }>;
+  }>;
+  accreditations: Array<{
+    id: string;
+    bodyName?: string;
+    status?: string | null;
+    scope?: string | null;
+    lastVerifiedAt?: string | null;
+    expiresAt?: string | null;
+    notes?: string | null;
+  }>;
   aiActions: Array<{ id: string; action: string; capability: string; status: string; createdAt: string }>;
 };
+
+type RelatedCamp = {
+  id: string;
+  name: string;
+  slug: string;
+  city?: string | null;
+  state?: string | null;
+  lastVerifiedAt?: string | null;
+};
+
+const CAMP_ATTESTATION_OPTIONS = [
+  { value: 'name', label: 'Name' },
+  { value: 'organizationName', label: 'Organization' },
+  { value: 'description', label: 'Description' },
+  { value: 'websiteUrl', label: 'Website URL' },
+  { value: 'applicationUrl', label: 'Application URL' },
+  { value: 'contactEmail', label: 'Contact Email' },
+  { value: 'contactPhone', label: 'Contact Phone' },
+  { value: 'socialLinks', label: 'Social Links' },
+  { value: 'interestingDetails', label: 'Interesting Details' },
+  { value: 'city', label: 'City' },
+  { value: 'state', label: 'State' },
+  { value: 'zip', label: 'ZIP' },
+  { value: 'neighborhood', label: 'Neighborhood' },
+  { value: 'address', label: 'Address' },
+  { value: 'lunchIncluded', label: 'Lunch Included' },
+  { value: 'registrationStatus', label: 'Registration Status' },
+  { value: 'registrationOpenDate', label: 'Registration Open Date' },
+  { value: 'registrationCloseDate', label: 'Registration Close Date' },
+  { value: 'campTypes', label: 'Camp Types' },
+  { value: 'categories', label: 'Categories' },
+  { value: 'ageGroups', label: 'Age Groups (all rows)' },
+  { value: 'schedules', label: 'Schedules / Sessions (all rows)' },
+  { value: 'pricing', label: 'Pricing (all rows)' },
+  { value: 'provider', label: 'Provider Link' },
+];
+
+const PROVIDER_ATTESTATION_OPTIONS = [
+  { value: 'name', label: 'Name' },
+  { value: 'websiteUrl', label: 'Website URL' },
+  { value: 'applicationUrl', label: 'Application URL' },
+  { value: 'contactEmail', label: 'Contact Email' },
+  { value: 'contactPhone', label: 'Contact Phone' },
+  { value: 'socialLinks', label: 'Social Links' },
+  { value: 'city', label: 'City' },
+  { value: 'neighborhood', label: 'Neighborhood' },
+  { value: 'address', label: 'Address' },
+  { value: 'notes', label: 'Notes' },
+  { value: 'crawlRootUrl', label: 'Crawl Root URL' },
+  { value: 'people', label: 'People' },
+  { value: 'accreditation', label: 'Accreditation' },
+];
 
 export function EntityOpsPanel({
   entityType,
   entityId,
   allowAccreditation = false,
+  attestationTargets,
 }: {
   entityType: EntityType;
   entityId: string;
   allowAccreditation?: boolean;
+  attestationTargets?: Array<{ value: string; label: string }>;
 }) {
   const [context, setContext] = useState<ContextPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,19 +117,16 @@ export function EntityOpsPanel({
   const [personTitle, setPersonTitle] = useState('');
   const [accreditationBody, setAccreditationBody] = useState('');
   const [accreditationScope, setAccreditationScope] = useState('');
-  const [accreditationEdits, setAccreditationEdits] = useState<Record<string, {
-    scope: string;
-    notes: string;
-    expiresAt: string;
-  }>>({});
+  const [accreditationEdits, setAccreditationEdits] = useState<Record<string, { scope: string; notes: string; expiresAt: string }>>({});
   const [attestationField, setAttestationField] = useState('');
+  const [attestationMode, setAttestationMode] = useState<AttestationMode>('source');
   const [attestationSourceUrl, setAttestationSourceUrl] = useState('');
+  const [attestationExcerpt, setAttestationExcerpt] = useState('');
   const [attestationNotes, setAttestationNotes] = useState('');
-  const [assistantAction, setAssistantAction] = useState<AssistantActionOption>('propose');
-  const [assistantPrompt, setAssistantPrompt] = useState('');
-  const [assistantResult, setAssistantResult] = useState<string | null>(null);
+  const [relatedCamps, setRelatedCamps] = useState<RelatedCamp[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingAssistant, setPendingAssistant] = useState<{ action: string; payload: Record<string, unknown> } | null>(null);
+
+  const attestationOptions = attestationTargets ?? (entityType === 'CAMP' ? CAMP_ATTESTATION_OPTIONS : PROVIDER_ATTESTATION_OPTIONS);
 
   async function loadContext() {
     setLoading(true);
@@ -77,7 +143,7 @@ export function EntityOpsPanel({
 
   useEffect(() => {
     loadContext().catch(() => {});
-  }, [entityType, entityId]);
+  }, [entityId, entityType]);
 
   async function runEntityAction(body: Record<string, unknown>, busyKey: string) {
     setBusy(busyKey);
@@ -96,29 +162,21 @@ export function EntityOpsPanel({
     await loadContext();
   }
 
-  async function runAssistant(action: string, payload: Record<string, unknown>, confirmed = false) {
-    setBusy('assistant');
-    setAssistantResult(null);
+  async function loadRelatedCamps() {
+    setBusy('related');
     setError(null);
     const res = await fetch('/api/admin/assistant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, entityType, entityId, payload, confirmed }),
+      body: JSON.stringify({ action: 'get_connected_camps', entityType, entityId, payload: {} }),
     }).catch(() => null);
     const data = await res?.json().catch(() => null);
     setBusy(null);
     if (!res?.ok) {
-      setError(data?.error ?? 'Assistant action failed');
+      setError(data?.error ?? 'Failed to load related camps');
       return;
     }
-    if (data?.requiresConfirmation) {
-      setPendingAssistant({ action, payload });
-      setAssistantResult(`Confirmation required for ${action}. Review and confirm below.`);
-      return;
-    }
-    setPendingAssistant(null);
-    setAssistantResult(JSON.stringify(data.output ?? data, null, 2));
-    await loadContext();
+    setRelatedCamps(Array.isArray(data?.output) ? data.output as RelatedCamp[] : []);
   }
 
   async function patchAttestation(attestationId: string, body: Record<string, unknown>, busyKey: string) {
@@ -155,34 +213,6 @@ export function EntityOpsPanel({
     await loadContext();
   }
 
-  async function refreshContext() {
-    await loadContext();
-  }
-
-  function assistantPlaceholder() {
-    switch (assistantAction) {
-      case 'propose':
-        return 'Describe the provider/camp change you want proposed.';
-      case 'flag':
-        return 'Describe why this entity should be flagged.';
-      case 'attest':
-        return 'Field key, source note, or rationale for the attestation.';
-      case 'add_person':
-        return 'Person name, title, and any useful context.';
-      case 'add_accreditation':
-        return 'Accreditation body and optional scope.';
-      case 'archive':
-      case 'restore':
-        return 'Optional reason for this archive state change.';
-      case 'mark_verified':
-        return 'Optional note before marking verified.';
-      case 'trigger_crawl':
-        return 'Optional crawl note.';
-      default:
-        return 'Describe the action you want the assistant to take.';
-    }
-  }
-
   function accreditationDraft(accreditation: ContextPayload['accreditations'][number]) {
     return accreditationEdits[accreditation.id] ?? {
       scope: accreditation.scope ?? '',
@@ -191,69 +221,19 @@ export function EntityOpsPanel({
     };
   }
 
-  async function runSelectedAssistantAction() {
-    const prompt = assistantPrompt.trim();
-    switch (assistantAction) {
-      case 'propose':
-        await runAssistant(entityType === 'CAMP' ? 'propose_camp_changes' : 'propose_provider_changes', {
-          reviewerNotes: prompt || null,
-          proposedChanges: {
-            notes: {
-              old: null,
-              new: prompt,
-              confidence: 0.5,
-            },
-          },
-        });
-        break;
-      case 'flag':
-        await runAssistant('flag_entity', { comment: prompt });
-        break;
-      case 'attest':
-        await runAssistant('add_attestation', {
-          fieldKey: attestationField || prompt,
-          sourceUrl: attestationSourceUrl || null,
-          notes: attestationNotes || prompt || null,
-        });
-        break;
-      case 'add_person':
-        await runAssistant('add_person', {
-          fullName: personName || prompt,
-          title: personTitle || null,
-          notes: prompt || null,
-        });
-        break;
-      case 'add_accreditation':
-        await runAssistant('add_accreditation', {
-          bodyName: accreditationBody || prompt,
-          scope: accreditationScope || null,
-          notes: prompt || null,
-        });
-        break;
-      case 'mark_verified':
-        await runAssistant('mark_camp_verified', { note: prompt || null });
-        break;
-      case 'trigger_crawl':
-        await runAssistant(entityType === 'CAMP' ? 'trigger_camp_crawl' : 'trigger_provider_crawl', { note: prompt || null });
-        break;
-      case 'archive':
-        await runAssistant('archive_entity', { reason: prompt || 'Archived from assistant console' });
-        break;
-      case 'restore':
-        await runAssistant('restore_entity', { reason: prompt || null });
-        break;
-    }
-  }
-
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-      <div className="glass-panel p-5 space-y-4">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <div className="glass-panel p-5 space-y-5">
         <div className="flex items-center gap-2">
-          <Archive className="w-4 h-4 text-bark-400" />
-          <h3 className="font-display font-bold text-bark-700 text-sm uppercase tracking-wide">Admin Ops</h3>
+          <Archive className="h-4 w-4 text-bark-400" />
+          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-bark-700">Admin Status</h3>
         </div>
+
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-bark-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading context…</div>
+          <div className="flex items-center gap-2 text-sm text-bark-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading context…
+          </div>
         ) : (
           <>
             <div className="rounded-xl border border-cream-300/70 px-3 py-2 text-sm text-bark-500">
@@ -268,43 +248,68 @@ export function EntityOpsPanel({
 
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => runEntityAction({ action: context?.snapshot.archivedAt ? 'unarchive' : 'archive', reason: 'Archived from admin entity panel' }, 'archive')}
+                onClick={() => runEntityAction({ action: context?.snapshot.archivedAt ? 'unarchive' : 'archive', reason: 'Changed from admin status panel' }, 'archive')}
                 disabled={busy !== null}
                 className="btn-secondary gap-2"
               >
-                {busy === 'archive' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+                {busy === 'archive' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
                 {context?.snapshot.archivedAt ? 'Restore' : 'Archive'}
               </button>
               <button
-                onClick={() => runAssistant('get_connected_camps', {}, false)}
+                onClick={() => loadRelatedCamps()}
                 disabled={busy !== null}
                 className="btn-secondary gap-2"
               >
-                {busy === 'assistant' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-                Load related context
+                {busy === 'related' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+                Show related camps
               </button>
             </div>
 
+            {relatedCamps && (
+              <div className="space-y-2 rounded-xl border border-cream-300/70 p-3">
+                <div className="text-sm font-semibold text-bark-600">Related camps</div>
+                {relatedCamps.length === 0 ? (
+                  <p className="text-sm text-bark-400">No related camps found.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {relatedCamps.map((camp) => (
+                      <Link
+                        key={camp.id}
+                        href={`/admin/camps/${camp.id}`}
+                        className="block rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600 transition-colors hover:border-pine-300 hover:text-pine-600"
+                      >
+                        <div className="font-medium">{camp.name}</div>
+                        <div className="text-xs text-bark-400">
+                          {[camp.city, camp.state].filter(Boolean).join(', ') || 'No location set'}
+                          {camp.lastVerifiedAt ? ` · verified ${new Date(camp.lastVerifiedAt).toLocaleDateString()}` : ' · never verified'}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Flag className="w-4 h-4 text-amber-500" />
+                <Flag className="h-4 w-4 text-amber-500" />
                 <span className="text-sm font-semibold text-bark-600">Review flags</span>
               </div>
               <div className="space-y-2">
-                {(context?.flags ?? []).map(flag => (
+                {(context?.flags ?? []).map((flag) => (
                   <div key={flag.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div>{flag.comment}</div>
                         <div className="mt-1 text-xs text-amber-700">{flag.status}</div>
                       </div>
-                      <ReviewFlagActions flagId={flag.id} status={flag.status} onUpdated={refreshContext} />
+                      <ReviewFlagActions flagId={flag.id} status={flag.status} onUpdated={loadContext} />
                     </div>
                   </div>
                 ))}
                 <textarea
                   value={flagComment}
-                  onChange={e => setFlagComment(e.target.value)}
+                  onChange={(event) => setFlagComment(event.target.value)}
                   rows={2}
                   placeholder="Flag this entity for later review…"
                   className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm"
@@ -317,7 +322,7 @@ export function EntityOpsPanel({
                   disabled={!flagComment.trim() || busy !== null}
                   className="btn-secondary gap-2"
                 >
-                  {busy === 'flag' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  {busy === 'flag' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                   Add flag
                 </button>
               </div>
@@ -328,24 +333,129 @@ export function EntityOpsPanel({
         )}
       </div>
 
-      <div className="glass-panel p-5 space-y-4">
+      <div className="glass-panel p-5 space-y-5">
         <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-pine-500" />
-          <h3 className="font-display font-bold text-bark-700 text-sm uppercase tracking-wide">People & Trust</h3>
+          <ShieldCheck className="h-4 w-4 text-pine-500" />
+          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-bark-700">Verification & Trust</h3>
+        </div>
+
+        <div className="rounded-xl border border-cream-300/70 p-3 text-xs text-bark-500">
+          Attestations are field-bound. For multi-row sections like pricing, age groups, and schedules, each attestation currently covers the whole section.
         </div>
 
         <div className="space-y-2">
-          {(context?.people ?? []).map(person => (
-            <Link key={person.roleId ?? person.id} href={`/admin/people/${person.id}`} className="block rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600 hover:border-pine-300 hover:text-pine-600">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <select value={attestationField} onChange={(event) => setAttestationField(event.target.value)} className="rounded-lg border border-cream-300 px-3 py-2 text-sm">
+              <option value="">Select field to attest…</option>
+              {attestationOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <select value={attestationMode} onChange={(event) => setAttestationMode(event.target.value as AttestationMode)} className="rounded-lg border border-cream-300 px-3 py-2 text-sm">
+              <option value="source">Source evidence</option>
+              <option value="override">Admin override</option>
+            </select>
+          </div>
+
+          {attestationMode === 'source' ? (
+            <div className="space-y-2">
+              <input
+                value={attestationSourceUrl}
+                onChange={(event) => setAttestationSourceUrl(event.target.value)}
+                placeholder="Source URL"
+                className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm"
+              />
+              <textarea
+                value={attestationExcerpt}
+                onChange={(event) => setAttestationExcerpt(event.target.value)}
+                rows={3}
+                placeholder="Verbatim excerpt supporting this field or section"
+                className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm"
+              />
+              <textarea
+                value={attestationNotes}
+                onChange={(event) => setAttestationNotes(event.target.value)}
+                rows={2}
+                placeholder="Optional reviewer note"
+                className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm"
+              />
+            </div>
+          ) : (
+            <textarea
+              value={attestationNotes}
+              onChange={(event) => setAttestationNotes(event.target.value)}
+              rows={3}
+              placeholder="Override reason required. Explain why this field is approved without public source evidence."
+              className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm"
+            />
+          )}
+
+          <button
+            onClick={async () => {
+              await runEntityAction({
+                action: 'attest',
+                fieldKey: attestationField,
+                mode: attestationMode,
+                sourceUrl: attestationMode === 'source' ? (attestationSourceUrl || null) : null,
+                excerpt: attestationMode === 'source' ? (attestationExcerpt || null) : null,
+                notes: attestationNotes || null,
+              }, 'attest');
+              setAttestationField('');
+              setAttestationMode('source');
+              setAttestationSourceUrl('');
+              setAttestationExcerpt('');
+              setAttestationNotes('');
+            }}
+            disabled={
+              !attestationField.trim()
+              || (attestationMode === 'source' && (!attestationSourceUrl.trim() || !attestationExcerpt.trim()))
+              || (attestationMode === 'override' && !attestationNotes.trim())
+              || busy !== null
+            }
+            className="btn-secondary gap-2"
+          >
+            {busy === 'attest' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Add attestation
+          </button>
+
+          <div className="space-y-2">
+            {(context?.attestations ?? []).slice(0, 12).map((attestation) => (
+              <div key={attestation.id} className="rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{attestation.fieldKey}</div>
+                    <div className="text-xs text-bark-400">
+                      {attestation.status}
+                      {attestation.lastRecheckedAt ? ` · rechecked ${new Date(attestation.lastRecheckedAt).toLocaleDateString()}` : ''}
+                    </div>
+                    {attestation.notes && <div className="mt-1 text-xs text-bark-500">{attestation.notes}</div>}
+                    {attestation.invalidationReason && <div className="mt-1 text-xs text-red-500">{attestation.invalidationReason}</div>}
+                  </div>
+                  <AttestationActions attestationId={attestation.id} onUpdated={loadContext} invalidationReason="Invalidated from entity panel" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-pine-500" />
+            <span className="text-sm font-semibold text-bark-600">People</span>
+          </div>
+          {(context?.people ?? []).map((person) => (
+            <Link
+              key={person.roleId ?? person.id}
+              href={`/admin/people/${person.id}`}
+              className="block rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600 transition-colors hover:border-pine-300 hover:text-pine-600"
+            >
               <span className="font-medium">{person.fullName ?? 'Person'}</span>
-              {(person.title || person.roleType) && (
-                <span className="text-bark-400"> · {person.title ?? person.roleType}</span>
-              )}
+              {(person.title || person.roleType) && <span className="text-bark-400"> · {person.title ?? person.roleType}</span>}
             </Link>
           ))}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input value={personName} onChange={e => setPersonName(e.target.value)} placeholder="Full name" className="rounded-lg border border-cream-300 px-3 py-2 text-sm" />
-            <input value={personTitle} onChange={e => setPersonTitle(e.target.value)} placeholder="Title" className="rounded-lg border border-cream-300 px-3 py-2 text-sm" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input value={personName} onChange={(event) => setPersonName(event.target.value)} placeholder="Full name" className="rounded-lg border border-cream-300 px-3 py-2 text-sm" />
+            <input value={personTitle} onChange={(event) => setPersonTitle(event.target.value)} placeholder="Title" className="rounded-lg border border-cream-300 px-3 py-2 text-sm" />
           </div>
           <button
             onClick={async () => {
@@ -356,140 +466,70 @@ export function EntityOpsPanel({
             disabled={!personName.trim() || busy !== null}
             className="btn-secondary gap-2"
           >
-            {busy === 'person' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {busy === 'person' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Add person
           </button>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-pine-500" />
-            <span className="text-sm font-semibold text-bark-600">Attestations</span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <input value={attestationField} onChange={e => setAttestationField(e.target.value)} placeholder="Field key" className="rounded-lg border border-cream-300 px-3 py-2 text-sm" />
-            <input value={attestationSourceUrl} onChange={e => setAttestationSourceUrl(e.target.value)} placeholder="Source URL (optional)" className="rounded-lg border border-cream-300 px-3 py-2 text-sm sm:col-span-2" />
-          </div>
-          <textarea value={attestationNotes} onChange={e => setAttestationNotes(e.target.value)} rows={2} placeholder="Attestation notes" className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm" />
-          <button
-            onClick={async () => {
-              await runEntityAction({
-                action: 'attest',
-                fieldKey: attestationField,
-                sourceUrl: attestationSourceUrl || null,
-                notes: attestationNotes || null,
-              }, 'attest');
-              setAttestationField('');
-              setAttestationSourceUrl('');
-              setAttestationNotes('');
-            }}
-            disabled={!attestationField.trim() || busy !== null}
-            className="btn-secondary gap-2"
-          >
-            {busy === 'attest' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Add attestation
-          </button>
-          <div className="space-y-2">
-            {(context?.attestations ?? []).slice(0, 12).map(att => (
-              <div key={att.id} className="rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="font-medium">{att.fieldKey}</div>
-                    <div className="text-xs text-bark-400">{att.status}{att.lastRecheckedAt ? ` · rechecked ${new Date(att.lastRecheckedAt).toLocaleDateString()}` : ''}</div>
-                    {att.invalidationReason && <div className="text-xs text-red-500 mt-1">{att.invalidationReason}</div>}
-                  </div>
-                  <AttestationActions attestationId={att.id} onUpdated={refreshContext} invalidationReason="Invalidated from entity panel" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Bot className="w-4 h-4 text-pine-500" />
-            <span className="text-sm font-semibold text-bark-600">Recent AI Actions</span>
-          </div>
-          <div className="space-y-2">
-            {(context?.aiActions ?? []).slice(0, 5).map(action => (
-              <div key={action.id} className="rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600">
-                <div className="font-medium">{action.action}</div>
-                <div className="text-xs text-bark-400">{action.capability} · {action.status}</div>
-              </div>
-            ))}
-            {!(context?.aiActions?.length) && (
-              <p className="text-sm text-bark-300">No AI actions recorded yet.</p>
-            )}
-          </div>
         </div>
 
         {allowAccreditation && (
           <div className="space-y-2">
             <span className="text-sm font-semibold text-bark-600">Accreditation</span>
-            {(context?.accreditations ?? []).map(accreditation => (
-              <div key={accreditation.id} className="rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600">
-                {(() => {
-                  const draft = accreditationDraft(accreditation);
-                  return (
-                    <>
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="font-medium">{accreditation.bodyName}</span>
-                    {(accreditation.status || accreditation.scope) && (
-                      <span className="text-bark-400"> · {accreditation.status ?? accreditation.scope}</span>
-                    )}
-                    {accreditation.lastVerifiedAt && (
-                      <div className="text-xs text-bark-400 mt-1">Verified {new Date(accreditation.lastVerifiedAt).toLocaleDateString()}</div>
-                    )}
+            {(context?.accreditations ?? []).map((accreditation) => {
+              const draft = accreditationDraft(accreditation);
+              return (
+                <div key={accreditation.id} className="rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="font-medium">{accreditation.bodyName}</span>
+                      {(accreditation.status || accreditation.scope) && (
+                        <span className="text-bark-400"> · {accreditation.status ?? accreditation.scope}</span>
+                      )}
+                      {accreditation.lastVerifiedAt && (
+                        <div className="mt-1 text-xs text-bark-400">Verified {new Date(accreditation.lastVerifiedAt).toLocaleDateString()}</div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      <button onClick={() => patchAccreditation(accreditation.id, { status: 'ACTIVE', lastVerifiedAt: new Date().toISOString() }, `acc-${accreditation.id}-active`)} disabled={busy !== null} className="btn-secondary text-xs">Verify</button>
+                      <button onClick={() => patchAccreditation(accreditation.id, { status: 'STALE' }, `acc-${accreditation.id}-stale`)} disabled={busy !== null} className="btn-secondary text-xs">Stale</button>
+                      <button onClick={() => patchAccreditation(accreditation.id, { status: 'EXPIRED' }, `acc-${accreditation.id}-expired`)} disabled={busy !== null} className="btn-secondary text-xs text-red-600">Expire</button>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1 justify-end">
-                    <button onClick={() => patchAccreditation(accreditation.id, { status: 'ACTIVE', lastVerifiedAt: new Date().toISOString() }, `acc-${accreditation.id}-active`)} disabled={busy !== null} className="btn-secondary text-xs">Verify</button>
-                    <button onClick={() => patchAccreditation(accreditation.id, { status: 'STALE' }, `acc-${accreditation.id}-stale`)} disabled={busy !== null} className="btn-secondary text-xs">Stale</button>
-                    <button onClick={() => patchAccreditation(accreditation.id, { status: 'EXPIRED' }, `acc-${accreditation.id}-expired`)} disabled={busy !== null} className="btn-secondary text-xs text-red-600">Expire</button>
-                  </div>
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-2">
-                  <input
-                    value={draft.scope}
-                    onChange={e => setAccreditationEdits(prev => ({ ...prev, [accreditation.id]: { ...draft, scope: e.target.value } }))}
-                    placeholder="Scope"
-                    className="rounded-lg border border-cream-300 px-3 py-2 text-sm"
-                  />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="mt-2 grid grid-cols-1 gap-2">
                     <input
-                      type="date"
-                      value={draft.expiresAt}
-                      onChange={e => setAccreditationEdits(prev => ({ ...prev, [accreditation.id]: { ...draft, expiresAt: e.target.value } }))}
+                      value={draft.scope}
+                      onChange={(event) => setAccreditationEdits((current) => ({ ...current, [accreditation.id]: { ...draft, scope: event.target.value } }))}
+                      placeholder="Scope"
                       className="rounded-lg border border-cream-300 px-3 py-2 text-sm"
                     />
-                    <button
-                      onClick={() => patchAccreditation(accreditation.id, {
-                        scope: draft.scope || null,
-                        notes: draft.notes || null,
-                        expiresAt: draft.expiresAt || null,
-                      }, `acc-${accreditation.id}-save`)}
-                      disabled={busy !== null}
-                      className="btn-secondary text-xs"
-                    >
-                      Save details
-                    </button>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        type="date"
+                        value={draft.expiresAt}
+                        onChange={(event) => setAccreditationEdits((current) => ({ ...current, [accreditation.id]: { ...draft, expiresAt: event.target.value } }))}
+                        className="rounded-lg border border-cream-300 px-3 py-2 text-sm"
+                      />
+                      <button
+                        onClick={() => patchAccreditation(accreditation.id, { scope: draft.scope || null, notes: draft.notes || null, expiresAt: draft.expiresAt || null }, `acc-${accreditation.id}-save`)}
+                        disabled={busy !== null}
+                        className="btn-secondary text-xs"
+                      >
+                        Save details
+                      </button>
+                    </div>
+                    <textarea
+                      value={draft.notes}
+                      onChange={(event) => setAccreditationEdits((current) => ({ ...current, [accreditation.id]: { ...draft, notes: event.target.value } }))}
+                      rows={2}
+                      placeholder="Notes"
+                      className="rounded-lg border border-cream-300 px-3 py-2 text-sm"
+                    />
                   </div>
-                  <textarea
-                    value={draft.notes}
-                    onChange={e => setAccreditationEdits(prev => ({ ...prev, [accreditation.id]: { ...draft, notes: e.target.value } }))}
-                    rows={2}
-                    placeholder="Notes"
-                    className="rounded-lg border border-cream-300 px-3 py-2 text-sm"
-                  />
                 </div>
-                    </>
-                  );
-                })()}
-              </div>
-            ))}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input value={accreditationBody} onChange={e => setAccreditationBody(e.target.value)} placeholder="Accreditation body" className="rounded-lg border border-cream-300 px-3 py-2 text-sm w-full" />
-              <input value={accreditationScope} onChange={e => setAccreditationScope(e.target.value)} placeholder="Scope (optional)" className="rounded-lg border border-cream-300 px-3 py-2 text-sm w-full" />
+              );
+            })}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <input value={accreditationBody} onChange={(event) => setAccreditationBody(event.target.value)} placeholder="Accreditation body" className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm" />
+              <input value={accreditationScope} onChange={(event) => setAccreditationScope(event.target.value)} placeholder="Scope (optional)" className="w-full rounded-lg border border-cream-300 px-3 py-2 text-sm" />
             </div>
             <button
               onClick={async () => {
@@ -500,82 +540,31 @@ export function EntityOpsPanel({
               disabled={!accreditationBody.trim() || busy !== null}
               className="btn-secondary gap-2"
             >
-              {busy === 'accreditation' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {busy === 'accreditation' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Add accreditation
             </button>
           </div>
         )}
 
-        <div className="rounded-xl border border-cream-300/70 p-3 space-y-2">
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Bot className="w-4 h-4 text-pine-500" />
-            <span className="text-sm font-semibold text-bark-600">Admin assistant</span>
+            <ShieldCheck className="h-4 w-4 text-pine-500" />
+            <span className="text-sm font-semibold text-bark-600">Recent AI actions</span>
           </div>
-          <select
-            value={assistantAction}
-            onChange={e => setAssistantAction(e.target.value as AssistantActionOption)}
-            className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm"
-          >
-            <option value="propose">Draft proposal</option>
-            <option value="flag">Flag entity</option>
-            <option value="attest">Add attestation</option>
-            <option value="add_person">Add person</option>
-            {allowAccreditation && <option value="add_accreditation">Add accreditation</option>}
-            {entityType === 'CAMP' && <option value="mark_verified">Mark verified</option>}
-            <option value="trigger_crawl">Trigger crawl</option>
-            <option value="archive">Archive entity</option>
-            <option value="restore">Restore entity</option>
-          </select>
-          <textarea
-            value={assistantPrompt}
-            onChange={e => setAssistantPrompt(e.target.value)}
-            rows={4}
-            placeholder={assistantPlaceholder()}
-            className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm"
-          />
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => runSelectedAssistantAction()}
-              disabled={(
-                (assistantAction === 'propose' || assistantAction === 'flag' || assistantAction === 'archive') && !assistantPrompt.trim()
-              ) || (
-                assistantAction === 'attest' && !(attestationField.trim() || assistantPrompt.trim())
-              ) || (
-                assistantAction === 'add_person' && !(personName.trim() || assistantPrompt.trim())
-              ) || (
-                assistantAction === 'add_accreditation' && !(accreditationBody.trim() || assistantPrompt.trim())
-              ) || busy !== null}
-              className="btn-primary gap-2"
-            >
-              {busy === 'assistant' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-              Run assistant action
-            </button>
-          </div>
-          {pendingAssistant && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 space-y-2">
-              <p>Pending confirmation for <span className="font-semibold">{pendingAssistant.action}</span>.</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => runAssistant(pendingAssistant.action, pendingAssistant.payload, true)}
-                  disabled={busy !== null}
-                  className="btn-primary gap-2"
-                >
-                  Confirm action
-                </button>
-                <button
-                  onClick={() => { setPendingAssistant(null); setAssistantResult('Assistant action canceled.'); }}
-                  disabled={busy !== null}
-                  className="btn-secondary gap-2"
-                >
-                  Cancel
-                </button>
+          <div className="space-y-2">
+            {(context?.aiActions ?? []).slice(0, 5).map((action) => (
+              <div key={action.id} className="rounded-lg border border-cream-300 px-3 py-2 text-sm text-bark-600">
+                <div className="font-medium">{action.action}</div>
+                <div className="text-xs text-bark-400">{action.capability} · {action.status}</div>
               </div>
-            </div>
-          )}
-          {assistantResult && (
-            <pre className="max-h-64 overflow-auto rounded-lg bg-bark-700 p-3 text-xs text-cream-100">{assistantResult}</pre>
-          )}
+            ))}
+            {!(context?.aiActions.length) && (
+              <p className="text-sm text-bark-300">No AI actions recorded yet.</p>
+            )}
+          </div>
         </div>
+
+        <AdminCopilot entityType={entityType} entityId={entityId} onContextChanged={loadContext} />
       </div>
     </div>
   );

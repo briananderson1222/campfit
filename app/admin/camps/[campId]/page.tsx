@@ -72,6 +72,41 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
     getPendingProposals(params.campId).catch(err => { console.error('[admin/camps] getPendingProposals failed:', err); return []; }),
     getSiteHints(domain).catch(err => { console.error('[admin/camps] getSiteHints failed:', err); return []; }),
   ]);
+  const attestationTargets = [
+    { value: 'name', label: 'Name' },
+    { value: 'organizationName', label: 'Organization' },
+    { value: 'description', label: 'Description' },
+    { value: 'websiteUrl', label: 'Website URL' },
+    { value: 'applicationUrl', label: 'Application URL' },
+    { value: 'contactEmail', label: 'Contact Email' },
+    { value: 'contactPhone', label: 'Contact Phone' },
+    { value: 'socialLinks', label: 'Social Links' },
+    { value: 'interestingDetails', label: 'Interesting Details' },
+    { value: 'city', label: 'City' },
+    { value: 'state', label: 'State' },
+    { value: 'zip', label: 'ZIP' },
+    { value: 'neighborhood', label: 'Neighborhood' },
+    { value: 'address', label: 'Address' },
+    { value: 'lunchIncluded', label: 'Lunch Included' },
+    { value: 'registrationStatus', label: 'Registration Status' },
+    { value: 'registrationOpenDate', label: 'Registration Open Date' },
+    { value: 'registrationCloseDate', label: 'Registration Close Date' },
+    { value: 'campTypes', label: 'Camp Types' },
+    { value: 'categories', label: 'Categories' },
+    ...camp.ageGroups.map((group: { id: string; label: string; minAge: number | null; maxAge: number | null }) => ({
+      value: `ageGroups:${group.id}`,
+      label: `Age Group: ${group.label || [group.minAge, group.maxAge].filter((value) => value != null).join('-')}`,
+    })),
+    ...camp.schedules.map((schedule: { id: string; label: string; startDate: string; endDate: string }) => ({
+      value: `schedules:${schedule.id}`,
+      label: `Schedule: ${schedule.label || `${schedule.startDate} to ${schedule.endDate}`}`,
+    })),
+    ...camp.pricing.map((pricing: { id: string; label: string; amount: number; unit: string }) => ({
+      value: `pricing:${pricing.id}`,
+      label: `Pricing: ${pricing.label || `${pricing.amount} ${pricing.unit}`}`,
+    })),
+    { value: 'provider', label: 'Provider Link' },
+  ];
 
   return (
     <div>
@@ -109,7 +144,7 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
         domain={domain}
       />
 
-      <EntityOpsPanel entityType="CAMP" entityId={camp.id} allowAccreditation />
+      <EntityOpsPanel entityType="CAMP" entityId={camp.id} allowAccreditation attestationTargets={attestationTargets} />
     </div>
   );
 }
