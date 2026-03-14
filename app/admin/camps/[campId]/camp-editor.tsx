@@ -852,7 +852,14 @@ export function CampEditor({
           </div>
         </div>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-          <EditableField campId={camp.id} field="name" label="Name" value={camp.name} />
+          <EditableField
+            campId={camp.id}
+            field="name"
+            label="Name"
+            value={camp.name}
+            onAttest={attestProp('name')}
+            isAttested={isAttested('name')}
+          />
           <ProviderField campId={camp.id} providerId={camp.providerId} organizationName={camp.organizationName} provider={provider} />
           <EditableField campId={camp.id} field="websiteUrl" label="Website URL" value={camp.websiteUrl}
             onAttest={attestProp('websiteUrl')} isAttested={isAttested('websiteUrl')} />
