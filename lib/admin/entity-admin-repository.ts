@@ -104,6 +104,24 @@ export async function getEntityContext(entityType: AdminEntityType, entityId: st
   };
 }
 
+export async function getEntityRelatedCamps(entityType: Extract<AdminEntityType, 'CAMP' | 'PROVIDER'>, entityId: string) {
+  const pool = getPool();
+  const providerId = entityType === 'PROVIDER'
+    ? entityId
+    : (await pool.query<{ providerId: string | null }>(`SELECT "providerId" FROM "Camp" WHERE id = $1`, [entityId])).rows[0]?.providerId;
+
+  if (!providerId) return [];
+
+  const { rows } = await pool.query(
+    `SELECT id, name, slug, city, state, "lastVerifiedAt"
+     FROM "Camp"
+     WHERE "providerId" = $1
+     ORDER BY name ASC`,
+    [providerId],
+  );
+  return rows;
+}
+
 export async function setEntityArchiveState(opts: {
   entityType: AdminEntityType;
   entityId: string;

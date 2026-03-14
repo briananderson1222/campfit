@@ -5,6 +5,7 @@ import {
   createReviewFlag,
   ensurePerson,
   getEntityContext,
+  getEntityRelatedCamps,
   linkPersonToEntity,
   setEntityArchiveState,
   type AdminEntityType,
@@ -76,7 +77,7 @@ function isAllowedAttestationField(entityType: AdminEntityType, fieldKey: string
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { entityType: string; entityId: string } },
 ) {
   const entityType = parseEntityType(params.entityType);
@@ -88,6 +89,16 @@ export async function GET(
       : null;
   const auth = await requireAdminAccess({ communitySlug, allowModerator: entityType !== 'PERSON' });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const { searchParams } = new URL(request.url);
+  if (searchParams.get('include') === 'related-camps') {
+    if (entityType !== 'CAMP' && entityType !== 'PROVIDER') {
+      return NextResponse.json({ error: 'Related camps are only available for camps and providers' }, { status: 400 });
+    }
+    return NextResponse.json({
+      relatedCamps: await getEntityRelatedCamps(entityType, params.entityId),
+    });
+  }
 
   const context = await getEntityContext(entityType, params.entityId);
   if (!context) return NextResponse.json({ error: 'Not found' }, { status: 404 });

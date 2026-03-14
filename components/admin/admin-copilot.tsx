@@ -15,6 +15,19 @@ type PendingConfirmation = {
   label: string;
 };
 
+type AssistantResponse = {
+  error?: string;
+  reply?: string;
+  output?: { runId?: string };
+  requiresConfirmation?: boolean;
+  confirmation?: {
+    action: string;
+    payload?: Record<string, unknown>;
+    label?: string;
+  };
+  contextChanged?: boolean;
+};
+
 const STARTERS = [
   'Show related camps',
   'What trust data is stale here?',
@@ -62,11 +75,23 @@ export function AdminCopilot({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }).catch(() => null);
-    const data = await res?.json().catch(() => null);
+    const rawText = await res?.text().catch(() => '') ?? '';
+    const data = rawText
+      ? (() => {
+          try {
+            return JSON.parse(rawText) as AssistantResponse;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
     setBusy(false);
 
     if (!res?.ok || !data) {
-      setError(data?.error ?? 'Assistant request failed');
+      const errorMessage = typeof data?.error === 'string'
+        ? data.error
+        : rawText || 'Assistant request failed';
+      setError(errorMessage);
       return;
     }
 
@@ -75,16 +100,23 @@ export function AdminCopilot({
       await onContextChanged?.();
       setMessages((current) => [
         ...current,
-        { role: 'assistant', content: typeof data.reply === 'string' ? data.reply : 'Action completed.' },
+        {
+          role: 'assistant',
+          content: typeof data.reply === 'string'
+            ? data.reply
+            : typeof (data.output as { runId?: unknown } | undefined)?.runId === 'string'
+              ? `Action started. Run id: ${(data.output as { runId: string }).runId}`
+              : 'Action completed.',
+        },
       ]);
       return;
     }
 
     if (data.requiresConfirmation) {
       setPendingConfirmation({
-        action: data.confirmation.action,
-        payload: data.confirmation.payload ?? {},
-        label: data.confirmation.label ?? 'Confirm action',
+        action: data.confirmation?.action ?? '',
+        payload: data.confirmation?.payload ?? {},
+        label: data.confirmation?.label ?? 'Confirm action',
       });
     } else {
       setPendingConfirmation(null);

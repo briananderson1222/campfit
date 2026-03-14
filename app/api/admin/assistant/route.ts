@@ -113,6 +113,7 @@ export async function POST(request: Request) {
 
   try {
     let output: unknown;
+    let reply: string | undefined;
     switch (body.action) {
       case 'chat_entity': {
         if (!entityType || !entityId) return NextResponse.json({ error: 'entityType and entityId required' }, { status: 400 });
@@ -154,10 +155,12 @@ export async function POST(request: Request) {
       case 'get_camp':
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
         output = await getEntityContext('CAMP', entityId);
+        reply = 'Loaded camp admin context.';
         break;
       case 'get_provider':
         if (entityType !== 'PROVIDER' || !entityId) return NextResponse.json({ error: 'PROVIDER entityId required' }, { status: 400 });
         output = await getEntityContext('PROVIDER', entityId);
+        reply = 'Loaded provider admin context.';
         break;
       case 'get_connected_camps': {
         if (!entityId) return NextResponse.json({ error: 'entityId required' }, { status: 400 });
@@ -176,6 +179,9 @@ export async function POST(request: Request) {
             [providerId],
           )).rows;
         }
+        reply = Array.isArray(output) && output.length > 0
+          ? `Found ${output.length} related camp${output.length === 1 ? '' : 's'}.`
+          : 'No related camps found.';
         break;
       }
       case 'get_attestations':
@@ -184,6 +190,7 @@ export async function POST(request: Request) {
       case 'get_flags':
         if (!entityType || !entityId) return NextResponse.json({ error: 'entityType and entityId required' }, { status: 400 });
         output = await getEntityContext(entityType, entityId);
+        reply = 'Loaded admin records.';
         break;
       case 'propose_camp_changes':
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
@@ -197,6 +204,7 @@ export async function POST(request: Request) {
           actor: auth.access.email,
           reviewerNotes: typeof payload.reviewerNotes === 'string' ? payload.reviewerNotes : null,
         });
+        reply = 'Created a camp proposal.';
         break;
       case 'propose_provider_changes':
         if (entityType !== 'PROVIDER' || !entityId) return NextResponse.json({ error: 'PROVIDER entityId required' }, { status: 400 });
@@ -210,6 +218,7 @@ export async function POST(request: Request) {
           actor: auth.access.email,
           reviewerNotes: typeof payload.reviewerNotes === 'string' ? payload.reviewerNotes : null,
         });
+        reply = 'Created a provider proposal.';
         break;
       case 'write_camp_update': {
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
@@ -220,6 +229,7 @@ export async function POST(request: Request) {
         const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
         await getPool().query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`, [entityId, ...entries.map(([, value]) => value ?? null)]);
         output = await getEntitySnapshot('CAMP', entityId);
+        reply = 'Updated camp fields.';
         break;
       }
       case 'write_provider_update': {
@@ -231,20 +241,24 @@ export async function POST(request: Request) {
         const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
         await getPool().query(`UPDATE "Provider" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`, [entityId, ...entries.map(([, value]) => value ?? null)]);
         output = await getEntitySnapshot('PROVIDER', entityId);
+        reply = 'Updated provider fields.';
         break;
       }
       case 'mark_camp_verified':
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
         await getPool().query(`UPDATE "Camp" SET "dataConfidence" = 'VERIFIED', "lastVerifiedAt" = now(), "updatedAt" = now() WHERE id = $1`, [entityId]);
         output = await getEntitySnapshot('CAMP', entityId);
+        reply = 'Marked this camp as verified.';
         break;
       case 'trigger_camp_crawl':
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
         output = await startCampCrawl(entityId, auth.access.email);
+        reply = `Camp crawl started${typeof (output as { runId?: unknown })?.runId === 'string' ? ` (run ${(output as { runId: string }).runId})` : ''}.`;
         break;
       case 'trigger_provider_crawl':
         if (entityType !== 'PROVIDER' || !entityId) return NextResponse.json({ error: 'PROVIDER entityId required' }, { status: 400 });
         output = await startProviderCrawl(entityId, auth.access.email);
+        reply = `Provider crawl started${typeof (output as { runId?: unknown })?.runId === 'string' ? ` (run ${(output as { runId: string }).runId})` : ''}.`;
         break;
       case 'flag_entity':
         if (!entityType || !entityId) return NextResponse.json({ error: 'entityType and entityId required' }, { status: 400 });
@@ -257,6 +271,7 @@ export async function POST(request: Request) {
           comment: payload.comment,
           actor: auth.access.email,
         });
+        reply = 'Created a review flag.';
         break;
       case 'archive_entity':
         if (!entityType || !entityId) return NextResponse.json({ error: 'entityType and entityId required' }, { status: 400 });
@@ -268,6 +283,7 @@ export async function POST(request: Request) {
           reason: typeof payload.reason === 'string' ? payload.reason : undefined,
         });
         output = await getEntitySnapshot(entityType, entityId);
+        reply = 'Entity archived.';
         break;
       case 'restore_entity':
         if (!entityType || !entityId) return NextResponse.json({ error: 'entityType and entityId required' }, { status: 400 });
@@ -278,6 +294,7 @@ export async function POST(request: Request) {
           actor: auth.access.email,
         });
         output = await getEntitySnapshot(entityType, entityId);
+        reply = 'Entity restored.';
         break;
       case 'add_attestation':
         if (!entityType || !entityId) return NextResponse.json({ error: 'entityType and entityId required' }, { status: 400 });
@@ -298,6 +315,7 @@ export async function POST(request: Request) {
           notes: typeof payload.notes === 'string' ? payload.notes : null,
           valueSnapshot: payload.valueSnapshot,
         });
+        reply = 'Added field attestation.';
         break;
       case 'add_person':
         if ((entityType !== 'CAMP' && entityType !== 'PROVIDER') || !entityId) {
@@ -327,6 +345,7 @@ export async function POST(request: Request) {
           });
           return { person, link };
         })();
+        reply = 'Added linked person.';
         break;
       case 'add_accreditation':
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
@@ -343,6 +362,7 @@ export async function POST(request: Request) {
           excerpt: typeof payload.excerpt === 'string' ? payload.excerpt : null,
           notes: typeof payload.notes === 'string' ? payload.notes : null,
         });
+        reply = 'Added accreditation.';
         break;
       default:
         return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
@@ -360,7 +380,7 @@ export async function POST(request: Request) {
       status: 'COMPLETED',
     });
 
-    return NextResponse.json({ ok: true, capability, output, actionLogId: log.id });
+    return NextResponse.json({ ok: true, capability, output, actionLogId: log.id, ...(reply ? { reply } : {}) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Action failed';
     await logAiAction({
