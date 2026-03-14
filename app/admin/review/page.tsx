@@ -21,6 +21,28 @@ const REPORT_TYPE_COLORS: Record<string, string> = {
   OTHER: 'bg-cream-200 text-bark-500',
 };
 
+const FIELD_PRIORITY: Record<string, number> = {
+  name: 0,
+  registrationStatus: 1,
+  description: 2,
+  websiteUrl: 3,
+  city: 4,
+  neighborhood: 5,
+  address: 6,
+  ageGroups: 7,
+  schedules: 8,
+  pricing: 9,
+};
+
+function prioritizedFields(fields: string[]) {
+  return [...fields].sort((fieldA, fieldB) => {
+    const priorityA = FIELD_PRIORITY[fieldA] ?? 100;
+    const priorityB = FIELD_PRIORITY[fieldB] ?? 100;
+    if (priorityA !== priorityB) return priorityA - priorityB;
+    return fieldA.localeCompare(fieldB);
+  });
+}
+
 function buildReviewHref(params: {
   tab?: string;
   page?: number | string;
@@ -180,7 +202,7 @@ export default async function ReviewQueuePage({
                       )}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {Object.keys(proposal.proposedChanges).slice(0, 5).map(field => (
+                      {prioritizedFields(Object.keys(proposal.proposedChanges)).slice(0, 5).map(field => (
                         <span key={field} className="px-2 py-0.5 rounded-full bg-cream-100 text-bark-500 text-xs">
                           {field}
                         </span>

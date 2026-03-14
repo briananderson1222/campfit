@@ -34,6 +34,19 @@ const INLINE_EDITABLE = new Set([
   'registrationStatus', 'campType', 'category',
 ]);
 
+const FIELD_PRIORITY: Record<string, number> = {
+  name: 0,
+  registrationStatus: 1,
+  description: 2,
+  websiteUrl: 3,
+  city: 4,
+  neighborhood: 5,
+  address: 6,
+  ageGroups: 7,
+  schedules: 8,
+  pricing: 9,
+};
+
 export function ReviewPanel({
   proposal,
   queueContext,
@@ -51,7 +64,9 @@ export function ReviewPanel({
   // Fields already applied in previous partial-approval rounds
   const alreadyApplied = new Set<string>(proposal.appliedFields ?? []);
   // Only show unapplied fields as selectable
-  const fields = (Object.entries(proposedChanges) as [string, FieldDiff][]).filter(([k]) => !alreadyApplied.has(k));
+  const fields = (Object.entries(proposedChanges) as [string, FieldDiff][])
+    .filter(([k]) => !alreadyApplied.has(k))
+    .sort(([fieldA], [fieldB]) => compareFieldPriority(fieldA, fieldB));
   const [selected, setSelected] = useState<Set<string>>(new Set(fields.map(([k]) => k)));
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState<'approve' | 'keep' | 'reject' | 'recrawl' | null>(null);
@@ -651,6 +666,13 @@ export function ReviewPanel({
       </div>
     </div>
   );
+}
+
+function compareFieldPriority(fieldA: string, fieldB: string) {
+  const priorityA = FIELD_PRIORITY[fieldA] ?? 100;
+  const priorityB = FIELD_PRIORITY[fieldB] ?? 100;
+  if (priorityA !== priorityB) return priorityA - priorityB;
+  return fieldA.localeCompare(fieldB);
 }
 
 function formatValue(val: unknown): string {
