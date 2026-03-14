@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
+import { writeChangeLogs } from '@/lib/admin/changelog-repository';
 
 interface AgeGroupInput {
   label: string;
@@ -24,6 +25,11 @@ export async function PUT(req: Request, { params }: { params: { campId: string }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const previous = await client.query(
+      `SELECT label, "minAge", "maxAge", "minGrade", "maxGrade"
+       FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`,
+      [params.campId],
+    );
     await client.query(`DELETE FROM "CampAgeGroup" WHERE "campId" = $1`, [params.campId]);
     for (const ag of ageGroups) {
       if (!ag.label?.trim()) continue;
@@ -35,6 +41,18 @@ export async function PUT(req: Request, { params }: { params: { campId: string }
     }
     await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [params.campId]);
     await client.query('COMMIT');
+
+    await writeChangeLogs([{
+      campId: params.campId,
+      proposalId: null,
+      changedBy: auth.access.email,
+      fieldName: 'ageGroups',
+      oldValue: previous.rows,
+      newValue: ageGroups.filter((row) => row.label?.trim()),
+      changeType: previous.rows.length === 0 ? 'FIELD_POPULATED' : 'UPDATE',
+    }]).catch((error) => {
+      console.error('[age-groups PUT] writeChangeLogs failed:', error);
+    });
 
     const { rows } = await client.query(
       `SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`,

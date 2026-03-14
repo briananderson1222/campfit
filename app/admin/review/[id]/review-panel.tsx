@@ -6,8 +6,13 @@ import Link from 'next/link';
 import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
-import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
-import { CAMP_TYPE_DESCRIPTIONS } from '@/lib/types';
+import {
+  CampArrayFieldEditor,
+  CampFieldInput,
+  CampFieldValue,
+  cloneEditableValue,
+} from '@/components/admin/camp-field-controls';
+import { FieldTimelineNote } from '@/components/admin/field-timeline';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Camp Name', organizationName: 'Organization', description: 'Description', campType: 'Camp Type',
@@ -78,7 +83,7 @@ export function ReviewPanel({
   const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
   const [showAllMeta, setShowAllMeta] = useState(false);
   // editing state: { [field]: currentEditValue }
-  const [editing, setEditing] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<Record<string, unknown>>({});
   const [arrayEditing, setArrayEditing] = useState<Record<string, Record<string, unknown>[]>>({});
   // direct camp field edits (bypassing proposal)
   const [campEdits, setCampEdits] = useState<Record<string, string>>({});
@@ -115,7 +120,7 @@ export function ReviewPanel({
 
   // Edit proposed value inline
   const startEdit = (field: string, currentVal: unknown) => {
-    setEditing(prev => ({ ...prev, [field]: String(currentVal ?? '') }));
+    setEditing(prev => ({ ...prev, [field]: cloneEditableValue(currentVal) }));
   };
   const commitEdit = (field: string) => {
     const val = editing[field];
@@ -250,6 +255,7 @@ export function ReviewPanel({
   };
 
   const fieldSources = (campData.fieldSources ?? {}) as Record<string, { excerpt: string | null; sourceUrl: string; approvedAt: string }>;
+  const fieldTimeline = (proposal.fieldTimeline ?? {}) as Record<string, { lastUpdatedAt: string | null; lastAttestedAt: string | null }>;
   const [proofOpen, setProofOpen] = useState<Set<string>>(new Set());
   const toggleProof = (f: string) => setProofOpen(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n; });
 
@@ -267,7 +273,7 @@ export function ReviewPanel({
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
           {(showAllMeta ? Object.keys(campData) : CAMP_META_FIELDS)
-            .filter(f => !['id', 'slug', 'createdAt', 'updatedAt', 'savedBy', 'notifications', 'dataSourceCamps', 'fieldSources'].includes(f))
+            .filter(f => !['id', 'slug', 'createdAt', 'updatedAt', 'savedBy', 'notifications', 'dataSourceCamps', 'fieldSources', 'fieldTimeline'].includes(f))
             .map(field => {
               const val = campData[field];
               const isChanged = changedFieldNames.has(field);
@@ -305,14 +311,16 @@ export function ReviewPanel({
                       </button>
                     )}
                   </p>
+                  <FieldTimelineNote timeline={fieldTimeline[field]} className="mt-0.5 text-[11px] text-bark-300" />
                   {isEditingCamp ? (
                     <div className="flex items-center gap-1 mt-1">
-                      <FieldInput
+                      <CampFieldInput
                         field={field}
                         value={campEdits[field] ?? ''}
-                        onChange={v => setCampEdits(p => ({ ...p, [field]: v }))}
+                        onChange={v => setCampEdits(p => ({ ...p, [field]: String(v ?? '') }))}
                         onCommit={() => saveCampField(field)}
                         onCancel={() => setCampEditFields(p => { const n = { ...p }; delete n[field]; return n; })}
+                        className="border-pine-300 focus:border-pine-500"
                       />
                       <button onClick={() => saveCampField(field)} disabled={savingCampField === field} className="text-pine-500 hover:text-pine-700 p-1 shrink-0">
                         {savingCampField === field ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
@@ -323,18 +331,16 @@ export function ReviewPanel({
                     </div>
                   ) : isChanged ? (
                     <div className="flex items-center gap-1.5 flex-wrap text-sm">
-                      <span className="text-bark-400 line-through text-xs">
-                        {ENUM_OPTIONS[field] ? labelFor(field, String(val ?? '')) : formatValue(val)}
-                      </span>
+                      <div className="text-bark-400 line-through text-xs">
+                        <CampFieldValue value={val} field={field} />
+                      </div>
                       <span className="text-amber-400 text-xs">→</span>
-                      <span className="text-amber-700 font-medium text-xs">
-                        {ENUM_OPTIONS[field] ? labelFor(field, String(proposedVal ?? '')) : formatValue(proposedVal)}
-                      </span>
+                      <div className="text-amber-700 font-medium text-xs">
+                        <CampFieldValue value={proposedVal} field={field} highlight />
+                      </div>
                     </div>
                   ) : (
-                    <p className="text-bark-600 truncate text-sm">
-                      {ENUM_OPTIONS[field] ? labelFor(field, String(val ?? '')) : formatValue(val)}
-                    </p>
+                    <div className="text-bark-600 text-sm"><CampFieldValue value={val} field={field} /></div>
                   )}
                   {/* Inline proof */}
                   {proof && isProofOpen && (
@@ -440,9 +446,9 @@ export function ReviewPanel({
                   <BookmarkCheck className="w-4 h-4 text-pine-500 shrink-0" />
                   <span className="text-sm font-medium text-bark-500">{FIELD_LABELS[field] ?? field}</span>
                   <span className="text-xs text-pine-500 font-medium ml-1">Applied</span>
-                  <span className="text-xs text-bark-300 ml-auto truncate max-w-[200px]">
-                    {formatValue(proposal.proposedChanges[field].new)}
-                  </span>
+                  <div className="ml-auto max-w-[240px] text-xs text-bark-300">
+                    <CampFieldValue value={proposal.proposedChanges[field].new} field={field} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -491,11 +497,12 @@ export function ReviewPanel({
                         {isPopulate ? 'new data' : 'update'}
                       </span>
                     </div>
+                    <FieldTimelineNote timeline={fieldTimeline[field]} className="mb-2 text-[11px] text-bark-300" />
 
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div>
                         <p className="text-xs text-bark-300 mb-1 uppercase tracking-wide">Current</p>
-                        <FieldValue value={diff.old} field={field} expanded={isExpanded} />
+                        <CampFieldValue value={diff.old} field={field} expanded={isExpanded} />
                       </div>
                       <div>
                         <p className="text-xs text-pine-400 mb-1 uppercase tracking-wide flex items-center gap-1">
@@ -512,7 +519,7 @@ export function ReviewPanel({
                         </p>
                         {isEditingArray ? (
                           <div className="space-y-2">
-                            <ArrayFieldEditor
+                            <CampArrayFieldEditor
                               field={field}
                               rows={arrayEditing[field] ?? []}
                               onChange={updateArrayRow}
@@ -526,12 +533,13 @@ export function ReviewPanel({
                           </div>
                         ) : isEditingProposed ? (
                           <div className="flex items-start gap-1">
-                            <FieldInput
+                            <CampFieldInput
                               field={field}
                               value={editing[field] ?? ''}
                               onChange={v => setEditing(prev => ({ ...prev, [field]: v }))}
                               onCommit={() => commitEdit(field)}
                               onCancel={() => cancelEdit(field)}
+                              className="border-pine-300 focus:border-pine-500"
                             />
                             <div className="flex flex-col gap-1">
                               <button onClick={() => commitEdit(field)} className="text-pine-500 hover:text-pine-700 p-1 shrink-0"><Check className="w-3.5 h-3.5" /></button>
@@ -539,7 +547,7 @@ export function ReviewPanel({
                             </div>
                           </div>
                         ) : (
-                          <FieldValue value={diff.new} field={field} expanded={isExpanded} highlight />
+                          <CampFieldValue value={diff.new} field={field} expanded={isExpanded} highlight />
                         )}
                       </div>
                     </div>
@@ -774,195 +782,11 @@ function sanitizeArrayRows(field: string, rows: Record<string, unknown>[]) {
 function formatValue(val: unknown): string {
   if (val === null || val === undefined) return '—';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+  if (typeof val === 'object') return JSON.stringify(val);
   if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
     return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
   return String(val);
-}
-
-function FieldValue({ value, field, expanded, highlight }: {
-  value: unknown; field: string; expanded: boolean; highlight?: boolean;
-}) {
-  if (value === null || value === undefined) {
-    return <span className="text-bark-200 italic">empty</span>;
-  }
-
-  if (typeof value === 'boolean') {
-    return <span className={highlight ? 'text-pine-600 font-medium' : 'text-bark-500'}>{value ? 'Yes' : 'No'}</span>;
-  }
-
-  if (Array.isArray(value)) {
-    const preview = JSON.stringify(value, null, 2);
-    return (
-      <pre className={cn(
-        'text-xs rounded-lg p-2 overflow-hidden whitespace-pre-wrap break-all font-mono',
-        highlight ? 'bg-pine-50 text-pine-700 border border-pine-200/50' : 'bg-cream-200/60 text-bark-500',
-        !expanded && 'max-h-24'
-      )}>
-        {preview}
-      </pre>
-    );
-  }
-
-  const str = String(value);
-  // For enum fields, show the human-readable label
-  if (ENUM_OPTIONS[field]) {
-    const label = labelFor(field, str);
-    return <p className={cn('leading-relaxed', highlight ? 'text-pine-700 font-medium' : 'text-bark-500')}>{label}</p>;
-  }
-
-  const text = !expanded && str.length > 120 ? str.slice(0, 120) + '…' : str;
-  return (
-    <p className={cn('leading-relaxed', highlight ? 'text-pine-700' : 'text-bark-500')}>
-      {text}
-    </p>
-  );
-}
-
-function ArrayFieldEditor({
-  field,
-  rows,
-  onChange,
-  onAdd,
-  onRemove,
-}: {
-  field: string;
-  rows: Record<string, unknown>[];
-  onChange: (field: string, index: number, key: string, value: string) => void;
-  onAdd: (field: string) => void;
-  onRemove: (field: string, index: number) => void;
-}) {
-  const columns = field === 'ageGroups'
-    ? [
-        { key: 'label', label: 'Label', type: 'text' },
-        { key: 'minAge', label: 'Min Age', type: 'number' },
-        { key: 'maxAge', label: 'Max Age', type: 'number' },
-        { key: 'minGrade', label: 'Min Grade', type: 'number' },
-        { key: 'maxGrade', label: 'Max Grade', type: 'number' },
-      ]
-    : field === 'schedules'
-      ? [
-          { key: 'label', label: 'Label', type: 'text' },
-          { key: 'startDate', label: 'Start', type: 'date' },
-          { key: 'endDate', label: 'End', type: 'date' },
-          { key: 'startTime', label: 'Start Time', type: 'text' },
-          { key: 'endTime', label: 'End Time', type: 'text' },
-          { key: 'earlyDropOff', label: 'Early Dropoff', type: 'text' },
-          { key: 'latePickup', label: 'Late Pickup', type: 'text' },
-        ]
-      : [
-          { key: 'label', label: 'Label', type: 'text' },
-          { key: 'amount', label: 'Amount', type: 'number' },
-          { key: 'unit', label: 'Unit', type: 'select' },
-          { key: 'durationWeeks', label: 'Weeks', type: 'number' },
-          { key: 'ageQualifier', label: 'Age Qualifier', type: 'text' },
-          { key: 'discountNotes', label: 'Discount Notes', type: 'text' },
-        ];
-
-  return (
-    <div className="space-y-2">
-      {rows.map((row, index) => (
-        <div key={`${field}-${index}`} className="rounded-lg border border-cream-300 bg-white p-2">
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            {columns.map((column) => (
-              column.type === 'select' ? (
-                <label key={column.key} className="space-y-1">
-                  <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
-                  <select
-                    value={String(row[column.key] ?? 'PER_WEEK')}
-                    onChange={(event) => onChange(field, index, column.key, event.target.value)}
-                    className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
-                  >
-                    <option value="PER_WEEK">Per Week</option>
-                    <option value="PER_SESSION">Per Session</option>
-                    <option value="PER_DAY">Per Day</option>
-                    <option value="FLAT">Flat</option>
-                    <option value="PER_CAMP">Per Camp</option>
-                  </select>
-                </label>
-              ) : (
-                <label key={column.key} className="space-y-1">
-                  <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
-                  <input
-                    type={column.type}
-                    value={row[column.key] == null ? '' : String(row[column.key])}
-                    onChange={(event) => onChange(field, index, column.key, event.target.value)}
-                    className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
-                  />
-                </label>
-              )
-            ))}
-          </div>
-          <div className="mt-2 flex justify-end">
-            <button onClick={() => onRemove(field, index)} className="text-xs text-red-500 hover:text-red-700">
-              Remove row
-            </button>
-          </div>
-        </div>
-      ))}
-      <button onClick={() => onAdd(field)} className="text-xs text-pine-600 hover:text-pine-700">
-        Add row
-      </button>
-    </div>
-  );
-}
-
-/** Input that renders a <select> for enum fields, <textarea> for long text, <input> otherwise */
-function FieldInput({ field, value, onChange, onCommit, onCancel }: {
-  field: string;
-  value: string;
-  onChange: (v: string) => void;
-  onCommit: () => void;
-  onCancel: () => void;
-}) {
-  const enumOpts = ENUM_OPTIONS[field];
-
-  if (enumOpts) {
-    return (
-      <select
-        autoFocus
-        value={value}
-        onChange={e => { onChange(e.target.value); }}
-        onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}
-        onBlur={onCommit}
-        className="flex-1 text-xs border border-pine-300 rounded px-2 py-1 focus:outline-none focus:border-pine-500 bg-white"
-      >
-        {enumOpts.map(o => (
-          <option
-            key={o.value}
-            value={o.value}
-            title={field === 'campType' ? CAMP_TYPE_DESCRIPTIONS[o.value as keyof typeof CAMP_TYPE_DESCRIPTIONS] : undefined}
-          >
-            {o.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  const isLong = value.length > 80 || field === 'description' || field === 'interestingDetails' || field === 'notes';
-  if (isLong) {
-    return (
-      <textarea
-        autoFocus
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onCommit(); } if (e.key === 'Escape') onCancel(); }}
-        rows={3}
-        className="flex-1 text-xs border border-pine-300 rounded px-2 py-1 focus:outline-none focus:border-pine-500 bg-white resize-none"
-      />
-    );
-  }
-
-  return (
-    <input
-      autoFocus
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      onKeyDown={e => { if (e.key === 'Enter') onCommit(); if (e.key === 'Escape') onCancel(); }}
-      className="flex-1 text-xs border border-pine-300 rounded px-2 py-1 focus:outline-none focus:border-pine-500 bg-white"
-    />
-  );
 }
 
 async function readErrorMessage(response: Response, fallback: string): Promise<string> {

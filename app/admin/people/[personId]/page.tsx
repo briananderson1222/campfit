@@ -5,6 +5,7 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { getPool } from '@/lib/db';
 import { PersonEditor } from './person-editor';
 import { PersonRoleActions } from './person-role-actions';
+import { getPersonFieldTimeline } from '@/lib/admin/field-metadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +48,7 @@ export default async function AdminPersonDetailPage({ params }: { params: { pers
 
   const detail = await getPersonDetail(params.personId).catch(() => null);
   if (!detail) notFound();
+  const fieldTimeline = await getPersonFieldTimeline(params.personId).catch(() => ({}));
 
   return (
     <div className="space-y-6">
@@ -61,7 +63,7 @@ export default async function AdminPersonDetailPage({ params }: { params: { pers
       </div>
 
       <PersonEditor
-        person={detail.person}
+        person={{ ...detail.person, fieldTimeline }}
         contacts={detail.contacts}
         campRoles={detail.campRoles}
         providerRoles={detail.providerRoles}

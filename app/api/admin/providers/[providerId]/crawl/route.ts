@@ -22,8 +22,8 @@ export async function POST(
 
   // Fetch provider info (for crawlRootUrl) and its camp IDs
   const [providerRes, campsRes] = await Promise.all([
-    pool.query<{ crawlRootUrl: string | null; websiteUrl: string | null }>(
-      `SELECT "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
+    pool.query<{ id: string; crawlRootUrl: string | null; websiteUrl: string | null }>(
+      `SELECT id, "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
       [params.providerId]
     ),
     pool.query<{ id: string }>(
@@ -55,6 +55,9 @@ export async function POST(
     triggeredBy: auth.access.email,
     trigger: 'MANUAL',
     providerIds: [params.providerId],
+    providerDiscoveryRoots: provider?.crawlRootUrl || provider?.websiteUrl
+      ? { [params.providerId]: provider.crawlRootUrl ?? provider.websiteUrl ?? '' }
+      : undefined,
     model,
     discover,
     onProgress: (event) => {

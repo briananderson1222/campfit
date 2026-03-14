@@ -112,6 +112,7 @@ export interface CrawlOptions {
   trigger?: 'MANUAL' | 'SCHEDULED';
   campIds?: string[];
   providerIds?: string[];  // crawl all camps for these providers
+  providerDiscoveryRoots?: Record<string, string>;
   limit?: number;
   model?: string;
   concurrency?: number;  // max simultaneous domains being crawled (default 3)
@@ -199,15 +200,19 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
 
   let globalIndex = 0;
 
+  const providerDiscoveryRoots = options.providerDiscoveryRoots ?? {};
   const domainTasks = Array.from(domainMap.values()).map(domainCamps =>
     semaphore.run(async () => {
       // ── Discovery pre-pass ──────────────────────────────────────────────────
-      // When 2+ camps share the same URL it's likely a listing page.
-      // Run discovery to find new programs and inject them into domainCamps.
-      if (options.discover === true && domainCamps.length >= 2) {
-        const listingUrl = domainCamps[0].websiteUrl;
-        const sharedUrl = domainCamps.every(c => c.websiteUrl === listingUrl);
-        if (sharedUrl) {
+      // Prefer provider-level discovery roots so discovery can start from the site root/listing
+      // instead of only from a downstream camp page.
+      const providerId = domainCamps[0]?.providerId ?? null;
+      const preferredListingUrl = providerId ? providerDiscoveryRoots[providerId] : null;
+      if (options.discover === true) {
+        const sharedCampUrl = domainCamps.length >= 2 ? domainCamps[0].websiteUrl : null;
+        const sharedUrl = sharedCampUrl ? domainCamps.every(c => c.websiteUrl === sharedCampUrl) : false;
+        const listingUrl = preferredListingUrl ?? (sharedUrl ? sharedCampUrl : null);
+        if (listingUrl) {
           const existingNames = domainCamps.map(c => c.name);
           const discovery = await discoverCampsFromUrl(listingUrl, { model: options.model }).catch(err => {
             console.error(`[crawl] discovery failed for ${listingUrl}:`, err);

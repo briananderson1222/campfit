@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { Check, Loader2, Plus, Trash2 } from 'lucide-react';
+import { FieldTimelineNote } from '@/components/admin/field-timeline';
+import type { FieldTimeline } from '@/lib/admin/field-metadata';
 
 type Contact = {
   id?: string;
@@ -14,7 +16,7 @@ export function PersonEditor({
   person,
   contacts: initialContacts,
 }: {
-  person: { id: string; fullName: string; bio?: string | null };
+  person: { id: string; fullName: string; bio?: string | null; fieldTimeline?: Record<string, FieldTimeline> };
   contacts: Contact[];
   campRoles: Array<Record<string, unknown>>;
   providerRoles: Array<Record<string, unknown>>;
@@ -24,6 +26,7 @@ export function PersonEditor({
   const [contacts, setContacts] = useState<Contact[]>(initialContacts);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const timeline = person.fieldTimeline ?? {};
 
   async function save() {
     setSaving(true);
@@ -47,10 +50,12 @@ export function PersonEditor({
       <div className="grid grid-cols-1 gap-4">
         <div>
           <label className="text-xs uppercase tracking-wide text-bark-300">Full Name</label>
+          <FieldTimelineNote timeline={timeline.fullName} className="mb-1 text-[11px] text-bark-300" />
           <input value={fullName} onChange={(e) => setFullName(e.target.value)} className="mt-1 w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="text-xs uppercase tracking-wide text-bark-300">Bio</label>
+          <FieldTimelineNote timeline={timeline.bio} className="mb-1 text-[11px] text-bark-300" />
           <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={4} className="mt-1 w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm resize-none" />
         </div>
       </div>
@@ -66,6 +71,7 @@ export function PersonEditor({
             Add Contact
           </button>
         </div>
+        <FieldTimelineNote timeline={timeline.contacts} className="mb-2 text-[11px] text-bark-300" />
         <div className="space-y-2">
           {contacts.map((contact, index) => (
             <div key={contact.id ?? index} className="grid grid-cols-1 sm:grid-cols-[120px_minmax(0,1fr)_160px_40px] gap-2">

@@ -429,6 +429,35 @@ model CampAccreditation {
   createdAt      DateTime @default(now())
 }
 
+model CampChangeLog {
+  id         String   @id @default(uuid())
+  campId     String
+  proposalId String?
+  changedAt  DateTime @default(now())
+  changedBy  String
+  fieldName  String
+  oldValue   String?
+  newValue   String?
+  changeType String   @default("UPDATE")
+
+  @@index([campId])
+  @@index([campId, fieldName])
+}
+
+model ProviderChangeLog {
+  id         String   @id @default(uuid())
+  providerId String
+  changedAt  DateTime @default(now())
+  changedBy  String
+  fieldName  String
+  oldValue   String?
+  newValue   String?
+  changeType String   @default("UPDATE")
+
+  @@index([providerId])
+  @@index([providerId, fieldName])
+}
+
 model Person {
   id         String                @id @default(uuid())
   fullName   String
@@ -449,6 +478,20 @@ model PersonContactMethod {
   value     String
   label     String?
   createdAt DateTime @default(now())
+}
+
+model PersonChangeLog {
+  id         String   @id @default(uuid())
+  personId   String
+  changedAt  DateTime @default(now())
+  changedBy  String
+  fieldName  String
+  oldValue   String?
+  newValue   String?
+  changeType String   @default("UPDATE")
+
+  @@index([personId])
+  @@index([personId, fieldName])
 }
 
 model CampPersonRole {

@@ -1,29 +1,85 @@
 import { getPool } from '@/lib/db';
 import type { CampChangeLog, ChangeType } from './types';
 
+type BaseChangeLogEntry = {
+  changedBy: string;
+  fieldName: string;
+  oldValue: unknown;
+  newValue: unknown;
+  changeType: ChangeType;
+};
+
+function serialize(value: unknown) {
+  return value !== null && value !== undefined ? JSON.stringify(value) : null;
+}
+
 export async function writeChangeLogs(
-  entries: {
+  entries: ({
     campId: string;
-    proposalId: string;
-    changedBy: string;
-    fieldName: string;
-    oldValue: unknown;
-    newValue: unknown;
-    changeType: ChangeType;
-  }[]
+    proposalId: string | null;
+  } & BaseChangeLogEntry)[],
 ): Promise<void> {
   if (entries.length === 0) return;
   const pool = getPool();
-  for (const e of entries) {
+  for (const entry of entries) {
     await pool.query(
       `INSERT INTO "CampChangeLog" ("campId", "proposalId", "changedBy", "fieldName", "oldValue", "newValue", "changeType")
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
-        e.campId, e.proposalId, e.changedBy, e.fieldName,
-        e.oldValue !== null && e.oldValue !== undefined ? JSON.stringify(e.oldValue) : null,
-        e.newValue !== null && e.newValue !== undefined ? JSON.stringify(e.newValue) : null,
-        e.changeType,
-      ]
+        entry.campId,
+        entry.proposalId,
+        entry.changedBy,
+        entry.fieldName,
+        serialize(entry.oldValue),
+        serialize(entry.newValue),
+        entry.changeType,
+      ],
+    );
+  }
+}
+
+export async function writeProviderChangeLogs(
+  entries: ({
+    providerId: string;
+  } & BaseChangeLogEntry)[],
+): Promise<void> {
+  if (entries.length === 0) return;
+  const pool = getPool();
+  for (const entry of entries) {
+    await pool.query(
+      `INSERT INTO "ProviderChangeLog" ("providerId", "changedBy", "fieldName", "oldValue", "newValue", "changeType")
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        entry.providerId,
+        entry.changedBy,
+        entry.fieldName,
+        serialize(entry.oldValue),
+        serialize(entry.newValue),
+        entry.changeType,
+      ],
+    );
+  }
+}
+
+export async function writePersonChangeLogs(
+  entries: ({
+    personId: string;
+  } & BaseChangeLogEntry)[],
+): Promise<void> {
+  if (entries.length === 0) return;
+  const pool = getPool();
+  for (const entry of entries) {
+    await pool.query(
+      `INSERT INTO "PersonChangeLog" ("personId", "changedBy", "fieldName", "oldValue", "newValue", "changeType")
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        entry.personId,
+        entry.changedBy,
+        entry.fieldName,
+        serialize(entry.oldValue),
+        serialize(entry.newValue),
+        entry.changeType,
+      ],
     );
   }
 }

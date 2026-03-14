@@ -1,6 +1,7 @@
 import { getPool } from '@/lib/db';
 import type { CampChangeProposal, ProposedChanges, ProposalStatus } from './types';
 import { communityScopeSql } from './community-access';
+import { getCampFieldTimeline } from './field-metadata';
 
 export async function createProposal(opts: {
   campId: string;
@@ -107,7 +108,10 @@ export async function getProposal(id: string): Promise<CampChangeProposal | null
      WHERE p.id = $1`,
     [id]
   );
-  return result.rows[0] ?? null;
+  const proposal = result.rows[0] ?? null;
+  if (!proposal) return null;
+  proposal.fieldTimeline = await getCampFieldTimeline(proposal.campId).catch(() => ({}));
+  return proposal;
 }
 
 export async function getPendingProposalQueue(opts: {

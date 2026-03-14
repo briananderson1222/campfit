@@ -11,6 +11,7 @@ import { EntityOpsPanel } from '@/components/admin/entity-ops-panel';
 import { ProviderProposalActions } from './provider-proposals-actions';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProviderCommunitySlug } from '@/lib/admin/community-access';
+import { getProviderFieldTimeline } from '@/lib/admin/field-metadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -125,6 +126,7 @@ export default async function ProviderDetailPage({
       )
       .catch(() => ({ rows: [] as any[] })),
   ]);
+  const fieldTimeline = await getProviderFieldTimeline(providerId).catch(() => ({}));
 
   const avgConfPct =
     provider.avgConfidence != null ? `${Math.round(provider.avgConfidence * 100)}%` : '—';
@@ -241,7 +243,7 @@ export default async function ProviderDetailPage({
       )}
 
       {/* ── Provider info + crawl hints (inline editable) ── */}
-      <ProviderEditor provider={provider} siteHints={siteHints} campCount={provider.campCount ?? 0} />
+      <ProviderEditor provider={{ ...provider, fieldTimeline }} siteHints={siteHints} campCount={provider.campCount ?? 0} />
 
       <EntityOpsPanel entityType="PROVIDER" entityId={provider.id} />
 

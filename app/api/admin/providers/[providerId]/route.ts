@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getProvider, getProviderCamps, getProviderPendingProposals, updateProvider } from '@/lib/admin/provider-repository';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProviderCommunitySlug } from '@/lib/admin/community-access';
+import { writeProviderChangeLogs } from '@/lib/admin/changelog-repository';
 
 export async function GET(
   _req: Request,
@@ -31,8 +32,28 @@ export async function PATCH(
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await request.json().catch(() => ({}));
+  const current = await getProvider(params.providerId);
   const provider = await updateProvider(params.providerId, body);
   if (!provider) return NextResponse.json({ error: 'Not found or no valid fields' }, { status: 404 });
+
+  if (current) {
+    const entries = Object.entries(body as Record<string, unknown>)
+      .filter(([field]) => field in provider)
+      .map(([field, newValue]) => {
+        const currentRecord = current as unknown as Record<string, unknown>;
+        return {
+          providerId: params.providerId,
+          changedBy: auth.access.email,
+          fieldName: field,
+          oldValue: currentRecord[field] ?? null,
+          newValue: newValue ?? null,
+          changeType: currentRecord[field] == null ? 'FIELD_POPULATED' as const : 'UPDATE' as const,
+        };
+      });
+    await writeProviderChangeLogs(entries).catch((error) => {
+      console.error('[provider PATCH] writeProviderChangeLogs failed:', error);
+    });
+  }
 
   return NextResponse.json(provider);
 }

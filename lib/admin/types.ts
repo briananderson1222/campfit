@@ -74,6 +74,7 @@ export interface CampChangeProposal {
   providerId?: string | null;
   lastVerifiedAt?: string | null;
   campData?: Record<string, unknown>; // full camp row for context
+  fieldTimeline?: Record<string, { lastUpdatedAt: string | null; lastAttestedAt: string | null }>;
   // joined from CrawlRun
   crawlStartedAt?: string;
   crawlCompletedAt?: string | null;
@@ -102,6 +103,28 @@ export interface CampChangeLog {
   id: string;
   campId: string;
   proposalId: string | null;
+  changedAt: string;
+  changedBy: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changeType: ChangeType;
+}
+
+export interface ProviderChangeLog {
+  id: string;
+  providerId: string;
+  changedAt: string;
+  changedBy: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changeType: ChangeType;
+}
+
+export interface PersonChangeLog {
+  id: string;
+  personId: string;
   changedAt: string;
   changedBy: string;
   fieldName: string;

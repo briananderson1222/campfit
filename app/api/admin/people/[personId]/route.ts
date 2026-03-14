@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { writePersonChangeLogs } from '@/lib/admin/changelog-repository';
 
 export async function GET(
   _request: Request,
@@ -65,6 +66,11 @@ export async function PATCH(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const [personBefore, contactsBefore] = await Promise.all([
+      client.query(`SELECT * FROM "Person" WHERE id = $1`, [params.personId]),
+      client.query(`SELECT type, value, label FROM "PersonContactMethod" WHERE "personId" = $1 ORDER BY "createdAt" ASC`, [params.personId]),
+    ]);
+    const existingPerson = personBefore.rows[0];
 
     const updates: string[] = [];
     const values: unknown[] = [params.personId];
@@ -96,6 +102,42 @@ export async function PATCH(
     }
 
     await client.query('COMMIT');
+
+    const logs = [];
+    if (body.fullName !== undefined) {
+      logs.push({
+        personId: params.personId,
+        changedBy: auth.access.email,
+        fieldName: 'fullName',
+        oldValue: existingPerson?.fullName ?? null,
+        newValue: body.fullName.trim(),
+        changeType: existingPerson?.fullName ? 'UPDATE' as const : 'FIELD_POPULATED' as const,
+      });
+    }
+    if (body.bio !== undefined) {
+      logs.push({
+        personId: params.personId,
+        changedBy: auth.access.email,
+        fieldName: 'bio',
+        oldValue: existingPerson?.bio ?? null,
+        newValue: body.bio?.trim() || null,
+        changeType: existingPerson?.bio ? 'UPDATE' as const : 'FIELD_POPULATED' as const,
+      });
+    }
+    if (Array.isArray(body.contacts)) {
+      logs.push({
+        personId: params.personId,
+        changedBy: auth.access.email,
+        fieldName: 'contacts',
+        oldValue: contactsBefore.rows,
+        newValue: body.contacts,
+        changeType: contactsBefore.rows.length ? 'UPDATE' as const : 'FIELD_POPULATED' as const,
+      });
+    }
+    await writePersonChangeLogs(logs).catch((error) => {
+      console.error('[person PATCH] writePersonChangeLogs failed:', error);
+    });
+
     return GET(request, { params });
   } catch (error) {
     await client.query('ROLLBACK');

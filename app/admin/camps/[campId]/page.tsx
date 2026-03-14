@@ -6,6 +6,7 @@ import { CampEditor } from './camp-editor';
 import { EntityOpsPanel } from '@/components/admin/entity-ops-panel';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
+import { getCampFieldTimeline } from '@/lib/admin/field-metadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,6 +73,10 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
     getPendingProposals(params.campId).catch(err => { console.error('[admin/camps] getPendingProposals failed:', err); return []; }),
     getSiteHints(domain).catch(err => { console.error('[admin/camps] getSiteHints failed:', err); return []; }),
   ]);
+  const fieldTimeline = await getCampFieldTimeline(params.campId).catch((err) => {
+    console.error('[admin/camps] getCampFieldTimeline failed:', err);
+    return {};
+  });
 
   return (
     <div>
@@ -103,7 +108,7 @@ export default async function AdminCampDetailPage({ params }: { params: { campId
       </div>
 
       <CampEditor
-        camp={camp}
+        camp={{ ...camp, fieldTimeline }}
         pendingProposals={pendingProposals}
         siteHints={siteHints}
         domain={domain}

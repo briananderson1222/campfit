@@ -7,6 +7,14 @@ import {
   RefreshCw, Telescope, CheckCircle, XCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  CampFieldInput,
+  CampFieldValue,
+  normalizeEditableValue,
+  parseEditableValue,
+} from '@/components/admin/camp-field-controls';
+import { FieldTimelineNote } from '@/components/admin/field-timeline';
+import type { FieldTimeline } from '@/lib/admin/field-metadata';
 
 interface Provider {
   id: string; name: string; slug: string;
@@ -16,6 +24,7 @@ interface Provider {
   notes: string | null; crawlRootUrl: string | null; communitySlug: string;
   applicationUrl?: string | null;
   socialLinks?: Record<string, string> | null;
+  fieldTimeline?: Record<string, FieldTimeline>;
 }
 
 interface SiteHint {
@@ -25,43 +34,44 @@ interface SiteHint {
 // ── Inline editable field ─────────────────────────────────────────────────────
 
 function EditableField({
-  providerId, field, label, value, type = 'text', helper,
+  providerId, field, label, value, type = 'text', helper, timeline,
 }: {
   providerId: string; field: string; label: string;
-  value: string | null; type?: 'text' | 'textarea' | 'url'; helper?: string;
+  value: unknown; type?: 'text' | 'textarea' | 'url'; helper?: string;
+  timeline?: FieldTimeline | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState(value);
-  const [draft, setDraft] = useState(value ?? '');
+  const [draft, setDraft] = useState<unknown>(normalizeEditableValue(field, value));
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
     const res = await fetch(`/api/admin/providers/${providerId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: draft.trim() || null }),
+      body: JSON.stringify({ [field]: parseEditableValue(field, draft) }),
     }).catch(() => null);
     setSaving(false);
-    if (res?.ok) { setCurrent(draft.trim() || null); setEditing(false); }
+    if (res?.ok) { setCurrent(parseEditableValue(field, draft)); setEditing(false); }
   }
 
-  function cancel() { setDraft(current ?? ''); setEditing(false); }
+  function cancel() { setDraft(normalizeEditableValue(field, current)); setEditing(false); }
 
   return (
     <div className="group flex gap-3 py-2.5 border-b border-cream-200/50 dark:border-bark-600/30 last:border-0">
       <dt className="text-xs text-bark-300 uppercase tracking-wide w-36 shrink-0 pt-1">{label}</dt>
       <dd className="flex-1 min-w-0">
+        <FieldTimelineNote timeline={timeline} className="mb-1 text-[11px] text-bark-300" />
         {editing ? (
           <div className="flex items-start gap-1.5">
-            {type === 'textarea' ? (
-              <textarea autoFocus value={draft} onChange={e => setDraft(e.target.value)} rows={3}
-                className="flex-1 text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-pine-400 resize-none" />
-            ) : (
-              <input autoFocus type={type} value={draft}
-                onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
-                className="flex-1 text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-pine-400" />
-            )}
+            <CampFieldInput
+              field={field}
+              value={draft}
+              onChange={setDraft}
+              onCommit={save}
+              onCancel={cancel}
+              className="border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 focus:border-pine-400"
+            />
             <button onClick={save} disabled={saving}
               className="p-1.5 rounded-lg text-pine-600 hover:bg-pine-50 disabled:opacity-40 mt-0.5">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -73,16 +83,10 @@ function EditableField({
           </div>
         ) : (
           <div className="flex items-start justify-between gap-2">
-            <span className={cn('text-sm break-all', !current ? 'text-bark-200 italic' : 'text-bark-600 dark:text-cream-300')}>
-              {current || '—'}
-              {type === 'url' && current && (
-                <a href={current} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 ml-1.5 text-pine-500 hover:text-pine-600">
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </span>
-            <button onClick={() => { setDraft(current ?? ''); setEditing(true); }}
+            <div className={cn('min-w-0 flex-1 text-sm break-all', !current ? 'text-bark-200 italic' : 'text-bark-600 dark:text-cream-300')}>
+              <CampFieldValue value={current} field={field} />
+            </div>
+            <button onClick={() => { setDraft(normalizeEditableValue(field, current)); setEditing(true); }}
               className="opacity-0 group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all shrink-0">
               <Pencil className="w-3.5 h-3.5" />
             </button>
@@ -299,6 +303,7 @@ function ProviderCrawlSection({ providerId, campCount }: { providerId: string; c
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function ProviderEditor({ provider, siteHints, campCount = 0 }: { provider: Provider; siteHints: SiteHint[]; campCount?: number }) {
+  const timeline = provider.fieldTimeline ?? {};
   return (
     <div className="space-y-6">
       {/* Provider info — inline editable */}
@@ -306,19 +311,19 @@ export function ProviderEditor({ provider, siteHints, campCount = 0 }: { provide
         <h2 className="font-display font-bold text-bark-700 dark:text-cream-200 mb-1">Provider Info</h2>
         <p className="text-xs text-bark-300 mb-4">Hover any field to edit inline.</p>
         <dl>
-          <EditableField providerId={provider.id} field="name" label="Name" value={provider.name} />
-          <EditableField providerId={provider.id} field="websiteUrl" label="Website" value={provider.websiteUrl} type="url" />
+          <EditableField providerId={provider.id} field="name" label="Name" value={provider.name} timeline={timeline.name} />
+          <EditableField providerId={provider.id} field="websiteUrl" label="Website" value={provider.websiteUrl} type="url" timeline={timeline.websiteUrl} />
           <EditableField providerId={provider.id} field="crawlRootUrl" label="Crawl Root URL" value={provider.crawlRootUrl} type="url"
-            helper="Entry point for discovery — leave blank to use Website URL" />
-          <EditableField providerId={provider.id} field="logoUrl" label="Logo URL" value={provider.logoUrl} type="url" />
-          <EditableField providerId={provider.id} field="address" label="Address" value={provider.address} />
-          <EditableField providerId={provider.id} field="city" label="City" value={provider.city} />
-          <EditableField providerId={provider.id} field="neighborhood" label="Neighborhood" value={provider.neighborhood} />
-          <EditableField providerId={provider.id} field="contactEmail" label="Contact Email" value={provider.contactEmail} />
-          <EditableField providerId={provider.id} field="contactPhone" label="Contact Phone" value={provider.contactPhone} />
-          <EditableField providerId={provider.id} field="applicationUrl" label="Application URL" value={provider.applicationUrl ?? null} type="url" />
-          <EditableField providerId={provider.id} field="socialLinks" label="Social Links JSON" value={provider.socialLinks ? JSON.stringify(provider.socialLinks) : null} />
-          <EditableField providerId={provider.id} field="notes" label="Internal Notes" value={provider.notes} type="textarea" />
+            helper="Entry point for discovery — leave blank to use Website URL" timeline={timeline.crawlRootUrl} />
+          <EditableField providerId={provider.id} field="logoUrl" label="Logo URL" value={provider.logoUrl} type="url" timeline={timeline.logoUrl} />
+          <EditableField providerId={provider.id} field="address" label="Address" value={provider.address} timeline={timeline.address} />
+          <EditableField providerId={provider.id} field="city" label="City" value={provider.city} timeline={timeline.city} />
+          <EditableField providerId={provider.id} field="neighborhood" label="Neighborhood" value={provider.neighborhood} timeline={timeline.neighborhood} />
+          <EditableField providerId={provider.id} field="contactEmail" label="Contact Email" value={provider.contactEmail} timeline={timeline.contactEmail} />
+          <EditableField providerId={provider.id} field="contactPhone" label="Contact Phone" value={provider.contactPhone} timeline={timeline.contactPhone} />
+          <EditableField providerId={provider.id} field="applicationUrl" label="Application URL" value={provider.applicationUrl ?? null} type="url" timeline={timeline.applicationUrl} />
+          <EditableField providerId={provider.id} field="socialLinks" label="Social Links" value={provider.socialLinks ?? null} timeline={timeline.socialLinks} />
+          <EditableField providerId={provider.id} field="notes" label="Internal Notes" value={provider.notes} type="textarea" timeline={timeline.notes} />
         </dl>
       </div>
 

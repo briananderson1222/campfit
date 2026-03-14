@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Loader2, RefreshCw, Save, Lightbulb } from 'lucide-react';
 
 type Row = {
   campId: string;
@@ -49,6 +49,12 @@ export function CrawlFailuresTable({ rows }: { rows: Row[] }) {
   const [search, setSearch] = useState('');
   const [community, setCommunity] = useState('ALL');
   const [reason, setReason] = useState('ALL');
+  const [draftUrls, setDraftUrls] = useState<Record<string, string>>({});
+  const [draftHints, setDraftHints] = useState<Record<string, string>>({});
+  const [savingUrlFor, setSavingUrlFor] = useState<string | null>(null);
+  const [savingHintFor, setSavingHintFor] = useState<string | null>(null);
+  const [retryingFor, setRetryingFor] = useState<string | null>(null);
+  const [rowMessages, setRowMessages] = useState<Record<string, string>>({});
 
   const communities = useMemo(
     () => ['ALL', ...Array.from(new Set(rows.map((row) => row.communitySlug)))],
@@ -110,6 +116,8 @@ export function CrawlFailuresTable({ rows }: { rows: Row[] }) {
       <div className="space-y-3">
         {filtered.map((row) => {
           const kind = classifyError(row.latestError);
+          const effectiveUrl = draftUrls[row.campId] ?? row.websiteUrl ?? row.latestUrl ?? '';
+          const domain = domainOf(effectiveUrl);
           return (
             <div key={row.campId} className="glass-panel p-5 space-y-3">
               <div className="flex items-start justify-between gap-4">
@@ -128,6 +136,26 @@ export function CrawlFailuresTable({ rows }: { rows: Row[] }) {
                 <div className="flex flex-wrap gap-2">
                   <Link href={`/admin/camps/${row.campId}`} className="btn-secondary text-xs">Open camp</Link>
                   <Link href={`/admin/crawls?runId=${row.latestRunId}`} className="btn-secondary text-xs">View crawl log</Link>
+                  <button
+                    onClick={async () => {
+                      setRetryingFor(row.campId);
+                      setRowMessages((prev) => ({ ...prev, [row.campId]: '' }));
+                      try {
+                        const res = await fetch(`/api/admin/camps/${row.campId}/crawl`, { method: 'POST' });
+                        const body = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(body.error ?? 'Failed to retry crawl');
+                        setRowMessages((prev) => ({ ...prev, [row.campId]: `Retry started · run ${body.runId}` }));
+                      } catch (error) {
+                        setRowMessages((prev) => ({ ...prev, [row.campId]: error instanceof Error ? error.message : 'Failed to retry crawl' }));
+                      } finally {
+                        setRetryingFor(null);
+                      }
+                    }}
+                    className="btn-secondary text-xs"
+                  >
+                    {retryingFor === row.campId ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 inline h-3 w-3" />}
+                    Retry
+                  </button>
                   {row.latestUrl && (
                     <a href={row.latestUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-xs">
                       Source <ExternalLink className="ml-1 inline h-3 w-3" />
@@ -141,6 +169,90 @@ export function CrawlFailuresTable({ rows }: { rows: Row[] }) {
               </div>
 
               <p className="text-sm text-bark-500">{recommendation(kind)}</p>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-xl border border-cream-300 bg-white/70 p-3">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-bark-300">Fix website URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={effectiveUrl}
+                      onChange={(event) => setDraftUrls((prev) => ({ ...prev, [row.campId]: event.target.value }))}
+                      placeholder="https://..."
+                      className="flex-1 rounded-lg border border-cream-300 px-3 py-2 text-sm"
+                    />
+                    <button
+                      onClick={async () => {
+                        setSavingUrlFor(row.campId);
+                        setRowMessages((prev) => ({ ...prev, [row.campId]: '' }));
+                        try {
+                          const res = await fetch(`/api/admin/camps/${row.campId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ websiteUrl: effectiveUrl.trim() || null }),
+                          });
+                          const body = await res.json().catch(() => ({}));
+                          if (!res.ok) throw new Error(body.error ?? 'Failed to save URL');
+                          setRowMessages((prev) => ({ ...prev, [row.campId]: 'Website URL saved' }));
+                        } catch (error) {
+                          setRowMessages((prev) => ({ ...prev, [row.campId]: error instanceof Error ? error.message : 'Failed to save URL' }));
+                        } finally {
+                          setSavingUrlFor(null);
+                        }
+                      }}
+                      className="btn-secondary text-xs"
+                    >
+                      {savingUrlFor === row.campId ? <Loader2 className="inline h-3 w-3 animate-spin" /> : <Save className="inline h-3 w-3" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-cream-300 bg-white/70 p-3">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-bark-300">Add crawl hint</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={draftHints[row.campId] ?? ''}
+                      onChange={(event) => setDraftHints((prev) => ({ ...prev, [row.campId]: event.target.value }))}
+                      placeholder={domain ? `Hint for ${domain}` : 'Set/fix URL first if needed'}
+                      className="flex-1 rounded-lg border border-cream-300 px-3 py-2 text-sm"
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!domain || !(draftHints[row.campId] ?? '').trim()) return;
+                        setSavingHintFor(row.campId);
+                        setRowMessages((prev) => ({ ...prev, [row.campId]: '' }));
+                        try {
+                          const res = await fetch('/api/admin/site-hints', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              domain,
+                              hint: (draftHints[row.campId] ?? '').trim(),
+                              source: 'manual',
+                              sourceId: row.campId,
+                            }),
+                          });
+                          const body = await res.json().catch(() => ({}));
+                          if (!res.ok) throw new Error(body.error ?? 'Failed to save hint');
+                          setDraftHints((prev) => ({ ...prev, [row.campId]: '' }));
+                          setRowMessages((prev) => ({ ...prev, [row.campId]: `Saved crawl hint for ${domain}` }));
+                        } catch (error) {
+                          setRowMessages((prev) => ({ ...prev, [row.campId]: error instanceof Error ? error.message : 'Failed to save hint' }));
+                        } finally {
+                          setSavingHintFor(null);
+                        }
+                      }}
+                      disabled={!domain || !(draftHints[row.campId] ?? '').trim()}
+                      className="btn-secondary text-xs disabled:opacity-40"
+                    >
+                      {savingHintFor === row.campId ? <Loader2 className="inline h-3 w-3 animate-spin" /> : <Lightbulb className="inline h-3 w-3" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {rowMessages[row.campId] && (
+                <p className="text-xs text-pine-600">{rowMessages[row.campId]}</p>
+              )}
             </div>
           );
         })}
@@ -151,4 +263,12 @@ export function CrawlFailuresTable({ rows }: { rows: Row[] }) {
       </div>
     </div>
   );
+}
+
+function domainOf(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
 }

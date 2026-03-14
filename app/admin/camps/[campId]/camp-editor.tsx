@@ -3,13 +3,20 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
-  Check, X, Pencil, Loader2, ExternalLink, AlertCircle,
+  Check, X, Pencil, Loader2, AlertCircle,
   Plus, Trash2, ToggleLeft, ToggleRight, ClipboardList,
   Lightbulb, ShieldCheck, Building2, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
 import { computeCoverage, REQUIRED_FOR_VERIFIED } from '@/lib/admin/verification';
+import {
+  CampFieldInput,
+  CampFieldValue,
+  normalizeEditableValue,
+  parseEditableValue,
+} from '@/components/admin/camp-field-controls';
+import { FieldTimelineNote } from '@/components/admin/field-timeline';
+import type { FieldTimeline } from '@/lib/admin/field-metadata';
 
 interface FieldSource { excerpt: string | null; sourceUrl: string; approvedAt: string; }
 
@@ -30,6 +37,7 @@ interface Camp {
   registrationOpenDate: string | null; registrationCloseDate: string | null; registrationStatus: string | null;
   dataConfidence: string | null; lastVerifiedAt: string | null;
   fieldSources: Record<string, FieldSource> | null;
+  fieldTimeline?: Record<string, FieldTimeline>;
   createdAt: string; updatedAt: string;
   ageGroups: AgeGroup[];
   schedules: { id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }[];
@@ -397,15 +405,17 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
 
 function EditableField({
   campId, field, label, value, type = 'text', onAttest, isAttested,
+  timeline,
 }: {
   campId: string; field: string; label: string;
-  value: string | null | boolean; type?: 'text' | 'textarea' | 'select' | 'boolean' | 'date';
+  value: unknown; type?: 'text' | 'textarea' | 'select' | 'boolean' | 'date';
   onAttest?: () => Promise<void>;
   isAttested?: boolean;
+  timeline?: FieldTimeline | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState(value);
-  const [draft, setDraft] = useState(String(value ?? ''));
+  const [draft, setDraft] = useState<unknown>(normalizeEditableValue(field, value, type));
   const [saving, setSaving] = useState(false);
   const [attesting, setAttesting] = useState(false);
 
@@ -418,49 +428,38 @@ function EditableField({
 
   async function save() {
     setSaving(true);
+    const payloadValue = parseEditableValue(field, draft, type);
     const r = await fetch(`/api/admin/camps/${campId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: type === 'boolean' ? draft === 'true' : draft || null }),
+      body: JSON.stringify({ [field]: payloadValue }),
     }).catch(() => null);
     setSaving(false);
-    if (r?.ok) { setCurrent(type === 'boolean' ? draft === 'true' : draft || null); setEditing(false); }
+    if (r?.ok) {
+      setCurrent(payloadValue);
+      setEditing(false);
+    }
   }
 
-  function cancel() { setDraft(String(current ?? '')); setEditing(false); }
-
-  const rawDisplay = type === 'boolean'
-    ? (current === true || current === 'true' ? 'Yes' : current === false || current === 'false' ? 'No' : '—')
-    : (current as string) || null;
-  const displayValue = rawDisplay && ENUM_OPTIONS[field] ? labelFor(field, rawDisplay) : rawDisplay;
+  function cancel() {
+    setDraft(normalizeEditableValue(field, current, type));
+    setEditing(false);
+  }
 
   return (
     <div className="group">
       <dt className="text-xs text-bark-300 dark:text-bark-300 font-semibold uppercase tracking-wide mb-0.5">{label}</dt>
+      <FieldTimelineNote timeline={timeline} className="mb-1 text-[11px] text-bark-300" />
       <dd className="flex items-start gap-2">
         {editing ? (
           <div className="flex-1 flex items-start gap-1.5">
-            {type === 'textarea' ? (
-              <textarea autoFocus value={draft} onChange={e => setDraft(e.target.value)} rows={4}
-                className="flex-1 text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-pine-400 resize-none" />
-            ) : (type === 'select' || ENUM_OPTIONS[field]) ? (
-              <select autoFocus value={draft} onChange={e => setDraft(e.target.value)}
-                className="flex-1 text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-pine-400">
-                <option value="">— unset —</option>
-                {(ENUM_OPTIONS[field] ?? []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            ) : type === 'boolean' ? (
-              <select autoFocus value={draft} onChange={e => setDraft(e.target.value)}
-                className="flex-1 text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-pine-400">
-                <option value="">— unset —</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            ) : (
-              <input autoFocus type={type === 'date' ? 'date' : 'text'} value={draft}
-                onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
-                className="flex-1 text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-pine-400" />
-            )}
+            <CampFieldInput
+              field={field}
+              value={draft}
+              onChange={setDraft}
+              onCommit={save}
+              onCancel={cancel}
+              className="border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 focus:border-pine-400"
+            />
             <button onClick={save} disabled={saving}
               className="p-1.5 rounded-lg text-pine-600 hover:bg-pine-50 disabled:opacity-40 transition-colors mt-0.5">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -472,15 +471,9 @@ function EditableField({
           </div>
         ) : (
           <div className="flex-1 flex items-start justify-between gap-2">
-            <span className={cn('text-sm', !displayValue ? 'text-bark-200 italic' : 'text-bark-600 dark:text-cream-300')}>
-              {displayValue || 'Not set'}
-              {field === 'websiteUrl' && displayValue && (
-                <a href={displayValue as string} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 ml-1.5 text-pine-500 hover:text-pine-600">
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </span>
+            <div className="min-w-0 flex-1 text-sm text-bark-600 dark:text-cream-300">
+              <CampFieldValue value={current} field={field} />
+            </div>
             <div className="flex items-center gap-1 shrink-0">
               {onAttest && !isAttested && (
                 <button onClick={handleAttest} disabled={attesting}
@@ -495,7 +488,7 @@ function EditableField({
                   <ShieldCheck className="w-3 h-3" />
                 </span>
               )}
-              <button onClick={() => { setDraft(String(current ?? '')); setEditing(true); }}
+              <button onClick={() => { setDraft(normalizeEditableValue(field, current, type)); setEditing(true); }}
                 className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded text-bark-300 hover:text-bark-500 hover:bg-cream-100 dark:hover:bg-bark-600 transition-all"
                 title={`Edit ${label}`}>
                 <Pencil className="w-3.5 h-3.5" />
@@ -787,6 +780,7 @@ export function CampEditor({
   siteHints?: SiteHint[]; domain?: string; provider?: Provider | null;
 }) {
   const [fieldSources, setFieldSources] = useState<Record<string, FieldSource> | null>(camp.fieldSources);
+  const fieldTimeline = camp.fieldTimeline ?? {};
 
   async function attest(field: string) {
     const res = await fetch(`/api/admin/camps/${camp.id}/attest`, {
@@ -859,10 +853,11 @@ export function CampEditor({
             value={camp.name}
             onAttest={attestProp('name')}
             isAttested={isAttested('name')}
+            timeline={fieldTimeline.name}
           />
           <ProviderField campId={camp.id} providerId={camp.providerId} organizationName={camp.organizationName} provider={provider} />
           <EditableField campId={camp.id} field="websiteUrl" label="Website URL" value={camp.websiteUrl}
-            onAttest={attestProp('websiteUrl')} isAttested={isAttested('websiteUrl')} />
+            onAttest={attestProp('websiteUrl')} isAttested={isAttested('websiteUrl')} timeline={fieldTimeline.websiteUrl} />
           <MultiSelectField campId={camp.id} field="campTypes" label="Camp Types" value={camp.campTypes ?? []}
             options={[
               { value: 'SUMMER_DAY', label: 'Summer Day' },
@@ -886,11 +881,11 @@ export function CampEditor({
               { value: 'OTHER', label: 'Other' },
             ]} />
           <EditableField campId={camp.id} field="registrationStatus" label="Registration Status" value={camp.registrationStatus} type="select"
-            onAttest={attestProp('registrationStatus')} isAttested={isAttested('registrationStatus')} />
-          <EditableField campId={camp.id} field="registrationOpenDate" label="Registration Open Date" value={camp.registrationOpenDate} type="date" />
-          <EditableField campId={camp.id} field="registrationCloseDate" label="Registration Close Date" value={camp.registrationCloseDate} type="date" />
-          <EditableField campId={camp.id} field="dataConfidence" label="Data Confidence" value={camp.dataConfidence} type="select" />
-          <EditableField campId={camp.id} field="lunchIncluded" label="Lunch Included" value={camp.lunchIncluded} type="boolean" />
+            onAttest={attestProp('registrationStatus')} isAttested={isAttested('registrationStatus')} timeline={fieldTimeline.registrationStatus} />
+          <EditableField campId={camp.id} field="registrationOpenDate" label="Registration Open Date" value={camp.registrationOpenDate} type="date" timeline={fieldTimeline.registrationOpenDate} />
+          <EditableField campId={camp.id} field="registrationCloseDate" label="Registration Close Date" value={camp.registrationCloseDate} type="date" timeline={fieldTimeline.registrationCloseDate} />
+          <EditableField campId={camp.id} field="dataConfidence" label="Data Confidence" value={camp.dataConfidence} type="select" timeline={fieldTimeline.dataConfidence} />
+          <EditableField campId={camp.id} field="lunchIncluded" label="Lunch Included" value={camp.lunchIncluded} type="boolean" timeline={fieldTimeline.lunchIncluded} />
         </dl>
       </div>
 
@@ -899,9 +894,9 @@ export function CampEditor({
         <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-4">Description & Details</h2>
         <dl className="space-y-4">
           <EditableField campId={camp.id} field="description" label="Description (public)" value={camp.description} type="textarea"
-            onAttest={attestProp('description')} isAttested={isAttested('description')} />
-          <EditableField campId={camp.id} field="interestingDetails" label="Interesting Details (public callout)" value={camp.interestingDetails} type="textarea" />
-          <EditableField campId={camp.id} field="notes" label="Internal Notes (admin only — not shown publicly)" value={camp.notes} type="textarea" />
+            onAttest={attestProp('description')} isAttested={isAttested('description')} timeline={fieldTimeline.description} />
+          <EditableField campId={camp.id} field="interestingDetails" label="Interesting Details (public callout)" value={camp.interestingDetails} type="textarea" timeline={fieldTimeline.interestingDetails} />
+          <EditableField campId={camp.id} field="notes" label="Internal Notes (admin only — not shown publicly)" value={camp.notes} type="textarea" timeline={fieldTimeline.notes} />
         </dl>
       </div>
 
@@ -910,12 +905,12 @@ export function CampEditor({
         <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-4">Location</h2>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
           <EditableField campId={camp.id} field="city" label="City" value={camp.city}
-            onAttest={attestProp('city')} isAttested={isAttested('city')} />
-          <EditableField campId={camp.id} field="state" label="State" value={camp.state} />
-          <EditableField campId={camp.id} field="zip" label="ZIP Code" value={camp.zip} />
+            onAttest={attestProp('city')} isAttested={isAttested('city')} timeline={fieldTimeline.city} />
+          <EditableField campId={camp.id} field="state" label="State" value={camp.state} timeline={fieldTimeline.state} />
+          <EditableField campId={camp.id} field="zip" label="ZIP Code" value={camp.zip} timeline={fieldTimeline.zip} />
           <NeighborhoodField campId={camp.id} value={camp.neighborhood} communitySlug={camp.communitySlug} />
           <div className="sm:col-span-2">
-            <EditableField campId={camp.id} field="address" label="Street Address" value={camp.address} />
+            <EditableField campId={camp.id} field="address" label="Street Address" value={camp.address} timeline={fieldTimeline.address} />
             <p className="text-xs text-bark-200 mt-1">Street address only (e.g. "4001 E Iliff Ave") — not the neighborhood name</p>
           </div>
         </dl>
@@ -924,10 +919,10 @@ export function CampEditor({
       <div className="glass-panel p-5">
         <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide mb-4">Contact & Apply</h2>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-          <EditableField campId={camp.id} field="applicationUrl" label="Application URL" value={camp.applicationUrl ?? null} />
-          <EditableField campId={camp.id} field="contactEmail" label="Contact Email" value={camp.contactEmail ?? null} />
-          <EditableField campId={camp.id} field="contactPhone" label="Contact Phone" value={camp.contactPhone ?? null} />
-          <EditableField campId={camp.id} field="socialLinks" label="Social Links JSON" value={camp.socialLinks ? JSON.stringify(camp.socialLinks) : null} />
+          <EditableField campId={camp.id} field="applicationUrl" label="Application URL" value={camp.applicationUrl ?? null} timeline={fieldTimeline.applicationUrl} />
+          <EditableField campId={camp.id} field="contactEmail" label="Contact Email" value={camp.contactEmail ?? null} timeline={fieldTimeline.contactEmail} />
+          <EditableField campId={camp.id} field="contactPhone" label="Contact Phone" value={camp.contactPhone ?? null} timeline={fieldTimeline.contactPhone} />
+          <EditableField campId={camp.id} field="socialLinks" label="Social Links" value={camp.socialLinks ?? null} timeline={fieldTimeline.socialLinks} />
         </dl>
       </div>
 
