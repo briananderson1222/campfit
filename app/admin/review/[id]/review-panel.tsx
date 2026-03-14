@@ -11,6 +11,7 @@ import {
   CampFieldInput,
   CampFieldValue,
   cloneEditableValue,
+  parseGradeInput,
 } from '@/components/admin/camp-field-controls';
 import { FieldTimelineNote } from '@/components/admin/field-timeline';
 
@@ -758,6 +759,7 @@ function createEmptyArrayRow(field: string): Record<string, unknown> {
 
 function normalizeArrayFieldValue(field: string, key: string, value: string) {
   const nullableNumberKeys = new Set(['minAge', 'maxAge', 'minGrade', 'maxGrade', 'amount', 'durationWeeks']);
+  if (key === 'minGrade' || key === 'maxGrade') return parseGradeInput(value);
   if (nullableNumberKeys.has(key)) return value === '' ? null : Number(value);
   if (field === 'pricing' && key === 'unit') return value;
   return value === '' ? null : value;

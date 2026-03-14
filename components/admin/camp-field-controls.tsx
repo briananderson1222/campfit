@@ -262,8 +262,8 @@ export function CampArrayFieldEditor({
         { key: 'label', label: 'Label', type: 'text' },
         { key: 'minAge', label: 'Min Age', type: 'number' },
         { key: 'maxAge', label: 'Max Age', type: 'number' },
-        { key: 'minGrade', label: 'Min Grade', type: 'number' },
-        { key: 'maxGrade', label: 'Max Grade', type: 'number' },
+        { key: 'minGrade', label: 'Min Grade', type: 'text' },
+        { key: 'maxGrade', label: 'Max Grade', type: 'text' },
       ]
     : field === 'schedules'
       ? [
@@ -310,9 +310,10 @@ export function CampArrayFieldEditor({
                   <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
                   <input
                     type={column.type}
-                    value={row[column.key] == null ? '' : String(row[column.key])}
+                    value={row[column.key] == null ? '' : gradeAwareDisplayValue(column.key, row[column.key])}
                     onChange={(event) => onChange(field, index, column.key, event.target.value)}
                     className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
+                    placeholder={column.key === 'minGrade' || column.key === 'maxGrade' ? 'K' : undefined}
                   />
                 </label>
               )
@@ -330,6 +331,11 @@ export function CampArrayFieldEditor({
       </button>
     </div>
   );
+}
+
+function gradeAwareDisplayValue(key: string, value: unknown) {
+  if (key === 'minGrade' || key === 'maxGrade') return formatGradeValue(value);
+  return String(value);
 }
 
 function SocialLinksEditor({
@@ -495,11 +501,23 @@ function ageGradeSuffix(row: ArrayRow) {
     else parts.push(`up to ${row.maxAge} yrs`);
   }
   if (row.minGrade != null || row.maxGrade != null) {
-    if (row.minGrade != null && row.maxGrade != null) parts.push(`Gr ${row.minGrade}–${row.maxGrade}`);
-    else if (row.minGrade != null) parts.push(`Gr ${row.minGrade}+`);
-    else parts.push(`up to Gr ${row.maxGrade}`);
+    if (row.minGrade != null && row.maxGrade != null) parts.push(`Gr ${formatGradeValue(row.minGrade)}–${formatGradeValue(row.maxGrade)}`);
+    else if (row.minGrade != null) parts.push(`Gr ${formatGradeValue(row.minGrade)}+`);
+    else parts.push(`up to Gr ${formatGradeValue(row.maxGrade)}`);
   }
   return parts.join(' · ');
+}
+
+export function parseGradeInput(value: string): number | null {
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized === 'K') return 0;
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export function formatGradeValue(value: unknown): string {
+  return Number(value) === 0 ? 'K' : String(value);
 }
 
 function dateRange(start: unknown, end: unknown) {

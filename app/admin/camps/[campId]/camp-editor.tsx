@@ -12,7 +12,9 @@ import { computeCoverage, REQUIRED_FOR_VERIFIED } from '@/lib/admin/verification
 import {
   CampFieldInput,
   CampFieldValue,
+  formatGradeValue,
   normalizeEditableValue,
+  parseGradeInput,
   parseEditableValue,
 } from '@/components/admin/camp-field-controls';
 import { FieldTimelineNote } from '@/components/admin/field-timeline';
@@ -274,6 +276,9 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
   function updateRow(i: number, field: keyof Omit<AgeGroup, 'id'>, val: string) {
     setDraft(prev => prev.map((r, idx) => {
       if (idx !== i) return r;
+      if (field === 'minGrade' || field === 'maxGrade') {
+        return { ...r, [field]: parseGradeInput(val) };
+      }
       const numVal = val === '' ? null : Number(val);
       return { ...r, [field]: field === 'label' ? val : (isNaN(numVal as number) ? null : numVal) };
     }));
@@ -338,9 +343,9 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
                 )}
                 {(ag.minGrade != null || ag.maxGrade != null) && (
                   <span className="text-bark-300 ml-1">
-                    {ag.minGrade != null && ag.maxGrade != null ? `Gr ${ag.minGrade}–${ag.maxGrade}`
-                      : ag.minGrade != null ? `Gr ${ag.minGrade}+`
-                      : `up to Gr ${ag.maxGrade}`}
+                    {ag.minGrade != null && ag.maxGrade != null ? `Gr ${formatGradeValue(ag.minGrade)}–${formatGradeValue(ag.maxGrade)}`
+                      : ag.minGrade != null ? `Gr ${formatGradeValue(ag.minGrade)}+`
+                      : `up to Gr ${formatGradeValue(ag.maxGrade)}`}
                   </span>
                 )}
               </span>
@@ -371,8 +376,10 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
               placeholder="e.g. K–2nd, Ages 6–8"
               className="text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2 py-1 focus:outline-none focus:border-pine-400" />
             {(['minAge','maxAge','minGrade','maxGrade'] as const).map(f => (
-              <input key={f} type="number" min={0} max={99}
-                value={row[f] ?? ''} onChange={e => updateRow(i, f, e.target.value)}
+              <input key={f} type={f === 'minGrade' || f === 'maxGrade' ? 'text' : 'number'} min={0} max={99}
+                value={row[f] == null ? '' : (f === 'minGrade' || f === 'maxGrade' ? formatGradeValue(row[f]) : row[f])}
+                onChange={e => updateRow(i, f, e.target.value)}
+                placeholder={f === 'minGrade' || f === 'maxGrade' ? 'K' : undefined}
                 className="text-sm border border-cream-300 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 rounded-lg px-2 py-1 focus:outline-none focus:border-pine-400 text-center" />
             ))}
             <button onClick={() => setDraft(prev => prev.filter((_, idx) => idx !== i))}
