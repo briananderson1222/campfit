@@ -10,11 +10,13 @@ import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
 import { CAMP_TYPE_DESCRIPTIONS } from '@/lib/types';
 
 const FIELD_LABELS: Record<string, string> = {
-  name: 'Camp Name', description: 'Description', campType: 'Camp Type',
+  name: 'Camp Name', organizationName: 'Organization', description: 'Description', campType: 'Camp Type',
   category: 'Category', registrationStatus: 'Registration Status',
-  registrationOpenDate: 'Registration Opens', lunchIncluded: 'Lunch Included',
+  registrationOpenDate: 'Registration Opens', registrationCloseDate: 'Registration Closes', lunchIncluded: 'Lunch Included',
   address: 'Address', neighborhood: 'Neighborhood', city: 'City',
-  websiteUrl: 'Website URL', interestingDetails: 'Interesting Details',
+  state: 'State', zip: 'ZIP', websiteUrl: 'Website URL', applicationUrl: 'Application URL',
+  contactEmail: 'Contact Email', contactPhone: 'Contact Phone', socialLinks: 'Social Links',
+  interestingDetails: 'Interesting Details',
   ageGroups: 'Age Groups', schedules: 'Schedules', pricing: 'Pricing',
   notes: 'Notes', sourceType: 'Source Type', dataConfidence: 'Data Confidence',
   lastVerifiedAt: 'Last Verified', communitySlug: 'Community', region: 'Region',
@@ -77,6 +79,7 @@ export function ReviewPanel({
   const [showAllMeta, setShowAllMeta] = useState(false);
   // editing state: { [field]: currentEditValue }
   const [editing, setEditing] = useState<Record<string, string>>({});
+  const [arrayEditing, setArrayEditing] = useState<Record<string, Record<string, unknown>[]>>({});
   // direct camp field edits (bypassing proposal)
   const [campEdits, setCampEdits] = useState<Record<string, string>>({});
   const [campEditFields, setCampEditFields] = useState<Record<string, boolean>>({});
@@ -125,6 +128,49 @@ export function ReviewPanel({
   };
   const cancelEdit = (field: string) => {
     setEditing(prev => { const n = { ...prev }; delete n[field]; return n; });
+  };
+  const startArrayEdit = (field: string, currentVal: unknown) => {
+    setArrayEditing((prev) => ({ ...prev, [field]: cloneArrayRows(currentVal) }));
+  };
+  const commitArrayEdit = (field: string) => {
+    const value = arrayEditing[field];
+    if (!value) return;
+    setProposedChanges((prev) => ({
+      ...prev,
+      [field]: { ...prev[field], new: sanitizeArrayRows(field, value) },
+    }));
+    setArrayEditing((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+  const cancelArrayEdit = (field: string) => {
+    setArrayEditing((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+  const updateArrayRow = (field: string, index: number, key: string, value: string) => {
+    setArrayEditing((prev) => ({
+      ...prev,
+      [field]: (prev[field] ?? []).map((row, rowIndex) => (
+        rowIndex === index ? { ...row, [key]: normalizeArrayFieldValue(field, key, value) } : row
+      )),
+    }));
+  };
+  const addArrayRow = (field: string) => {
+    setArrayEditing((prev) => ({
+      ...prev,
+      [field]: [...(prev[field] ?? []), createEmptyArrayRow(field)],
+    }));
+  };
+  const removeArrayRow = (field: string, index: number) => {
+    setArrayEditing((prev) => ({
+      ...prev,
+      [field]: (prev[field] ?? []).filter((_, rowIndex) => rowIndex !== index),
+    }));
   };
 
   // Save a direct camp field edit (not via proposal)
@@ -410,6 +456,7 @@ export function ReviewPanel({
             const conf = Math.round(diff.confidence * 100);
             const isPopulate = diff.old === null || diff.old === '' || diff.old === undefined;
             const isEditingProposed = editing[field] !== undefined;
+            const isEditingArray = arrayEditing[field] !== undefined;
 
             return (
               <div
@@ -453,9 +500,9 @@ export function ReviewPanel({
                       <div>
                         <p className="text-xs text-pine-400 mb-1 uppercase tracking-wide flex items-center gap-1">
                           Proposed
-                          {!isArray && !isEditingProposed && (
+                          {!isEditingProposed && !isEditingArray && (
                             <button
-                              onClick={() => startEdit(field, diff.new)}
+                              onClick={() => isArray ? startArrayEdit(field, diff.new) : startEdit(field, diff.new)}
                               className="text-bark-300 hover:text-pine-500 ml-1"
                               title="Edit proposed value"
                             >
@@ -463,7 +510,21 @@ export function ReviewPanel({
                             </button>
                           )}
                         </p>
-                        {isEditingProposed ? (
+                        {isEditingArray ? (
+                          <div className="space-y-2">
+                            <ArrayFieldEditor
+                              field={field}
+                              rows={arrayEditing[field] ?? []}
+                              onChange={updateArrayRow}
+                              onAdd={addArrayRow}
+                              onRemove={removeArrayRow}
+                            />
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => commitArrayEdit(field)} className="p-1 text-pine-500 hover:text-pine-700 shrink-0"><Check className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => cancelArrayEdit(field)} className="p-1 text-bark-300 hover:text-red-400 shrink-0"><X className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </div>
+                        ) : isEditingProposed ? (
                           <div className="flex items-start gap-1">
                             <FieldInput
                               field={field}
@@ -675,6 +736,41 @@ function compareFieldPriority(fieldA: string, fieldB: string) {
   return fieldA.localeCompare(fieldB);
 }
 
+function cloneArrayRows(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => ({ ...(row as Record<string, unknown>) }));
+}
+
+function createEmptyArrayRow(field: string): Record<string, unknown> {
+  if (field === 'ageGroups') return { label: '', minAge: null, maxAge: null, minGrade: null, maxGrade: null };
+  if (field === 'schedules') return { label: '', startDate: null, endDate: null, startTime: null, endTime: null, earlyDropOff: null, latePickup: null };
+  if (field === 'pricing') return { label: '', amount: null, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null };
+  return {};
+}
+
+function normalizeArrayFieldValue(field: string, key: string, value: string) {
+  const nullableNumberKeys = new Set(['minAge', 'maxAge', 'minGrade', 'maxGrade', 'amount', 'durationWeeks']);
+  if (nullableNumberKeys.has(key)) return value === '' ? null : Number(value);
+  if (field === 'pricing' && key === 'unit') return value;
+  return value === '' ? null : value;
+}
+
+function sanitizeArrayRows(field: string, rows: Record<string, unknown>[]) {
+  return rows
+    .map((row) => {
+      const cleaned = Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [key, value === '' ? null : value]),
+      );
+      return cleaned;
+    })
+    .filter((row) => {
+      if (field === 'ageGroups' || field === 'schedules' || field === 'pricing') {
+        return Boolean(row.label ?? row.startDate ?? row.amount);
+      }
+      return true;
+    });
+}
+
 function formatValue(val: unknown): string {
   if (val === null || val === undefined) return '—';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
@@ -720,6 +816,94 @@ function FieldValue({ value, field, expanded, highlight }: {
     <p className={cn('leading-relaxed', highlight ? 'text-pine-700' : 'text-bark-500')}>
       {text}
     </p>
+  );
+}
+
+function ArrayFieldEditor({
+  field,
+  rows,
+  onChange,
+  onAdd,
+  onRemove,
+}: {
+  field: string;
+  rows: Record<string, unknown>[];
+  onChange: (field: string, index: number, key: string, value: string) => void;
+  onAdd: (field: string) => void;
+  onRemove: (field: string, index: number) => void;
+}) {
+  const columns = field === 'ageGroups'
+    ? [
+        { key: 'label', label: 'Label', type: 'text' },
+        { key: 'minAge', label: 'Min Age', type: 'number' },
+        { key: 'maxAge', label: 'Max Age', type: 'number' },
+        { key: 'minGrade', label: 'Min Grade', type: 'number' },
+        { key: 'maxGrade', label: 'Max Grade', type: 'number' },
+      ]
+    : field === 'schedules'
+      ? [
+          { key: 'label', label: 'Label', type: 'text' },
+          { key: 'startDate', label: 'Start', type: 'date' },
+          { key: 'endDate', label: 'End', type: 'date' },
+          { key: 'startTime', label: 'Start Time', type: 'text' },
+          { key: 'endTime', label: 'End Time', type: 'text' },
+          { key: 'earlyDropOff', label: 'Early Dropoff', type: 'text' },
+          { key: 'latePickup', label: 'Late Pickup', type: 'text' },
+        ]
+      : [
+          { key: 'label', label: 'Label', type: 'text' },
+          { key: 'amount', label: 'Amount', type: 'number' },
+          { key: 'unit', label: 'Unit', type: 'select' },
+          { key: 'durationWeeks', label: 'Weeks', type: 'number' },
+          { key: 'ageQualifier', label: 'Age Qualifier', type: 'text' },
+          { key: 'discountNotes', label: 'Discount Notes', type: 'text' },
+        ];
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => (
+        <div key={`${field}-${index}`} className="rounded-lg border border-cream-300 bg-white p-2">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {columns.map((column) => (
+              column.type === 'select' ? (
+                <label key={column.key} className="space-y-1">
+                  <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
+                  <select
+                    value={String(row[column.key] ?? 'PER_WEEK')}
+                    onChange={(event) => onChange(field, index, column.key, event.target.value)}
+                    className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
+                  >
+                    <option value="PER_WEEK">Per Week</option>
+                    <option value="PER_SESSION">Per Session</option>
+                    <option value="PER_DAY">Per Day</option>
+                    <option value="FLAT">Flat</option>
+                    <option value="PER_CAMP">Per Camp</option>
+                  </select>
+                </label>
+              ) : (
+                <label key={column.key} className="space-y-1">
+                  <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
+                  <input
+                    type={column.type}
+                    value={row[column.key] == null ? '' : String(row[column.key])}
+                    onChange={(event) => onChange(field, index, column.key, event.target.value)}
+                    className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
+                  />
+                </label>
+              )
+            ))}
+          </div>
+          <div className="mt-2 flex justify-end">
+            <button onClick={() => onRemove(field, index)} className="text-xs text-red-500 hover:text-red-700">
+              Remove row
+            </button>
+          </div>
+        </div>
+      ))}
+      <button onClick={() => onAdd(field)} className="text-xs text-pine-600 hover:text-pine-700">
+        Add row
+      </button>
+    </div>
   );
 }
 

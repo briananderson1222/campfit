@@ -138,14 +138,16 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     resolvedCampIds?.length
       ? `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
                "campType", category, "campTypes", "categories", state, zip,
-               "registrationStatus", "registrationOpenDate", "lunchIncluded",
-               address, "interestingDetails", "providerId", "organizationName",
+               "registrationStatus", "registrationOpenDate", "registrationCloseDate", "lunchIncluded",
+               address, "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
+               "interestingDetails", "providerId", "organizationName",
                COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE id = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
       : `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
                "campType", category, "campTypes", "categories", state, zip,
-               "registrationStatus", "registrationOpenDate", "lunchIncluded",
-               address, "interestingDetails", "providerId", "organizationName",
+               "registrationStatus", "registrationOpenDate", "registrationCloseDate", "lunchIncluded",
+               address, "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
+               "interestingDetails", "providerId", "organizationName",
                COALESCE("fieldSources", '{}') AS "fieldSources"
          FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != '' ORDER BY "lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
     resolvedCampIds?.length ? [resolvedCampIds] : []
@@ -234,8 +236,9 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                       ...newCamp,
                       slug: campSlug,
                       neighborhood: null, description: null, campType: null, category: null,
-                      registrationStatus: null, registrationOpenDate: null, lunchIncluded: null,
-                      address: null, interestingDetails: null, providerId: refCamp.providerId,
+                      registrationStatus: null, registrationOpenDate: null, registrationCloseDate: null, lunchIncluded: null,
+                      address: null, applicationUrl: null, contactEmail: null, contactPhone: null, socialLinks: null,
+                      interestingDetails: null, providerId: refCamp.providerId,
                       ageGroups: [] as Camp['ageGroups'],
                       schedules: [] as Camp['schedules'],
                       pricing: [] as Camp['pricing'],

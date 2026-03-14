@@ -7,9 +7,10 @@ const SUPPRESS_DAYS = 30;  // Re-suppress recently-approved fields at low confid
 const SUPPRESS_CONFIDENCE = 0.8; // Threshold below which suppression applies
 
 const SCALAR_FIELDS = [
-  'name', 'description', 'registrationStatus',
+  'name', 'organizationName', 'description', 'registrationStatus',
   'registrationOpenDate', 'registrationCloseDate', 'lunchIncluded', 'address', 'neighborhood',
-  'city', 'websiteUrl', 'interestingDetails', 'state', 'zip',
+  'city', 'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
+  'interestingDetails', 'state', 'zip',
 ] as const;
 
 const ARRAY_FIELDS = ['ageGroups', 'schedules', 'pricing'] as const;
@@ -145,7 +146,15 @@ function normalize(val: unknown): string {
   if (val === null || val === undefined || val === '') return '';
   if (typeof val === 'boolean') return String(val);
   if (typeof val === 'number') return String(val);
+  if (typeof val === 'object') return stableObjectString(val);
   return String(val).trim().toLowerCase();
+}
+
+function stableObjectString(val: unknown): string {
+  if (Array.isArray(val)) return stableJson(val);
+  if (!val || typeof val !== 'object') return String(val ?? '');
+  const entries = Object.entries(val as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(Object.fromEntries(entries));
 }
 
 function stableJson(val: unknown): string {

@@ -21,6 +21,7 @@ export interface CampInput {
   name: string;
   description: string;
   notes: string | null;
+  organizationName?: string | null;
   campType: CampType;
   category: CampCategory;
   campTypes?: CampType[];
@@ -28,6 +29,10 @@ export interface CampInput {
   state?: string | null;
   zip?: string | null;
   websiteUrl: string;
+  applicationUrl?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  socialLinks?: Record<string, string> | null;
   interestingDetails: string | null;
 
   city: string;

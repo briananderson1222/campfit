@@ -47,9 +47,14 @@ RULES:
 - Only extract fields you find EXPLICIT evidence for on the page. Never guess or infer beyond what is written.
 - confidence: 1.0 = exact text found, 0.7 = strongly implied, 0.5 = reasonably inferred, 0 = not found. Set to 0 and null the value if you are not confident.
 - excerpt: copy the EXACT verbatim sentence or phrase from the website text that proves your answer. This is REQUIRED for every non-null field — reviewers use it to verify accuracy. If you cannot find a direct quote, set the field to null with confidence 0.
+- Extract as many source-backed fields as possible. Prioritize: camp name, organization name, application/contact links, registration dates/status, age groups, sessions, pricing, location, and descriptive summary.
 - city must be a real city name (e.g. "Arvada", "Denver") — NOT a state name.
 - address must be a street address only (e.g. "4001 E Iliff Ave") — NOT a neighborhood or park name.
 ${nbhdRule}
+- organizationName should be the hosting school, museum, nonprofit, or organization operating the camp if the page states it.
+- applicationUrl should be the direct registration/apply URL if different from the source page.
+- contactEmail and contactPhone should be the best camp-specific or organization contact listed on the page.
+- socialLinks should be an object of any explicit social profile URLs found on the page, such as {"instagram":"https://...","facebook":"https://..."}.
 - campTypes must be an array containing one or more of: SUMMER_DAY, SLEEPAWAY, FAMILY, VIRTUAL, WINTER_BREAK, SCHOOL_BREAK — list all that apply (SUMMER_DAY = drop-off day camp during summer, SLEEPAWAY = overnight/residential, FAMILY = parents attend with kids, VIRTUAL = fully online, WINTER_BREAK = runs during winter/holiday school break, SCHOOL_BREAK = spring break, fall break, or other non-summer school holiday)
 - categories must be an array containing one or more of: SPORTS, ARTS, STEM, NATURE, ACADEMIC, MUSIC, THEATER, COOKING, MULTI_ACTIVITY, OTHER — list all that apply
 - state must be a 2-letter US state abbreviation (e.g. 'CO') if found on the page, or null
@@ -66,51 +71,114 @@ ${nbhdRule}
 
 - registrationOpenDate: the date registration opens, as YYYY-MM-DD. Only set if an explicit future or past date is stated on the page.
 - registrationCloseDate: the date registration closes or the deadline to register, as YYYY-MM-DD. Only set if explicitly stated.
+- ageGroups should include every distinct age/grade grouping the page states.
+- schedules should include every distinct session/week/date range the page states.
+- pricing should include every distinct tuition or fee entry the page states.
 
 Return ONLY valid JSON matching this exact shape — no markdown fences, no explanation:
 
 {
   "extracted": {
+    "name": string | null,
+    "organizationName": string | null,
     "description": string | null,
+    "websiteUrl": string | null,
+    "applicationUrl": string | null,
+    "contactEmail": string | null,
+    "contactPhone": string | null,
+    "socialLinks": { "platform": "https://..." } | null,
     "city": string | null,
     "neighborhood": string | null,
     "address": string | null,
+    "state": "CO" | null,
+    "zip": "80000" | null,
     "lunchIncluded": boolean | null,
     "registrationStatus": "OPEN"|"FULL"|"WAITLIST"|"CLOSED"|"COMING_SOON"|"UNKNOWN"|null,
     "registrationOpenDate": "YYYY-MM-DD" | null,
     "registrationCloseDate": "YYYY-MM-DD" | null,
     "campTypes": ["SUMMER_DAY"|"SLEEPAWAY"|"FAMILY"|"VIRTUAL"|"WINTER_BREAK"|"SCHOOL_BREAK"],
     "categories": ["SPORTS"|"ARTS"|"STEM"|"NATURE"|"ACADEMIC"|"MUSIC"|"THEATER"|"COOKING"|"MULTI_ACTIVITY"|"OTHER"],
-    "state": "CO" | null,
-    "zip": "80000" | null
+    "interestingDetails": string | null,
+    "ageGroups": [
+      {
+        "label": string,
+        "minAge": number | null,
+        "maxAge": number | null,
+        "minGrade": number | null,
+        "maxGrade": number | null
+      }
+    ],
+    "schedules": [
+      {
+        "label": string,
+        "startDate": "YYYY-MM-DD" | null,
+        "endDate": "YYYY-MM-DD" | null,
+        "startTime": string | null,
+        "endTime": string | null,
+        "earlyDropOff": string | null,
+        "latePickup": string | null
+      }
+    ],
+    "pricing": [
+      {
+        "label": string,
+        "amount": number | null,
+        "unit": "PER_WEEK"|"PER_SESSION"|"PER_DAY"|"FLAT"|"PER_CAMP"|null,
+        "durationWeeks": number | null,
+        "ageQualifier": string | null,
+        "discountNotes": string | null
+      }
+    ]
   },
   "confidence": {
+    "name": 0,
+    "organizationName": 0,
     "description": 0,
+    "websiteUrl": 0,
+    "applicationUrl": 0,
+    "contactEmail": 0,
+    "contactPhone": 0,
+    "socialLinks": 0,
     "city": 0,
     "neighborhood": 0,
     "address": 0,
+    "state": 0,
+    "zip": 0,
     "lunchIncluded": 0,
     "registrationStatus": 0,
     "registrationOpenDate": 0,
     "registrationCloseDate": 0,
     "campTypes": 0,
     "categories": 0,
-    "state": 0,
-    "zip": 0
+    "interestingDetails": 0,
+    "ageGroups": 0,
+    "schedules": 0,
+    "pricing": 0
   },
   "excerpts": {
+    "name": "verbatim quote from page or null",
+    "organizationName": "verbatim quote from page or null",
     "description": "verbatim quote from page or null",
+    "websiteUrl": "verbatim quote from page or null",
+    "applicationUrl": "verbatim quote from page or null",
+    "contactEmail": "verbatim quote from page or null",
+    "contactPhone": "verbatim quote from page or null",
+    "socialLinks": "verbatim quote from page or null",
     "city": "verbatim quote from page or null",
     "neighborhood": "verbatim quote from page or null",
     "address": "verbatim quote from page or null",
+    "state": "verbatim quote from page or null",
+    "zip": "verbatim quote from page or null",
     "lunchIncluded": "verbatim quote from page or null",
     "registrationStatus": "verbatim quote from page or null",
     "registrationOpenDate": "verbatim quote from page or null",
     "registrationCloseDate": "verbatim quote from page or null",
     "campTypes": "verbatim quote from page or null",
     "categories": "verbatim quote from page or null",
-    "state": "verbatim quote from page or null",
-    "zip": "verbatim quote from page or null"
+    "interestingDetails": "verbatim quote from page or null",
+    "ageGroups": "verbatim quote from page or null",
+    "schedules": "verbatim quote from page or null",
+    "pricing": "verbatim quote from page or null"
   }
 }
 

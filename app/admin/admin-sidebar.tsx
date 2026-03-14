@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, History, Database,
   ExternalLink, Menu, X, Users, LogOut, Building2, ShieldCheck, GitBranch,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -36,6 +37,7 @@ export function AdminSidebar({ userEmail, pendingCount, pendingProviderCount, is
     { href: "/admin/review", icon: <ClipboardList className="w-4 h-4" />, label: "Review Queue", badge: pendingCount },
     { href: "/admin/provider-review", icon: <GitBranch className="w-4 h-4" />, label: "Provider Review", badge: pendingProviderCount },
     { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl Monitor" },
+    { href: "/admin/crawl-failures", icon: <AlertTriangle className="w-4 h-4" />, label: "Uncrawlable Camps" },
     { href: "/admin/providers", icon: <Building2 className="w-4 h-4" />, label: "Providers" },
     { href: "/admin/camps", icon: <Database className="w-4 h-4" />, label: "Camp Data" },
     { href: "/admin/people", icon: <Users className="w-4 h-4" />, label: "People" },

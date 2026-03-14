@@ -39,9 +39,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const rejectedFields = allFields.filter(f => !approvedFields.includes(f));
 
     const SCALAR = [
-      'name', 'description', 'campType', 'category', 'registrationStatus',
-      'registrationOpenDate', 'lunchIncluded', 'address', 'neighborhood', 'city',
-      'websiteUrl', 'interestingDetails',
+      'name', 'organizationName', 'description', 'campType', 'category', 'registrationStatus',
+      'registrationOpenDate', 'registrationCloseDate', 'lunchIncluded', 'address', 'neighborhood', 'city',
+      'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
+      'interestingDetails', 'state', 'zip',
     ];
     const RELATIONS: Record<string, string> = {
       ageGroups: 'CampAgeGroup',
@@ -125,6 +126,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
       // Fetch the current camp state (including freshly-written fieldSources) to check coverage
       const { rows: [updatedCamp] } = await client.query(
         `SELECT description, "campType", category, "registrationStatus", city, "websiteUrl",
+                "organizationName", "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
+                state, zip, "registrationOpenDate", "registrationCloseDate",
                 "ageGroups", pricing, schedules, "fieldSources"
          FROM "Camp"
          LEFT JOIN LATERAL (

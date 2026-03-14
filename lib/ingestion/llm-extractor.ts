@@ -95,7 +95,7 @@ function parseExtractionResponse(raw: string): {
 } {
   // Strip markdown code fences if present
   const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-  const data = JSON.parse(cleaned);
+  const data = JSON.parse(extractJsonObject(cleaned));
 
   const { confidence = {}, excerpts: rawExcerpts = {}, extracted: extractedRaw = {}, ...rest } = data;
 
@@ -104,9 +104,10 @@ function parseExtractionResponse(raw: string): {
 
   // Map to CampInput shape (remove null values, keep structure)
   const extracted: Partial<CampInput> = {};
-  const fields = ['name', 'description', 'campType', 'category', 'campTypes', 'categories',
+  const fields = ['name', 'organizationName', 'description', 'campType', 'category', 'campTypes', 'categories',
     'registrationStatus', 'registrationOpenDate', 'registrationCloseDate',
     'lunchIncluded', 'address', 'neighborhood', 'city', 'state', 'zip',
+    'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
     'websiteUrl', 'interestingDetails', 'ageGroups', 'schedules', 'pricing'] as const;
 
   for (const field of fields) {
@@ -122,6 +123,40 @@ function parseExtractionResponse(raw: string): {
   }
 
   return { extracted, confidence, excerpts };
+}
+
+function extractJsonObject(raw: string): string {
+  const firstBrace = raw.indexOf('{');
+  if (firstBrace === -1) return raw;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = firstBrace; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth++;
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) return raw.slice(firstBrace, i + 1);
+    }
+  }
+
+  return raw.slice(firstBrace);
 }
 
 function computeOverallConfidence(confidence: Record<string, number>): number {
