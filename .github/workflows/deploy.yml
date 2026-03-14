@@ -64,4 +64,4 @@ jobs:
 
       - name: Deploy prebuilt output
         if: steps.preflight.outputs.enabled == 'true'
-        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN"
