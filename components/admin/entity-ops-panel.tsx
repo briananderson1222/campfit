@@ -259,8 +259,6 @@ export function EntityOpsPanel({
       </div>
 
       <div className="space-y-5">
-        <AdminCopilot entityType={entityType} entityId={entityId} onContextChanged={loadContext} />
-
         <div className="glass-panel p-5 space-y-5">
           <div className="rounded-xl border border-cream-300/70 p-3 text-xs text-bark-500">
             Use the inline <span className="font-semibold">Attest</span> buttons next to each camp field or section. This side panel is only for linked records and admin tools.
@@ -390,6 +388,8 @@ export function EntityOpsPanel({
           </div>
         </div>
       </div>
+
+      <AdminCopilot entityType={entityType} entityId={entityId} onContextChanged={loadContext} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Bot, Loader2, Sparkles } from 'lucide-react';
+import { Bot, Loader2, MessageCircle, Minimize2, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Message = {
@@ -44,6 +44,7 @@ export function AdminCopilot({
   entityId: string;
   onContextChanged?: () => Promise<void> | void;
 }) {
+  const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -133,79 +134,121 @@ export function AdminCopilot({
   }
 
   return (
-    <div className="rounded-xl border border-cream-300/70 p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <Bot className="h-4 w-4 text-pine-500" />
-        <span className="text-sm font-semibold text-bark-600">Admin copilot</span>
-      </div>
+    <>
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+        {open && (
+          <div className="w-[min(92vw,420px)] overflow-hidden rounded-3xl border border-cream-300/80 bg-[#fbf6ec]/95 shadow-2xl backdrop-blur">
+            <div className="flex items-center justify-between border-b border-cream-300/70 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="rounded-full bg-pine-600 p-2 text-cream-50">
+                  <Bot className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-bark-700">Admin copilot</div>
+                  <div className="text-[11px] text-bark-400">Tool-enabled chat for this record</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setOpen(false)}
+                  className="rounded-full p-2 text-bark-400 transition-colors hover:bg-cream-100 hover:text-bark-600"
+                  title="Minimize"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="rounded-full p-2 text-bark-400 transition-colors hover:bg-cream-100 hover:text-bark-600"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
 
-      <div className="space-y-2 rounded-xl bg-cream-50/70 p-3">
-        {messages.map((message, index) => (
-          <div
-            key={`${message.role}-${index}`}
-            className={cn(
-              'max-w-[90%] rounded-2xl px-3 py-2 text-sm',
-              message.role === 'assistant' ? 'bg-white text-bark-600' : 'ml-auto bg-pine-600 text-cream-50',
-            )}
-          >
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          </div>
-        ))}
-        {busy && (
-          <div className="flex items-center gap-2 text-sm text-bark-400">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Thinking…
+            <div className="space-y-3 p-4">
+              <div className="max-h-[48vh] space-y-2 overflow-y-auto rounded-2xl bg-cream-50/80 p-3">
+                {messages.map((message, index) => (
+                  <div
+                    key={`${message.role}-${index}`}
+                    className={cn(
+                      'max-w-[92%] rounded-2xl px-3 py-2 text-sm',
+                      message.role === 'assistant' ? 'bg-white text-bark-600 shadow-sm' : 'ml-auto bg-pine-600 text-cream-50',
+                    )}
+                  >
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                ))}
+                {busy && (
+                  <div className="flex items-center gap-2 text-sm text-bark-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Thinking…
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {STARTERS.map((starter) => (
+                  <button
+                    key={starter}
+                    onClick={() => sendMessage(starter)}
+                    disabled={busy}
+                    className="rounded-full border border-cream-300 bg-white px-3 py-1.5 text-xs font-medium text-bark-500 transition-colors hover:border-pine-300 hover:text-pine-600"
+                  >
+                    <Sparkles className="mr-1 inline h-3 w-3" />
+                    {starter}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                rows={3}
+                placeholder="Ask a question or request an action, for example: 'archive this provider because the site is gone' or 'show related camps'."
+                className="w-full rounded-2xl border border-cream-300 bg-white px-3 py-2 text-sm"
+              />
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => sendMessage(input)}
+                  disabled={busy || !input.trim()}
+                  className="btn-secondary"
+                >
+                  Send
+                </button>
+                {pendingConfirmation && (
+                  <button
+                    onClick={() => sendMessage('', pendingConfirmation)}
+                    disabled={busy}
+                    className="rounded-lg bg-pine-600 px-3 py-2 text-sm font-semibold text-cream-50 transition-colors hover:bg-pine-700"
+                  >
+                    {pendingConfirmation.label}
+                  </button>
+                )}
+              </div>
+
+              {pendingConfirmation && (
+                <p className="text-xs text-amber-700">
+                  Confirmation is required before the requested write action is applied.
+                </p>
+              )}
+              {error && <p className="text-sm text-red-600">{error}</p>}
+            </div>
           </div>
         )}
-      </div>
 
-      <div className="flex flex-wrap gap-2">
-        {STARTERS.map((starter) => (
-          <button
-            key={starter}
-            onClick={() => sendMessage(starter)}
-            disabled={busy}
-            className="rounded-full border border-cream-300 bg-white px-3 py-1.5 text-xs font-medium text-bark-500 transition-colors hover:border-pine-300 hover:text-pine-600"
-          >
-            <Sparkles className="mr-1 inline h-3 w-3" />
-            {starter}
-          </button>
-        ))}
-      </div>
-
-      <textarea
-        value={input}
-        onChange={(event) => setInput(event.target.value)}
-        rows={3}
-        placeholder="Ask a question or request an action, for example: 'archive this provider because the site is gone' or 'show related camps'."
-        className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm"
-      />
-
-      <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => sendMessage(input)}
-          disabled={busy || !input.trim()}
-          className="btn-secondary"
+          onClick={() => setOpen((current) => !current)}
+          className={cn(
+            'flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold shadow-lg transition-colors',
+            open ? 'bg-bark-700 text-cream-50' : 'bg-pine-600 text-cream-50 hover:bg-pine-700',
+          )}
         >
-          Send
+          <MessageCircle className="h-4 w-4" />
+          {open ? 'Hide copilot' : 'Admin copilot'}
         </button>
-        {pendingConfirmation && (
-          <button
-            onClick={() => sendMessage('', pendingConfirmation)}
-            disabled={busy}
-            className="rounded-lg bg-pine-600 px-3 py-2 text-sm font-semibold text-cream-50 transition-colors hover:bg-pine-700"
-          >
-            {pendingConfirmation.label}
-          </button>
-        )}
       </div>
-
-      {pendingConfirmation && (
-        <p className="text-xs text-amber-700">
-          Confirmation is required before the requested write action is applied.
-        </p>
-      )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
-    </div>
+    </>
   );
 }
