@@ -63,6 +63,7 @@ export function ReviewPanel({
   queueContext?: {
     backHref: string;
     campHref: string;
+    providerHref?: string | null;
     nextHref: string | null;
     previousHref: string | null;
   };
@@ -609,6 +610,12 @@ export function ReviewPanel({
                 <Link href={queueContext.campHref} className="btn-secondary w-full gap-2">
                   <ExternalLink className="w-4 h-4" />
                   Open Camp Data
+                </Link>
+              )}
+              {queueContext?.providerHref && (
+                <Link href={queueContext.providerHref} className="btn-secondary w-full gap-2">
+                  <ExternalLink className="w-4 h-4" />
+                  Open Provider
                 </Link>
               )}
               <button

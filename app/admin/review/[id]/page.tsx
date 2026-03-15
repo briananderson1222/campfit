@@ -43,6 +43,7 @@ export default async function ReviewDetailPage({
   });
   const backHref = buildQueueHref(searchParams);
   const campHref = `/admin/camps/${proposal.campId}`;
+  const providerHref = proposal.providerId ? `/admin/providers/${proposal.providerId}` : null;
 
   return (
     <div>
@@ -62,6 +63,11 @@ export default async function ReviewDetailPage({
             <Link href={campHref} className="inline-flex items-center gap-1 text-bark-400 hover:text-pine-600">
               View camp data
             </Link>
+            {providerHref && (
+              <Link href={providerHref} className="inline-flex items-center gap-1 text-bark-400 hover:text-pine-600">
+                View provider
+              </Link>
+            )}
           </div>
         </div>
         <div className="text-right shrink-0">
@@ -95,6 +101,7 @@ export default async function ReviewDetailPage({
         queueContext={{
           backHref,
           campHref,
+          providerHref,
           nextHref: queue.nextId ? buildDetailHref(queue.nextId, searchParams) : null,
           previousHref: queue.previousId ? buildDetailHref(queue.previousId, searchParams) : null,
         }}
