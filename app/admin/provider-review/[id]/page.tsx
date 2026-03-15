@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getPendingProviderProposalQueue, getProviderProposal } from '@/lib/admin/provider-repository';
 import { ProviderReviewPanel } from './provider-review-panel';
+import { AdminCopilot } from '@/components/admin/admin-copilot';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,6 +95,8 @@ export default async function ProviderReviewDetailPage({
           nextHref: queue.nextId ? buildDetailHref(queue.nextId, searchParams) : null,
         }}
       />
+
+      <AdminCopilot entityType="PROVIDER" entityId={proposal.providerId} />
     </div>
   );
 }

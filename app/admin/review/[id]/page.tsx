@@ -4,6 +4,7 @@ import { ReviewPanel } from './review-panel';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { AdminCopilot } from '@/components/admin/admin-copilot';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,6 +107,8 @@ export default async function ReviewDetailPage({
           previousHref: queue.previousId ? buildDetailHref(queue.previousId, searchParams) : null,
         }}
       />
+
+      <AdminCopilot entityType="CAMP" entityId={proposal.campId} />
     </div>
   );
 }
