@@ -37,6 +37,7 @@
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
+    "@kontourai/surface": "github:kontourai/surface",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.18.0",
     "@types/react": "^18.3.0",

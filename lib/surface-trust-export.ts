@@ -1,83 +1,6 @@
 import type { Camp, FieldSource, RegistrationStatus } from './types';
 import type { CampChangeProposal, FieldDiff } from './admin/types';
-
-export type SurfaceTrustStatus =
-  | 'unknown'
-  | 'proposed'
-  | 'assumed'
-  | 'verified'
-  | 'stale'
-  | 'disputed'
-  | 'superseded'
-  | 'rejected';
-
-export type SurfaceImpactLevel = 'low' | 'medium' | 'high' | 'critical';
-
-export interface SurfaceClaim {
-  id: string;
-  subjectType: string;
-  subjectId: string;
-  surface: string;
-  claimType: string;
-  fieldOrBehavior: string;
-  value: unknown;
-  status?: SurfaceTrustStatus;
-  createdAt: string;
-  updatedAt: string;
-  impactLevel?: SurfaceImpactLevel;
-  confidenceBasis?: {
-    sourceQuality?: 'unknown' | 'weak' | 'moderate' | 'strong';
-    extractionConfidence?: number;
-    reviewerAuthority?: 'none' | 'operator' | 'domain_expert' | 'system';
-    freshnessRemainingDays?: number;
-    evidenceStrength?: 'none' | 'weak' | 'moderate' | 'strong';
-    impactLevel?: SurfaceImpactLevel;
-  };
-  metadata?: Record<string, unknown>;
-}
-
-export interface SurfaceEvidence {
-  id: string;
-  claimId: string;
-  evidenceType:
-    | 'source_excerpt'
-    | 'test_output'
-    | 'human_attestation'
-    | 'attestation'
-    | 'calculation_trace'
-    | 'document_citation'
-    | 'crawl_observation'
-    | 'policy_rule';
-  method: 'observation' | 'extraction' | 'validation' | 'corroboration' | 'attestation' | 'auditability' | 'anchoring' | 'monitoring';
-  sourceRef: string;
-  sourceLocator?: string;
-  excerptOrSummary: string;
-  observedAt: string;
-  collectedBy: string;
-  integrityRef?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface SurfaceVerificationEvent {
-  id: string;
-  claimId: string;
-  status: SurfaceTrustStatus;
-  actor: string;
-  method: string;
-  evidenceIds: string[];
-  createdAt: string;
-  verifiedAt?: string;
-  notes?: string;
-}
-
-export interface SurfaceTrustInput {
-  schemaVersion: 3;
-  source: string;
-  claims: SurfaceClaim[];
-  evidence: SurfaceEvidence[];
-  policies: [];
-  events: SurfaceVerificationEvent[];
-}
+import type { Claim, Evidence, TrustInput, TrustStatus, VerificationEvent } from '@kontourai/surface';
 
 export interface CampfitSurfaceExportInput {
   camp: Pick<Camp, 'id' | 'name' | 'slug' | 'websiteUrl' | 'registrationStatus' | 'fieldSources' | 'lastVerifiedAt' | 'lastCrawledAt' | 'dataConfidence'>;
@@ -85,11 +8,11 @@ export interface CampfitSurfaceExportInput {
   generatedAt?: string;
 }
 
-export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): SurfaceTrustInput {
+export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const claims: SurfaceClaim[] = [];
-  const evidence: SurfaceEvidence[] = [];
-  const events: SurfaceVerificationEvent[] = [];
+  const claims: Claim[] = [];
+  const evidence: Evidence[] = [];
+  const events: VerificationEvent[] = [];
 
   addCurrentRegistrationStatus({ input, generatedAt, claims, evidence, events });
   addProposedRegistrationStatus({ input, generatedAt, claims, evidence, events });
@@ -107,14 +30,14 @@ export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput):
 function addCurrentRegistrationStatus(args: {
   input: CampfitSurfaceExportInput;
   generatedAt: string;
-  claims: SurfaceClaim[];
-  evidence: SurfaceEvidence[];
-  events: SurfaceVerificationEvent[];
+  claims: Claim[];
+  evidence: Evidence[];
+  events: VerificationEvent[];
 }): void {
   const { camp } = args.input;
   const fieldSource = camp.fieldSources?.registrationStatus;
   const claimId = currentClaimId(camp.id);
-  const status: SurfaceTrustStatus = fieldSource?.approvedAt ? 'verified' : camp.registrationStatus === 'UNKNOWN' ? 'unknown' : 'proposed';
+  const status: TrustStatus = fieldSource?.approvedAt ? 'verified' : camp.registrationStatus === 'UNKNOWN' ? 'unknown' : 'proposed';
   args.claims.push({
     id: claimId,
     subjectType: 'public-directory.camp',
@@ -168,9 +91,9 @@ function addCurrentRegistrationStatus(args: {
 function addProposedRegistrationStatus(args: {
   input: CampfitSurfaceExportInput;
   generatedAt: string;
-  claims: SurfaceClaim[];
-  evidence: SurfaceEvidence[];
-  events: SurfaceVerificationEvent[];
+  claims: Claim[];
+  evidence: Evidence[];
+  events: VerificationEvent[];
 }): void {
   const proposal = args.input.proposal;
   const diff = proposal?.proposedChanges.registrationStatus;
@@ -237,7 +160,7 @@ function fieldSourceEvidence(input: {
   fieldSource: FieldSource;
   camp: Pick<Camp, 'websiteUrl'>;
   generatedAt: string;
-}): SurfaceEvidence {
+}): Evidence {
   return {
     id: input.evidenceId,
     claimId: input.claimId,
@@ -261,7 +184,7 @@ function diffEvidence(input: {
   diff: FieldDiff;
   proposal: Pick<CampChangeProposal, 'sourceUrl' | 'extractionModel' | 'createdAt'>;
   generatedAt: string;
-}): SurfaceEvidence {
+}): Evidence {
   return {
     id: input.evidenceId,
     claimId: input.claimId,
