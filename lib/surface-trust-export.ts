@@ -4,14 +4,8 @@ import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surfac
 import {
   buildSurveyTrustInput,
   SurveyInputBuilder,
-  type Candidate,
-  type CandidateSet,
-  type ClaimTarget,
-  type Extraction,
-  type RawSource,
-  type ReviewOutcome,
-  type SurveyClaimRecord,
   type SurveyInput,
+  type SurveyObservationInput,
 } from '@kontourai/survey';
 
 export interface CampfitSurfaceExportInput {
@@ -23,21 +17,15 @@ export interface CampfitSurfaceExportInput {
 type RegistrationClaimType = 'public-data.field' | 'public-data.field-candidate';
 
 interface RegistrationObservation {
-  ids: ObservationIds;
+  ids: {
+    claimId: string;
+  };
   value: RegistrationStatus;
   status: TrustStatus;
   source: ObservationSource;
   review?: ObservationReview;
   projection: ObservationProjection;
   campfitMetadata: Record<string, unknown>;
-}
-
-interface ObservationIds {
-  claimId: string;
-  sourceId: string;
-  extractionId: string;
-  candidateId: string;
-  candidateSetId: string;
 }
 
 interface ObservationSource {
@@ -77,7 +65,7 @@ function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput 
     source: 'campfit.surface-adapter.registration-status-proof',
     generatedAt,
   })
-    .addClaimRecords(observations.map((observation) => toSurveyClaimRecord(input.camp.id, observation)))
+    .addObservations(observations.map((observation) => toSurveyObservation(input.camp.id, observation)))
     .build();
 }
 
@@ -88,13 +76,45 @@ function registrationObservations(input: CampfitSurfaceExportInput, generatedAt:
   ].filter((observation): observation is RegistrationObservation => observation !== undefined);
 }
 
-function toSurveyClaimRecord(campId: string, observation: RegistrationObservation): SurveyClaimRecord {
+function toSurveyObservation(campId: string, observation: RegistrationObservation): SurveyObservationInput {
   return {
-    rawSource: toRawSource(observation),
-    extraction: toExtraction(observation),
-    candidateSet: toCandidateSet(observation),
-    reviewOutcome: observation.review ? toReviewOutcome(observation) : undefined,
-    claim: toClaimTarget(campId, observation),
+    id: observation.ids.claimId,
+    rawSource: {
+      sourceRef: observation.source.sourceRef,
+      observedAt: observation.source.observedAt,
+      kind: 'web-page',
+      locatorScheme: 'html',
+    },
+    extraction: {
+      target: 'registrationStatus',
+      value: observation.value,
+      confidence: observation.source.confidence,
+      locator: 'html:field=registrationStatus',
+      excerpt: observation.source.excerpt ?? `registrationStatus: ${observation.value}`,
+      extractor: observation.source.extractor,
+      extractedAt: observation.source.extractedAt,
+    },
+    reviewOutcome: observation.review,
+    claim: {
+      id: observation.ids.claimId,
+      subjectType: 'public-directory.camp',
+      subjectId: campId,
+      surface: 'public-directory.camp-profile',
+      claimType: observation.projection.claimType,
+      fieldOrBehavior: 'registrationStatus',
+      value: observation.value,
+      status: observation.status,
+      createdAt: observation.source.observedAt,
+      updatedAt: observation.projection.updatedAt,
+      impactLevel: 'medium',
+      collectedBy: observation.source.collectedBy,
+      actor: observation.projection.actor,
+      eventMethod: observation.projection.eventMethod,
+      confidenceBasis: confidenceBasisForObservation(observation),
+      metadata: {
+        campfit: observation.campfitMetadata,
+      },
+    },
   };
 }
 
@@ -110,7 +130,7 @@ function currentRegistrationObservation(
   const status = fieldSource?.approvedAt ? 'verified' : camp.registrationStatus === 'UNKNOWN' ? 'unknown' : 'proposed';
 
   return {
-    ids: idsForClaim(claimId),
+    ids: { claimId },
     value: camp.registrationStatus,
     status,
     source: {
@@ -156,7 +176,7 @@ function proposedRegistrationObservation(
   const claimId = proposedClaimId(input.camp.id, proposal.id);
 
   return {
-    ids: idsForClaim(claimId),
+    ids: { claimId },
     value: diff.new,
     status: proposalStatus(proposal.status),
     source: {
@@ -194,89 +214,6 @@ function proposedRegistrationObservation(
   };
 }
 
-function toRawSource(observation: RegistrationObservation): RawSource {
-  return {
-    id: observation.ids.sourceId,
-    kind: 'web-page',
-    sourceRef: observation.source.sourceRef,
-    observedAt: observation.source.observedAt,
-    locatorScheme: 'html',
-  };
-}
-
-function toExtraction(observation: RegistrationObservation): Extraction {
-  return {
-    id: observation.ids.extractionId,
-    sourceId: observation.ids.sourceId,
-    target: 'registrationStatus',
-    value: observation.value,
-    confidence: observation.source.confidence,
-    locator: 'html:field=registrationStatus',
-    excerpt: observation.source.excerpt ?? `registrationStatus: ${observation.value}`,
-    extractor: observation.source.extractor,
-    extractedAt: observation.source.extractedAt,
-  };
-}
-
-function toCandidateSet(observation: RegistrationObservation): CandidateSet {
-  return {
-    id: observation.ids.candidateSetId,
-    target: 'registrationStatus',
-    selectedCandidateId: observation.ids.candidateId,
-    status: observation.status === 'proposed' ? 'needs-review' : 'resolved',
-    candidates: [toCandidate(observation)],
-  };
-}
-
-function toCandidate(observation: RegistrationObservation): Candidate {
-  return {
-    id: observation.ids.candidateId,
-    extractionId: observation.ids.extractionId,
-    value: observation.value,
-    confidence: observation.source.confidence,
-  };
-}
-
-function toReviewOutcome(observation: RegistrationObservation): ReviewOutcome {
-  const review = observation.review;
-  if (!review) throw new Error(`Missing review for ${observation.ids.claimId}`);
-
-  return {
-    id: review.id,
-    candidateSetId: observation.ids.candidateSetId,
-    candidateId: observation.ids.candidateId,
-    status: review.status,
-    actor: review.actor,
-    reviewedAt: review.reviewedAt,
-    rationale: review.rationale,
-  };
-}
-
-function toClaimTarget(campId: string, observation: RegistrationObservation): ClaimTarget {
-  return {
-    id: observation.ids.claimId,
-    candidateSetId: observation.ids.candidateSetId,
-    candidateId: observation.ids.candidateId,
-    subjectType: 'public-directory.camp',
-    subjectId: campId,
-    surface: 'public-directory.camp-profile',
-    claimType: observation.projection.claimType,
-    fieldOrBehavior: 'registrationStatus',
-    value: observation.value,
-    status: observation.status,
-    createdAt: observation.source.observedAt,
-    updatedAt: observation.projection.updatedAt,
-    impactLevel: 'medium',
-    collectedBy: observation.source.collectedBy,
-    actor: observation.projection.actor,
-    eventMethod: observation.projection.eventMethod,
-    confidenceBasis: confidenceBasisForObservation(observation),
-    metadata: {
-      campfit: observation.campfitMetadata,
-    },
-  };
-}
-
 function confidenceBasisForObservation(observation: RegistrationObservation): ConfidenceBasis {
   const hasSupport = observation.review || observation.source.confidence !== undefined;
 
@@ -286,16 +223,6 @@ function confidenceBasisForObservation(observation: RegistrationObservation): Co
     reviewerAuthority: observation.status === 'verified' ? 'operator' : 'none',
     evidenceStrength: hasSupport ? 'moderate' : 'none',
     impactLevel: 'medium',
-  };
-}
-
-function idsForClaim(claimId: string): ObservationIds {
-  return {
-    claimId,
-    sourceId: `${claimId}.source`,
-    extractionId: `${claimId}.extraction`,
-    candidateId: `${claimId}.candidate`,
-    candidateSetId: `${claimId}.candidates`,
   };
 }
 
