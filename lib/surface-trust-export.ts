@@ -3,6 +3,7 @@ import type { CampChangeProposal, ProposalStatus } from './admin/types';
 import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surface';
 import {
   buildSurveyTrustInput,
+  fieldObservation,
   repeatedObservation,
   SurveyInputBuilder,
   type SurveyInput,
@@ -15,31 +16,16 @@ export interface CampfitSurfaceExportInput {
   generatedAt?: string;
 }
 
-type PublicDataClaimType = 'public-data.field' | 'public-data.field-candidate';
+type ScalarPublicDataClaimType = 'public-data.field' | 'public-data.field-candidate';
 type RepeatedPublicDataClaimType = 'public-data.repeated-field' | 'public-data.repeated-field-candidate';
 type CampfitField = 'registrationStatus' | 'schedules';
 type ScheduleCandidate = Omit<CampSchedule, 'id'> & { id?: string };
-type CampfitObservationValue = RegistrationStatus;
-
-interface CampfitObservation {
-  ids: {
-    claimId: string;
-  };
-  field: CampfitField;
-  value: CampfitObservationValue;
-  status: TrustStatus;
-  source: ObservationSource;
-  review?: ObservationReview;
-  projection: ObservationProjection;
-  campfitMetadata: Record<string, unknown>;
-}
 
 interface ObservationSource {
   sourceRef: string;
   observedAt: string;
   extractedAt: string;
   extractor: string;
-  collectedBy: string;
   excerpt?: string | null;
   confidence?: number;
 }
@@ -52,11 +38,14 @@ interface ObservationReview {
   rationale: string;
 }
 
-interface ObservationProjection {
-  claimType: PublicDataClaimType;
+interface ScalarObservationProjection {
+  claimType: ScalarPublicDataClaimType;
   eventMethod: string;
+  createdAt: string;
   updatedAt: string;
   actor: string;
+  collectedBy: string;
+  confidence?: number;
 }
 
 interface RepeatedObservationProjection {
@@ -80,13 +69,24 @@ interface ScheduleObservationContext<TItem> {
   campfitMetadata: Record<string, unknown>;
 }
 
+interface RegistrationStatusObservationContext {
+  campId: string;
+  claimId: string;
+  value: RegistrationStatus;
+  status: TrustStatus;
+  source: ObservationSource;
+  review?: ObservationReview;
+  projection: ScalarObservationProjection;
+  campfitMetadata: Record<string, unknown>;
+}
+
 export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
   return buildSurveyTrustInput(buildCampfitSurveyInput(input));
 }
 
 function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const scalarObservations = campfitObservations(input, generatedAt);
+  const registrationStatusObservations = campfitRegistrationStatusObservations(input, generatedAt);
   const scheduleObservations = campfitScheduleObservations(input, generatedAt);
 
   return new SurveyInputBuilder({
@@ -94,17 +94,20 @@ function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput 
     generatedAt,
   })
     .addObservations([
-      ...scalarObservations.map((observation) => toSurveyObservation(input.camp.id, observation)),
+      ...registrationStatusObservations,
       ...scheduleObservations,
     ])
     .build();
 }
 
-function campfitObservations(input: CampfitSurfaceExportInput, generatedAt: string): CampfitObservation[] {
+function campfitRegistrationStatusObservations(
+  input: CampfitSurfaceExportInput,
+  generatedAt: string,
+): SurveyObservationInput[] {
   return [
     currentRegistrationObservation(input, generatedAt),
     proposedRegistrationObservation(input, generatedAt),
-  ].filter((observation): observation is CampfitObservation => observation !== undefined);
+  ].filter((observation): observation is SurveyObservationInput => observation !== undefined);
 }
 
 function campfitScheduleObservations(
@@ -117,46 +120,44 @@ function campfitScheduleObservations(
   ].filter((observation): observation is SurveyObservationInput => observation !== undefined);
 }
 
-function toSurveyObservation(campId: string, observation: CampfitObservation): SurveyObservationInput {
-  return {
-    id: observation.ids.claimId,
+function toRegistrationStatusObservation(context: RegistrationStatusObservationContext): SurveyObservationInput {
+  return fieldObservation<RegistrationStatus>({
+    id: context.claimId,
+    field: 'registrationStatus',
+    value: context.value,
     rawSource: {
-      sourceRef: observation.source.sourceRef,
-      observedAt: observation.source.observedAt,
+      sourceRef: context.source.sourceRef,
+      observedAt: context.source.observedAt,
       kind: 'web-page',
       locatorScheme: 'html',
     },
     extraction: {
-      target: observation.field,
-      value: observation.value,
-      confidence: observation.source.confidence,
-      locator: `html:field=${observation.field}`,
-      excerpt: observation.source.excerpt ?? `${observation.field}: ${observationValueSummary(observation.value)}`,
-      extractor: observation.source.extractor,
-      extractedAt: observation.source.extractedAt,
+      confidence: context.projection.confidence,
+      locator: 'html:field=registrationStatus',
+      excerpt: context.source.excerpt,
+      extractor: context.source.extractor,
+      extractedAt: context.source.extractedAt,
     },
-    reviewOutcome: observation.review,
+    reviewOutcome: context.review,
     claim: {
-      id: observation.ids.claimId,
+      id: context.claimId,
       subjectType: 'public-directory.camp',
-      subjectId: campId,
+      subjectId: context.campId,
       surface: 'public-directory.camp-profile',
-      claimType: observation.projection.claimType,
-      fieldOrBehavior: observation.field,
-      value: observation.value,
-      status: observation.status,
-      createdAt: observation.source.observedAt,
-      updatedAt: observation.projection.updatedAt,
+      claimType: context.projection.claimType,
+      status: context.status,
+      createdAt: context.projection.createdAt,
+      updatedAt: context.projection.updatedAt,
       impactLevel: 'medium',
-      collectedBy: observation.source.collectedBy,
-      actor: observation.projection.actor,
-      eventMethod: observation.projection.eventMethod,
-      confidenceBasis: confidenceBasisFor(observation.status, observation.review, observation.source.confidence),
-      metadata: {
-        campfit: observation.campfitMetadata,
-      },
+      collectedBy: context.projection.collectedBy,
+      actor: context.projection.actor,
+      eventMethod: context.projection.eventMethod,
+      confidenceBasis: confidenceBasisFor(context.status, context.review, context.projection.confidence),
     },
-  };
+    metadata: {
+      campfit: context.campfitMetadata,
+    },
+  });
 }
 
 function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>): SurveyObservationInput {
@@ -202,7 +203,7 @@ function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>
 function currentRegistrationObservation(
   input: CampfitSurfaceExportInput,
   generatedAt: string,
-): CampfitObservation {
+): SurveyObservationInput {
   const { camp } = input;
   const fieldSource = camp.fieldSources?.registrationStatus;
   const claimId = currentClaimId(camp.id, 'registrationStatus');
@@ -210,9 +211,9 @@ function currentRegistrationObservation(
   const observedAt = fieldSource?.approvedAt ?? camp.lastCrawledAt ?? generatedAt;
   const status = fieldSource?.approvedAt ? 'verified' : camp.registrationStatus === 'UNKNOWN' ? 'unknown' : 'proposed';
 
-  return {
-    ids: { claimId },
-    field: 'registrationStatus',
+  return toRegistrationStatusObservation({
+    campId: camp.id,
+    claimId,
     value: camp.registrationStatus,
     status,
     source: {
@@ -220,7 +221,6 @@ function currentRegistrationObservation(
       observedAt,
       extractedAt: fieldSource?.approvedAt ?? generatedAt,
       extractor: fieldSource ? 'campfit-field-review' : 'campfit',
-      collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
       excerpt: fieldSource?.excerpt,
     },
     review: fieldSource?.approvedAt
@@ -234,9 +234,11 @@ function currentRegistrationObservation(
       : undefined,
     projection: {
       claimType: 'public-data.field',
+      createdAt: observedAt,
       eventMethod: fieldSource ? 'field-source-approval' : 'candidate-resolution',
       updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
       actor: fieldSource ? 'campfit-admin' : 'campfit-crawl',
+      collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
     },
     campfitMetadata: {
       campSlug: camp.slug,
@@ -244,22 +246,22 @@ function currentRegistrationObservation(
       dataConfidence: camp.dataConfidence,
       fieldSource,
     },
-  };
+  });
 }
 
 function proposedRegistrationObservation(
   input: CampfitSurfaceExportInput,
   generatedAt: string,
-): CampfitObservation | undefined {
+): SurveyObservationInput | undefined {
   const proposal = input.proposal;
   const diff = proposal?.proposedChanges.registrationStatus;
   if (!proposal || !diff || !isRegistrationStatus(diff.new)) return undefined;
 
   const claimId = proposedClaimId(input.camp.id, 'registrationStatus', proposal.id);
 
-  return {
-    ids: { claimId },
-    field: 'registrationStatus',
+  return toRegistrationStatusObservation({
+    campId: input.camp.id,
+    claimId,
     value: diff.new,
     status: proposalStatus(proposal.status),
     source: {
@@ -267,7 +269,6 @@ function proposedRegistrationObservation(
       observedAt: proposal.createdAt,
       extractedAt: proposal.createdAt,
       extractor: proposal.extractionModel,
-      collectedBy: proposal.extractionModel,
       excerpt: diff.excerpt,
       confidence: diff.confidence,
     },
@@ -282,9 +283,12 @@ function proposedRegistrationObservation(
       : undefined,
     projection: {
       claimType: 'public-data.field-candidate',
+      createdAt: proposal.createdAt,
       eventMethod: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
       updatedAt: proposal.reviewedAt ?? generatedAt,
       actor: proposal.reviewedBy ?? 'campfit-crawl',
+      collectedBy: proposal.extractionModel,
+      confidence: diff.confidence,
     },
     campfitMetadata: {
       proposalId: proposal.id,
@@ -294,7 +298,7 @@ function proposedRegistrationObservation(
       overallConfidence: proposal.overallConfidence,
       extractionModel: proposal.extractionModel,
     },
-  };
+  });
 }
 
 function currentScheduleObservation(
@@ -328,7 +332,6 @@ function currentScheduleObservation(
       sourceRef: fieldSource?.sourceUrl ?? camp.websiteUrl,
       observedAt,
       extractor: fieldSource ? 'campfit-field-review' : 'campfit',
-      collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
       extractedAt: fieldSource?.approvedAt ?? generatedAt,
       excerpt: fieldSource?.excerpt,
     },
@@ -380,7 +383,6 @@ function proposedScheduleObservation(
       sourceRef: diff.sourceUrl ?? proposal.sourceUrl,
       observedAt: proposal.createdAt,
       extractor: proposal.extractionModel,
-      collectedBy: proposal.extractionModel,
       extractedAt: proposal.createdAt,
       excerpt: diff.excerpt,
       confidence: diff.confidence,
@@ -461,10 +463,6 @@ function currentClaimId(campId: string, field: CampfitField): string {
 
 function proposedClaimId(campId: string, field: CampfitField, proposalId: string): string {
   return stableId(['campfit', campId, field, proposalId]);
-}
-
-function observationValueSummary(value: CampfitObservationValue): string {
-  return value;
 }
 
 function stableId(parts: Array<string | number>): string {

@@ -14,10 +14,10 @@ camp website / schedule URL
 ```
 
 The implementation lives in `lib/surface-trust-export.ts`. Scalar
-`registrationStatus` observations are still assembled locally. Aggregate
-`schedules` observations use `@kontourai/survey`'s `repeatedObservation`
-helper so Campfit keeps schedule policy and validation while Survey owns the
-generic repeated-value provenance shape.
+`registrationStatus` observations use `@kontourai/survey`'s
+`fieldObservation` helper. Aggregate `schedules` observations use Survey's
+`repeatedObservation` helper. Campfit keeps field policy, validation, claim ids,
+and review semantics while Survey owns the generic observation shape.
 
 ## What This Proves
 
@@ -36,17 +36,23 @@ generic repeated-value provenance shape.
 
 ## What Moved To Survey
 
-The aggregate repeated-field observation shape moved into Survey:
+The generic scalar and aggregate repeated-field observation shapes moved into
+Survey:
 
+- one source/excerpt supporting one scalar current or candidate value
 - one source/excerpt supporting a list of current or candidate rows
+- shared `metadata.survey.field = { representation: "scalar" }`
 - shared `metadata.survey.repeated = { representation: "aggregate-array",
   itemCount }`
-- default extraction target, claim field, array value, and empty-array support
+- default extraction target, claim field, scalar/list value, and empty-array
+  support
 
-Campfit now supplies the Campfit-specific parts to that helper: claim ids,
-claim types, schedule candidate validation, field-source approval semantics,
-proposal status mapping, and `metadata.campfit`. Generic repeated-array
-metadata belongs under `metadata.survey.repeated`, not `metadata.campfit`.
+Campfit now supplies the Campfit-specific parts to those helpers: claim ids,
+claim types, registration status validation, schedule candidate validation,
+field-source approval semantics, proposal status mapping, and
+`metadata.campfit`. Generic scalar metadata belongs under
+`metadata.survey.field`; generic repeated-array metadata belongs under
+`metadata.survey.repeated`.
 
 ## What Should Eventually Move To Survey
 
@@ -57,7 +63,7 @@ These concepts are still candidates for extraction after more vertical proofs:
   rationale
 - review/promotion result helpers: approved field source, rejected proposal,
   pending candidate
-- Surface adapter mapping shortcuts that reduce scalar field boilerplate without
+- Surface adapter mapping shortcuts that reduce producer boilerplate without
   hiding producer discipline
 
 Campfit should keep:
