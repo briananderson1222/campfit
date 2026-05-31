@@ -3,12 +3,14 @@ import type { CampChangeProposal, FieldDiff, ProposalStatus } from './admin/type
 import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surface';
 import {
   buildSurveyTrustInput,
+  SurveyInputBuilder,
   type Candidate,
   type CandidateSet,
   type ClaimTarget,
   type Extraction,
   type RawSource,
   type ReviewOutcome,
+  type SurveyClaimRecord,
   type SurveyInput,
 } from '@kontourai/survey';
 
@@ -63,14 +65,6 @@ interface ObservationProjection {
   actor: string;
 }
 
-interface SurveyRecords {
-  rawSources: RawSource[];
-  extractions: Extraction[];
-  candidateSets: CandidateSet[];
-  reviewOutcomes: ReviewOutcome[];
-  claims: ClaimTarget[];
-}
-
 export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
   return buildSurveyTrustInput(buildCampfitSurveyInput(input));
 }
@@ -78,13 +72,13 @@ export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput):
 function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const observations = registrationObservations(input, generatedAt);
-  const records = observationsToSurveyRecords(input.camp.id, observations);
 
-  return {
+  return new SurveyInputBuilder({
     source: 'campfit.surface-adapter.registration-status-proof',
     generatedAt,
-    ...records,
-  };
+  })
+    .addClaimRecords(observations.map((observation) => toSurveyClaimRecord(input.camp.id, observation)))
+    .build();
 }
 
 function registrationObservations(input: CampfitSurfaceExportInput, generatedAt: string): RegistrationObservation[] {
@@ -94,13 +88,13 @@ function registrationObservations(input: CampfitSurfaceExportInput, generatedAt:
   ].filter((observation): observation is RegistrationObservation => observation !== undefined);
 }
 
-function observationsToSurveyRecords(campId: string, observations: RegistrationObservation[]): SurveyRecords {
+function toSurveyClaimRecord(campId: string, observation: RegistrationObservation): SurveyClaimRecord {
   return {
-    rawSources: observations.map(toRawSource),
-    extractions: observations.map(toExtraction),
-    candidateSets: observations.map(toCandidateSet),
-    reviewOutcomes: observations.flatMap((observation) => observation.review ? [toReviewOutcome(observation)] : []),
-    claims: observations.map((observation) => toClaimTarget(campId, observation)),
+    rawSource: toRawSource(observation),
+    extraction: toExtraction(observation),
+    candidateSet: toCandidateSet(observation),
+    reviewOutcome: observation.review ? toReviewOutcome(observation) : undefined,
+    claim: toClaimTarget(campId, observation),
   };
 }
 
