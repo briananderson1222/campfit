@@ -1,8 +1,9 @@
-import type { Camp, CampSchedule, FieldSource, RegistrationStatus } from './types';
-import type { CampChangeProposal, FieldDiff, ProposalStatus } from './admin/types';
+import type { Camp, CampSchedule, RegistrationStatus } from './types';
+import type { CampChangeProposal, ProposalStatus } from './admin/types';
 import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surface';
 import {
   buildSurveyTrustInput,
+  repeatedObservation,
   SurveyInputBuilder,
   type SurveyInput,
   type SurveyObservationInput,
@@ -14,10 +15,11 @@ export interface CampfitSurfaceExportInput {
   generatedAt?: string;
 }
 
-type PublicDataClaimType = 'public-data.field' | 'public-data.field-candidate' | 'public-data.repeated-field' | 'public-data.repeated-field-candidate';
+type PublicDataClaimType = 'public-data.field' | 'public-data.field-candidate';
+type RepeatedPublicDataClaimType = 'public-data.repeated-field' | 'public-data.repeated-field-candidate';
 type CampfitField = 'registrationStatus' | 'schedules';
 type ScheduleCandidate = Omit<CampSchedule, 'id'> & { id?: string };
-type CampfitObservationValue = RegistrationStatus | CampSchedule[] | ScheduleCandidate[];
+type CampfitObservationValue = RegistrationStatus;
 
 interface CampfitObservation {
   ids: {
@@ -57,19 +59,44 @@ interface ObservationProjection {
   actor: string;
 }
 
+interface RepeatedObservationProjection {
+  claimType: RepeatedPublicDataClaimType;
+  eventMethod: string;
+  createdAt: string;
+  updatedAt: string;
+  actor: string;
+  collectedBy: string;
+  confidence?: number;
+}
+
+interface ScheduleObservationContext<TItem> {
+  campId: string;
+  claimId: string;
+  value: readonly TItem[];
+  status: TrustStatus;
+  source: ObservationSource;
+  review?: ObservationReview;
+  projection: RepeatedObservationProjection;
+  campfitMetadata: Record<string, unknown>;
+}
+
 export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
   return buildSurveyTrustInput(buildCampfitSurveyInput(input));
 }
 
 function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const observations = campfitObservations(input, generatedAt);
+  const scalarObservations = campfitObservations(input, generatedAt);
+  const scheduleObservations = campfitScheduleObservations(input, generatedAt);
 
   return new SurveyInputBuilder({
     source: 'campfit.surface-adapter.public-directory-proof',
     generatedAt,
   })
-    .addObservations(observations.map((observation) => toSurveyObservation(input.camp.id, observation)))
+    .addObservations([
+      ...scalarObservations.map((observation) => toSurveyObservation(input.camp.id, observation)),
+      ...scheduleObservations,
+    ])
     .build();
 }
 
@@ -77,9 +104,17 @@ function campfitObservations(input: CampfitSurfaceExportInput, generatedAt: stri
   return [
     currentRegistrationObservation(input, generatedAt),
     proposedRegistrationObservation(input, generatedAt),
-    currentRepeatedFieldObservation(input, generatedAt, 'schedules', input.camp.schedules),
-    proposedRepeatedFieldObservation(input, generatedAt, 'schedules'),
   ].filter((observation): observation is CampfitObservation => observation !== undefined);
+}
+
+function campfitScheduleObservations(
+  input: CampfitSurfaceExportInput,
+  generatedAt: string,
+): SurveyObservationInput[] {
+  return [
+    currentScheduleObservation(input, generatedAt),
+    proposedScheduleObservation(input, generatedAt),
+  ].filter((observation): observation is SurveyObservationInput => observation !== undefined);
 }
 
 function toSurveyObservation(campId: string, observation: CampfitObservation): SurveyObservationInput {
@@ -116,12 +151,52 @@ function toSurveyObservation(campId: string, observation: CampfitObservation): S
       collectedBy: observation.source.collectedBy,
       actor: observation.projection.actor,
       eventMethod: observation.projection.eventMethod,
-      confidenceBasis: confidenceBasisForObservation(observation),
+      confidenceBasis: confidenceBasisFor(observation.status, observation.review, observation.source.confidence),
       metadata: {
         campfit: observation.campfitMetadata,
       },
     },
   };
+}
+
+function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>): SurveyObservationInput {
+  return repeatedObservation<TItem>({
+    id: context.claimId,
+    field: 'schedules',
+    value: context.value,
+    rawSource: {
+      sourceRef: context.source.sourceRef,
+      observedAt: context.source.observedAt,
+      kind: 'web-page',
+      locatorScheme: 'html',
+    },
+    extraction: {
+      confidence: context.projection.confidence,
+      locator: 'html:field=schedules',
+      excerpt: context.source.excerpt,
+      extractor: context.source.extractor,
+      extractedAt: context.source.extractedAt,
+    },
+    reviewOutcome: context.review,
+    claim: {
+      id: context.claimId,
+      subjectType: 'public-directory.camp',
+      subjectId: context.campId,
+      surface: 'public-directory.camp-profile',
+      claimType: context.projection.claimType,
+      status: context.status,
+      createdAt: context.projection.createdAt,
+      updatedAt: context.projection.updatedAt,
+      impactLevel: 'medium',
+      collectedBy: context.projection.collectedBy,
+      actor: context.projection.actor,
+      eventMethod: context.projection.eventMethod,
+      confidenceBasis: confidenceBasisFor(context.status, context.review, context.projection.confidence),
+    },
+    metadata: {
+      campfit: context.campfitMetadata,
+    },
+  });
 }
 
 function currentRegistrationObservation(
@@ -222,103 +297,103 @@ function proposedRegistrationObservation(
   };
 }
 
-function currentRepeatedFieldObservation(
+function currentScheduleObservation(
   input: CampfitSurfaceExportInput,
   generatedAt: string,
-  field: 'schedules',
-  value: CampSchedule[],
-): CampfitObservation | undefined;
-function currentRepeatedFieldObservation(
-  input: CampfitSurfaceExportInput,
-  generatedAt: string,
-  field: 'schedules',
-  value: CampSchedule[],
-): CampfitObservation | undefined {
+): SurveyObservationInput | undefined {
   const { camp } = input;
-  const fieldSource = camp.fieldSources?.[field];
-  if (value.length === 0 && !fieldSource?.approvedAt) return undefined;
+  const field = 'schedules';
+  const fieldSource = camp.fieldSources?.schedules;
+  if (camp.schedules.length === 0 && !fieldSource?.approvedAt) return undefined;
 
   const claimId = currentClaimId(camp.id, field);
   const observedAt = fieldSource?.approvedAt ?? camp.lastCrawledAt ?? generatedAt;
+  const status = fieldSource?.approvedAt ? 'verified' : 'proposed';
+  const review = fieldSource?.approvedAt
+    ? {
+        id: `${claimId}.review.approved`,
+        actor: 'campfit-admin',
+        reviewedAt: fieldSource.approvedAt,
+        status: 'verified' as const,
+        rationale: 'Approved schedules field source.',
+      }
+    : undefined;
 
-  return {
-    ids: { claimId },
-    field,
-    value,
-    status: fieldSource?.approvedAt ? 'verified' : 'proposed',
+  return toScheduleObservation<CampSchedule>({
+    campId: camp.id,
+    claimId,
+    value: camp.schedules,
+    status,
     source: {
       sourceRef: fieldSource?.sourceUrl ?? camp.websiteUrl,
       observedAt,
-      extractedAt: fieldSource?.approvedAt ?? generatedAt,
       extractor: fieldSource ? 'campfit-field-review' : 'campfit',
       collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
+      extractedAt: fieldSource?.approvedAt ?? generatedAt,
       excerpt: fieldSource?.excerpt,
     },
-    review: fieldSource?.approvedAt
-      ? {
-          id: `${claimId}.review.approved`,
-          actor: 'campfit-admin',
-          reviewedAt: fieldSource.approvedAt,
-          status: 'verified',
-          rationale: `Approved ${field} field source.`,
-        }
-      : undefined,
+    review,
     projection: {
       claimType: 'public-data.repeated-field',
-      eventMethod: fieldSource ? 'field-source-approval' : 'candidate-resolution',
+      createdAt: observedAt,
       updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
+      collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
       actor: fieldSource ? 'campfit-admin' : 'campfit-crawl',
+      eventMethod: fieldSource ? 'field-source-approval' : 'candidate-resolution',
     },
     campfitMetadata: {
       campSlug: camp.slug,
       campName: camp.name,
       dataConfidence: camp.dataConfidence,
       fieldSource,
-      itemCount: value.length,
-      representation: 'aggregate-array',
     },
-  };
+  });
 }
 
-function proposedRepeatedFieldObservation(
+function proposedScheduleObservation(
   input: CampfitSurfaceExportInput,
   generatedAt: string,
-  field: 'schedules',
-): CampfitObservation | undefined {
+): SurveyObservationInput | undefined {
   const proposal = input.proposal;
-  const diff = proposal?.proposedChanges[field];
+  const diff = proposal?.proposedChanges.schedules;
   if (!proposal || !diff || !isScheduleCandidateArray(diff.new)) return undefined;
 
+  const field = 'schedules';
   const claimId = proposedClaimId(input.camp.id, field, proposal.id);
+  const status = proposalStatus(proposal.status);
+  const review = proposal.reviewedAt && proposal.reviewedBy
+    ? {
+        id: `${claimId}.review.${proposal.status.toLowerCase()}`,
+        actor: proposal.reviewedBy,
+        reviewedAt: proposal.reviewedAt,
+        status: proposalReviewStatus(proposal.status),
+        rationale: `Proposal ${proposal.status.toLowerCase()} by reviewer.`,
+      }
+    : undefined;
 
-  return {
-    ids: { claimId },
-    field,
+  return toScheduleObservation<ScheduleCandidate>({
+    campId: input.camp.id,
+    claimId,
     value: diff.new,
-    status: proposalStatus(proposal.status),
+    status,
     source: {
       sourceRef: diff.sourceUrl ?? proposal.sourceUrl,
       observedAt: proposal.createdAt,
-      extractedAt: proposal.createdAt,
       extractor: proposal.extractionModel,
       collectedBy: proposal.extractionModel,
+      extractedAt: proposal.createdAt,
       excerpt: diff.excerpt,
       confidence: diff.confidence,
     },
-    review: proposal.reviewedAt && proposal.reviewedBy
-      ? {
-          id: `${claimId}.review.${proposal.status.toLowerCase()}`,
-          actor: proposal.reviewedBy,
-          reviewedAt: proposal.reviewedAt,
-          status: proposalReviewStatus(proposal.status),
-          rationale: `Proposal ${proposal.status.toLowerCase()} by reviewer.`,
-        }
-      : undefined,
+    review,
     projection: {
       claimType: 'public-data.repeated-field-candidate',
-      eventMethod: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
+      createdAt: proposal.createdAt,
       updatedAt: proposal.reviewedAt ?? generatedAt,
+      collectedBy: proposal.extractionModel,
       actor: proposal.reviewedBy ?? 'campfit-crawl',
+      eventMethod: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
+      confidence: diff.confidence,
     },
     campfitMetadata: {
       proposalId: proposal.id,
@@ -327,10 +402,8 @@ function proposedRepeatedFieldObservation(
       mode: diff.mode,
       overallConfidence: proposal.overallConfidence,
       extractionModel: proposal.extractionModel,
-      itemCount: diff.new.length,
-      representation: 'aggregate-array',
     },
-  };
+  });
 }
 
 function isScheduleCandidateArray(value: unknown): value is ScheduleCandidate[] {
@@ -354,13 +427,17 @@ function nullableString(value: unknown): value is string | null | undefined {
   return value === null || value === undefined || typeof value === 'string';
 }
 
-function confidenceBasisForObservation(observation: CampfitObservation): ConfidenceBasis {
-  const hasSupport = observation.review || observation.source.confidence !== undefined;
+function confidenceBasisFor(
+  status: TrustStatus,
+  review: ObservationReview | undefined,
+  extractionConfidence?: number,
+): ConfidenceBasis {
+  const hasSupport = review || extractionConfidence !== undefined;
 
   return {
     sourceQuality: hasSupport ? 'moderate' : 'unknown',
-    extractionConfidence: observation.source.confidence,
-    reviewerAuthority: observation.status === 'verified' ? 'operator' : 'none',
+    extractionConfidence,
+    reviewerAuthority: status === 'verified' ? 'operator' : 'none',
     evidenceStrength: hasSupport ? 'moderate' : 'none',
     impactLevel: 'medium',
   };
@@ -387,7 +464,6 @@ function proposedClaimId(campId: string, field: CampfitField, proposalId: string
 }
 
 function observationValueSummary(value: CampfitObservationValue): string {
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
   return value;
 }
 
