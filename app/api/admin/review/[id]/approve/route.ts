@@ -78,6 +78,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
         });
       } else if (field in RELATIONS && Array.isArray(diff.new)) {
         const table = RELATIONS[field];
+        const fieldSource = {
+          excerpt: diff.excerpt ?? null,
+          sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
+          approvedAt: new Date().toISOString(),
+        };
+
         await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
 
         if (field === 'ageGroups') {
@@ -104,6 +110,13 @@ export async function POST(request: Request, { params }: { params: { id: string 
               [proposal.campId, p.label, p.amount, p.unit, p.durationWeeks, p.ageQualifier, p.discountNotes]
             );
           }
+        }
+
+        if (field === 'schedules') {
+          await client.query(
+            `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
+            [JSON.stringify({ schedules: fieldSource }), proposal.campId],
+          );
         }
 
         changeLogs.push({
