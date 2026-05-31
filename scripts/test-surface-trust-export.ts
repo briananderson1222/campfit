@@ -113,11 +113,19 @@ assert.equal(current?.fieldOrBehavior, 'registrationStatus');
 assert.equal(current?.value, 'OPEN');
 assert.equal(current?.status, 'verified');
 assert.equal(current?.metadata?.survey && typeof current.metadata.survey === 'object', true);
+assert.equal(
+  (current?.metadata?.survey as { field?: { representation?: string } } | undefined)?.field?.representation,
+  'scalar',
+);
 
 const proposed = proof.claims.find((claim) => claim.claimType === 'public-data.field-candidate');
 assert.equal(proposed?.value, 'OPEN');
 assert.equal(proposed?.status, 'proposed');
 assert.equal(proposed?.confidenceBasis?.extractionConfidence, 0.88);
+assert.equal(
+  (proposed?.metadata?.survey as { field?: { representation?: string } } | undefined)?.field?.representation,
+  'scalar',
+);
 
 const currentSchedules = proof.claims.find((claim) => claim.claimType === 'public-data.repeated-field');
 assert.equal(currentSchedules?.fieldOrBehavior, 'schedules');
