@@ -243,7 +243,7 @@ function ProviderCrawlSection({ providerId, campCount }: { providerId: string; c
   return (
     <div className="glass-panel p-6">
       <h2 className="font-display font-bold text-bark-700 dark:text-cream-200 mb-1">Crawl</h2>
-      <p className="text-xs text-bark-300 mb-4">Update existing camps or discover new programs from this provider's website.</p>
+      <p className="text-xs text-bark-300 mb-4">Update existing camps or discover new programs from this provider&apos;s website.</p>
 
       {state === 'idle' && (
         <div className="flex flex-wrap gap-2">

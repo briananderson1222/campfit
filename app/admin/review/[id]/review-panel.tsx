@@ -352,7 +352,7 @@ export function ReviewPanel({
                         Verified {new Date(proof.approvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                       {proof.excerpt && (
-                        <p className="text-xs text-bark-500 italic leading-relaxed">"{proof.excerpt}"</p>
+                        <p className="text-xs text-bark-500 italic leading-relaxed">&quot;{proof.excerpt}&quot;</p>
                       )}
                       {!proof.excerpt && (
                         <p className="text-xs text-bark-400 italic">Admin attestation — no excerpt</p>
@@ -560,7 +560,7 @@ export function ReviewPanel({
                         <Quote className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
                           {diff.excerpt && (
-                            <p className="text-xs text-amber-800 italic leading-relaxed">"{diff.excerpt}"</p>
+                            <p className="text-xs text-amber-800 italic leading-relaxed">&quot;{diff.excerpt}&quot;</p>
                           )}
                           {diff.sourceUrl && (
                             <a

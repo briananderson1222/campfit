@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Archive, Flag, Loader2, Plus, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReviewFlagActions } from './review-flag-actions';
@@ -74,7 +74,7 @@ export function EntityOpsPanel({
   const [relatedCamps, setRelatedCamps] = useState<RelatedCamp[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadContext() {
+  const loadContext = useCallback(async () => {
     setLoading(true);
     const res = await fetch(`/api/admin/entities/${entityType.toLowerCase()}/${entityId}`).catch(() => null);
     const data = await res?.json().catch(() => null);
@@ -85,11 +85,11 @@ export function EntityOpsPanel({
     }
     setError(null);
     setContext(data);
-  }
+  }, [entityId, entityType]);
 
   useEffect(() => {
     loadContext().catch(() => {});
-  }, [entityId, entityType]);
+  }, [loadContext]);
 
   async function runEntityAction(body: Record<string, unknown>, busyKey: string) {
     setBusy(busyKey);
