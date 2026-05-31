@@ -14,10 +14,12 @@
     "scrape": "tsx scripts/scrape.ts",
     "scrape:dry": "tsx scripts/scrape.ts --dry-run",
     "test:access": "tsx scripts/test-access.ts",
+    "test:surface": "tsx scripts/test-surface-trust-export.ts",
     "verify:admin": "tsx scripts/verify-admin-platform.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@kontourai/survey": "^0.1.2",
     "@prisma/client": "^7.4.2",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.98.0",
@@ -36,11 +38,14 @@
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
+    "@kontourai/surface": "^0.5.0",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.18.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.0",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
     "pg": "^8.20.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",

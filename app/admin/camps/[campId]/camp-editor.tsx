@@ -918,7 +918,7 @@ export function CampEditor({
           <NeighborhoodField campId={camp.id} value={camp.neighborhood} communitySlug={camp.communitySlug} />
           <div className="sm:col-span-2">
             <EditableField campId={camp.id} field="address" label="Street Address" value={camp.address} timeline={fieldTimeline.address} />
-            <p className="text-xs text-bark-200 mt-1">Street address only (e.g. "4001 E Iliff Ave") — not the neighborhood name</p>
+            <p className="text-xs text-bark-200 mt-1">Street address only (e.g. &quot;4001 E Iliff Ave&quot;) — not the neighborhood name</p>
           </div>
         </dl>
       </div>

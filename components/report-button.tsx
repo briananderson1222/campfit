@@ -77,14 +77,14 @@ export function ReportButton({ campId }: { campId: string }) {
               <div className="px-5 py-10 text-center">
                 <CheckCircle className="w-10 h-10 text-pine-500 mx-auto mb-3" />
                 <p className="font-semibold text-bark-700 dark:text-cream-100">Thanks for the report!</p>
-                <p className="text-sm text-bark-400 mt-1">We'll review it and update the listing.</p>
+                <p className="text-sm text-bark-400 mt-1">We&apos;ll review it and update the listing.</p>
                 <button onClick={close} className="mt-5 btn-secondary text-sm">Close</button>
               </div>
             ) : (
               <div className="px-5 py-5 space-y-4">
                 {/* Type selector */}
                 <div>
-                  <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">What's wrong?</label>
+                  <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">What&apos;s wrong?</label>
                   <div className="space-y-1.5">
                     {REPORT_TYPES.map(rt => (
                       <button

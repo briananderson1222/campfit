@@ -1,7 +1,7 @@
 import { getAllCamps } from "@/lib/camp-repository";
 import { CalendarExplorer } from "@/components/calendar-explorer";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export default async function CalendarPage() {
   const camps = await getAllCamps("denver");

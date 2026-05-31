@@ -185,7 +185,7 @@ export function ProviderReviewPanel({
                       <Quote className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                       <div className="flex-1 min-w-0">
                         {diff.excerpt && (
-                          <p className="text-xs text-amber-800 italic leading-relaxed">"{diff.excerpt}"</p>
+                          <p className="text-xs text-amber-800 italic leading-relaxed">&quot;{diff.excerpt}&quot;</p>
                         )}
                         {diff.sourceUrl && (
                           <a

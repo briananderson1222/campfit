@@ -3,7 +3,9 @@ import type { Provider, ProviderWithStats } from '@/lib/types';
 import { communityScopeSql } from './community-access';
 import type { ProviderChangeProposal } from './types';
 
-const pool = getPool();
+function db() {
+  return getPool();
+}
 
 /** All providers with rollup stats, ordered by name. */
 export async function getProviders(
@@ -17,7 +19,7 @@ export async function getProviders(
       : `AND p."archivedAt" IS NULL`;
   const communitySlugs = Array.isArray(communitySlug) ? communitySlug : [communitySlug];
   const communityScope = communityScopeSql(communitySlugs, `p."communitySlug"`, 1);
-  const { rows } = await pool.query<ProviderWithStats>(`
+  const { rows } = await db().query<ProviderWithStats>(`
     SELECT
       p.*,
       COUNT(DISTINCT c.id)::int                                          AS "campCount",
@@ -46,7 +48,7 @@ export async function getProviders(
 
 /** Single provider with rollup stats. */
 export async function getProvider(id: string): Promise<ProviderWithStats | null> {
-  const { rows } = await pool.query<ProviderWithStats>(`
+  const { rows } = await db().query<ProviderWithStats>(`
     SELECT
       p.*,
       COUNT(DISTINCT c.id)::int                                          AS "campCount",
@@ -80,7 +82,7 @@ export async function getProviderCamps(
     : archived === 'all'
       ? ''
       : `AND c."archivedAt" IS NULL`;
-  const { rows } = await pool.query(`
+  const { rows } = await db().query(`
     SELECT
       c.id, c.name, c.slug, c.category, c."registrationStatus",
       c."dataConfidence", c."lastVerifiedAt", c."archivedAt",
@@ -97,7 +99,7 @@ export async function getProviderCamps(
 
 /** Pending proposals across all camps for a provider. */
 export async function getProviderPendingProposals(providerId: string) {
-  const { rows } = await pool.query(`
+  const { rows } = await db().query(`
     SELECT
       cp.id, cp."campId", cp."createdAt", cp."overallConfidence",
       cp."proposedChanges", cp."appliedFields",
@@ -130,7 +132,7 @@ export async function getPendingProviderProposals(opts: {
   const whereClause = `${filters.join(' AND ')}${communityScope.clause}`;
   const rowValues = [...values, limit, offset];
   const [rows, countRow] = await Promise.all([
-    pool.query<ProviderChangeProposal>(
+    db().query<ProviderChangeProposal>(
       `SELECT pcp.*, p.name AS "providerName", p.slug AS "providerSlug", p."communitySlug"
        FROM "ProviderChangeProposal" pcp
        JOIN "Provider" p ON p.id = pcp."providerId"
@@ -139,7 +141,7 @@ export async function getPendingProviderProposals(opts: {
        LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
       rowValues,
     ),
-    pool.query(
+    db().query(
       `SELECT COUNT(*)
        FROM "ProviderChangeProposal" pcp
        JOIN "Provider" p ON p.id = pcp."providerId"
@@ -155,7 +157,7 @@ export async function getPendingProviderProposals(opts: {
 }
 
 export async function getProviderProposal(id: string): Promise<ProviderChangeProposal | null> {
-  const { rows } = await pool.query<ProviderChangeProposal>(
+  const { rows } = await db().query<ProviderChangeProposal>(
     `SELECT pcp.*, p.name AS "providerName", p.slug AS "providerSlug", p."communitySlug",
             row_to_json(p.*) AS "providerData"
      FROM "ProviderChangeProposal" pcp
@@ -212,7 +214,7 @@ export async function createProvider(input: CreateProviderInput): Promise<Provid
   const slug = await makeUniqueSlug(input.name);
   const domain = parseDomain(input.websiteUrl);
 
-  const { rows } = await pool.query<Provider>(`
+  const { rows } = await db().query<Provider>(`
     INSERT INTO "Provider"
       (name, slug, "websiteUrl", domain, address, city, neighborhood,
        "contactEmail", "contactPhone", notes, "crawlRootUrl", "communitySlug")
@@ -245,7 +247,7 @@ export async function updateProvider(id: string, input: UpdateProviderInput): Pr
   const setClauses = allUpdates.map(([k], i) => `"${k}" = $${i + 2}`).join(', ');
   const values = [id, ...allUpdates.map(([, v]) => v ?? null)];
 
-  const { rows } = await pool.query<Provider>(
+  const { rows } = await db().query<Provider>(
     `UPDATE "Provider" SET ${setClauses}, "updatedAt" = now() WHERE id = $1 RETURNING *`,
     values
   );
@@ -259,7 +261,7 @@ async function makeUniqueSlug(name: string): Promise<string> {
   let slug = base;
   let attempt = 2;
   while (true) {
-    const { rows } = await pool.query('SELECT 1 FROM "Provider" WHERE slug = $1', [slug]);
+    const { rows } = await db().query('SELECT 1 FROM "Provider" WHERE slug = $1', [slug]);
     if (rows.length === 0) return slug;
     slug = `${base}-${attempt++}`;
   }
