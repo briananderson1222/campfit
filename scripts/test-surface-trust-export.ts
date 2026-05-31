@@ -129,7 +129,15 @@ const proposedSchedules = proof.claims.find((claim) => claim.claimType === 'publ
 assert.equal(proposedSchedules?.fieldOrBehavior, 'schedules');
 assert.equal(proposedSchedules?.status, 'proposed');
 assert.equal(proposedSchedules?.confidenceBasis?.extractionConfidence, 0.82);
-assert.equal((proposedSchedules?.metadata?.campfit as { representation?: string } | undefined)?.representation, 'aggregate-array');
+assert.equal(
+  (proposedSchedules?.metadata?.survey as { repeated?: { itemCount?: number } } | undefined)?.repeated?.itemCount,
+  2,
+);
+assert.equal(
+  (proposedSchedules?.metadata?.survey as { repeated?: { representation?: string } } | undefined)?.repeated?.representation,
+  'aggregate-array',
+);
+assert.equal((proposedSchedules?.metadata?.campfit as { proposalId?: string } | undefined)?.proposalId, pendingProposal.id);
 
 assert.ok(proof.evidence.some((item) => item.evidenceType === 'crawl_observation' && item.sourceRef === 'https://example.org/camps/demo'));
 assert.ok(proof.evidence.some((item) => item.evidenceType === 'crawl_observation' && item.sourceRef === 'https://example.org/camps/demo/schedule'));

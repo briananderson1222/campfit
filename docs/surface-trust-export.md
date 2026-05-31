@@ -13,7 +13,11 @@ camp website / schedule URL
   -> Surface public-data field or repeated-field claim
 ```
 
-The implementation lives in `lib/surface-trust-export.ts`.
+The implementation lives in `lib/surface-trust-export.ts`. Scalar
+`registrationStatus` observations are still assembled locally. Aggregate
+`schedules` observations use `@kontourai/survey`'s `repeatedObservation`
+helper so Campfit keeps schedule policy and validation while Survey owns the
+generic repeated-value provenance shape.
 
 ## What This Proves
 
@@ -30,18 +34,31 @@ The implementation lives in `lib/surface-trust-export.ts`.
   relation rows without source coverage makes downstream trust export weaker
   than scalar-field export.
 
+## What Moved To Survey
+
+The aggregate repeated-field observation shape moved into Survey:
+
+- one source/excerpt supporting a list of current or candidate rows
+- shared `metadata.survey.repeated = { representation: "aggregate-array",
+  itemCount }`
+- default extraction target, claim field, array value, and empty-array support
+
+Campfit now supplies the Campfit-specific parts to that helper: claim ids,
+claim types, schedule candidate validation, field-source approval semantics,
+proposal status mapping, and `metadata.campfit`. Generic repeated-array
+metadata belongs under `metadata.survey.repeated`, not `metadata.campfit`.
+
 ## What Should Eventually Move To Survey
 
-These concepts are not Campfit-specific and are candidates for extraction after
-the Survey boundary is proven in code:
+These concepts are still candidates for extraction after more vertical proofs:
 
-- raw source identity: source URL, crawl/proposal id, observed time
-- extraction observation: target field, value, confidence, excerpt, source URL
-- resolution/proposal result: old value, new candidate, confidence, rationale
-- review/promotion result: approved field source, rejected proposal, pending candidate
-- Surface adapter mapping: claim/evidence/event construction
-- ergonomic repeated-field observation helpers for one source/excerpt that
-  supports a list of candidate rows
+- raw source identity conventions: source URL, crawl/proposal id, observed time
+- resolution/proposal result helpers: old value, new candidate, confidence,
+  rationale
+- review/promotion result helpers: approved field source, rejected proposal,
+  pending candidate
+- Surface adapter mapping shortcuts that reduce scalar field boilerplate without
+  hiding producer discipline
 
 Campfit should keep:
 
