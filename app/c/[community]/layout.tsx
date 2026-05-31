@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { getDistinctCommunities } from "@/lib/camp-repository";
 import { CommunityProvider } from "@/lib/community-context";
 
+export const dynamic = "force-dynamic";
+
 export default async function CommunityLayout({
   children,
   params,

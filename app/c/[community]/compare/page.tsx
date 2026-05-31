@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { getCampBySlug } from "@/lib/camp-repository";
 import { CompareClient } from "@/components/compare-client";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,

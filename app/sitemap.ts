@@ -1,9 +1,23 @@
 import { MetadataRoute } from "next";
 import { getCampSlugs, getDistinctCommunities } from "@/lib/camp-repository";
+import { resolvePgConfig } from "@/lib/db-config";
 
 const BASE_URL = "https://camp.fit";
 
+export const dynamic = "force-dynamic";
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  if (!resolvePgConfig()) {
+    return [
+      {
+        url: BASE_URL,
+        lastModified: new Date(),
+        changeFrequency: "daily",
+        priority: 1,
+      },
+    ];
+  }
+
   const [slugs, communities] = await Promise.all([
     getCampSlugs(),
     getDistinctCommunities(),

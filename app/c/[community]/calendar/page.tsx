@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getAllCamps } from "@/lib/camp-repository";
 import { CalendarExplorer } from "@/components/calendar-explorer";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,

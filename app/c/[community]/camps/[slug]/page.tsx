@@ -35,8 +35,9 @@ import { LinkifiedText } from "@/components/linkified-text";
 import { ReportButton } from "@/components/report-button";
 import { AdminCampBar } from "@/components/admin-camp-bar";
 import { routes } from "@/lib/routes";
+import { resolvePgConfig } from "@/lib/db-config";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 const BASE_URL = "https://camp.fit";
 
@@ -98,6 +99,8 @@ export async function generateMetadata({
 }
 
 export async function generateStaticParams() {
+  if (!resolvePgConfig()) return [];
+
   const slugs = await getCampSlugs();
   return slugs.map((c) => ({ community: c.communitySlug, slug: c.slug }));
 }

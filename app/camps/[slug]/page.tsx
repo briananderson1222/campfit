@@ -30,8 +30,9 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
 import { CompareButton } from "@/components/compare-button";
 import { LinkifiedText } from "@/components/linkified-text";
+import { resolvePgConfig } from "@/lib/db-config";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 const BASE_URL = "https://camp.fit";
 
@@ -91,6 +92,8 @@ export async function generateMetadata({
 }
 
 export async function generateStaticParams() {
+  if (!resolvePgConfig()) return [];
+
   const slugs = await getCampSlugs();
   return slugs.map((s) => ({ slug: s.slug }));
 }
