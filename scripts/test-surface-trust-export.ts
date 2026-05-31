@@ -61,7 +61,7 @@ const current = proof.claims.find((claim) => claim.claimType === 'public-data.fi
 assert.equal(current?.fieldOrBehavior, 'registrationStatus');
 assert.equal(current?.value, 'OPEN');
 assert.equal(current?.status, 'verified');
-assert.equal(current?.metadata?.surveyCandidate && typeof current.metadata.surveyCandidate === 'object', true);
+assert.equal(current?.metadata?.survey && typeof current.metadata.survey === 'object', true);
 
 const proposed = proof.claims.find((claim) => claim.claimType === 'public-data.field-candidate');
 assert.equal(proposed?.value, 'OPEN');

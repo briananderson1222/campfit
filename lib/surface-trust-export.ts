@@ -1,6 +1,16 @@
 import type { Camp, FieldSource, RegistrationStatus } from './types';
-import type { CampChangeProposal, FieldDiff } from './admin/types';
-import type { Claim, Evidence, TrustInput, TrustStatus, VerificationEvent } from '@kontourai/surface';
+import type { CampChangeProposal, FieldDiff, ProposalStatus } from './admin/types';
+import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surface';
+import {
+  buildSurveyTrustInput,
+  type Candidate,
+  type CandidateSet,
+  type ClaimTarget,
+  type Extraction,
+  type RawSource,
+  type ReviewOutcome,
+  type SurveyInput,
+} from '@kontourai/survey';
 
 export interface CampfitSurfaceExportInput {
   camp: Pick<Camp, 'id' | 'name' | 'slug' | 'websiteUrl' | 'registrationStatus' | 'fieldSources' | 'lastVerifiedAt' | 'lastCrawledAt' | 'dataConfidence'>;
@@ -8,198 +18,303 @@ export interface CampfitSurfaceExportInput {
   generatedAt?: string;
 }
 
-export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
-  const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const claims: Claim[] = [];
-  const evidence: Evidence[] = [];
-  const events: VerificationEvent[] = [];
+type RegistrationClaimType = 'public-data.field' | 'public-data.field-candidate';
 
-  addCurrentRegistrationStatus({ input, generatedAt, claims, evidence, events });
-  addProposedRegistrationStatus({ input, generatedAt, claims, evidence, events });
+interface RegistrationObservation {
+  ids: ObservationIds;
+  value: RegistrationStatus;
+  status: TrustStatus;
+  source: ObservationSource;
+  review?: ObservationReview;
+  projection: ObservationProjection;
+  campfitMetadata: Record<string, unknown>;
+}
+
+interface ObservationIds {
+  claimId: string;
+  sourceId: string;
+  extractionId: string;
+  candidateId: string;
+  candidateSetId: string;
+}
+
+interface ObservationSource {
+  sourceRef: string;
+  observedAt: string;
+  extractedAt: string;
+  extractor: string;
+  collectedBy: string;
+  excerpt?: string | null;
+  confidence?: number;
+}
+
+interface ObservationReview {
+  id: string;
+  actor: string;
+  reviewedAt: string;
+  status: 'verified' | 'rejected' | 'proposed';
+  rationale: string;
+}
+
+interface ObservationProjection {
+  claimType: RegistrationClaimType;
+  eventMethod: string;
+  updatedAt: string;
+  actor: string;
+}
+
+interface SurveyRecords {
+  rawSources: RawSource[];
+  extractions: Extraction[];
+  candidateSets: CandidateSet[];
+  reviewOutcomes: ReviewOutcome[];
+  claims: ClaimTarget[];
+}
+
+export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
+  return buildSurveyTrustInput(buildCampfitSurveyInput(input));
+}
+
+function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput {
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const observations = registrationObservations(input, generatedAt);
+  const records = observationsToSurveyRecords(input.camp.id, observations);
 
   return {
-    schemaVersion: 3,
     source: 'campfit.surface-adapter.registration-status-proof',
-    claims,
-    evidence,
-    policies: [],
-    events,
+    generatedAt,
+    ...records,
   };
 }
 
-function addCurrentRegistrationStatus(args: {
-  input: CampfitSurfaceExportInput;
-  generatedAt: string;
-  claims: Claim[];
-  evidence: Evidence[];
-  events: VerificationEvent[];
-}): void {
-  const { camp } = args.input;
+function registrationObservations(input: CampfitSurfaceExportInput, generatedAt: string): RegistrationObservation[] {
+  return [
+    currentRegistrationObservation(input, generatedAt),
+    proposedRegistrationObservation(input, generatedAt),
+  ].filter((observation): observation is RegistrationObservation => observation !== undefined);
+}
+
+function observationsToSurveyRecords(campId: string, observations: RegistrationObservation[]): SurveyRecords {
+  return {
+    rawSources: observations.map(toRawSource),
+    extractions: observations.map(toExtraction),
+    candidateSets: observations.map(toCandidateSet),
+    reviewOutcomes: observations.flatMap((observation) => observation.review ? [toReviewOutcome(observation)] : []),
+    claims: observations.map((observation) => toClaimTarget(campId, observation)),
+  };
+}
+
+function currentRegistrationObservation(
+  input: CampfitSurfaceExportInput,
+  generatedAt: string,
+): RegistrationObservation {
+  const { camp } = input;
   const fieldSource = camp.fieldSources?.registrationStatus;
   const claimId = currentClaimId(camp.id);
-  const status: TrustStatus = fieldSource?.approvedAt ? 'verified' : camp.registrationStatus === 'UNKNOWN' ? 'unknown' : 'proposed';
-  args.claims.push({
-    id: claimId,
-    subjectType: 'public-directory.camp',
-    subjectId: camp.id,
-    surface: 'public-directory.camp-profile',
-    claimType: 'public-data.field',
-    fieldOrBehavior: 'registrationStatus',
+  const sourceRef = fieldSource?.sourceUrl ?? camp.websiteUrl;
+  const observedAt = fieldSource?.approvedAt ?? camp.lastCrawledAt ?? generatedAt;
+  const status = fieldSource?.approvedAt ? 'verified' : camp.registrationStatus === 'UNKNOWN' ? 'unknown' : 'proposed';
+
+  return {
+    ids: idsForClaim(claimId),
     value: camp.registrationStatus,
     status,
-    createdAt: fieldSource?.approvedAt ?? camp.lastCrawledAt ?? args.generatedAt,
-    updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? args.generatedAt,
-    impactLevel: 'medium',
-    confidenceBasis: {
-      sourceQuality: fieldSource ? 'moderate' : 'unknown',
-      reviewerAuthority: fieldSource ? 'operator' : 'none',
-      evidenceStrength: fieldSource ? 'moderate' : 'none',
-      impactLevel: 'medium',
+    source: {
+      sourceRef,
+      observedAt,
+      extractedAt: fieldSource?.approvedAt ?? generatedAt,
+      extractor: fieldSource ? 'campfit-field-review' : 'campfit',
+      collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
+      excerpt: fieldSource?.excerpt,
     },
-    metadata: {
-      campfit: {
-        campSlug: camp.slug,
-        campName: camp.name,
-        dataConfidence: camp.dataConfidence,
-        fieldSource,
-      },
-      surveyCandidate: {
-        rawSourceId: fieldSource?.sourceUrl,
-        extractionId: fieldSource ? `${camp.id}:registrationStatus:approved-source` : undefined,
-        resolvedValueId: `${camp.id}:registrationStatus:current`,
-        reviewOutcomeId: fieldSource?.approvedAt ? `${camp.id}:registrationStatus:approved` : undefined,
-      },
+    review: fieldSource?.approvedAt
+      ? {
+          id: `${claimId}.review.approved`,
+          actor: 'campfit-admin',
+          reviewedAt: fieldSource.approvedAt,
+          status: 'verified',
+          rationale: 'Approved registrationStatus field source.',
+        }
+      : undefined,
+    projection: {
+      claimType: 'public-data.field',
+      eventMethod: fieldSource ? 'field-source-approval' : 'candidate-resolution',
+      updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
+      actor: fieldSource ? 'campfit-admin' : 'campfit-crawl',
     },
-  });
-
-  if (!fieldSource) return;
-  const evidenceId = `${claimId}.evidence.source`;
-  args.evidence.push(fieldSourceEvidence({ claimId, evidenceId, fieldSource, camp, generatedAt: args.generatedAt }));
-  args.events.push({
-    id: `${claimId}.event.verified`,
-    claimId,
-    status: 'verified',
-    actor: 'campfit-admin',
-    method: 'field-source-approval',
-    evidenceIds: [evidenceId],
-    createdAt: fieldSource.approvedAt,
-    verifiedAt: fieldSource.approvedAt,
-    notes: 'Approved registrationStatus field source.',
-  });
+    campfitMetadata: {
+      campSlug: camp.slug,
+      campName: camp.name,
+      dataConfidence: camp.dataConfidence,
+      fieldSource,
+    },
+  };
 }
 
-function addProposedRegistrationStatus(args: {
-  input: CampfitSurfaceExportInput;
-  generatedAt: string;
-  claims: Claim[];
-  evidence: Evidence[];
-  events: VerificationEvent[];
-}): void {
-  const proposal = args.input.proposal;
+function proposedRegistrationObservation(
+  input: CampfitSurfaceExportInput,
+  generatedAt: string,
+): RegistrationObservation | undefined {
+  const proposal = input.proposal;
   const diff = proposal?.proposedChanges.registrationStatus;
-  if (!proposal || !diff) return;
+  if (!proposal || !diff || !isRegistrationStatus(diff.new)) return undefined;
 
-  const claimId = proposedClaimId(args.input.camp.id, proposal.id);
-  args.claims.push({
-    id: claimId,
-    subjectType: 'public-directory.camp',
-    subjectId: args.input.camp.id,
-    surface: 'public-directory.camp-profile',
-    claimType: 'public-data.field-candidate',
-    fieldOrBehavior: 'registrationStatus',
+  const claimId = proposedClaimId(input.camp.id, proposal.id);
+
+  return {
+    ids: idsForClaim(claimId),
     value: diff.new,
-    status: proposal.status === 'APPROVED' ? 'verified' : proposal.status === 'REJECTED' ? 'rejected' : 'proposed',
-    createdAt: proposal.createdAt,
-    updatedAt: proposal.reviewedAt ?? args.generatedAt,
+    status: proposalStatus(proposal.status),
+    source: {
+      sourceRef: diff.sourceUrl ?? proposal.sourceUrl,
+      observedAt: proposal.createdAt,
+      extractedAt: proposal.createdAt,
+      extractor: proposal.extractionModel,
+      collectedBy: proposal.extractionModel,
+      excerpt: diff.excerpt,
+      confidence: diff.confidence,
+    },
+    review: proposal.reviewedAt && proposal.reviewedBy
+      ? {
+          id: `${claimId}.review.${proposal.status.toLowerCase()}`,
+          actor: proposal.reviewedBy,
+          reviewedAt: proposal.reviewedAt,
+          status: proposalReviewStatus(proposal.status),
+          rationale: `Proposal ${proposal.status.toLowerCase()} by reviewer.`,
+        }
+      : undefined,
+    projection: {
+      claimType: 'public-data.field-candidate',
+      eventMethod: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
+      updatedAt: proposal.reviewedAt ?? generatedAt,
+      actor: proposal.reviewedBy ?? 'campfit-crawl',
+    },
+    campfitMetadata: {
+      proposalId: proposal.id,
+      proposalStatus: proposal.status,
+      oldValue: diff.old,
+      mode: diff.mode,
+      overallConfidence: proposal.overallConfidence,
+      extractionModel: proposal.extractionModel,
+    },
+  };
+}
+
+function toRawSource(observation: RegistrationObservation): RawSource {
+  return {
+    id: observation.ids.sourceId,
+    kind: 'web-page',
+    sourceRef: observation.source.sourceRef,
+    observedAt: observation.source.observedAt,
+    locatorScheme: 'html',
+  };
+}
+
+function toExtraction(observation: RegistrationObservation): Extraction {
+  return {
+    id: observation.ids.extractionId,
+    sourceId: observation.ids.sourceId,
+    target: 'registrationStatus',
+    value: observation.value,
+    confidence: observation.source.confidence,
+    locator: 'html:field=registrationStatus',
+    excerpt: observation.source.excerpt ?? `registrationStatus: ${observation.value}`,
+    extractor: observation.source.extractor,
+    extractedAt: observation.source.extractedAt,
+  };
+}
+
+function toCandidateSet(observation: RegistrationObservation): CandidateSet {
+  return {
+    id: observation.ids.candidateSetId,
+    target: 'registrationStatus',
+    selectedCandidateId: observation.ids.candidateId,
+    status: observation.status === 'proposed' ? 'needs-review' : 'resolved',
+    candidates: [toCandidate(observation)],
+  };
+}
+
+function toCandidate(observation: RegistrationObservation): Candidate {
+  return {
+    id: observation.ids.candidateId,
+    extractionId: observation.ids.extractionId,
+    value: observation.value,
+    confidence: observation.source.confidence,
+  };
+}
+
+function toReviewOutcome(observation: RegistrationObservation): ReviewOutcome {
+  const review = observation.review;
+  if (!review) throw new Error(`Missing review for ${observation.ids.claimId}`);
+
+  return {
+    id: review.id,
+    candidateSetId: observation.ids.candidateSetId,
+    candidateId: observation.ids.candidateId,
+    status: review.status,
+    actor: review.actor,
+    reviewedAt: review.reviewedAt,
+    rationale: review.rationale,
+  };
+}
+
+function toClaimTarget(campId: string, observation: RegistrationObservation): ClaimTarget {
+  return {
+    id: observation.ids.claimId,
+    candidateSetId: observation.ids.candidateSetId,
+    candidateId: observation.ids.candidateId,
+    subjectType: 'public-directory.camp',
+    subjectId: campId,
+    surface: 'public-directory.camp-profile',
+    claimType: observation.projection.claimType,
+    fieldOrBehavior: 'registrationStatus',
+    value: observation.value,
+    status: observation.status,
+    createdAt: observation.source.observedAt,
+    updatedAt: observation.projection.updatedAt,
     impactLevel: 'medium',
-    confidenceBasis: {
-      sourceQuality: 'moderate',
-      extractionConfidence: diff.confidence,
-      reviewerAuthority: proposal.status === 'APPROVED' ? 'operator' : 'none',
-      evidenceStrength: 'moderate',
-      impactLevel: 'medium',
-    },
+    collectedBy: observation.source.collectedBy,
+    actor: observation.projection.actor,
+    eventMethod: observation.projection.eventMethod,
+    confidenceBasis: confidenceBasisForObservation(observation),
     metadata: {
-      campfit: {
-        proposalId: proposal.id,
-        proposalStatus: proposal.status,
-        oldValue: diff.old,
-        mode: diff.mode,
-        overallConfidence: proposal.overallConfidence,
-        extractionModel: proposal.extractionModel,
-      },
-      surveyCandidate: {
-        rawSourceId: diff.sourceUrl ?? proposal.sourceUrl,
-        extractionId: `${proposal.id}:registrationStatus`,
-        resolvedValueId: `${proposal.id}:registrationStatus:candidate`,
-        reviewOutcomeId: proposal.reviewedAt ? `${proposal.id}:registrationStatus:${proposal.status.toLowerCase()}` : undefined,
-      },
+      campfit: observation.campfitMetadata,
     },
-  });
+  };
+}
 
-  const evidenceId = `${claimId}.evidence.crawl`;
-  args.evidence.push(diffEvidence({ claimId, evidenceId, diff, proposal, generatedAt: args.generatedAt }));
-  args.events.push({
-    id: `${claimId}.event.${proposal.status.toLowerCase()}`,
+function confidenceBasisForObservation(observation: RegistrationObservation): ConfidenceBasis {
+  const hasSupport = observation.review || observation.source.confidence !== undefined;
+
+  return {
+    sourceQuality: hasSupport ? 'moderate' : 'unknown',
+    extractionConfidence: observation.source.confidence,
+    reviewerAuthority: observation.status === 'verified' ? 'operator' : 'none',
+    evidenceStrength: hasSupport ? 'moderate' : 'none',
+    impactLevel: 'medium',
+  };
+}
+
+function idsForClaim(claimId: string): ObservationIds {
+  return {
     claimId,
-    status: proposal.status === 'APPROVED' ? 'verified' : proposal.status === 'REJECTED' ? 'rejected' : 'proposed',
-    actor: proposal.reviewedBy ?? 'campfit-crawl',
-    method: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
-    evidenceIds: [evidenceId],
-    createdAt: proposal.reviewedAt ?? proposal.createdAt,
-    verifiedAt: proposal.status === 'APPROVED' ? proposal.reviewedAt ?? args.generatedAt : undefined,
-    notes: proposal.status === 'PENDING'
-      ? 'Crawl proposed a registrationStatus candidate awaiting review.'
-      : `Proposal ${proposal.status.toLowerCase()} by reviewer.`,
-  });
-}
-
-function fieldSourceEvidence(input: {
-  claimId: string;
-  evidenceId: string;
-  fieldSource: FieldSource;
-  camp: Pick<Camp, 'websiteUrl'>;
-  generatedAt: string;
-}): Evidence {
-  return {
-    id: input.evidenceId,
-    claimId: input.claimId,
-    evidenceType: 'crawl_observation',
-    method: 'extraction',
-    sourceRef: input.fieldSource.sourceUrl || input.camp.websiteUrl,
-    sourceLocator: 'html:field=registrationStatus',
-    excerptOrSummary: input.fieldSource.excerpt ?? 'registrationStatus approved from public source.',
-    observedAt: input.fieldSource.approvedAt,
-    collectedBy: 'campfit-field-review',
-    metadata: {
-      approvedAt: input.fieldSource.approvedAt,
-      generatedAt: input.generatedAt,
-    },
+    sourceId: `${claimId}.source`,
+    extractionId: `${claimId}.extraction`,
+    candidateId: `${claimId}.candidate`,
+    candidateSetId: `${claimId}.candidates`,
   };
 }
 
-function diffEvidence(input: {
-  claimId: string;
-  evidenceId: string;
-  diff: FieldDiff;
-  proposal: Pick<CampChangeProposal, 'sourceUrl' | 'extractionModel' | 'createdAt'>;
-  generatedAt: string;
-}): Evidence {
-  return {
-    id: input.evidenceId,
-    claimId: input.claimId,
-    evidenceType: 'crawl_observation',
-    method: 'extraction',
-    sourceRef: input.diff.sourceUrl ?? input.proposal.sourceUrl,
-    sourceLocator: 'html:field=registrationStatus',
-    excerptOrSummary: input.diff.excerpt ?? `registrationStatus candidate: ${String(input.diff.new)}`,
-    observedAt: input.proposal.createdAt,
-    collectedBy: input.proposal.extractionModel,
-    metadata: {
-      confidence: input.diff.confidence,
-      generatedAt: input.generatedAt,
-    },
-  };
+function proposalStatus(status: ProposalStatus): TrustStatus {
+  if (status === 'APPROVED') return 'verified';
+  if (status === 'REJECTED') return 'rejected';
+  return 'proposed';
+}
+
+function proposalReviewStatus(status: ProposalStatus): 'verified' | 'rejected' | 'proposed' {
+  if (status === 'APPROVED') return 'verified';
+  if (status === 'REJECTED') return 'rejected';
+  return 'proposed';
 }
 
 function currentClaimId(campId: string): string {
