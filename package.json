@@ -14,6 +14,7 @@
     "scrape": "tsx scripts/scrape.ts",
     "scrape:dry": "tsx scripts/scrape.ts --dry-run",
     "test:access": "tsx scripts/test-access.ts",
+    "test:surface": "tsx scripts/test-surface-trust-export.ts",
     "verify:admin": "tsx scripts/verify-admin-platform.ts"
   },
   "dependencies": {
