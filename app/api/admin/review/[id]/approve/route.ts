@@ -3,6 +3,7 @@ import { getProposal, updateProposalStatus, partialApprove } from '@/lib/admin/r
 import { writeChangeLogs } from '@/lib/admin/changelog-repository';
 import { recordReviewDecision } from '@/lib/admin/metrics-repository';
 import { isFullyVerified } from '@/lib/admin/verification';
+import { buildCampReviewTrustInput } from '@/lib/admin/trust-projection';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlug } from '@/lib/admin/community-access';
@@ -28,6 +29,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const effectiveChanges = overrides
     ? { ...proposal.proposedChanges, ...overrides }
     : proposal.proposedChanges;
+  const reviewedAt = new Date().toISOString();
 
   const pool = getPool();
   const client = await pool.connect();
@@ -37,6 +39,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     const allFields = Object.keys(effectiveChanges);
     const rejectedFields = allFields.filter(f => !approvedFields.includes(f));
+    buildCampReviewTrustInput({
+      proposalId: proposal.id,
+      campId: proposal.campId,
+      sourceUrl: proposal.sourceUrl,
+      proposedChanges: effectiveChanges,
+      approvedFields,
+      reviewer: auth.access.email,
+      reviewedAt,
+      proposalCreatedAt: proposal.createdAt,
+      extractionModel: proposal.extractionModel,
+      reviewerNotes,
+    });
 
     const SCALAR = [
       'name', 'organizationName', 'description', 'campType', 'category', 'registrationStatus',
@@ -61,7 +75,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         const fieldSource = {
           excerpt: diff.excerpt ?? null,
           sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-          approvedAt: new Date().toISOString(),
+          approvedAt: reviewedAt,
         };
         await client.query(
           `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
@@ -81,7 +95,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         const fieldSource = {
           excerpt: diff.excerpt ?? null,
           sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-          approvedAt: new Date().toISOString(),
+          approvedAt: reviewedAt,
         };
 
         await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
