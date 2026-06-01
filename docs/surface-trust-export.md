@@ -16,8 +16,10 @@ camp website / schedule URL
 The implementation lives in `lib/surface-trust-export.ts`. Scalar
 `registrationStatus` observations use `@kontourai/survey`'s
 `fieldObservation` helper. Aggregate `schedules` observations use Survey's
-`repeatedObservation` helper. Campfit keeps field policy, validation, claim ids,
-and review semantics while Survey owns the generic observation shape.
+`repeatedObservation` helper. URL-backed raw-source shape uses Survey's
+`webPageSource` helper. Campfit keeps field policy, validation, source ids,
+claim ids, and review semantics while Survey owns the generic observation
+shape.
 
 ## What This Proves
 
@@ -39,6 +41,7 @@ and review semantics while Survey owns the generic observation shape.
 The generic scalar and aggregate repeated-field observation shapes moved into
 Survey:
 
+- web-page raw-source shape/defaults for URL-backed crawl and proposal evidence
 - one source/excerpt supporting one scalar current or candidate value
 - one source/excerpt supporting a list of current or candidate rows
 - shared `metadata.survey.field = { representation: "scalar" }`

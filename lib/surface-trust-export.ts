@@ -6,6 +6,8 @@ import {
   fieldObservation,
   repeatedObservation,
   SurveyInputBuilder,
+  webPageSource,
+  type RawSource,
   type SurveyInput,
   type SurveyObservationInput,
 } from '@kontourai/survey';
@@ -125,12 +127,7 @@ function toRegistrationStatusObservation(context: RegistrationStatusObservationC
     id: context.claimId,
     field: 'registrationStatus',
     value: context.value,
-    rawSource: {
-      sourceRef: context.source.sourceRef,
-      observedAt: context.source.observedAt,
-      kind: 'web-page',
-      locatorScheme: 'html',
-    },
+    rawSource: observationWebPageSource(context.source),
     extraction: {
       confidence: context.projection.confidence,
       locator: 'html:field=registrationStatus',
@@ -165,12 +162,7 @@ function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>
     id: context.claimId,
     field: 'schedules',
     value: context.value,
-    rawSource: {
-      sourceRef: context.source.sourceRef,
-      observedAt: context.source.observedAt,
-      kind: 'web-page',
-      locatorScheme: 'html',
-    },
+    rawSource: observationWebPageSource(context.source),
     extraction: {
       confidence: context.projection.confidence,
       locator: 'html:field=schedules',
@@ -198,6 +190,19 @@ function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>
       campfit: context.campfitMetadata,
     },
   });
+}
+
+function observationWebPageSource(source: ObservationSource): RawSource {
+  return webPageSource({
+    id: webPageSourceId(source),
+    sourceRef: source.sourceRef,
+    observedAt: source.observedAt,
+    locatorScheme: 'html',
+  });
+}
+
+function webPageSourceId(source: ObservationSource): string {
+  return stableId(['campfit', 'web-page', source.sourceRef, source.observedAt]);
 }
 
 function currentRegistrationObservation(
