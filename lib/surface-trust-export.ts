@@ -11,6 +11,13 @@ import {
   type SurveyInput,
   type SurveyObservationInput,
 } from '@kontourai/survey';
+import {
+  CAMPFIT_CLAIM_TYPES,
+  CAMPFIT_TRUST_SUBJECT_TYPE,
+  CAMPFIT_TRUST_SURFACE,
+  type CampfitRepeatedClaimType,
+  type CampfitScalarClaimType,
+} from './trust-vocabulary';
 
 export interface CampfitSurfaceExportInput {
   camp: Pick<Camp, 'id' | 'name' | 'slug' | 'websiteUrl' | 'registrationStatus' | 'fieldSources' | 'lastVerifiedAt' | 'lastCrawledAt' | 'dataConfidence' | 'schedules'>;
@@ -18,8 +25,6 @@ export interface CampfitSurfaceExportInput {
   generatedAt?: string;
 }
 
-type ScalarPublicDataClaimType = 'public-data.field' | 'public-data.field-candidate';
-type RepeatedPublicDataClaimType = 'public-data.repeated-field' | 'public-data.repeated-field-candidate';
 type CampfitField = 'registrationStatus' | 'schedules';
 type ScheduleCandidate = Omit<CampSchedule, 'id'> & { id?: string };
 
@@ -41,7 +46,7 @@ interface ObservationReview {
 }
 
 interface ScalarObservationProjection {
-  claimType: ScalarPublicDataClaimType;
+  claimType: CampfitScalarClaimType;
   eventMethod: string;
   createdAt: string;
   updatedAt: string;
@@ -51,7 +56,7 @@ interface ScalarObservationProjection {
 }
 
 interface RepeatedObservationProjection {
-  claimType: RepeatedPublicDataClaimType;
+  claimType: CampfitRepeatedClaimType;
   eventMethod: string;
   createdAt: string;
   updatedAt: string;
@@ -138,9 +143,9 @@ function toRegistrationStatusObservation(context: RegistrationStatusObservationC
     reviewOutcome: context.review,
     claim: {
       id: context.claimId,
-      subjectType: 'public-directory.camp',
+      subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
       subjectId: context.campId,
-      surface: 'public-directory.camp-profile',
+      surface: CAMPFIT_TRUST_SURFACE,
       claimType: context.projection.claimType,
       status: context.status,
       createdAt: context.projection.createdAt,
@@ -173,9 +178,9 @@ function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>
     reviewOutcome: context.review,
     claim: {
       id: context.claimId,
-      subjectType: 'public-directory.camp',
+      subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
       subjectId: context.campId,
-      surface: 'public-directory.camp-profile',
+      surface: CAMPFIT_TRUST_SURFACE,
       claimType: context.projection.claimType,
       status: context.status,
       createdAt: context.projection.createdAt,
@@ -238,7 +243,7 @@ function currentRegistrationObservation(
         }
       : undefined,
     projection: {
-      claimType: 'public-data.field',
+      claimType: CAMPFIT_CLAIM_TYPES.scalarField,
       createdAt: observedAt,
       eventMethod: fieldSource ? 'field-source-approval' : 'candidate-resolution',
       updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
@@ -287,7 +292,7 @@ function proposedRegistrationObservation(
         }
       : undefined,
     projection: {
-      claimType: 'public-data.field-candidate',
+      claimType: CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
       createdAt: proposal.createdAt,
       eventMethod: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
       updatedAt: proposal.reviewedAt ?? generatedAt,
@@ -342,7 +347,7 @@ function currentScheduleObservation(
     },
     review,
     projection: {
-      claimType: 'public-data.repeated-field',
+      claimType: CAMPFIT_CLAIM_TYPES.repeatedField,
       createdAt: observedAt,
       updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
       collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
@@ -394,7 +399,7 @@ function proposedScheduleObservation(
     },
     review,
     projection: {
-      claimType: 'public-data.repeated-field-candidate',
+      claimType: CAMPFIT_CLAIM_TYPES.repeatedFieldCandidate,
       createdAt: proposal.createdAt,
       updatedAt: proposal.reviewedAt ?? generatedAt,
       collectedBy: proposal.extractionModel,

@@ -5,6 +5,7 @@ import {
   buildCampAttestationTrustInput,
   buildCampReviewTrustInput,
 } from '../lib/admin/trust-projection';
+import { CAMPFIT_CLAIM_TYPES, CAMPFIT_DECISION_EFFECTS } from '../lib/trust-vocabulary';
 
 const reviewedAt = '2026-06-01T12:00:00.000Z';
 
@@ -44,10 +45,10 @@ assert.equal(reviewReport.summary.byStatus.rejected, 1);
 assert.equal(reviewReport.evidence.length, 2);
 assert.ok(reviewReport.claims.every((claim) => claim.metadata?.survey));
 const rejectedCandidate = reviewReport.claims.find((claim) => claim.status === 'rejected');
-assert.equal(rejectedCandidate?.claimType, 'public-directory.field-candidate');
+assert.equal(rejectedCandidate?.claimType, CAMPFIT_CLAIM_TYPES.scalarFieldCandidate);
 assert.equal(
   (rejectedCandidate?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
-  'kept-current-value',
+  CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
 );
 
 const attestationTrustInput = buildCampAttestationTrustInput({

@@ -21,6 +21,11 @@ The implementation lives in `lib/surface-trust-export.ts`. Scalar
 claim ids, and review semantics while Survey owns the generic observation
 shape.
 
+Admin review and manual attestation guards live in
+`lib/admin/trust-projection.ts`. They use the same shared Campfit trust
+vocabulary from `lib/trust-vocabulary.ts` so public exports and admin decisions
+agree on subject type, Surface name, claim types, and review decision effects.
+
 ## What This Proves
 
 - Campfit has the same Survey-shaped spine as the tax repo: raw source,
@@ -35,6 +40,10 @@ shape.
 - Campfit relation approvals must write `fieldSources.schedules`; replacing
   relation rows without source coverage makes downstream trust export weaker
   than scalar-field export.
+- A rejected crawl proposal is a rejected candidate claim, not a rejected
+  current field claim. In Campfit it means the reviewer kept the current value;
+  the decision is marked with `decisionEffect: "kept-current-value"` so it can
+  feed future extraction prompt/eval refinement.
 
 ## What Moved To Survey
 
