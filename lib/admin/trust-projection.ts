@@ -8,6 +8,13 @@ import {
 } from '@kontourai/survey';
 
 import type { FieldDiff, ProposedChanges } from './types';
+import {
+  CAMPFIT_CLAIM_TYPES,
+  CAMPFIT_DECISION_EFFECTS,
+  CAMPFIT_TRUST_SUBJECT_TYPE,
+  CAMPFIT_TRUST_SURFACE,
+  type CampfitScalarClaimType,
+} from '../trust-vocabulary';
 
 type ReviewStatus = 'verified' | 'assumed' | 'rejected';
 
@@ -162,13 +169,15 @@ function campReviewObservation(args: {
       campId: args.campId,
       field: args.field,
       status: args.status,
-      claimType: 'public-directory.field-candidate',
+      claimType: CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
       collectedBy: args.extractionModel ?? 'campfit-crawler',
       value: args.diff.new,
       metadata: {
         proposalId: args.proposalId,
         reviewKind: 'crawl-proposal',
-        decisionEffect: args.status === 'rejected' ? 'kept-current-value' : 'accepted-candidate-value',
+        decisionEffect: args.status === 'rejected'
+          ? CAMPFIT_DECISION_EFFECTS.keptCurrentValue
+          : CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
       },
     }),
   });
@@ -178,17 +187,17 @@ function campClaim(args: {
   campId: string;
   field: string;
   status: ReviewStatus;
-  claimType?: string;
+  claimType?: CampfitScalarClaimType;
   collectedBy: string;
   value: unknown;
   metadata?: Record<string, unknown>;
 }) {
   return {
     id: `camp.${args.campId}.field.${args.field}`,
-    subjectType: 'public-directory.camp',
+    subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
     subjectId: args.campId,
-    surface: 'public-directory.camp-profile',
-    claimType: args.claimType ?? 'public-directory.field',
+    surface: CAMPFIT_TRUST_SURFACE,
+    claimType: args.claimType ?? CAMPFIT_CLAIM_TYPES.scalarField,
     fieldOrBehavior: args.field,
     value: args.value,
     status: args.status,
