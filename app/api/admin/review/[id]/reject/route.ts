@@ -24,6 +24,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
     runId: proposal.crawlRunId,
     approvedFields: [],
     rejectedFields: Object.keys(proposal.proposedChanges),
+    proposedChanges: proposal.proposedChanges,
+    reviewerNotes,
+    feedbackTags,
+    extractionModel: proposal.extractionModel,
+    overallConfidence: proposal.overallConfidence,
+    finalDecision: true,
   });
 
   return NextResponse.json({ success: true });

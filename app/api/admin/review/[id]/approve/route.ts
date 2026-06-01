@@ -216,6 +216,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
         runId: proposal.crawlRunId,
         approvedFields,
         rejectedFields,
+        proposedChanges: effectiveChanges,
+        reviewerNotes,
+        feedbackTags,
+        extractionModel: proposal.extractionModel,
+        overallConfidence: proposal.overallConfidence,
+        finalDecision: !keepPending,
       });
     } catch (metricsErr) {
       console.error('recordReviewDecision failed (non-fatal):', metricsErr);
