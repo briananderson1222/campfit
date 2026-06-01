@@ -1,5 +1,6 @@
 import { getPool } from '@/lib/db';
-import type { LLMExtractionResult } from './types';
+import { CAMPFIT_DECISION_EFFECTS } from '@/lib/trust-vocabulary';
+import type { FieldDiff, LLMExtractionResult, ProposedChanges } from './types';
 
 export async function recordExtractionMetrics(opts: {
   runId: string;
@@ -39,6 +40,12 @@ export async function recordReviewDecision(opts: {
   runId: string | null;
   approvedFields: string[];
   rejectedFields: string[];
+  proposedChanges?: ProposedChanges;
+  reviewerNotes?: string | null;
+  feedbackTags?: string[];
+  extractionModel?: string;
+  overallConfidence?: number;
+  finalDecision?: boolean;
 }): Promise<void> {
   const pool = getPool();
   const allFields = [
@@ -56,6 +63,68 @@ export async function recordReviewDecision(opts: {
       ]
     );
   }
+
+  if (opts.finalDecision && opts.proposedChanges) {
+    for (const field of opts.rejectedFields) {
+      const diff = opts.proposedChanges[field];
+      if (!diff) continue;
+
+      await pool.query(
+        `INSERT INTO "CrawlMetric" ("crawlRunId", "metricName", "metricValue", dimensions)
+         VALUES ($1, 'field_rejection_learning_signal', 1, $2)`,
+        [
+          opts.runId,
+          JSON.stringify(buildRejectedProposalLearningDimensions({
+            proposalId: opts.proposalId,
+            field,
+            diff,
+            reviewerNotes: opts.reviewerNotes,
+            feedbackTags: opts.feedbackTags,
+            extractionModel: opts.extractionModel,
+            overallConfidence: opts.overallConfidence,
+          })),
+        ],
+      );
+    }
+  }
+}
+
+export function buildRejectedProposalLearningDimensions(opts: {
+  proposalId: string;
+  field: string;
+  diff: FieldDiff;
+  reviewerNotes?: string | null;
+  feedbackTags?: string[];
+  extractionModel?: string;
+  overallConfidence?: number;
+}): Record<string, string> {
+  return compactStringRecord({
+    proposalId: opts.proposalId,
+    field: opts.field,
+    decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+    sourceUrl: opts.diff.sourceUrl,
+    excerpt: opts.diff.excerpt,
+    proposedValue: summarizeMetricValue(opts.diff.new),
+    currentValue: summarizeMetricValue(opts.diff.old),
+    confidence: String(opts.diff.confidence),
+    mode: opts.diff.mode,
+    reviewerNotes: opts.reviewerNotes ?? undefined,
+    feedbackTags: opts.feedbackTags?.join(','),
+    extractionModel: opts.extractionModel,
+    overallConfidence: opts.overallConfidence === undefined ? undefined : String(opts.overallConfidence),
+  });
+}
+
+function compactStringRecord(input: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== ''),
+  );
+}
+
+function summarizeMetricValue(value: unknown): string {
+  const raw = typeof value === 'string' ? value : JSON.stringify(value);
+  if (raw === undefined) return 'undefined';
+  return raw.length > 500 ? `${raw.slice(0, 497)}...` : raw;
 }
 
 export async function getDashboardMetrics(): Promise<{

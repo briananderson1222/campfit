@@ -44,6 +44,10 @@ agree on subject type, Surface name, claim types, and review decision effects.
   current field claim. In Campfit it means the reviewer kept the current value;
   the decision is marked with `decisionEffect: "kept-current-value"` so it can
   feed future extraction prompt/eval refinement.
+- Final rejected candidates also emit `field_rejection_learning_signal`
+  `CrawlMetric` rows. Those rows carry the kept current value, rejected
+  candidate value, source URL/excerpt, confidence, model, reviewer notes, and
+  feedback tags so extraction failures can be turned into prompt/eval fixtures.
 
 ## What Moved To Survey
 
