@@ -12,6 +12,7 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { REQUIRED_FOR_VERIFIED } from '@/lib/admin/verification';
+import { buildCampAttestationTrustInput } from '@/lib/admin/trust-projection';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
@@ -37,6 +38,13 @@ export async function POST(
 
   const pool = getPool();
   const now = new Date().toISOString();
+  buildCampAttestationTrustInput({
+    campId: params.campId,
+    fields,
+    actor: auth.access.email,
+    attestedAt: now,
+    notes,
+  });
 
   // Build a fieldSources patch: one entry per field, attestedBy + approvedAt, no excerpt/sourceUrl
   const patch: Record<string, { excerpt: null; sourceUrl: string; approvedAt: string; attestedBy: string; notes?: string }> = {};
