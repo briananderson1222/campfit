@@ -40,14 +40,52 @@ const reviewTrustInput = buildCampReviewTrustInput({
 });
 
 const reviewReport = buildTrustReport(validateTrustInput(reviewTrustInput));
-assert.equal(reviewReport.summary.byStatus.verified, 1);
+assert.equal(reviewReport.summary.totalClaims, 4);
+assert.equal(reviewReport.summary.byStatus.verified, 2);
 assert.equal(reviewReport.summary.byStatus.rejected, 1);
-assert.equal(reviewReport.evidence.length, 2);
+assert.equal(reviewReport.summary.byStatus.superseded, 1);
+assert.equal(reviewReport.evidence.length, 4);
 assert.ok(reviewReport.claims.every((claim) => claim.metadata?.survey));
-const rejectedCandidate = reviewReport.claims.find((claim) => claim.status === 'rejected');
-assert.equal(rejectedCandidate?.claimType, CAMPFIT_CLAIM_TYPES.scalarFieldCandidate);
+const acceptedProposal = reviewReport.claims.find((claim) =>
+  claim.fieldOrBehavior === 'description'
+  && claim.status === 'verified'
+  && claim.metadata?.candidateRole === 'proposed-value'
+);
+assert.equal(acceptedProposal?.id, 'camp.camp-1.field.description');
+assert.equal(acceptedProposal?.value, 'Outdoor day camp for ages 7-12.');
+assert.equal(acceptedProposal?.claimType, CAMPFIT_CLAIM_TYPES.scalarField);
 assert.equal(
-  (rejectedCandidate?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
+  (acceptedProposal?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
+  CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
+);
+const supersededCurrent = reviewReport.claims.find((claim) =>
+  claim.fieldOrBehavior === 'description'
+  && claim.status === 'superseded'
+  && claim.metadata?.candidateRole === 'current-value'
+);
+assert.equal(supersededCurrent?.value, '');
+
+const retainedCurrent = reviewReport.claims.find((claim) =>
+  claim.fieldOrBehavior === 'contactPhone'
+  && claim.status === 'verified'
+  && claim.metadata?.candidateRole === 'current-value'
+);
+assert.equal(retainedCurrent?.id, 'camp.camp-1.field.contactPhone');
+assert.equal(retainedCurrent?.value, null);
+assert.equal(retainedCurrent?.claimType, CAMPFIT_CLAIM_TYPES.scalarField);
+assert.equal(
+  (retainedCurrent?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
+  CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+);
+const rejectedProposal = reviewReport.claims.find((claim) =>
+  claim.fieldOrBehavior === 'contactPhone'
+  && claim.status === 'rejected'
+  && claim.metadata?.candidateRole === 'proposed-value'
+);
+assert.equal(rejectedProposal?.claimType, CAMPFIT_CLAIM_TYPES.scalarFieldCandidate);
+assert.equal(rejectedProposal?.value, '303-555-0100');
+assert.equal(
+  (rejectedProposal?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
   CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
 );
 

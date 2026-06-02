@@ -1,10 +1,12 @@
-import { validateTrustInput, type TrustInput } from '@kontourai/surface';
+import { validateTrustInput, type TrustInput, type TrustStatus } from '@kontourai/surface';
 import {
   buildSurveyTrustInput,
   fieldObservation,
   manualEntrySource,
+  reviewedCandidateResolution,
   SurveyInputBuilder,
   webPageSource,
+  type SurveyObservationInput,
 } from '@kontourai/survey';
 
 import type { FieldDiff, ProposedChanges } from './types';
@@ -50,7 +52,7 @@ export function buildCampReviewTrustInput(args: CampReviewTrustInputArgs): Trust
 
   for (const [field, diff] of Object.entries(args.proposedChanges)) {
     const status: ReviewStatus = approved.has(field) ? 'verified' : 'rejected';
-    builder.addObservation(campReviewObservation({
+    builder.addClaimRecords(campReviewResolution({
       proposalId: args.proposalId,
       campId: args.campId,
       field,
@@ -119,7 +121,7 @@ export function buildCampAttestationTrustInput(args: CampAttestationTrustInputAr
   return validateTrustInput(buildSurveyTrustInput(builder.build()));
 }
 
-function campReviewObservation(args: {
+function campReviewResolution(args: {
   proposalId: string;
   campId: string;
   field: string;
@@ -132,8 +134,142 @@ function campReviewObservation(args: {
   extractionModel?: string;
   reviewerNotes?: string | null;
 }) {
+  const approved = args.status === 'verified';
+  const currentCandidateId = campCandidateId(args.campId, args.field, args.proposalId, 'current');
+  const proposedCandidateId = campCandidateId(args.campId, args.field, args.proposalId, 'proposed');
+  const selectedCandidateId = approved ? proposedCandidateId : currentCandidateId;
+  const decisionEffect = approved
+    ? CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue
+    : CAMPFIT_DECISION_EFFECTS.keptCurrentValue;
+
+  return reviewedCandidateResolution({
+    id: campCandidateSetId(args.campId, args.field, args.proposalId),
+    target: campFieldTarget(args.campId, args.field),
+    selectedCandidateId,
+    status: 'resolved',
+    rationale: args.reviewerNotes ?? (approved
+      ? 'Reviewer accepted the proposed value.'
+      : 'Reviewer rejected the proposed value and kept the current value.'),
+    metadata: {
+      proposalId: args.proposalId,
+      reviewKind: 'crawl-proposal',
+      decisionEffect,
+    },
+    reviewOutcome: {
+      id: `${campCandidateSetId(args.campId, args.field, args.proposalId)}.review`,
+      status: 'verified',
+      actor: args.reviewer,
+      reviewedAt: args.reviewedAt,
+      rationale: args.reviewerNotes ?? undefined,
+      metadata: {
+        proposalId: args.proposalId,
+        proposalDecision: approved ? 'approved' : 'rejected',
+        decisionEffect,
+      },
+    },
+    selectedClaimStatus: 'verified',
+    unselectedClaimStatus: approved ? 'superseded' : 'rejected',
+    observations: [
+      currentCampReviewObservation({
+        ...args,
+        candidateId: currentCandidateId,
+        selected: !approved,
+        decisionEffect,
+      }),
+      proposedCampReviewObservation({
+        ...args,
+        candidateId: proposedCandidateId,
+        selected: approved,
+        decisionEffect,
+      }),
+    ],
+  });
+}
+
+function currentCampReviewObservation(args: {
+  proposalId: string;
+  campId: string;
+  field: string;
+  diff: FieldDiff;
+  status: TrustStatus;
+  sourceUrl: string;
+  reviewer: string;
+  reviewedAt: string;
+  extractedAt: string;
+  extractionModel?: string;
+  reviewerNotes?: string | null;
+  candidateId: string;
+  selected: boolean;
+  decisionEffect: string;
+}): SurveyObservationInput {
   return fieldObservation({
-    id: campObservationId(args.campId, args.field, args.proposalId),
+    id: campObservationId(args.campId, args.field, args.proposalId, 'current'),
+    field: args.field,
+    value: args.diff.old,
+    rawSource: manualEntrySource({
+      id: `camp.${args.campId}.field.${args.field}.proposal.${args.proposalId}.current.source`,
+      sourceRef: `campfit:camp:${args.campId}:field:${args.field}:current`,
+      observedAt: args.reviewedAt,
+      metadata: {
+        proposalId: args.proposalId,
+        trustProducer: 'campfit.current-value-review',
+      },
+    }),
+    extraction: {
+      locator: `field:${args.field}`,
+      extractor: 'campfit-current-record',
+      extractedAt: args.reviewedAt,
+      metadata: {
+        mode: 'current-value',
+        proposedValue: args.diff.new,
+      },
+    },
+    candidate: {
+      id: args.candidateId,
+      sourceRank: args.selected ? 1 : 2,
+      metadata: {
+        role: 'current-value',
+        decisionEffect: args.decisionEffect,
+      },
+    },
+    claim: campClaim({
+      campId: args.campId,
+      field: args.field,
+      status: args.selected ? 'verified' : 'superseded',
+      claimType: args.selected ? CAMPFIT_CLAIM_TYPES.scalarField : CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      collectedBy: 'campfit-current-record',
+      value: args.diff.old,
+      claimId: args.selected
+        ? campCanonicalClaimId(args.campId, args.field)
+        : campCandidateClaimId(args.campId, args.field, args.proposalId, 'current'),
+      metadata: {
+        proposalId: args.proposalId,
+        reviewKind: 'crawl-proposal',
+        candidateRole: 'current-value',
+        decisionEffect: args.decisionEffect,
+      },
+    }),
+  });
+}
+
+function proposedCampReviewObservation(args: {
+  proposalId: string;
+  campId: string;
+  field: string;
+  diff: FieldDiff;
+  status: ReviewStatus;
+  sourceUrl: string;
+  reviewer: string;
+  reviewedAt: string;
+  extractedAt: string;
+  extractionModel?: string;
+  reviewerNotes?: string | null;
+  candidateId: string;
+  selected: boolean;
+  decisionEffect: string;
+}): SurveyObservationInput {
+  return fieldObservation({
+    id: campObservationId(args.campId, args.field, args.proposalId, 'proposed'),
     field: args.field,
     value: args.diff.new,
     rawSource: webPageSource({
@@ -156,28 +292,30 @@ function campReviewObservation(args: {
         oldValue: args.diff.old,
       },
     },
-    reviewOutcome: {
-      status: args.status,
-      actor: args.reviewer,
-      reviewedAt: args.reviewedAt,
-      rationale: args.reviewerNotes ?? undefined,
+    candidate: {
+      id: args.candidateId,
+      confidence: args.diff.confidence,
+      sourceRank: args.selected ? 1 : 2,
       metadata: {
-        proposalId: args.proposalId,
+        role: 'proposed-value',
+        decisionEffect: args.decisionEffect,
       },
     },
     claim: campClaim({
       campId: args.campId,
       field: args.field,
       status: args.status,
-      claimType: CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      claimType: args.selected ? CAMPFIT_CLAIM_TYPES.scalarField : CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
       collectedBy: args.extractionModel ?? 'campfit-crawler',
       value: args.diff.new,
+      claimId: args.selected
+        ? campCanonicalClaimId(args.campId, args.field)
+        : campCandidateClaimId(args.campId, args.field, args.proposalId, 'proposed'),
       metadata: {
         proposalId: args.proposalId,
         reviewKind: 'crawl-proposal',
-        decisionEffect: args.status === 'rejected'
-          ? CAMPFIT_DECISION_EFFECTS.keptCurrentValue
-          : CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
+        candidateRole: 'proposed-value',
+        decisionEffect: args.decisionEffect,
       },
     }),
   });
@@ -186,14 +324,15 @@ function campReviewObservation(args: {
 function campClaim(args: {
   campId: string;
   field: string;
-  status: ReviewStatus;
+  status: TrustStatus;
   claimType?: CampfitScalarClaimType;
   collectedBy: string;
   value: unknown;
+  claimId?: string;
   metadata?: Record<string, unknown>;
 }) {
   return {
-    id: `camp.${args.campId}.field.${args.field}`,
+    id: args.claimId ?? campCanonicalClaimId(args.campId, args.field),
     subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
     subjectId: args.campId,
     surface: CAMPFIT_TRUST_SURFACE,
@@ -207,6 +346,26 @@ function campClaim(args: {
   };
 }
 
-function campObservationId(campId: string, field: string, eventId: string): string {
-  return `camp.${campId}.field.${field}.${eventId}`;
+function campObservationId(campId: string, field: string, eventId: string, role?: string): string {
+  return ['camp', campId, 'field', field, eventId, role].filter(Boolean).join('.');
+}
+
+function campCandidateSetId(campId: string, field: string, proposalId: string): string {
+  return `camp.${campId}.field.${field}.proposal.${proposalId}.candidates`;
+}
+
+function campCandidateId(campId: string, field: string, proposalId: string, role: 'current' | 'proposed'): string {
+  return `camp.${campId}.field.${field}.proposal.${proposalId}.${role}.candidate`;
+}
+
+function campCandidateClaimId(campId: string, field: string, proposalId: string, role: 'current' | 'proposed'): string {
+  return `camp.${campId}.field.${field}.proposal.${proposalId}.${role}.claim`;
+}
+
+function campCanonicalClaimId(campId: string, field: string): string {
+  return `camp.${campId}.field.${field}`;
+}
+
+function campFieldTarget(campId: string, field: string): string {
+  return `camp.${campId}.field.${field}`;
 }
