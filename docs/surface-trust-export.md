@@ -28,6 +28,13 @@ Admin review and manual attestation guards live in
 vocabulary from `lib/trust-vocabulary.ts` so public exports and admin decisions
 agree on subject type, Surface name, claim types, and review decision effects.
 
+`lib/admin/trust-projection.ts` also proves the reviewed current/proposed
+resolution shape from Survey. Campfit authors both observations because it owns
+the current record, crawler proposal, field policy, claim ids, and learning
+signals. Survey combines those observations into one candidate set, records
+which candidate was selected, promotes the selected candidate to the canonical
+field claim, and keeps the unselected candidate inspectable as proposal history.
+
 ## What This Proves
 
 - Campfit has the same Survey-shaped spine as the tax repo: raw source,
@@ -51,6 +58,12 @@ agree on subject type, Surface name, claim types, and review decision effects.
   `CrawlMetric` rows. Those rows carry the kept current value, rejected
   candidate value, source URL/excerpt, confidence, model, reviewer notes, and
   feedback tags so extraction failures can be turned into prompt/eval fixtures.
+- Survey's `reviewedCurrentProposedResolution` helper is the right current API
+  for this proof. Campfit still decides whether approval means "accept proposed"
+  or "keep current", but Survey owns the portable selected/unselected candidate
+  wiring. The selected candidate receives the review outcome id; the unselected
+  candidate remains tied to the same candidate set and keeps its candidate
+  status for audit and learning.
 
 ## What Moved To Survey
 
@@ -81,10 +94,14 @@ These concepts are still candidates for extraction after more vertical proofs:
 - raw source identity conventions: source URL, crawl/proposal id, observed time
 - resolution/proposal result helpers: old value, new candidate, confidence,
   rationale
-- review/promotion result helpers: approved field source, rejected proposal,
-  pending candidate
 - Surface adapter mapping shortcuts that reduce producer boilerplate without
   hiding producer discipline
+
+Do not move Campfit's current/proposed policy into Survey yet. Survey can own
+the candidate-set mechanics, but Campfit must keep the rules that decide which
+fields are reviewable, which proposal modes are valid, when rejection means
+"keep current value", how learning signals are recorded, and which claim ids
+are canonical versus proposal-specific.
 
 Campfit should keep:
 
