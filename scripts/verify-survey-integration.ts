@@ -9,6 +9,12 @@ import { CAMPFIT_CLAIM_TYPES, CAMPFIT_DECISION_EFFECTS } from '../lib/trust-voca
 
 const reviewedAt = '2026-06-01T12:00:00.000Z';
 
+function surveyMetadata(claim: { metadata?: Record<string, unknown> } | undefined): Record<string, unknown> {
+  const survey = claim?.metadata?.survey;
+  assert.equal(survey && typeof survey === 'object' && !Array.isArray(survey), true);
+  return survey as Record<string, unknown>;
+}
+
 const reviewTrustInput = buildCampReviewTrustInput({
   proposalId: 'proposal-1',
   campId: 'camp-1',
@@ -58,12 +64,28 @@ assert.equal(
   (acceptedProposal?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
   CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
 );
+const acceptedSurvey = surveyMetadata(acceptedProposal);
+assert.equal(acceptedSurvey.candidateSetId, 'camp.camp-1.field.description.proposal.proposal-1.candidates');
+assert.equal(acceptedSurvey.candidateId, 'camp.camp-1.field.description.proposal.proposal-1.candidates.proposed.candidate');
+assert.equal(acceptedSurvey.reviewOutcomeId, 'camp.camp-1.field.description.proposal.proposal-1.candidates.review');
+assert.ok(reviewReport.events.some((event) =>
+  event.claimId === acceptedProposal?.id
+  && event.status === 'verified'
+  && event.method === 'survey-review'
+  && event.verifiedAt === reviewedAt
+));
 const supersededCurrent = reviewReport.claims.find((claim) =>
   claim.fieldOrBehavior === 'description'
   && claim.status === 'superseded'
   && claim.metadata?.candidateRole === 'current-value'
 );
 assert.equal(supersededCurrent?.value, '');
+assert.equal(supersededCurrent?.id, 'camp.camp-1.field.description.proposal.proposal-1.current.claim');
+assert.equal(supersededCurrent?.claimType, CAMPFIT_CLAIM_TYPES.scalarFieldCandidate);
+const supersededSurvey = surveyMetadata(supersededCurrent);
+assert.equal(supersededSurvey.candidateSetId, acceptedSurvey.candidateSetId);
+assert.equal(supersededSurvey.candidateId, 'camp.camp-1.field.description.proposal.proposal-1.candidates.current.candidate');
+assert.equal(supersededSurvey.reviewOutcomeId, undefined);
 
 const retainedCurrent = reviewReport.claims.find((claim) =>
   claim.fieldOrBehavior === 'contactPhone'
@@ -77,6 +99,10 @@ assert.equal(
   (retainedCurrent?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
   CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
 );
+const retainedSurvey = surveyMetadata(retainedCurrent);
+assert.equal(retainedSurvey.candidateSetId, 'camp.camp-1.field.contactPhone.proposal.proposal-1.candidates');
+assert.equal(retainedSurvey.candidateId, 'camp.camp-1.field.contactPhone.proposal.proposal-1.candidates.current.candidate');
+assert.equal(retainedSurvey.reviewOutcomeId, 'camp.camp-1.field.contactPhone.proposal.proposal-1.candidates.review');
 const rejectedProposal = reviewReport.claims.find((claim) =>
   claim.fieldOrBehavior === 'contactPhone'
   && claim.status === 'rejected'
@@ -87,6 +113,20 @@ assert.equal(rejectedProposal?.value, '303-555-0100');
 assert.equal(
   (rejectedProposal?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
   CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+);
+assert.equal(rejectedProposal?.id, 'camp.camp-1.field.contactPhone.proposal.proposal-1.proposed.claim');
+const rejectedSurvey = surveyMetadata(rejectedProposal);
+assert.equal(rejectedSurvey.candidateSetId, retainedSurvey.candidateSetId);
+assert.equal(rejectedSurvey.candidateId, 'camp.camp-1.field.contactPhone.proposal.proposal-1.candidates.proposed.candidate');
+assert.equal(rejectedSurvey.reviewOutcomeId, undefined);
+assert.ok(reviewReport.events.some((event) =>
+  event.claimId === rejectedProposal?.id
+  && event.status === 'rejected'
+  && event.method === 'survey-rejection'
+));
+assert.equal(
+  reviewReport.evidence.filter((evidence) => evidence.metadata?.decisionEffect === CAMPFIT_DECISION_EFFECTS.keptCurrentValue).length,
+  2,
 );
 
 const attestationTrustInput = buildCampAttestationTrustInput({
