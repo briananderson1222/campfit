@@ -3,8 +3,8 @@ import type { CampChangeProposal, ProposalStatus } from './admin/types';
 import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surface';
 import {
   buildSurveyTrustInput,
-  fieldObservation,
   repeatedObservation,
+  sourceOfAuthorityObservationBuilder,
   SurveyInputBuilder,
   webPageSource,
   type RawSource,
@@ -128,20 +128,31 @@ function campfitScheduleObservations(
 }
 
 function toRegistrationStatusObservation(context: RegistrationStatusObservationContext): SurveyObservationInput {
-  return fieldObservation<RegistrationStatus>({
+  return sourceOfAuthorityObservationBuilder<RegistrationStatus>({
     id: context.claimId,
     field: 'registrationStatus',
     value: context.value,
-    rawSource: observationWebPageSource(context.source),
-    extraction: {
+  })
+    .withSourceAuthority({
+      authorityClass: 'publisher_owned_page',
+      scope: {
+        productArea: 'public-directory',
+        subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+        subjectId: context.campId,
+        field: 'registrationStatus',
+      },
+      declaredBy: context.source.extractor,
+    })
+    .fromSource(observationWebPageSource(context.source))
+    .withExtraction({
       confidence: context.projection.confidence,
       locator: 'html:field=registrationStatus',
       excerpt: context.source.excerpt,
       extractor: context.source.extractor,
       extractedAt: context.source.extractedAt,
-    },
-    reviewOutcome: context.review,
-    claim: {
+    })
+    .withReviewOutcome(context.review)
+    .forClaim({
       id: context.claimId,
       subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
       subjectId: context.campId,
@@ -155,11 +166,11 @@ function toRegistrationStatusObservation(context: RegistrationStatusObservationC
       actor: context.projection.actor,
       eventMethod: context.projection.eventMethod,
       confidenceBasis: confidenceBasisFor(context.status, context.review, context.projection.confidence),
-    },
-    metadata: {
+    })
+    .withMetadata({
       campfit: context.campfitMetadata,
-    },
-  });
+    })
+    .build();
 }
 
 function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>): SurveyObservationInput {
