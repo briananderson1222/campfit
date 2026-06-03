@@ -114,8 +114,8 @@ assert.equal(current?.value, 'OPEN');
 assert.equal(current?.status, 'verified');
 assert.equal(current?.metadata?.survey && typeof current.metadata.survey === 'object', true);
 assert.equal(
-  (current?.metadata?.survey as { field?: { representation?: string } } | undefined)?.field?.representation,
-  'scalar',
+  (current?.metadata?.survey as { sourceOfAuthority?: { authorityClass?: string } } | undefined)?.sourceOfAuthority?.authorityClass,
+  'publisher_owned_page',
 );
 
 const proposed = proof.claims.find((claim) => claim.claimType === 'public-data.field-candidate');
@@ -123,8 +123,8 @@ assert.equal(proposed?.value, 'OPEN');
 assert.equal(proposed?.status, 'proposed');
 assert.equal(proposed?.confidenceBasis?.extractionConfidence, 0.88);
 assert.equal(
-  (proposed?.metadata?.survey as { field?: { representation?: string } } | undefined)?.field?.representation,
-  'scalar',
+  (proposed?.metadata?.survey as { sourceOfAuthority?: { authorityClass?: string } } | undefined)?.sourceOfAuthority?.authorityClass,
+  'publisher_owned_page',
 );
 
 const currentSchedules = proof.claims.find((claim) => claim.claimType === 'public-data.repeated-field');
@@ -149,6 +149,11 @@ assert.equal((proposedSchedules?.metadata?.campfit as { proposalId?: string } | 
 
 assert.ok(proof.evidence.some((item) => item.evidenceType === 'crawl_observation' && item.sourceRef === 'https://example.org/camps/demo'));
 assert.ok(proof.evidence.some((item) => item.evidenceType === 'crawl_observation' && item.sourceRef === 'https://example.org/camps/demo/schedule'));
+assert.ok(proof.evidence.some((item) =>
+  item.claimId === current?.id
+  && (item.metadata?.sourceAuthority as { authorityClass?: string } | undefined)?.authorityClass === 'publisher_owned_page'
+));
+assert.equal(proof.authorityTrace?.length ?? 0, 0);
 assert.ok(proof.events.some((event) => event.method === 'field-source-approval'));
 assert.ok(proof.events.some((event) => event.method === 'crawl-proposal'));
 

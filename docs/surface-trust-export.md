@@ -15,8 +15,10 @@ camp website / schedule URL
 
 The implementation lives in `lib/surface-trust-export.ts`. Scalar
 `registrationStatus` observations use `@kontourai/survey`'s
-`fieldObservation` helper. Aggregate `schedules` observations use Survey's
-`repeatedObservation` helper. URL-backed raw-source shape uses Survey's
+`sourceOfAuthorityObservationBuilder` because the camp publisher page is the
+declared source of authority for that registration value. Aggregate `schedules`
+observations still use Survey's `repeatedObservation` helper so they preserve
+repeated-array metadata. URL-backed raw-source shape uses Survey's
 `webPageSource` helper. Campfit keeps field policy, validation, source ids,
 claim ids, and review semantics while Survey owns the generic observation
 shape.
@@ -31,8 +33,9 @@ agree on subject type, Surface name, claim types, and review decision effects.
 - Campfit has the same Survey-shaped spine as the tax repo: raw source,
   extraction, candidate proposal, review, and verified claim material.
 - The source locator is web/excerpt based, not PDF or tax-form based.
-- `registrationStatus` can be represented as a Surface field claim with
-  `crawl_observation` evidence.
+- `registrationStatus` can be represented as a source-authority-backed Surface
+  field claim with `crawl_observation` evidence and evidence metadata under
+  `sourceAuthority`.
 - `schedules` can be represented as an aggregate repeated-field claim with
   the current approved schedule set and pending candidate schedule set.
 - A pending crawl proposal can be represented as a proposed candidate claim,
@@ -55,9 +58,10 @@ The generic scalar and aggregate repeated-field observation shapes moved into
 Survey:
 
 - web-page raw-source shape/defaults for URL-backed crawl and proposal evidence
-- one source/excerpt supporting one scalar current or candidate value
+- one source-authority builder path for publisher-backed current or candidate
+  registration values
 - one source/excerpt supporting a list of current or candidate rows
-- shared `metadata.survey.field = { representation: "scalar" }`
+- shared `metadata.survey.sourceOfAuthority = { authorityClass }`
 - shared `metadata.survey.repeated = { representation: "aggregate-array",
   itemCount }`
 - default extraction target, claim field, scalar/list value, and empty-array
