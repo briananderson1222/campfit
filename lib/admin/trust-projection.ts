@@ -7,6 +7,7 @@ import {
   SurveyInputBuilder,
   webPageSource,
   type SurveyObservationInput,
+  type SurveyInput,
 } from '@kontourai/survey';
 
 import type { FieldDiff, ProposedChanges } from './types';
@@ -31,6 +32,7 @@ export interface CampReviewTrustInputArgs {
   proposalCreatedAt?: string;
   extractionModel?: string;
   reviewerNotes?: string | null;
+  feedbackTags?: string[];
 }
 
 export interface CampAttestationTrustInputArgs {
@@ -43,6 +45,10 @@ export interface CampAttestationTrustInputArgs {
 }
 
 export function buildCampReviewTrustInput(args: CampReviewTrustInputArgs): TrustInput {
+  return validateTrustInput(buildSurveyTrustInput(buildCampReviewSurveyInput(args)));
+}
+
+export function buildCampReviewSurveyInput(args: CampReviewTrustInputArgs): SurveyInput {
   const approved = new Set(args.approvedFields);
   const extractedAt = args.proposalCreatedAt ?? args.reviewedAt;
   const builder = new SurveyInputBuilder({
@@ -64,10 +70,11 @@ export function buildCampReviewTrustInput(args: CampReviewTrustInputArgs): Trust
       extractedAt,
       extractionModel: args.extractionModel,
       reviewerNotes: args.reviewerNotes,
+      feedbackTags: args.feedbackTags,
     }));
   }
 
-  return validateTrustInput(buildSurveyTrustInput(builder.build()));
+  return builder.build();
 }
 
 export function buildCampAttestationTrustInput(args: CampAttestationTrustInputArgs): TrustInput {
@@ -133,11 +140,14 @@ function campReviewResolution(args: {
   extractedAt: string;
   extractionModel?: string;
   reviewerNotes?: string | null;
+  feedbackTags?: string[];
 }) {
   const approved = args.status === 'verified';
   const decisionEffect = approved
     ? CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue
     : CAMPFIT_DECISION_EFFECTS.keptCurrentValue;
+
+  const comfortZoneNote = explicitComfortZoneNote(args.feedbackTags, args.reviewerNotes);
 
   return reviewedCurrentProposedResolution({
     id: campCandidateSetId(args.campId, args.field, args.proposalId),
@@ -159,10 +169,13 @@ function campReviewResolution(args: {
       actor: args.reviewer,
       reviewedAt: args.reviewedAt,
       rationale: args.reviewerNotes ?? undefined,
+      withinComfortZone: !approved && comfortZoneNote ? false : undefined,
+      comfortZoneNote,
       metadata: {
         proposalId: args.proposalId,
         proposalDecision: approved ? 'approved' : 'rejected',
         decisionEffect,
+        feedbackTags: args.feedbackTags,
       },
     },
     selectedClaimStatus: 'verified',
@@ -178,6 +191,20 @@ function campReviewResolution(args: {
       decisionEffect,
     }),
   });
+}
+
+function explicitComfortZoneNote(feedbackTags?: string[], reviewerNotes?: string | null): string | undefined {
+  const hasExplicitAuthorityTag = feedbackTags?.some((tag) => {
+    const normalized = tag.trim().toLowerCase();
+    return normalized === 'needs-authority-review' || normalized === 'needs-domain-review';
+  }) ?? false;
+
+  if (!hasExplicitAuthorityTag) return undefined;
+
+  const notes = reviewerNotes?.trim();
+  return notes && notes.length > 0
+    ? notes
+    : 'Reviewer marked this decision for authority or domain review.';
 }
 
 function currentCampReviewObservation(args: {
