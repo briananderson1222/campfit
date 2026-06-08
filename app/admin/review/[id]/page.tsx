@@ -5,6 +5,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react
 import Link from 'next/link';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { AdminCopilot } from '@/components/admin/admin-copilot';
+import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +46,10 @@ export default async function ReviewDetailPage({
   const backHref = buildQueueHref(searchParams);
   const campHref = `/admin/camps/${proposal.campId}`;
   const providerHref = proposal.providerId ? `/admin/providers/${proposal.providerId}` : null;
+  const surveyReviewSession = buildCampSurveyReviewQueueSession(proposal, {
+    actorId: auth.access.email ?? auth.access.userId,
+    includeAppliedFields: true,
+  });
 
   return (
     <div>
@@ -99,6 +104,7 @@ export default async function ReviewDetailPage({
 
       <ReviewPanel
         proposal={proposal}
+        surveyReviewSession={surveyReviewSession}
         queueContext={{
           backHref,
           campHref,

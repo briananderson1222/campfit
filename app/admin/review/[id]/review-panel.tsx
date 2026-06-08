@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
+import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
+import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbench';
 import {
   CampArrayFieldEditor,
   CampFieldInput,
@@ -57,9 +59,11 @@ const FIELD_PRIORITY: Record<string, number> = {
 
 export function ReviewPanel({
   proposal,
+  surveyReviewSession,
   queueContext,
 }: {
   proposal: CampChangeProposal;
+  surveyReviewSession?: CampReviewQueueSession;
   queueContext?: {
     backHref: string;
     campHref: string;
@@ -690,6 +694,19 @@ export function ReviewPanel({
               <p>{fields.length + alreadyApplied.size} field{(fields.length + alreadyApplied.size) !== 1 ? 's' : ''} in proposal</p>
             </div>
           </div>
+
+          {surveyReviewSession && (
+            <div className="glass-panel p-5 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-bark-600 mb-1 text-sm">Survey Review Workbench</h3>
+                  <p className="text-xs text-bark-400">ReviewItems, source evidence, and Surface preview generated from this proposal.</p>
+                </div>
+                <ShieldCheck className="h-4 w-4 shrink-0 text-pine-500" />
+              </div>
+              <SurveyReviewWorkbench session={surveyReviewSession} />
+            </div>
+          )}
 
           {/* Crawl hint */}
           <div className="glass-panel p-4">
