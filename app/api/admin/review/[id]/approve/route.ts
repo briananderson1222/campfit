@@ -50,6 +50,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       proposalCreatedAt: proposal.createdAt,
       extractionModel: proposal.extractionModel,
       reviewerNotes,
+      feedbackTags,
     });
 
     const SCALAR = [

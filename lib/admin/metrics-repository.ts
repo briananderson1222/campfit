@@ -1,10 +1,4 @@
 import { getPool } from '@/lib/db';
-import {
-  buildSurveyLearningProjections,
-  fieldObservation,
-  manualEntrySource,
-  SurveyInputBuilder,
-} from '@kontourai/survey';
 import { CAMPFIT_DECISION_EFFECTS } from '@/lib/trust-vocabulary';
 import type { FieldDiff, LLMExtractionResult, ProposedChanges } from './types';
 
@@ -104,8 +98,6 @@ export function buildRejectedProposalLearningDimensions(opts: {
   extractionModel?: string;
   overallConfidence?: number;
 }): Record<string, string> {
-  const surveyLearning = buildRejectedProposalSurveyLearningDimensions(opts);
-
   return compactStringRecord({
     proposalId: opts.proposalId,
     field: opts.field,
@@ -120,123 +112,7 @@ export function buildRejectedProposalLearningDimensions(opts: {
     feedbackTags: opts.feedbackTags?.join(','),
     extractionModel: opts.extractionModel,
     overallConfidence: opts.overallConfidence === undefined ? undefined : String(opts.overallConfidence),
-    ...surveyLearning,
   });
-}
-
-function buildRejectedProposalSurveyLearningDimensions(opts: {
-  proposalId: string;
-  field: string;
-  diff: FieldDiff;
-  reviewerNotes?: string | null;
-  feedbackTags?: string[];
-  extractionModel?: string;
-}): Record<string, string> {
-  if (!isOutsideReviewerComfortZone(opts.feedbackTags)) return {};
-
-  const reviewedAt = new Date(0).toISOString();
-  const candidateSetId = `proposal.${opts.proposalId}.field.${opts.field}.rejected.learning`;
-  const claimId = `${candidateSetId}.claim`;
-  const reviewOutcomeId = `${candidateSetId}.review`;
-  const comfortZoneNote = opts.reviewerNotes?.trim()
-    || 'Reviewer rejected the proposed value and marked it for authority or domain review.';
-  const builder = new SurveyInputBuilder({
-    source: 'campfit.review-learning',
-    generatedAt: reviewedAt,
-  });
-
-  builder.addObservation(fieldObservation({
-    id: `${candidateSetId}.observation`,
-    field: opts.field,
-    value: opts.diff.new,
-    rawSource: manualEntrySource({
-      id: `${candidateSetId}.source`,
-      sourceRef: `campfit:proposal:${opts.proposalId}:field:${opts.field}:review`,
-      observedAt: reviewedAt,
-      metadata: {
-        proposalId: opts.proposalId,
-        reviewKind: 'crawl-proposal-learning',
-      },
-    }),
-    extraction: {
-      confidence: opts.diff.confidence,
-      extractor: opts.extractionModel ?? 'campfit-crawler',
-      extractedAt: reviewedAt,
-      locator: `field:${opts.field}`,
-      excerpt: opts.diff.excerpt,
-      metadata: {
-        mode: opts.diff.mode,
-        sourceUrl: opts.diff.sourceUrl,
-        currentValue: opts.diff.old,
-      },
-    },
-    candidateSet: {
-      id: candidateSetId,
-      status: 'resolved',
-      rationale: comfortZoneNote,
-      metadata: {
-        proposalId: opts.proposalId,
-        decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
-      },
-    },
-    candidate: {
-      confidence: opts.diff.confidence,
-      sourceRank: 2,
-      rejectionReason: comfortZoneNote,
-      metadata: {
-        role: 'proposed-value',
-        decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
-      },
-    },
-    reviewOutcome: {
-      id: reviewOutcomeId,
-      status: 'rejected',
-      reviewedAt,
-      rationale: comfortZoneNote,
-      withinComfortZone: false,
-      comfortZoneNote,
-      metadata: {
-        proposalId: opts.proposalId,
-        feedbackTags: opts.feedbackTags,
-        decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
-      },
-    },
-    claim: {
-      id: claimId,
-      subjectType: 'campfit.proposal',
-      subjectId: opts.proposalId,
-      surface: 'campfit.admin.review',
-      claimType: 'campfit.scalar-field-candidate',
-      fieldOrBehavior: opts.field,
-      status: 'rejected',
-      impactLevel: 'medium',
-      collectedBy: opts.extractionModel ?? 'campfit-crawler',
-      metadata: {
-        proposalId: opts.proposalId,
-        reviewKind: 'crawl-proposal-learning',
-      },
-    },
-  }));
-
-  const [projection] = buildSurveyLearningProjections(builder.build());
-  if (!projection) return {};
-
-  return compactStringRecord({
-    surveyLearningProjectionId: projection.id,
-    surveyLearningProjectionKind: projection.kind,
-    surveyLearningProjectionSignal: projection.signal,
-    surveyLearningProjectionSource: projection.source,
-    surveyLearningProjectionReviewOutcomeId: projection.reviewOutcomeId,
-  });
-}
-
-function isOutsideReviewerComfortZone(feedbackTags?: string[]): boolean {
-  return feedbackTags?.some((tag) => {
-    const normalized = tag.trim().toLowerCase();
-    return normalized === 'outside-comfort-zone'
-      || normalized === 'needs-authority-review'
-      || normalized === 'needs-domain-review';
-  }) ?? false;
 }
 
 function compactStringRecord(input: Record<string, string | undefined>): Record<string, string> {
