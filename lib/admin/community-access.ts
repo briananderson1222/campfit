@@ -28,6 +28,17 @@ export async function getProposalCommunitySlug(proposalId: string): Promise<stri
   return rows[0]?.communitySlug ?? null;
 }
 
+export async function getProposalCommunityScope(proposalId: string): Promise<{ communitySlug: string | null } | null> {
+  const { rows } = await getPool().query<{ communitySlug: string | null }>(
+    `SELECT c."communitySlug"
+     FROM "CampChangeProposal" p
+     JOIN "Camp" c ON c.id = p."campId"
+     WHERE p.id = $1`,
+    [proposalId],
+  );
+  return rows[0] ?? null;
+}
+
 export async function getProviderProposalCommunitySlug(proposalId: string): Promise<string | null> {
   const { rows } = await getPool().query<{ communitySlug: string | null }>(
     `SELECT p."communitySlug"

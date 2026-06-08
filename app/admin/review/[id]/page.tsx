@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { AdminCopilot } from '@/components/admin/admin-copilot';
 import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
+import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +51,7 @@ export default async function ReviewDetailPage({
     actorId: auth.access.email ?? auth.access.userId,
     includeAppliedFields: true,
   });
+  const surveyReviewEvents = await getSurveyReviewEvents(proposal.id);
 
   return (
     <div>
@@ -105,6 +107,7 @@ export default async function ReviewDetailPage({
       <ReviewPanel
         proposal={proposal}
         surveyReviewSession={surveyReviewSession}
+        surveyReviewEvents={surveyReviewEvents}
         queueContext={{
           backHref,
           campHref,

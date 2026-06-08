@@ -10,6 +10,7 @@ import {
   CAMPFIT_TRUST_SUBJECT_TYPE,
   CAMPFIT_TRUST_SURFACE,
 } from '../trust-vocabulary';
+import { normalizeReviewQueueSession } from './survey-review-session-normalization';
 import type { CampChangeProposal, FieldDiff } from './types';
 
 export interface CampReviewQueueSession {
@@ -33,14 +34,14 @@ export function buildCampSurveyReviewQueueSession(
 ): CampReviewQueueSession {
   const items = buildCampSurveyReviewItems(proposal, options);
 
-  return {
+  return normalizeReviewQueueSession({
     items,
     activeItemName: items[0]?.metadata.name ?? '',
     notesByItemName: {},
     decisionsByItemName: {},
     reviewedAt: options.reviewedAt ?? proposal.reviewedAt ?? new Date().toISOString(),
     actorId: options.actorId ?? proposal.reviewedBy ?? 'campfit-admin',
-  };
+  });
 }
 
 export function buildCampSurveyReviewItems(
@@ -60,9 +61,9 @@ function buildCampSurveyReviewItem(
   diff: FieldDiff,
 ): ReviewItem {
   const candidateSetId = campCandidateSetId(proposal.campId, field, proposal.id);
-  const proposedSourceUrl = diff.sourceUrl ?? proposal.sourceUrl;
+  const proposedSourceUrl = surveyDisplayValue(diff.sourceUrl ?? proposal.sourceUrl);
   const createdAt = proposal.createdAt;
-  const feedbackTags = proposal.feedbackTags ?? [];
+  const feedbackTags = (proposal.feedbackTags ?? []).map(surveyDisplayValue);
 
   return {
     apiVersion: reviewResourceApiVersion,
@@ -117,24 +118,24 @@ function currentCandidate(
   return {
     id: `${candidateSetId}.current.candidate`,
     role: 'current',
-    value: diff.old,
+    value: surveyDisplayValue(diff.old),
     sourceRank: 2,
     source: {
       sourceId: `camp.${proposal.campId}.field.${field}.proposal.${proposal.id}.current.source`,
-      sourceRef: `campfit:camp:${proposal.campId}:field:${field}:current`,
+      sourceRef: surveyDisplayValue(`campfit:camp:${proposal.campId}:field:${field}:current`),
       kind: 'manual-entry',
       observedAt,
       locatorScheme: 'structured-field',
     },
     locator: {
       scheme: 'structured-field',
-      locator: `field:${field}`,
-      excerpt: 'Current CampFit value before applying the crawl proposal.',
+      locator: surveyDisplayValue(`field:${field}`),
+      excerpt: surveyDisplayValue('Current CampFit value before applying the crawl proposal.'),
     },
     extraction: {
       extractionId: campObservationId(proposal.campId, field, proposal.id, 'current'),
       target: field,
-      extractor: 'campfit-current-record',
+      extractor: surveyDisplayValue('campfit-current-record'),
       extractedAt: observedAt,
     },
     claimTarget: {
@@ -158,6 +159,7 @@ function currentCandidate(
     },
     producer: {
       status: 'current-managed-value',
+      rawValue: diff.old,
       decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
     },
   };
@@ -174,12 +176,12 @@ function proposedCandidate(
   return {
     id: `${candidateSetId}.proposed.candidate`,
     role: 'proposed',
-    value: diff.new,
+    value: surveyDisplayValue(diff.new),
     confidence: diff.confidence,
     sourceRank: 1,
     source: {
       sourceId: `camp.${proposal.campId}.field.${field}.proposal.${proposal.id}.source`,
-      sourceRef: sourceUrl,
+      sourceRef: surveyDisplayValue(sourceUrl),
       kind: 'web-page',
       observedAt,
       fetchedAt: proposal.crawlCompletedAt ?? undefined,
@@ -187,14 +189,14 @@ function proposedCandidate(
     },
     locator: {
       scheme: 'html',
-      locator: `field:${field}`,
-      excerpt: diff.excerpt ?? undefined,
+      locator: surveyDisplayValue(`field:${field}`),
+      excerpt: diff.excerpt === undefined ? undefined : surveyDisplayValue(diff.excerpt),
     },
     extraction: {
       extractionId: campObservationId(proposal.campId, field, proposal.id, 'proposed'),
       target: field,
       confidence: diff.confidence,
-      extractor: proposal.extractionModel || 'campfit-crawler',
+      extractor: surveyDisplayValue(proposal.extractionModel || 'campfit-crawler'),
       extractedAt: observedAt,
     },
     claimTarget: {
@@ -219,6 +221,7 @@ function proposedCandidate(
     producer: {
       mode: diff.mode,
       oldValue: diff.old,
+      rawValue: diff.new,
       proposalId: proposal.id,
       sourceAuthority: {
         authorityClass: 'publisher_owned_page',
@@ -228,6 +231,13 @@ function proposedCandidate(
       decisionEffect: CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
     },
   };
+}
+
+function surveyDisplayValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value, null, 2);
 }
 
 function campReviewItemName(proposalId: string, field: string): string {

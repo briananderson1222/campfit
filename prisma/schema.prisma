@@ -444,6 +444,30 @@ model CampChangeLog {
   @@index([campId, fieldName])
 }
 
+model SurveyReviewEvent {
+  id                 String   @id @default(uuid())
+  proposalId         String
+  sessionName        String
+  sequence           Int
+  eventName          String
+  eventType          String
+  reviewItemName     String?
+  activeItemName     String?
+  reviewDecisionName String?
+  candidateId        String?
+  status             String?
+  rationale          String?
+  actor              String?
+  occurredAt         DateTime
+  event              Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now())
+
+  @@unique([proposalId, sessionName, sequence])
+  @@index([proposalId, sessionName, sequence])
+  @@index([proposalId, reviewItemName])
+}
+
 model ProviderChangeLog {
   id         String   @id @default(uuid())
   providerId String

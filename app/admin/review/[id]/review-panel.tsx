@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
+import type { ReviewSessionEvent } from '@kontourai/survey';
 import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbench';
 import {
   CampArrayFieldEditor,
@@ -60,10 +61,12 @@ const FIELD_PRIORITY: Record<string, number> = {
 export function ReviewPanel({
   proposal,
   surveyReviewSession,
+  surveyReviewEvents = [],
   queueContext,
 }: {
   proposal: CampChangeProposal;
   surveyReviewSession?: CampReviewQueueSession;
+  surveyReviewEvents?: readonly ReviewSessionEvent[];
   queueContext?: {
     backHref: string;
     campHref: string;
@@ -97,6 +100,10 @@ export function ReviewPanel({
   const [campEditFields, setCampEditFields] = useState<Record<string, boolean>>({});
   const [savingCampField, setSavingCampField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const surveyEventPersistence = useMemo(() => ({
+    proposalId: proposal.id,
+    initialEvents: surveyReviewEvents,
+  }), [proposal.id, surveyReviewEvents]);
 
   const campData = (proposal.campData ?? {}) as Record<string, unknown>;
   const campDomain = (() => {
@@ -409,7 +416,12 @@ export function ReviewPanel({
             </button>
           </div>
 
-          {!surveyCollapsed && <SurveyReviewWorkbench session={surveyReviewSession} />}
+          {!surveyCollapsed && (
+            <SurveyReviewWorkbench
+              session={surveyReviewSession}
+              eventPersistence={surveyEventPersistence}
+            />
+          )}
         </section>
       )}
 
