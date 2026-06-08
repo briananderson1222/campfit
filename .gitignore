@@ -12,3 +12,6 @@ next-env.d.ts
 /lib/generated/prisma
 .env*.local
 .omx/
+test-results/
+playwright-report/
+.playwright/

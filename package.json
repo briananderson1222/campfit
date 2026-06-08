@@ -17,6 +17,7 @@
     "test:learning": "tsx scripts/test-review-learning-signals.ts",
     "test:surface": "tsx scripts/test-surface-trust-export.ts",
     "verify:survey-review-items": "tsx scripts/verify-survey-review-items.ts",
+    "verify:survey-browser": "playwright test",
     "verify:survey": "tsx scripts/verify-survey-integration.ts",
     "verify:admin": "tsx scripts/verify-admin-platform.ts"
   },
@@ -42,11 +43,13 @@
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.18.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.0",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.35",
     "pg": "^8.20.0",
