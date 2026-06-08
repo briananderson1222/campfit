@@ -85,6 +85,7 @@ export function ReviewPanel({
   const [loading, setLoading] = useState<'approve' | 'keep' | 'reject' | 'recrawl' | null>(null);
   const [recrawlMsg, setRecrawlMsg] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [surveyCollapsed, setSurveyCollapsed] = useState(false);
   const [proposedCollapsed, setProposedCollapsed] = useState(false);
   const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
   const [showAllMeta, setShowAllMeta] = useState(false);
@@ -383,6 +384,35 @@ export function ReviewPanel({
 
   return (
     <div className="space-y-6">
+      {surveyReviewSession && (
+        <section className="glass-panel p-5 space-y-4" data-testid="real-proposal-survey-workbench">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-pine-500" />
+                <h2 className="font-semibold text-bark-600 text-sm uppercase tracking-wide">Survey Review Workbench</h2>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                  Read-only pilot
+                </span>
+              </div>
+              <p className="mt-1 max-w-3xl text-xs text-bark-400">
+                Survey renders ReviewItems, candidate evidence, reviewer decisions, and Surface previews from this real proposal.
+                The legacy Apply and Reject controls below still perform the CampFit write path.
+              </p>
+            </div>
+            <button
+              onClick={() => setSurveyCollapsed((value) => !value)}
+              className="flex items-center gap-1.5 text-xs text-bark-400 hover:text-pine-600"
+            >
+              {surveyCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+              {surveyCollapsed ? 'Show Survey' : 'Hide Survey'}
+            </button>
+          </div>
+
+          {!surveyCollapsed && <SurveyReviewWorkbench session={surveyReviewSession} />}
+        </section>
+      )}
+
       {/* ── Proposed Changes header (always visible) ── */}
       <div className="flex items-center gap-2">
         <button
@@ -694,19 +724,6 @@ export function ReviewPanel({
               <p>{fields.length + alreadyApplied.size} field{(fields.length + alreadyApplied.size) !== 1 ? 's' : ''} in proposal</p>
             </div>
           </div>
-
-          {surveyReviewSession && (
-            <div className="glass-panel p-5 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-bark-600 mb-1 text-sm">Survey Review Workbench</h3>
-                  <p className="text-xs text-bark-400">ReviewItems, source evidence, and Surface preview generated from this proposal.</p>
-                </div>
-                <ShieldCheck className="h-4 w-4 shrink-0 text-pine-500" />
-              </div>
-              <SurveyReviewWorkbench session={surveyReviewSession} />
-            </div>
-          )}
 
           {/* Crawl hint */}
           <div className="glass-panel p-4">
