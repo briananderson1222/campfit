@@ -10,12 +10,14 @@ import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 export function SurveyReviewWorkbench({
   session,
   eventPersistence,
+  onPersistedEventsChange,
 }: {
   session: CampReviewQueueSession;
   eventPersistence?: {
     readonly proposalId: string;
     readonly initialEvents: readonly ReviewSessionEvent[];
   };
+  onPersistedEventsChange?: (events: readonly ReviewSessionEvent[]) => void;
 }) {
   const workbenchRef = useRef<HTMLDivElement | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
@@ -27,14 +29,17 @@ export function SurveyReviewWorkbench({
       eventStore: eventPersistence
         ? createPersistentReviewSessionEventStore({
             initialEvents: eventPersistence.initialEvents,
-            persist: ({ events, expectedEventCount }) => persistProposalReviewEvents(eventPersistence.proposalId, events, expectedEventCount),
+            persist: async ({ events, expectedEventCount }) => {
+              await persistProposalReviewEvents(eventPersistence.proposalId, events, expectedEventCount);
+              onPersistedEventsChange?.(events);
+            },
             onStatusChange: (state) => {
               setPersistenceError(state.status === 'error' ? 'Survey changes were not saved. Reload the review page before continuing.' : null);
             },
           })
         : createSessionStorageEventStore(storageKey),
     });
-  }, [eventPersistence, session, storageKey]);
+  }, [eventPersistence, onPersistedEventsChange, session, storageKey]);
 
   const activeItem = session.items.find((item) => item.metadata.name === session.activeItemName) ?? session.items[0];
   if (!activeItem) {

@@ -7,29 +7,81 @@ import { buildCampReviewTrustInput } from '@/lib/admin/trust-projection';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlug } from '@/lib/admin/community-access';
+import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from '@/lib/admin/survey-review-apply';
+import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
+import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const communitySlug = await getProposalCommunitySlug(params.id);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const { approvedFields = [], reviewerNotes, feedbackTags, overrides, keepPending = false }: {
-    approvedFields: string[];
+  const { approvedFields: requestedApprovedFields = [], reviewerNotes: requestedReviewerNotes, feedbackTags, overrides, keepPending = false, applyFromSurvey = false }: {
+    approvedFields?: string[];
     reviewerNotes?: string;
     feedbackTags?: string[];
     overrides?: Record<string, import('@/lib/admin/types').FieldDiff>;
     keepPending?: boolean; // if true: apply selected fields but leave proposal in queue
+    applyFromSurvey?: boolean;
   } = await request.json();
 
   const proposal = await getProposal(params.id);
   if (!proposal) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (proposal.status !== 'PENDING') return NextResponse.json({ error: 'Already reviewed' }, { status: 409 });
 
+  if (applyFromSurvey && overrides) {
+    return NextResponse.json({ error: 'Survey apply does not accept client-submitted field overrides.' }, { status: 400 });
+  }
+
+  const unappliedProposalFields = unappliedFields(proposal);
+  if (!applyFromSurvey) {
+    const invalidLegacyFields = invalidLegacyApplyFields({
+      proposalFields: unappliedProposalFields,
+      approvedFields: requestedApprovedFields,
+      overrideFields: Object.keys(overrides ?? {}),
+    });
+    if (invalidLegacyFields.length > 0) {
+      return NextResponse.json({
+        error: `Review apply includes field(s) outside this proposal: ${invalidLegacyFields.join(', ')}`,
+      }, { status: 400 });
+    }
+  }
+
   // Merge reviewer overrides into proposal changes (reviewer may have edited values)
-  const effectiveChanges = overrides
-    ? { ...proposal.proposedChanges, ...overrides }
-    : proposal.proposedChanges;
+  const effectiveChanges = pickFields(
+    overrides ? { ...proposal.proposedChanges, ...overrides } : proposal.proposedChanges,
+    unappliedProposalFields,
+  );
   const reviewedAt = new Date().toISOString();
+
+  let approvedFields = requestedApprovedFields;
+  let reviewerNotes = requestedReviewerNotes;
+  let surveyRejectedFields: string[] | undefined;
+
+  if (applyFromSurvey) {
+    try {
+      const surveySession = buildCampSurveyReviewQueueSession(proposal, {
+        actorId: auth.access.email,
+        reviewedAt,
+        includeAppliedFields: true,
+      });
+      const surveyEvents = await getSurveyReviewEvents(proposal.id);
+      const surveyApply = deriveCampApplyFromSurveySession({
+        proposal,
+        session: surveySession,
+        events: surveyEvents,
+        mode: keepPending ? 'partial' : 'full',
+      });
+      approvedFields = surveyApply.approvedFields;
+      surveyRejectedFields = surveyApply.rejectedFields;
+      reviewerNotes = combineReviewerNotes(requestedReviewerNotes, surveyApply.reviewerNotes);
+    } catch (error) {
+      if (error instanceof SurveyReviewApplyError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
+  }
 
   const pool = getPool();
   const client = await pool.connect();
@@ -38,7 +90,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     await client.query('BEGIN');
 
     const allFields = Object.keys(effectiveChanges);
-    const rejectedFields = allFields.filter(f => !approvedFields.includes(f));
+    const rejectedFields = surveyRejectedFields ?? allFields.filter(f => !approvedFields.includes(f));
     buildCampReviewTrustInput({
       proposalId: proposal.id,
       campId: proposal.campId,
@@ -236,4 +288,33 @@ export async function POST(request: Request, { params }: { params: { id: string 
   } finally {
     client.release();
   }
+}
+
+function combineReviewerNotes(requestNotes?: string, surveyNotes?: string): string | undefined {
+  const notes = [requestNotes?.trim(), surveyNotes?.trim()].filter((note): note is string => Boolean(note));
+  return notes.length > 0 ? notes.join('\n') : undefined;
+}
+
+function invalidLegacyApplyFields(opts: {
+  proposalFields: readonly string[];
+  approvedFields: readonly string[];
+  overrideFields: readonly string[];
+}): string[] {
+  const proposalFields = new Set(opts.proposalFields);
+  return Array.from(new Set([...opts.approvedFields, ...opts.overrideFields]))
+    .filter((field) => !proposalFields.has(field));
+}
+
+function unappliedFields(proposal: Awaited<ReturnType<typeof getProposal>>): string[] {
+  if (!proposal) return [];
+  const alreadyApplied = new Set(proposal.appliedFields ?? []);
+  return Object.keys(proposal.proposedChanges).filter((field) => !alreadyApplied.has(field));
+}
+
+function pickFields<T>(record: Record<string, T>, fields: readonly string[]): Record<string, T> {
+  return Object.fromEntries(
+    fields
+      .filter((field) => field in record)
+      .map((field) => [field, record[field]]),
+  );
 }

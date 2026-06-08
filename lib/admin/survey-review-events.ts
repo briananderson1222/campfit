@@ -40,7 +40,6 @@ export async function replaceSurveyReviewEvents(opts: {
 
     for (const event of opts.events) {
       const spec = event.spec;
-      const actor = spec.actor?.id ?? spec.actor?.displayName ?? opts.actorEmail;
 
       await client.query(
         `INSERT INTO "SurveyReviewEvent" (
@@ -72,7 +71,7 @@ export async function replaceSurveyReviewEvents(opts: {
           spec.candidateId ?? null,
           spec.status ?? null,
           spec.rationale ?? null,
-          actor,
+          opts.actorEmail,
           spec.occurredAt,
           JSON.stringify(event),
         ],

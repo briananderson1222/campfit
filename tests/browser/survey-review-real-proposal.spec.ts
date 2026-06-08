@@ -16,8 +16,8 @@ test('renders Survey workbench on a real pending proposal detail page', async ({
 
   const surveyPanel = page.getByTestId('real-proposal-survey-workbench');
   await expect(surveyPanel).toBeVisible();
-  await expect(surveyPanel).toContainText('Read-only pilot');
-  await expect(surveyPanel).toContainText('legacy Apply and Reject controls');
+  await expect(surveyPanel).toContainText('Apply source');
+  await expect(surveyPanel).toContainText('Apply actions below replay saved Survey decisions on the server');
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
   await expect(surveyPanel.getByTestId('review-queue')).toBeVisible();
   await expect(surveyPanel.getByTestId('review-focus')).toBeVisible();

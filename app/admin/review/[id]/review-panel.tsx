@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
@@ -76,6 +76,7 @@ export function ReviewPanel({
   };
 }) {
   const router = useRouter();
+  const hasSurveyReviewSession = Boolean(surveyReviewSession);
   const [proposedChanges, setProposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
   // Fields already applied in previous partial-approval rounds
   const alreadyApplied = new Set<string>(proposal.appliedFields ?? []);
@@ -100,10 +101,20 @@ export function ReviewPanel({
   const [campEditFields, setCampEditFields] = useState<Record<string, boolean>>({});
   const [savingCampField, setSavingCampField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [useSurveyApply, setUseSurveyApply] = useState(hasSurveyReviewSession);
+  const [persistedSurveyEvents, setPersistedSurveyEvents] = useState<readonly ReviewSessionEvent[]>(surveyReviewEvents);
+  const applyFromSurvey = hasSurveyReviewSession && useSurveyApply;
   const surveyEventPersistence = useMemo(() => ({
     proposalId: proposal.id,
     initialEvents: surveyReviewEvents,
   }), [proposal.id, surveyReviewEvents]);
+  const handlePersistedSurveyEventsChange = useCallback((events: readonly ReviewSessionEvent[]) => {
+    setPersistedSurveyEvents(events);
+  }, []);
+  const savedSurveyDecisionCount = useMemo(() => countSavedSurveyDecisions(persistedSurveyEvents), [persistedSurveyEvents]);
+  const surveyItemCount = surveyReviewSession?.items.length ?? 0;
+  const canApplySurveyPartial = savedSurveyDecisionCount > 0;
+  const canApplySurveyFull = surveyItemCount > 0 && savedSurveyDecisionCount >= surveyItemCount;
 
   const campData = (proposal.campData ?? {}) as Record<string, unknown>;
   const campDomain = (() => {
@@ -223,10 +234,11 @@ export function ReviewPanel({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          approvedFields: Array.from(selected),
+          approvedFields: applyFromSurvey ? undefined : Array.from(selected),
           reviewerNotes: notes,
-          overrides: proposedChanges,
+          overrides: applyFromSurvey ? undefined : proposedChanges,
           keepPending,
+          applyFromSurvey,
         }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to apply proposal'));
@@ -398,13 +410,13 @@ export function ReviewPanel({
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-pine-500" />
                 <h2 className="font-semibold text-bark-600 text-sm uppercase tracking-wide">Survey Review Workbench</h2>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-                  Read-only pilot
+                <span className="rounded-full bg-pine-100 px-2 py-0.5 text-[11px] font-semibold text-pine-700">
+                  Apply source
                 </span>
               </div>
               <p className="mt-1 max-w-3xl text-xs text-bark-400">
-                Survey renders ReviewItems, candidate evidence, reviewer decisions, and Surface previews from this real proposal.
-                The legacy Apply and Reject controls below still perform the CampFit write path.
+                Survey renders ReviewItems, candidate evidence, reviewer decisions, and Surface previews from this proposal.
+                Apply actions below replay saved Survey decisions on the server before CampFit writes the approved fields.
               </p>
             </div>
             <button
@@ -420,6 +432,7 @@ export function ReviewPanel({
             <SurveyReviewWorkbench
               session={surveyReviewSession}
               eventPersistence={surveyEventPersistence}
+              onPersistedEventsChange={handlePersistedSurveyEventsChange}
             />
           )}
         </section>
@@ -652,6 +665,41 @@ export function ReviewPanel({
             />
 
             <div className="space-y-2 mt-4">
+              {hasSurveyReviewSession && (
+                <div className="rounded-xl border border-cream-300/70 bg-cream-50/80 p-3 text-xs text-bark-500">
+                  <p className="mb-2 font-semibold text-bark-600">Apply source</p>
+                  <div className="space-y-2">
+                    <label className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="applySource"
+                        checked={useSurveyApply}
+                        onChange={() => setUseSurveyApply(true)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block font-medium text-bark-600">Saved Survey decisions</span>
+                        <span className="block text-bark-400">
+                          {savedSurveyDecisionCount} of {surveyItemCount} ReviewItems resolved.
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="applySource"
+                        checked={!useSurveyApply}
+                        onChange={() => setUseSurveyApply(false)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block font-medium text-bark-600">Selected fields and edits</span>
+                        <span className="block text-bark-400">Use the checkbox selections and inline proposal edits below.</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
               {queueContext?.campHref && (
                 <Link href={queueContext.campHref} className="btn-secondary w-full gap-2">
                   <ExternalLink className="w-4 h-4" />
@@ -666,27 +714,27 @@ export function ReviewPanel({
               )}
               <button
                 onClick={handleApprove}
-                disabled={loading !== null || selected.size === 0}
+                disabled={loading !== null || (applyFromSurvey ? !canApplySurveyFull : selected.size === 0)}
                 className="btn-primary w-full gap-2 disabled:opacity-50"
-                title="Apply selected fields and close this proposal"
+                title={applyFromSurvey ? 'Apply saved Survey decisions for every ReviewItem and close this proposal' : 'Apply selected fields and close this proposal'}
               >
                 {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 Apply & Resolve
               </button>
               <button
                 onClick={handleApproveAndNext}
-                disabled={loading !== null || selected.size === 0 || !queueContext?.nextHref}
+                disabled={loading !== null || (applyFromSurvey ? !canApplySurveyFull : selected.size === 0) || !queueContext?.nextHref}
                 className="btn-secondary w-full gap-2 disabled:opacity-50"
-                title="Apply selected fields and move straight to the next proposal in this queue"
+                title={applyFromSurvey ? 'Apply saved Survey decisions for every ReviewItem and move straight to the next proposal in this queue' : 'Apply selected fields and move straight to the next proposal in this queue'}
               >
                 {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
                 Apply & Next
               </button>
               <button
                 onClick={handleKeep}
-                disabled={loading !== null || selected.size === 0}
+                disabled={loading !== null || (applyFromSurvey ? !canApplySurveyPartial : selected.size === 0)}
                 className="btn-secondary w-full gap-2 disabled:opacity-50"
-                title="Apply selected fields but keep this proposal in queue for future review"
+                title={applyFromSurvey ? 'Apply currently resolved Survey decisions but keep this proposal in queue for future review' : 'Apply selected fields but keep this proposal in queue for future review'}
               >
                 {loading === 'keep' ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookmarkCheck className="w-4 h-4" />}
                 Apply & Keep Reviewing
@@ -796,6 +844,16 @@ function compareFieldPriority(fieldA: string, fieldB: string) {
   const priorityB = FIELD_PRIORITY[fieldB] ?? 100;
   if (priorityA !== priorityB) return priorityA - priorityB;
   return fieldA.localeCompare(fieldB);
+}
+
+function countSavedSurveyDecisions(events: readonly ReviewSessionEvent[]): number {
+  const reviewedItems = new Set<string>();
+  for (const event of events) {
+    if (event.spec.reviewItemName && event.spec.reviewDecisionName) {
+      reviewedItems.add(event.spec.reviewItemName);
+    }
+  }
+  return reviewedItems.size;
 }
 
 function cloneArrayRows(value: unknown): Record<string, unknown>[] {
