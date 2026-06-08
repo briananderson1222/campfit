@@ -10,7 +10,6 @@ import {
   CAMPFIT_TRUST_SUBJECT_TYPE,
   CAMPFIT_TRUST_SURFACE,
 } from '../trust-vocabulary';
-import { normalizeReviewQueueSession } from './survey-review-session-normalization';
 import type { CampChangeProposal, FieldDiff } from './types';
 
 export interface CampReviewQueueSession {
@@ -34,14 +33,14 @@ export function buildCampSurveyReviewQueueSession(
 ): CampReviewQueueSession {
   const items = buildCampSurveyReviewItems(proposal, options);
 
-  return normalizeReviewQueueSession({
+  return {
     items,
     activeItemName: items[0]?.metadata.name ?? '',
     notesByItemName: {},
     decisionsByItemName: {},
     reviewedAt: options.reviewedAt ?? proposal.reviewedAt ?? new Date().toISOString(),
     actorId: options.actorId ?? proposal.reviewedBy ?? 'campfit-admin',
-  });
+  };
 }
 
 export function buildCampSurveyReviewItems(
@@ -61,9 +60,9 @@ function buildCampSurveyReviewItem(
   diff: FieldDiff,
 ): ReviewItem {
   const candidateSetId = campCandidateSetId(proposal.campId, field, proposal.id);
-  const proposedSourceUrl = surveyDisplayValue(diff.sourceUrl ?? proposal.sourceUrl);
+  const proposedSourceUrl = displayString(diff.sourceUrl ?? proposal.sourceUrl);
   const createdAt = proposal.createdAt;
-  const feedbackTags = (proposal.feedbackTags ?? []).map(surveyDisplayValue);
+  const feedbackTags = (proposal.feedbackTags ?? []).map(displayString);
 
   return {
     apiVersion: reviewResourceApiVersion,
@@ -118,24 +117,24 @@ function currentCandidate(
   return {
     id: `${candidateSetId}.current.candidate`,
     role: 'current',
-    value: surveyDisplayValue(diff.old),
+    value: diff.old,
     sourceRank: 2,
     source: {
       sourceId: `camp.${proposal.campId}.field.${field}.proposal.${proposal.id}.current.source`,
-      sourceRef: surveyDisplayValue(`campfit:camp:${proposal.campId}:field:${field}:current`),
+      sourceRef: `campfit:camp:${proposal.campId}:field:${field}:current`,
       kind: 'manual-entry',
       observedAt,
       locatorScheme: 'structured-field',
     },
     locator: {
       scheme: 'structured-field',
-      locator: surveyDisplayValue(`field:${field}`),
-      excerpt: surveyDisplayValue('Current CampFit value before applying the crawl proposal.'),
+      locator: `field:${field}`,
+      excerpt: 'Current CampFit value before applying the crawl proposal.',
     },
     extraction: {
       extractionId: campObservationId(proposal.campId, field, proposal.id, 'current'),
       target: field,
-      extractor: surveyDisplayValue('campfit-current-record'),
+      extractor: 'campfit-current-record',
       extractedAt: observedAt,
     },
     claimTarget: {
@@ -176,12 +175,12 @@ function proposedCandidate(
   return {
     id: `${candidateSetId}.proposed.candidate`,
     role: 'proposed',
-    value: surveyDisplayValue(diff.new),
+    value: diff.new,
     confidence: diff.confidence,
     sourceRank: 1,
     source: {
       sourceId: `camp.${proposal.campId}.field.${field}.proposal.${proposal.id}.source`,
-      sourceRef: surveyDisplayValue(sourceUrl),
+      sourceRef: sourceUrl,
       kind: 'web-page',
       observedAt,
       fetchedAt: proposal.crawlCompletedAt ?? undefined,
@@ -189,14 +188,14 @@ function proposedCandidate(
     },
     locator: {
       scheme: 'html',
-      locator: surveyDisplayValue(`field:${field}`),
-      excerpt: diff.excerpt === undefined ? undefined : surveyDisplayValue(diff.excerpt),
+      locator: `field:${field}`,
+      excerpt: diff.excerpt === undefined ? undefined : displayString(diff.excerpt),
     },
     extraction: {
       extractionId: campObservationId(proposal.campId, field, proposal.id, 'proposed'),
       target: field,
       confidence: diff.confidence,
-      extractor: surveyDisplayValue(proposal.extractionModel || 'campfit-crawler'),
+      extractor: proposal.extractionModel || 'campfit-crawler',
       extractedAt: observedAt,
     },
     claimTarget: {
@@ -233,7 +232,7 @@ function proposedCandidate(
   };
 }
 
-function surveyDisplayValue(value: unknown): string {
+function displayString(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === null || value === undefined) return '';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);

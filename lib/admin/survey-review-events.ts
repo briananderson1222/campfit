@@ -1,7 +1,6 @@
 import type { ReviewSessionEvent } from '@kontourai/survey';
 
 import { getPool } from '@/lib/db';
-import { normalizeReviewSessionEvent } from './survey-review-event-normalization';
 
 export async function getSurveyReviewEvents(proposalId: string): Promise<ReviewSessionEvent[]> {
   const result = await getPool().query<{ event: ReviewSessionEvent }>(
@@ -12,9 +11,7 @@ export async function getSurveyReviewEvents(proposalId: string): Promise<ReviewS
     [proposalId],
   );
 
-  return result.rows
-    .map((row) => normalizeReviewSessionEvent(row.event))
-    .filter(isReviewSessionEvent);
+  return result.rows.map((row) => row.event).filter(isReviewSessionEvent);
 }
 
 export async function replaceSurveyReviewEvents(opts: {
@@ -41,8 +38,7 @@ export async function replaceSurveyReviewEvents(opts: {
 
     await client.query(`DELETE FROM "SurveyReviewEvent" WHERE "proposalId" = $1`, [opts.proposalId]);
 
-    for (const originalEvent of opts.events) {
-      const event = normalizeReviewSessionEvent(originalEvent);
+    for (const event of opts.events) {
       const spec = event.spec;
       const actor = spec.actor?.id ?? spec.actor?.displayName ?? opts.actorEmail;
 

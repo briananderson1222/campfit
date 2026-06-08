@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { buildReviewWorkbenchResultsFromSession } from '@kontourai/survey/review-workbench';
 
 import { SurveyReviewWorkbench } from '../components/admin/survey-review-workbench';
 import { buildCampSurveyReviewItems, buildCampSurveyReviewQueueSession } from '../lib/admin/survey-review-items';
@@ -71,6 +72,8 @@ assert.deepEqual(items[0]?.spec.producerPolicy?.feedbackTags, ['needs-authority-
 
 const allItems = buildCampSurveyReviewItems(proposal, { includeAppliedFields: true });
 assert.equal(allItems.length, 2);
+assert.equal(allItems[1]?.spec.candidates[0]?.value, null);
+assert.equal(allItems[1]?.spec.candidates[1]?.value, '303-555-0100');
 
 const session = buildCampSurveyReviewQueueSession(proposal, {
   actorId: 'operator@example.test',
@@ -80,6 +83,17 @@ assert.equal(session.items.length, 1);
 assert.equal(session.activeItemName, 'camp-proposal-proposal-1-description');
 assert.equal(session.actorId, 'operator@example.test');
 assert.equal(session.reviewedAt, '2026-06-01T12:00:00.000Z');
+
+const results = buildReviewWorkbenchResultsFromSession({
+  ...session,
+  decisionsByItemName: {
+    [session.items[0]!.metadata.name]: 'accept-proposed',
+  },
+});
+assert.equal(results.length, 1);
+assert.equal(results[0]?.selectedCandidateRole, 'proposed');
+assert.equal(results[0]?.selectedValue, 'Outdoor day camp for ages 7-12.');
+assert.equal(results[0]?.reviewDecision.spec.status, 'verified');
 
 const markup = renderToStaticMarkup(createElement(SurveyReviewWorkbench, { session }));
 assert.match(markup, /Survey queue payload/);

@@ -1,13 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, CircleDashed, FileJson2, ShieldCheck, Telescope } from 'lucide-react';
-import { mountReviewWorkbench } from '@kontourai/survey/review-workbench';
+import React, { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, CircleDashed, FileJson2, Telescope } from 'lucide-react';
+import { createPersistentReviewSessionEventStore, mountReviewWorkbench } from '@kontourai/survey/review-workbench';
 import type { ReviewSessionEvent } from '@kontourai/survey';
 
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
-import { normalizeReviewSessionEvents } from '@/lib/admin/survey-review-event-normalization';
-import { normalizeReviewQueueSession } from '@/lib/admin/survey-review-session-normalization';
 
 export function SurveyReviewWorkbench({
   session,
@@ -21,22 +19,24 @@ export function SurveyReviewWorkbench({
 }) {
   const workbenchRef = useRef<HTMLDivElement | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
-  const normalizedSession = useMemo(() => normalizeReviewQueueSession(session), [session]);
-  const storageKey = `campfit:${normalizedSession.items.map((item) => item.metadata.name).join(',')}`;
+  const storageKey = `campfit:${session.items.map((item) => item.metadata.name).join(',')}`;
 
   useEffect(() => {
     if (!workbenchRef.current) return;
-    mountReviewWorkbench(workbenchRef.current, normalizedSession, {
+    mountReviewWorkbench(workbenchRef.current, session, {
       eventStore: eventPersistence
-        ? createProposalReviewEventStore(eventPersistence.proposalId, eventPersistence.initialEvents, {
-            onError: setPersistenceError,
-            onSaved: () => setPersistenceError(null),
+        ? createPersistentReviewSessionEventStore({
+            initialEvents: eventPersistence.initialEvents,
+            persist: ({ events, expectedEventCount }) => persistProposalReviewEvents(eventPersistence.proposalId, events, expectedEventCount),
+            onStatusChange: (state) => {
+              setPersistenceError(state.status === 'error' ? 'Survey changes were not saved. Reload the review page before continuing.' : null);
+            },
           })
         : createSessionStorageEventStore(storageKey),
     });
-  }, [eventPersistence, normalizedSession, storageKey]);
+  }, [eventPersistence, session, storageKey]);
 
-  const activeItem = normalizedSession.items.find((item) => item.metadata.name === normalizedSession.activeItemName) ?? normalizedSession.items[0];
+  const activeItem = session.items.find((item) => item.metadata.name === session.activeItemName) ?? session.items[0];
   if (!activeItem) {
     return (
       <div className="rounded-xl border border-cream-300/70 bg-cream-50/80 p-3 text-xs text-bark-400">
@@ -73,9 +73,9 @@ export function SurveyReviewWorkbench({
           </div>
           <dl className="grid grid-cols-2 gap-2 text-xs">
             <Field label="Target" value={activeItem.spec.target} />
-            <Field label="Actor" value={normalizedSession.actorId} />
-            <Field label="Items" value={String(normalizedSession.items.length)} />
-            <Field label="Reviewed at" value={new Date(normalizedSession.reviewedAt).toLocaleString()} />
+            <Field label="Actor" value={session.actorId} />
+            <Field label="Items" value={String(session.items.length)} />
+            <Field label="Reviewed at" value={new Date(session.reviewedAt).toLocaleString()} />
           </dl>
         </div>
 
@@ -199,47 +199,17 @@ function createSessionStorageEventStore(key: string) {
   };
 }
 
-function createProposalReviewEventStore(
+async function persistProposalReviewEvents(
   proposalId: string,
-  initialEvents: readonly ReviewSessionEvent[],
-  callbacks: {
-    readonly onError: (message: string) => void;
-    readonly onSaved: () => void;
-  },
+  events: readonly ReviewSessionEvent[],
+  expectedEventCount: number,
 ) {
-  let lastPersistedSerialized = JSON.stringify(initialEvents);
-  let lastPersistedEventCount = initialEvents.length;
-  let pendingSave = Promise.resolve();
-
-  return {
-    load: () => initialEvents,
-    save: (_session: unknown, events: readonly ReviewSessionEvent[]) => {
-      const normalizedEvents = normalizeReviewSessionEvents(events);
-      const serialized = JSON.stringify(normalizedEvents);
-      if (serialized === lastPersistedSerialized) return;
-
-      pendingSave = pendingSave
-        .then(async () => {
-          if (serialized === lastPersistedSerialized) return;
-          const response = await fetch(`/api/admin/review/${proposalId}/survey-events`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              events: normalizedEvents,
-              expectedEventCount: lastPersistedEventCount,
-            }),
-          });
-          if (!response.ok) {
-            throw new Error(`Failed to persist Survey review events: ${response.status}`);
-          }
-          lastPersistedSerialized = serialized;
-          lastPersistedEventCount = normalizedEvents.length;
-          callbacks.onSaved();
-        })
-        .catch((error) => {
-          console.error('Failed to persist Survey review events', error);
-          callbacks.onError('Survey changes were not saved. Reload the review page before continuing.');
-        });
-    },
-  };
+  const response = await fetch(`/api/admin/review/${proposalId}/survey-events`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events, expectedEventCount }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to persist Survey review events: ${response.status}`);
+  }
 }
