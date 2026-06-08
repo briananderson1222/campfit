@@ -259,6 +259,10 @@ function proposedCampReviewObservation(args: {
   selected: boolean;
   decisionEffect: string;
 }): SurveyObservationInput {
+  const rejectionReason = args.selected
+    ? undefined
+    : rejectedProposedCandidateReason(args.reviewerNotes);
+
   return fieldObservation({
     id: campObservationId(args.campId, args.field, args.proposalId, 'proposed'),
     field: args.field,
@@ -286,6 +290,7 @@ function proposedCampReviewObservation(args: {
     candidate: {
       confidence: args.diff.confidence,
       sourceRank: args.selected ? 1 : 2,
+      rejectionReason,
       metadata: {
         role: 'proposed-value',
         decisionEffect: args.decisionEffect,
@@ -309,6 +314,13 @@ function proposedCampReviewObservation(args: {
       },
     }),
   });
+}
+
+function rejectedProposedCandidateReason(reviewerNotes?: string | null): string {
+  const notes = reviewerNotes?.trim();
+  return notes && notes.length > 0
+    ? notes
+    : 'Reviewer rejected the proposed value and kept the current value.';
 }
 
 function campClaim(args: {

@@ -119,6 +119,10 @@ const rejectedSurvey = surveyMetadata(rejectedProposal);
 assert.equal(rejectedSurvey.candidateSetId, retainedSurvey.candidateSetId);
 assert.equal(rejectedSurvey.candidateId, 'camp.camp-1.field.contactPhone.proposal.proposal-1.candidates.proposed.candidate');
 assert.equal(rejectedSurvey.reviewOutcomeId, undefined);
+assert.deepEqual(
+  rejectedSurvey.candidate,
+  { rejectionReason: 'Description accepted, phone rejected until source is clearer.' },
+);
 assert.ok(reviewReport.events.some((event) =>
   event.claimId === rejectedProposal?.id
   && event.status === 'rejected'
