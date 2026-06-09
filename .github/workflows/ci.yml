@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check content boundary
+        run: npm run check:content-boundary
+
       - name: Validate Prisma schema
         run: npx prisma validate
 
