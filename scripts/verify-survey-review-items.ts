@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildReviewWorkbenchResultsFromSession } from '@kontourai/survey/review-workbench';
+import { buildReviewWorkbenchResultsFromSession } from '../lib/kontourai/survey-review-workbench';
 
 import { SurveyReviewWorkbench } from '../components/admin/survey-review-workbench';
 import { buildCampSurveyReviewItems, buildCampSurveyReviewQueueSession } from '../lib/admin/survey-review-items';
@@ -99,6 +99,7 @@ const markup = renderToStaticMarkup(createElement(SurveyReviewWorkbench, { sessi
 assert.match(markup, /Survey queue payload/);
 assert.match(markup, /Outdoor day camp for ages 7-12/);
 assert.match(markup, /publisher_owned_page/);
-assert.match(markup, /Surface preview/);
+assert.match(markup, /Projection summary/);
+assert.match(markup, /IDs and trace links/);
 
 console.log('survey review item verification passed');

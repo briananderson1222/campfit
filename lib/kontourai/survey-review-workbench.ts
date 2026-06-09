@@ -1,6 +1,7 @@
 export {
   buildReviewWorkbenchSessionExport,
   buildReviewWorkbenchSessionExportForSnapshot,
+  buildReviewWorkbenchResultsFromSession,
   createPersistentReviewSessionEventStore,
   mountReviewWorkbench,
   replayReviewSessionEventsForSnapshot,
