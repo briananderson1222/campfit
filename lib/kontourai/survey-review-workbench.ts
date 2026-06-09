@@ -6,6 +6,7 @@ export {
   buildReviewWorkbenchResultsFromSession,
   createPersistentReviewSessionEventStore,
   mountReviewWorkbench,
+  persistReviewSessionEvents,
   replayReviewSessionEventsForSnapshot,
   validateReviewSessionEventsForSnapshot,
 } from '@kontourai/survey/review-workbench';

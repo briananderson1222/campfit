@@ -26,7 +26,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "@kontourai/surface": "^0.5.1",
-    "@kontourai/survey": "^0.4.16",
+    "@kontourai/survey": "^0.4.17",
     "@prisma/client": "^7.8.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.108.0",

@@ -44,8 +44,9 @@ export function SurveyReviewWorkbench({
         ? createPersistentReviewSessionEventStore({
             initialEvents: eventPersistence.initialEvents,
             persist: async ({ events, expectedEventCount }) => {
-              await persistProposalReviewEvents(eventPersistence.proposalId, events, expectedEventCount);
-              onPersistedEventsChange?.(events);
+              const persisted = await persistProposalReviewEvents(eventPersistence.proposalId, events, expectedEventCount);
+              onPersistedEventsChange?.(persisted.events);
+              return persisted;
             },
             onStatusChange: (state) => {
               setPersistenceError(state.status === 'error' ? 'Survey changes were not saved. Reload the review page before continuing.' : null);
@@ -312,7 +313,7 @@ async function persistProposalReviewEvents(
   proposalId: string,
   events: readonly ReviewSessionEvent[],
   expectedEventCount: number,
-) {
+): Promise<{ events: readonly ReviewSessionEvent[]; eventCount: number }> {
   const response = await fetch(`/api/admin/review/${proposalId}/survey-events`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -321,4 +322,8 @@ async function persistProposalReviewEvents(
   if (!response.ok) {
     throw new Error(`Failed to persist Survey review events: ${response.status}`);
   }
+  return {
+    events,
+    eventCount: events.length,
+  };
 }
