@@ -1,7 +1,7 @@
 import type { ReviewDecision, ReviewSessionEvent } from '@kontourai/survey';
 import {
   buildReviewWorkbenchSessionExport,
-  replayReviewSessionEvents,
+  replayReviewSessionEventsForSnapshot,
   type ReviewWorkbenchResult,
 } from '@kontourai/survey/review-workbench';
 
@@ -33,9 +33,8 @@ export function deriveCampApplyFromSurveySession(opts: {
 }): SurveyReviewApplyResult {
   const mode = opts.mode ?? 'full';
   validateSessionItems(opts.proposal, opts.session);
-  validateEventItems(opts.session, opts.events);
 
-  const replayedSession = replayReviewSessionEvents(opts.session, opts.events);
+  const replayedSession = replaySurveySessionForApply(opts.session, opts.events);
   const sessionExport = buildReviewWorkbenchSessionExport(replayedSession, opts.events);
   const resultsByItemName = new Map(sessionExport.results.map((result) => [result.reviewItemName, result]));
 
@@ -117,16 +116,16 @@ function validateSessionItems(proposal: CampChangeProposal, session: CampReviewQ
   }
 }
 
-function validateEventItems(session: CampReviewQueueSession, events: readonly ReviewSessionEvent[]): void {
-  const itemNames = new Set(session.items.map((item) => item.metadata.name));
-
-  for (const event of events) {
-    const names = [event.spec.reviewItemName, event.spec.activeItemName].filter(Boolean);
-    for (const itemName of names) {
-      if (itemName && !itemNames.has(itemName)) {
-        throw new SurveyReviewApplyError(`Survey event ${event.metadata.name} references an unknown item: ${itemName}`);
-      }
-    }
+function replaySurveySessionForApply(
+  session: CampReviewQueueSession,
+  events: readonly ReviewSessionEvent[],
+): CampReviewQueueSession {
+  try {
+    return replayReviewSessionEventsForSnapshot(session, events);
+  } catch (error) {
+    throw new SurveyReviewApplyError(error instanceof Error
+      ? error.message
+      : 'Survey review events do not match the reviewed session snapshot.');
   }
 }
 
