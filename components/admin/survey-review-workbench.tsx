@@ -8,6 +8,7 @@ import { createPersistentReviewSessionEventStore, mountReviewWorkbench } from '@
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { cn } from '@/lib/utils';
 import { adminTheme } from '@/components/admin/theme';
+import { CampFieldValue } from '@/components/admin/camp-field-controls';
 
 export function SurveyReviewWorkbench({
   session,
@@ -113,8 +114,8 @@ export function SurveyReviewWorkbench({
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <CandidateCard title="Current value" tone="current" candidate={current} fieldLabel={fieldLabel} />
-          <CandidateCard title="Proposed value" tone="proposed" candidate={proposed} fieldLabel={fieldLabel} />
+          <CandidateCard title="Current value" tone="current" candidate={current} fieldLabel={fieldLabel} fieldName={fieldName} />
+          <CandidateCard title="Proposed value" tone="proposed" candidate={proposed} fieldLabel={fieldLabel} fieldName={fieldName} />
         </div>
 
         <div className="rounded-xl border border-pine-200/70 bg-pine-50/50 p-4 admin-surface">
@@ -124,7 +125,9 @@ export function SurveyReviewWorkbench({
           </div>
           <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
             <ProjectionPill icon={<GitBranch className="h-3.5 w-3.5" />} label="Review set" value={`${session.items.length} field${session.items.length === 1 ? '' : 's'}`} />
-            <ProjectionPill icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="If accepted" value={formatValue(proposed?.value)} />
+            <ProjectionPill icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="If accepted">
+              <CampFieldValue field={fieldName} value={proposed?.value} highlight />
+            </ProjectionPill>
             <ProjectionPill icon={<Fingerprint className="h-3.5 w-3.5" />} label="Authority" value={sourceAuthorityLabel(proposed?.producer?.sourceAuthority)} />
           </div>
           <TraceDetails className="mt-3" rows={[
@@ -152,11 +155,13 @@ function CandidateCard({
   tone,
   candidate,
   fieldLabel,
+  fieldName,
 }: {
   title: string;
   tone: 'current' | 'proposed';
   candidate: CampReviewQueueSession['items'][number]['spec']['candidates'][number] | undefined;
   fieldLabel: string;
+  fieldName: string;
 }) {
   if (!candidate) {
     return (
@@ -183,7 +188,7 @@ function CandidateCard({
       </div>
       <p className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>{fieldLabel}</p>
       <div className={cn('mb-2 mt-1 rounded-lg bg-white/70 p-2 text-sm font-medium text-bark-700 admin-surface', adminTheme.textStrong)}>
-        {formatValue(candidate.value)}
+        <CampFieldValue field={fieldName} value={candidate.value} highlight={isProposed} expanded />
       </div>
       <dl className="space-y-2 text-xs">
         <SourceField value={candidate.source.sourceRef} />
@@ -208,14 +213,14 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ProjectionPill({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function ProjectionPill({ icon, label, value, children }: { icon: React.ReactNode; label: string; value?: string; children?: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-pine-200/60 bg-white/75 px-2.5 py-2 admin-surface">
       <p className={cn('flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>
         {icon}
         {label}
       </p>
-      <p className={cn('mt-0.5 break-words font-medium text-bark-600', adminTheme.textStrong)}>{value}</p>
+      <div className={cn('mt-0.5 break-words font-medium text-bark-600', adminTheme.textStrong)}>{children ?? value}</div>
     </div>
   );
 }
