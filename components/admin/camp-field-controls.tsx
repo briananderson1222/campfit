@@ -5,6 +5,7 @@ import { ExternalLink, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
 import { CAMP_TYPE_DESCRIPTIONS } from '@/lib/types';
+import { formatCampDate } from '@/lib/date-format';
 
 type ArrayRow = Record<string, unknown>;
 type SocialLinksValue = Record<string, string>;
@@ -124,7 +125,7 @@ export function CampFieldValue({
   if (str.match(/^\d{4}-\d{2}-\d{2}/)) {
     return (
       <p className={cn('leading-relaxed', highlight ? 'text-pine-700 font-medium dark:text-pine-200' : 'text-bark-500 dark:text-cream-300')}>
-        {new Date(str).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+        {formatCampDate(str)}
       </p>
     );
   }
@@ -532,7 +533,7 @@ export function formatGradeValue(value: unknown): string {
 function dateRange(start: unknown, end: unknown) {
   if (!start && !end) return null;
   return [start, end].filter(Boolean).map((value) => (
-    new Date(String(value)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    formatCampDate(String(value), { month: 'short', day: 'numeric' })
   )).join(' - ');
 }
 

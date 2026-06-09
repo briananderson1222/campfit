@@ -23,6 +23,7 @@ import {
   parseGradeInput,
 } from '@/components/admin/camp-field-controls';
 import { FieldTimelineNote } from '@/components/admin/field-timeline';
+import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Camp Name', organizationName: 'Organization', description: 'Description', campType: 'Camp Type',
@@ -330,7 +331,7 @@ export function ReviewPanel({
                     {proof ? (
                       <button
                         onClick={() => toggleProof(field)}
-                        title={`Verified ${new Date(proof.approvedAt).toLocaleDateString()} — click to ${isProofOpen ? 'hide' : 'show'} proof`}
+                        title={`Verified ${formatCampDate(proof.approvedAt)} — click to ${isProofOpen ? 'hide' : 'show'} proof`}
                         className="ml-1 text-pine-500 hover:text-pine-700"
                       >
                         <ShieldCheck className="w-3 h-3" />
@@ -383,7 +384,7 @@ export function ReviewPanel({
                     <div className="mt-1.5 rounded-lg bg-pine-50/60 border border-pine-200/50 px-2.5 py-2 space-y-1 admin-surface">
                       <p className="text-xs text-pine-600 font-medium flex items-center gap-1">
                         <ShieldCheck className="w-3 h-3" />
-                        Verified {new Date(proof.approvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        Verified {formatCampDate(proof.approvedAt)}
                       </p>
                       {proof.excerpt && (
                         <p className={cn('text-xs text-bark-500 italic leading-relaxed', adminTheme.text)}>&quot;{proof.excerpt}&quot;</p>
@@ -789,7 +790,7 @@ export function ReviewPanel({
                 View crawl run logs
                 {proposal.crawlStartedAt && (
                   <span className="text-bark-300 ml-1">
-                    · {new Date(proposal.crawlStartedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    · {formatCampDateTime(proposal.crawlStartedAt, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                   </span>
                 )}
               </a>
@@ -797,7 +798,7 @@ export function ReviewPanel({
 
             <div className={cn('border-t border-cream-300 pt-3 space-y-1 text-xs text-bark-400 dark:border-[var(--admin-border)]', adminTheme.textMuted)}>
               <p>Model: <span className="font-mono">{proposal.extractionModel}</span></p>
-              <p>Proposed: {new Date(proposal.createdAt).toLocaleString()}</p>
+              <p>Proposed: {formatCampDateTime(proposal.createdAt)}</p>
               {proposal.crawlTriggeredBy && <p>Triggered by: {proposal.crawlTriggeredBy}</p>}
               <p>{fields.length + alreadyApplied.size} field{(fields.length + alreadyApplied.size) !== 1 ? 's' : ''} in proposal</p>
             </div>
@@ -905,7 +906,7 @@ function formatValue(val: unknown): string {
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
   if (typeof val === 'object') return JSON.stringify(val);
   if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
-    return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatCampDate(val);
   }
   return String(val);
 }

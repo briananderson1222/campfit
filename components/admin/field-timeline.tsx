@@ -1,6 +1,7 @@
 'use client';
 
 import type { FieldTimeline } from '@/lib/admin/field-metadata';
+import { formatCampDate } from '@/lib/date-format';
 
 export function FieldTimelineNote({
   timeline,
@@ -21,9 +22,5 @@ export function FieldTimelineNote({
 }
 
 function shortDateTime(value: string) {
-  return new Date(value).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  return formatCampDate(value);
 }

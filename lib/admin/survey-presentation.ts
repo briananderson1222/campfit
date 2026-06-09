@@ -1,4 +1,5 @@
 import type { ReviewPresentationAdapter } from '@/lib/kontourai/survey-review-workbench';
+import { formatCampDate } from '@/lib/date-format';
 
 export function createCampSurveyPresentationAdapter(fieldLabels: Record<string, string> = {}): ReviewPresentationAdapter {
   return {
@@ -35,7 +36,7 @@ export function sourceAuthorityLabel(value: unknown): string {
 }
 
 export function formatSurveyDate(value: string): string {
-  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatCampDate(value);
 }
 
 export function humanizeFieldName(value: string): string {

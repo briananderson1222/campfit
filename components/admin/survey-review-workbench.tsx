@@ -16,6 +16,7 @@ import { createCampSurveyPresentationAdapter, fieldNameForSurveyItem, sourceAuth
 import { cn } from '@/lib/utils';
 import { adminTheme } from '@/components/admin/theme';
 import { CampFieldValue } from '@/components/admin/camp-field-controls';
+import { formatCampDateTime } from '@/lib/date-format';
 
 export function SurveyReviewWorkbench({
   session,
@@ -103,7 +104,7 @@ export function SurveyReviewWorkbench({
             <Field label="CampFit field" value={fieldName} />
             <Field label="Actor" value={session.actorId} />
             <Field label="Items" value={String(session.items.length)} />
-            <Field label="Reviewed at" value={new Date(session.reviewedAt).toLocaleString()} />
+            <Field label="Reviewed at" value={formatCampDateTime(session.reviewedAt)} />
           </dl>
           <div className="mt-3 flex flex-wrap gap-2">
             {campId && (
