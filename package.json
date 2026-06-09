@@ -21,6 +21,7 @@
     "verify:survey-review-items": "tsx scripts/verify-survey-review-items.ts",
     "verify:survey-apply": "tsx scripts/verify-survey-apply-path.ts",
     "verify:survey-browser": "playwright test",
+    "smoke:prod": "playwright test --config=playwright.prod.config.ts",
     "verify:survey": "tsx scripts/verify-survey-integration.ts",
     "verify:admin": "tsx scripts/verify-admin-platform.ts"
   },
