@@ -6,8 +6,7 @@ import { AlertTriangle, CheckCircle2, Clock3, Copy, FileClock, GitCompareArrows,
 import type { ReviewSessionEvent } from '@kontourai/survey';
 import {
   buildReviewResultPresentation,
-  buildReviewWorkbenchSessionExportForSnapshot,
-  validateReviewSessionEventsForSnapshot,
+  deriveReviewSessionApplyResultForSnapshot,
   type ReviewWorkbenchResult,
   type ReviewTraceRef,
 } from '@/lib/kontourai/survey-review-workbench';
@@ -77,8 +76,8 @@ export function SurveyReviewTrail({
         >
           <p className="font-semibold">Saved Survey events no longer replay cleanly for this proposal snapshot.</p>
           <ul className="mt-2 space-y-1">
-            {trail.issues.slice(0, 3).map((issue) => (
-              <li key={`${issue.eventName}-${issue.sequence}`}>{issue.message}</li>
+            {trail.issues.slice(0, 3).map((issue, index) => (
+              <li key={issueKey(issue, index)}>{issue.message}</li>
             ))}
           </ul>
         </div>
@@ -178,6 +177,10 @@ function TrailResult({
   );
 }
 
+function issueKey(issue: { code: string; message: string; eventName?: string; sequence?: number; reviewItemName?: string }, index: number) {
+  return [issue.eventName, issue.sequence, issue.reviewItemName, issue.code, index].filter((value) => value !== undefined && value !== '').join(':');
+}
+
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-xl border border-cream-300/70 bg-white/70 p-3 admin-surface-raised">
@@ -235,19 +238,22 @@ function InlineId({ refItem }: { refItem: ReviewTraceRef }) {
 }
 
 function buildSurveyReviewTrail(session: CampReviewQueueSession, events: readonly ReviewSessionEvent[]) {
-  const issues = validateReviewSessionEventsForSnapshot(session, events);
-  if (issues.length > 0) {
+  const applyResult = deriveReviewSessionApplyResultForSnapshot({
+    snapshot: session,
+    events,
+    requiredResolvedItems: 'none',
+  });
+  if (!applyResult.ok) {
     return {
-      issues,
+      issues: applyResult.issues,
       decisions: [],
       results: [],
     };
   }
 
-  const sessionExport = buildReviewWorkbenchSessionExportForSnapshot(session, events);
   return {
     issues: [],
-    decisions: sessionExport.decisions,
-    results: sessionExport.results,
+    decisions: applyResult.decisions,
+    results: applyResult.results,
   };
 }

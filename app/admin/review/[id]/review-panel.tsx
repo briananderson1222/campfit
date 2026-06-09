@@ -9,8 +9,7 @@ import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import type { ReviewSessionEvent } from '@kontourai/survey';
 import {
-  buildReviewWorkbenchSessionExportForSnapshot,
-  validateReviewSessionEventsForSnapshot,
+  deriveReviewSessionApplyResultForSnapshot,
 } from '@/lib/kontourai/survey-review-workbench';
 import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbench';
 import { SurveyReviewTrail } from '@/components/admin/survey-review-trail';
@@ -928,14 +927,17 @@ function deriveSurveyReplaySummary(
     return { isValid: false, resolvedCount: 0, newlyApplicableCount: 0 };
   }
 
-  const issues = validateReviewSessionEventsForSnapshot(session, events);
-  if (issues.length > 0) {
+  const applyResult = deriveReviewSessionApplyResultForSnapshot({
+    snapshot: session,
+    events,
+    requiredResolvedItems: 'none',
+  });
+  if (!applyResult.ok) {
     return { isValid: false, resolvedCount: 0, newlyApplicableCount: 0 };
   }
 
-  const sessionExport = buildReviewWorkbenchSessionExportForSnapshot(session, events);
   const itemByName = new Map(session.items.map((item) => [item.metadata.name, item]));
-  const newlyApplicableCount = sessionExport.results.filter((result) => {
+  const newlyApplicableCount = applyResult.results.filter((result) => {
     const target = itemByName.get(result.reviewItemName)?.spec.target;
     return Boolean(
       target &&
@@ -947,7 +949,7 @@ function deriveSurveyReplaySummary(
 
   return {
     isValid: true,
-    resolvedCount: sessionExport.results.length,
+    resolvedCount: applyResult.results.length,
     newlyApplicableCount,
   };
 }

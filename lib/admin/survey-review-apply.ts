@@ -1,7 +1,6 @@
 import type { ReviewDecision, ReviewSessionEvent } from '@kontourai/survey';
 import {
-  buildReviewWorkbenchSessionExport,
-  replayReviewSessionEventsForSnapshot,
+  deriveReviewSessionApplyResultForSnapshot,
   type ReviewWorkbenchResult,
 } from '@/lib/kontourai/survey-review-workbench';
 import type { CampReviewQueueSession } from './survey-review-items';
@@ -33,22 +32,15 @@ export function deriveCampApplyFromSurveySession(opts: {
   const mode = opts.mode ?? 'full';
   validateSessionItems(opts.proposal, opts.session);
 
-  const replayedSession = replaySurveySessionForApply(opts.session, opts.events);
-  const sessionExport = buildReviewWorkbenchSessionExport(replayedSession, opts.events);
-  const resultsByItemName = new Map(sessionExport.results.map((result) => [result.reviewItemName, result]));
-
-  const unresolvedItems = opts.session.items
-    .map((item) => item.metadata.name)
-    .filter((itemName) => !resultsByItemName.has(itemName));
-
-  if (mode === 'full' && unresolvedItems.length > 0) {
+  const applyResult = deriveReviewSessionApplyResultForSnapshot({
+    snapshot: opts.session,
+    events: opts.events,
+    requiredResolvedItems: mode === 'full' ? 'all' : 'any',
+  });
+  if (!applyResult.ok) {
     throw new SurveyReviewApplyError(
-      `Survey review is incomplete for ${unresolvedItems.length} item(s): ${unresolvedItems.join(', ')}`,
+      applyResult.issues.map((issue) => issue.message).join(' '),
     );
-  }
-
-  if (mode === 'partial' && sessionExport.results.length === 0) {
-    throw new SurveyReviewApplyError('Survey review has no resolved items to apply.');
   }
 
   const itemByName = new Map(opts.session.items.map((item) => [item.metadata.name, item]));
@@ -56,7 +48,7 @@ export function deriveCampApplyFromSurveySession(opts: {
   const approvedFields: string[] = [];
   const rejectedFields: string[] = [];
 
-  for (const result of sessionExport.results) {
+  for (const result of applyResult.results) {
     const item = itemByName.get(result.reviewItemName);
     if (!item) {
       throw new SurveyReviewApplyError(`Survey result references an unknown item: ${result.reviewItemName}`);
@@ -85,9 +77,9 @@ export function deriveCampApplyFromSurveySession(opts: {
   return {
     approvedFields: unique(approvedFields),
     rejectedFields: unique(rejectedFields),
-    reviewerNotes: surveyReviewerNotes(replayedSession.notesByItemName),
-    decisions: sessionExport.decisions,
-    results: sessionExport.results,
+    reviewerNotes: surveyReviewerNotes(applyResult.replayedSession.notesByItemName),
+    decisions: applyResult.decisions,
+    results: applyResult.results,
   };
 }
 
@@ -112,19 +104,6 @@ function validateSessionItems(proposal: CampChangeProposal, session: CampReviewQ
     if (item.metadata.labels?.proposalId && item.metadata.labels.proposalId !== proposal.id) {
       throw new SurveyReviewApplyError(`Survey item ${item.metadata.name} belongs to a different proposal.`);
     }
-  }
-}
-
-function replaySurveySessionForApply(
-  session: CampReviewQueueSession,
-  events: readonly ReviewSessionEvent[],
-): CampReviewQueueSession {
-  try {
-    return replayReviewSessionEventsForSnapshot(session, events);
-  } catch (error) {
-    throw new SurveyReviewApplyError(error instanceof Error
-      ? error.message
-      : 'Survey review events do not match the reviewed session snapshot.');
   }
 }
 

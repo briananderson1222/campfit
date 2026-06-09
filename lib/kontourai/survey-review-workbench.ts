@@ -5,6 +5,7 @@ export {
   buildReviewWorkbenchSessionExportForSnapshot,
   buildReviewWorkbenchResultsFromSession,
   createPersistentReviewSessionEventStore,
+  deriveReviewSessionApplyResultForSnapshot,
   mountReviewWorkbench,
   persistReviewSessionEvents,
   replayReviewSessionEventsForSnapshot,
@@ -16,6 +17,8 @@ export type {
   ReviewItemPresentation,
   ReviewPresentationAdapter,
   ReviewResultPresentation,
+  ReviewSessionApplyIssue,
+  ReviewSessionApplyResolutionRequirement,
   ReviewTraceRef,
   ReviewWorkbenchResult,
 } from '@kontourai/survey/review-workbench';
