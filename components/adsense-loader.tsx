@@ -24,12 +24,12 @@ export function AdsenseLoader() {
 }
 
 function inject() {
-  if (document.querySelector('script[data-adsense]')) return; // already loaded
+  if (document.getElementById("campfit-adsense-loader")) return; // already loaded
   const s = document.createElement("script");
+  s.id = "campfit-adsense-loader";
   s.src =
     "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8332505769102683";
   s.async = true;
   s.crossOrigin = "anonymous";
-  s.setAttribute("data-adsense", "1");
   document.head.appendChild(s);
 }
