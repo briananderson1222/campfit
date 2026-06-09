@@ -94,6 +94,7 @@ function isIgnorableRequestFailure(request: Request) {
   const failure = request.failure()?.errorText ?? '';
   const url = request.url();
   if (!isFirstPartyRequest(request)) return true;
+  if (failure.includes('ERR_ABORTED') && url.includes('/_next/static/')) return true;
   return failure.includes('ERR_ABORTED') && (url.includes('_rsc=') || request.resourceType() === 'fetch');
 }
 
