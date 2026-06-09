@@ -21,6 +21,7 @@
     "test:surface": "tsx scripts/test-surface-trust-export.ts",
     "verify:survey-review-items": "tsx scripts/verify-survey-review-items.ts",
     "verify:survey-apply": "tsx scripts/verify-survey-apply-path.ts",
+    "verify:survey-session": "tsx scripts/verify-survey-server-owned-session.ts",
     "verify:survey-browser": "playwright test tests/browser/survey-review-fixture.spec.ts tests/browser/survey-review-real-proposal.spec.ts",
     "smoke:prod": "playwright test --config=playwright.prod.config.ts",
     "verify:survey": "tsx scripts/verify-survey-integration.ts",

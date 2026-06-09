@@ -27,6 +27,7 @@ export function SurveyReviewWorkbench({
   session: CampReviewQueueSession;
   eventPersistence?: {
     readonly proposalId: string;
+    readonly reviewSessionId: string;
     readonly initialEvents: readonly ReviewSessionEvent[];
   };
   onPersistedEventsChange?: (events: readonly ReviewSessionEvent[]) => void;
@@ -45,7 +46,12 @@ export function SurveyReviewWorkbench({
         ? createPersistentReviewSessionEventStore({
             initialEvents: eventPersistence.initialEvents,
             persist: async ({ events, expectedEventCount }) => {
-              const persisted = await persistProposalReviewEvents(eventPersistence.proposalId, events, expectedEventCount);
+              const persisted = await persistProposalReviewEvents(
+                eventPersistence.proposalId,
+                eventPersistence.reviewSessionId,
+                events,
+                expectedEventCount,
+              );
               onPersistedEventsChange?.(persisted.events);
               return persisted;
             },
@@ -312,13 +318,14 @@ function createSessionStorageEventStore(key: string) {
 
 async function persistProposalReviewEvents(
   proposalId: string,
+  reviewSessionId: string,
   events: readonly ReviewSessionEvent[],
   expectedEventCount: number,
 ): Promise<{ events: readonly ReviewSessionEvent[]; eventCount: number }> {
   const response = await fetch(`/api/admin/review/${proposalId}/survey-events`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ events, expectedEventCount }),
+    body: JSON.stringify({ reviewSessionId, events, expectedEventCount }),
   });
   if (!response.ok) {
     throw new Error(`Failed to persist Survey review events: ${response.status}`);

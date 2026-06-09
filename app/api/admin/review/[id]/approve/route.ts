@@ -9,7 +9,11 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlug } from '@/lib/admin/community-access';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from '@/lib/admin/survey-review-apply';
 import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
-import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
+import {
+  assertSurveyReviewSessionFreshForProposal,
+  getSurveyReviewSessionForProposal,
+  SurveyReviewSessionStaleError,
+} from '@/lib/admin/survey-review-sessions';
 
 export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -17,13 +21,14 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const { approvedFields: requestedApprovedFields = [], reviewerNotes: requestedReviewerNotes, feedbackTags, overrides, keepPending = false, applyFromSurvey = false }: {
+  const { approvedFields: requestedApprovedFields = [], reviewerNotes: requestedReviewerNotes, feedbackTags, overrides, keepPending = false, applyFromSurvey = false, reviewSessionId }: {
     approvedFields?: string[];
     reviewerNotes?: string;
     feedbackTags?: string[];
     overrides?: Record<string, import('@/lib/admin/types').FieldDiff>;
     keepPending?: boolean; // if true: apply selected fields but leave proposal in queue
     applyFromSurvey?: boolean;
+    reviewSessionId?: string;
   } = await request.json();
 
   const proposal = await getProposal(params.id);
@@ -32,6 +37,9 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
 
   if (applyFromSurvey && overrides) {
     return NextResponse.json({ error: 'Survey apply does not accept client-submitted field overrides.' }, { status: 400 });
+  }
+  if (applyFromSurvey && (!reviewSessionId || typeof reviewSessionId !== 'string')) {
+    return NextResponse.json({ error: 'Survey apply requires a server-created reviewSessionId.' }, { status: 400 });
   }
 
   const unappliedProposalFields = unappliedFields(proposal);
@@ -61,15 +69,22 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
 
   if (applyFromSurvey) {
     try {
-      const surveySession = buildCampSurveyReviewQueueSession(proposal, {
-        actorId: auth.access.email,
-        reviewedAt,
-        includeAppliedFields: true,
+      const surveySessionRecord = await getSurveyReviewSessionForProposal({
+        proposalId: proposal.id,
+        reviewSessionId: reviewSessionId!,
       });
-      const surveyEvents = await getSurveyReviewEvents(proposal.id);
+      if (!surveySessionRecord) {
+        return NextResponse.json({ error: 'Survey review session was not found for this proposal.' }, { status: 404 });
+      }
+      assertSurveyReviewSessionFreshForProposal(surveySessionRecord, proposal);
+
+      const surveyEvents = await getSurveyReviewEvents({
+        proposalId: proposal.id,
+        reviewSessionId,
+      });
       const surveyApply = deriveCampApplyFromSurveySession({
         proposal,
-        session: surveySession,
+        session: surveySessionRecord.snapshot,
         events: surveyEvents,
         mode: keepPending ? 'partial' : 'full',
       });
@@ -79,6 +94,9 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     } catch (error) {
       if (error instanceof SurveyReviewApplyError) {
         return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      if (error instanceof SurveyReviewSessionStaleError) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
       }
       throw error;
     }

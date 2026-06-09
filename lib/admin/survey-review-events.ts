@@ -1,14 +1,31 @@
 import type { ReviewSessionEvent } from '@kontourai/survey';
 
 import { getPool } from '@/lib/db';
+import {
+  assertSurveyReviewSessionFreshForProposal,
+  getSurveyReviewSessionForProposal,
+  type SurveyReviewSessionRecord,
+} from './survey-review-sessions';
+import type { CampChangeProposal } from './types';
 
-export async function getSurveyReviewEvents(proposalId: string): Promise<ReviewSessionEvent[]> {
+export async function getSurveyReviewEvents(opts: string | {
+  readonly proposalId: string;
+  readonly reviewSessionId?: string;
+}): Promise<ReviewSessionEvent[]> {
+  if (typeof opts === 'string') {
+    return getLegacyProposalSurveyReviewEvents(opts);
+  }
+
+  if (!opts.reviewSessionId) {
+    return getLegacyProposalSurveyReviewEvents(opts.proposalId);
+  }
+
   const result = await getPool().query<{ event: ReviewSessionEvent }>(
     `SELECT event
      FROM "SurveyReviewEvent"
-     WHERE "proposalId" = $1
+     WHERE "proposalId" = $1 AND "reviewSessionId" = $2
      ORDER BY "sessionName" ASC, sequence ASC`,
-    [proposalId],
+    [opts.proposalId, opts.reviewSessionId],
   );
 
   return result.rows.map((row) => row.event).filter(isReviewSessionEvent);
@@ -16,27 +33,44 @@ export async function getSurveyReviewEvents(proposalId: string): Promise<ReviewS
 
 export async function replaceSurveyReviewEvents(opts: {
   proposalId: string;
+  proposal?: CampChangeProposal;
+  reviewSessionId: string;
   events: readonly ReviewSessionEvent[];
   actorEmail: string;
   expectedEventCount?: number;
 }): Promise<void> {
+  const reviewSession = await getSurveyReviewSessionForProposal({
+    proposalId: opts.proposalId,
+    reviewSessionId: opts.reviewSessionId,
+  });
+  if (!reviewSession) {
+    throw new SurveyReviewEventValidationError('Survey review session was not found for this proposal.');
+  }
+  if (opts.proposal) {
+    assertSurveyReviewSessionFreshForProposal(reviewSession, opts.proposal);
+  }
+  validateSurveyReviewEventsForSession(reviewSession, opts.events);
+
   const pool = getPool();
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [opts.proposalId]);
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [opts.reviewSessionId]);
 
     const existing = await client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM "SurveyReviewEvent" WHERE "proposalId" = $1`,
-      [opts.proposalId],
+      `SELECT COUNT(*)::text AS count FROM "SurveyReviewEvent" WHERE "proposalId" = $1 AND "reviewSessionId" = $2`,
+      [opts.proposalId, opts.reviewSessionId],
     );
     const existingCount = Number(existing.rows[0]?.count ?? '0');
     if (opts.expectedEventCount !== undefined && existingCount !== opts.expectedEventCount) {
       throw new SurveyReviewEventConflictError(existingCount);
     }
 
-    await client.query(`DELETE FROM "SurveyReviewEvent" WHERE "proposalId" = $1`, [opts.proposalId]);
+    await client.query(
+      `DELETE FROM "SurveyReviewEvent" WHERE "proposalId" = $1 AND "reviewSessionId" = $2`,
+      [opts.proposalId, opts.reviewSessionId],
+    );
 
     for (const event of opts.events) {
       const spec = event.spec;
@@ -44,6 +78,7 @@ export async function replaceSurveyReviewEvents(opts: {
       await client.query(
         `INSERT INTO "SurveyReviewEvent" (
            "proposalId",
+           "reviewSessionId",
            "sessionName",
            sequence,
            "eventName",
@@ -58,9 +93,10 @@ export async function replaceSurveyReviewEvents(opts: {
            "occurredAt",
            event
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamptz, $14::jsonb)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::timestamptz, $15::jsonb)`,
         [
           opts.proposalId,
+          opts.reviewSessionId,
           spec.sessionName,
           spec.sequence,
           event.metadata.name,
@@ -84,6 +120,13 @@ export async function replaceSurveyReviewEvents(opts: {
     throw error;
   } finally {
     client.release();
+  }
+}
+
+export class SurveyReviewEventValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SurveyReviewEventValidationError';
   }
 }
 
@@ -112,4 +155,48 @@ function isReviewSessionEvent(value: unknown): value is ReviewSessionEvent {
     typeof spec.eventType === 'string' &&
     typeof spec.occurredAt === 'string'
   );
+}
+
+async function getLegacyProposalSurveyReviewEvents(proposalId: string): Promise<ReviewSessionEvent[]> {
+  const result = await getPool().query<{ event: ReviewSessionEvent }>(
+    `SELECT event
+     FROM "SurveyReviewEvent"
+     WHERE "proposalId" = $1
+     ORDER BY "sessionName" ASC, sequence ASC`,
+    [proposalId],
+  );
+
+  return result.rows.map((row) => row.event).filter(isReviewSessionEvent);
+}
+
+export function validateSurveyReviewEventsForSession(
+  reviewSession: SurveyReviewSessionRecord,
+  events: readonly ReviewSessionEvent[],
+): void {
+  const itemByName = new Map(reviewSession.snapshot.items.map((item) => [item.metadata.name, item]));
+  const candidatesByItemName = new Map(
+    reviewSession.snapshot.items.map((item) => [
+      item.metadata.name,
+      new Set(item.spec.candidates.map((candidate) => candidate.id)),
+    ]),
+  );
+
+  for (const event of events) {
+    const spec = event.spec;
+    if (spec.sessionName !== reviewSession.sessionName) {
+      throw new SurveyReviewEventValidationError('Survey event belongs to a different review session.');
+    }
+    if (spec.reviewItemName && !itemByName.has(spec.reviewItemName)) {
+      throw new SurveyReviewEventValidationError('Survey event references a ReviewItem outside this review session.');
+    }
+    if (spec.activeItemName && !itemByName.has(spec.activeItemName)) {
+      throw new SurveyReviewEventValidationError('Survey event references an active ReviewItem outside this review session.');
+    }
+    if (spec.candidateId && spec.reviewItemName) {
+      const candidateIds = candidatesByItemName.get(spec.reviewItemName);
+      if (!candidateIds?.has(spec.candidateId)) {
+        throw new SurveyReviewEventValidationError('Survey event references a candidate outside this review session.');
+      }
+    }
+  }
 }

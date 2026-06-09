@@ -5,6 +5,7 @@ export {
   buildReviewWorkbenchSessionExportForSnapshot,
   buildReviewWorkbenchResultsFromSession,
   createPersistentReviewSessionEventStore,
+  defaultReviewSessionName,
   deriveReviewSessionApplyResultForSnapshot,
   mountReviewWorkbench,
   persistReviewSessionEvents,

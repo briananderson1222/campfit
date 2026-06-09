@@ -447,6 +447,7 @@ model CampChangeLog {
 model SurveyReviewEvent {
   id                 String   @id @default(uuid())
   proposalId         String
+  reviewSessionId    String?
   sessionName        String
   sequence           Int
   eventName          String
@@ -463,9 +464,25 @@ model SurveyReviewEvent {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @default(now())
 
-  @@unique([proposalId, sessionName, sequence])
   @@index([proposalId, sessionName, sequence])
   @@index([proposalId, reviewItemName])
+  @@index([reviewSessionId, sessionName, sequence])
+}
+
+model SurveyReviewSession {
+  id             String    @id @default(uuid())
+  proposalId     String
+  sessionName    String
+  snapshot       Json
+  snapshotHash   String
+  proposalStatus String
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now())
+  appliedAt      DateTime?
+
+  @@unique([proposalId, sessionName])
+  @@index([proposalId, sessionName])
 }
 
 model ProviderChangeLog {

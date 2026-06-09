@@ -5,8 +5,8 @@ import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react
 import Link from 'next/link';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { AdminCopilot } from '@/components/admin/admin-copilot';
-import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
+import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
 export const dynamic = 'force-dynamic';
@@ -49,11 +49,13 @@ export default async function ReviewDetailPage(
   const backHref = buildQueueHref(searchParams);
   const campHref = `/admin/camps/${proposal.campId}`;
   const providerHref = proposal.providerId ? `/admin/providers/${proposal.providerId}` : null;
-  const surveyReviewSession = buildCampSurveyReviewQueueSession(proposal, {
+  const surveyReviewSessionRecord = await getOrCreateSurveyReviewSessionForProposal(proposal, {
     actorId: auth.access.email ?? auth.access.userId,
-    includeAppliedFields: true,
   });
-  const surveyReviewEvents = await getSurveyReviewEvents(proposal.id);
+  const surveyReviewEvents = await getSurveyReviewEvents({
+    proposalId: proposal.id,
+    reviewSessionId: surveyReviewSessionRecord.id,
+  });
 
   return (
     <div>
@@ -102,7 +104,8 @@ export default async function ReviewDetailPage(
       </div>
       <ReviewPanel
         proposal={proposal}
-        surveyReviewSession={surveyReviewSession}
+        surveyReviewSession={surveyReviewSessionRecord.snapshot}
+        surveyReviewSessionId={surveyReviewSessionRecord.id}
         surveyReviewEvents={surveyReviewEvents}
         queueContext={{
           backHref,

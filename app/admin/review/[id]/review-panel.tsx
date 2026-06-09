@@ -68,11 +68,13 @@ const FIELD_PRIORITY: Record<string, number> = {
 export function ReviewPanel({
   proposal,
   surveyReviewSession,
+  surveyReviewSessionId,
   surveyReviewEvents = [],
   queueContext,
 }: {
   proposal: CampChangeProposal;
   surveyReviewSession?: CampReviewQueueSession;
+  surveyReviewSessionId?: string;
   surveyReviewEvents?: readonly ReviewSessionEvent[];
   queueContext?: {
     backHref: string;
@@ -83,7 +85,7 @@ export function ReviewPanel({
   };
 }) {
   const router = useRouter();
-  const hasSurveyReviewSession = Boolean(surveyReviewSession);
+  const hasSurveyReviewSession = Boolean(surveyReviewSession && surveyReviewSessionId);
   const [proposedChanges, setProposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
   // Fields already applied in previous partial-approval rounds
   const alreadyApplied = useMemo(() => new Set<string>(proposal.appliedFields ?? []), [proposal.appliedFields]);
@@ -111,10 +113,15 @@ export function ReviewPanel({
   const [useSurveyApply, setUseSurveyApply] = useState(hasSurveyReviewSession);
   const [persistedSurveyEvents, setPersistedSurveyEvents] = useState<readonly ReviewSessionEvent[]>(surveyReviewEvents);
   const applyFromSurvey = hasSurveyReviewSession && useSurveyApply;
-  const surveyEventPersistence = useMemo(() => ({
-    proposalId: proposal.id,
-    initialEvents: surveyReviewEvents,
-  }), [proposal.id, surveyReviewEvents]);
+  const surveyEventPersistence = useMemo(() => (
+    surveyReviewSessionId
+      ? {
+          proposalId: proposal.id,
+          reviewSessionId: surveyReviewSessionId,
+          initialEvents: surveyReviewEvents,
+        }
+      : undefined
+  ), [proposal.id, surveyReviewEvents, surveyReviewSessionId]);
   const handlePersistedSurveyEventsChange = useCallback((events: readonly ReviewSessionEvent[]) => {
     setPersistedSurveyEvents(events);
   }, []);
@@ -250,6 +257,7 @@ export function ReviewPanel({
           overrides: applyFromSurvey ? undefined : proposedChanges,
           keepPending,
           applyFromSurvey,
+          reviewSessionId: applyFromSurvey ? surveyReviewSessionId : undefined,
         }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to apply proposal'));
