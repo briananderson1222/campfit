@@ -20,9 +20,9 @@ test('production smoke keeps public, auth, and admin review surfaces healthy', a
   const blockedMutations = await blockFirstPartyMutations(page);
   await expectOkNavigation(page, adminReviewPath);
 
-  await expect(page.getByRole('heading', { name: /review candidate update/i })).toBeVisible();
-  await expect(page.getByTestId('real-proposal-survey-workbench')).toBeVisible();
-  await expect(page.getByText('SURVEY REVIEW WORKBENCH')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Survey review workbench' })).toBeVisible();
+  await expect(page.getByText('Browser fixture')).toBeVisible();
+  await expect(page.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
   await expect(page.getByTestId('survey-review-trail')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Saved Survey decisions' })).toBeVisible();
 
