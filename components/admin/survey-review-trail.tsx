@@ -5,12 +5,15 @@ import type { ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Copy, FileClock, GitCompareArrows, ListChecks } from 'lucide-react';
 import type { ReviewSessionEvent } from '@kontourai/survey';
 import {
+  buildReviewResultPresentation,
   buildReviewWorkbenchSessionExportForSnapshot,
   validateReviewSessionEventsForSnapshot,
   type ReviewWorkbenchResult,
+  type ReviewTraceRef,
 } from '@/lib/kontourai/survey-review-workbench';
 import { cn } from '@/lib/utils';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
+import { createCampSurveyPresentationAdapter, fieldNameForSurveyItem, formatSurveyDate } from '@/lib/admin/survey-presentation';
 import { adminTheme } from '@/components/admin/theme';
 import { CampFieldValue } from '@/components/admin/camp-field-controls';
 
@@ -26,6 +29,7 @@ export function SurveyReviewTrail({
   className?: string;
 }) {
   const trail = useMemo(() => buildSurveyReviewTrail(session, events), [session, events]);
+  const presentationAdapter = useMemo(() => createCampSurveyPresentationAdapter(fieldLabels), [fieldLabels]);
   const resultsByItemName = new Map(trail.results.map((result) => [result.reviewItemName, result]));
   const unresolvedItems = session.items.filter((item) => !resultsByItemName.has(item.metadata.name));
 
@@ -62,7 +66,7 @@ export function SurveyReviewTrail({
         <Metric icon={<ListChecks className="h-3.5 w-3.5" />} label="Resolved" value={`${trail.results.length}/${session.items.length}`} />
         <Metric icon={<GitCompareArrows className="h-3.5 w-3.5" />} label="Events" value={String(events.length)} />
         <Metric icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Decisions" value={String(trail.decisions.length)} />
-        <Metric icon={<Clock3 className="h-3.5 w-3.5" />} label="Reviewed" value={formatDate(session.reviewedAt)} />
+        <Metric icon={<Clock3 className="h-3.5 w-3.5" />} label="Reviewed" value={formatSurveyDate(session.reviewedAt)} />
       </dl>
 
       {trail.issues.length > 0 ? (
@@ -90,7 +94,7 @@ export function SurveyReviewTrail({
                 key={result.reviewItemName}
                 result={result}
                 item={session.items.find((candidate) => candidate.metadata.name === result.reviewItemName)}
-                fieldLabels={fieldLabels}
+                presentationAdapter={presentationAdapter}
               />
             ))
           )}
@@ -101,7 +105,7 @@ export function SurveyReviewTrail({
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {unresolvedItems.slice(0, 4).map((item) => (
                   <span key={item.metadata.name} className="rounded-full border border-cream-300/70 bg-white/75 px-2 py-0.5 text-[11px] font-semibold text-bark-500 admin-chip">
-                    {fieldLabels[item.spec.target] ?? humanizeFieldName(item.spec.target)}
+                    {presentationAdapter.labelForTarget?.(item.spec.target, { item }) ?? item.spec.target}
                   </span>
                 ))}
               </div>
@@ -116,19 +120,14 @@ export function SurveyReviewTrail({
 function TrailResult({
   result,
   item,
-  fieldLabels,
+  presentationAdapter,
 }: {
   result: ReviewWorkbenchResult;
   item?: CampReviewQueueSession['items'][number];
-  fieldLabels: Record<string, string>;
+  presentationAdapter: ReturnType<typeof createCampSurveyPresentationAdapter>;
 }) {
-  const target = item?.spec.target ?? result.reviewItemName;
-  const label = fieldLabels[target] ?? humanizeFieldName(target);
-  const applyMeaning = result.selectedCandidateRole === 'proposed'
-    ? 'Saved decision applies proposed value'
-    : 'Saved decision keeps current value';
-  const selectedCandidate = item?.spec.candidates.find((candidate) =>
-    candidate.role === result.selectedCandidateRole || candidate.id === result.selectedCandidateId);
+  const presentation = buildReviewResultPresentation(result, item, presentationAdapter);
+  const target = item ? fieldNameForSurveyItem(item) : presentation.target;
   const currentCandidate = item?.spec.candidates.find((candidate) => candidate.role === 'current');
   const proposedCandidate = item?.spec.candidates.find((candidate) => candidate.role === 'proposed');
   const campId = typeof item?.metadata.labels?.campId === 'string' ? item.metadata.labels.campId : undefined;
@@ -137,7 +136,7 @@ function TrailResult({
     <article className="rounded-lg border border-cream-300/70 bg-white/75 p-3 admin-surface-raised" data-testid="survey-review-trail-result">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className={cn('text-sm font-semibold text-bark-600', adminTheme.textStrong)}>{label}</p>
+          <p className={cn('text-sm font-semibold text-bark-600', adminTheme.textStrong)}>{presentation.targetLabel}</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             {campId && (
               <a href={`/admin/camps/${campId}`} className="text-[11px] font-semibold text-pine-700 hover:underline admin-link">
@@ -147,7 +146,7 @@ function TrailResult({
           </div>
         </div>
         <span className="rounded-full bg-pine-100 px-2 py-0.5 text-[11px] font-semibold text-pine-700 admin-chip">
-          {formatDecision(result.decision)}
+          {presentation.decisionLabel}
         </span>
       </div>
       <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-3">
@@ -162,7 +161,7 @@ function TrailResult({
         </DecisionPill>
       </div>
       <p className={cn('mt-2 text-xs font-medium text-bark-500', adminTheme.text)}>
-        {applyMeaning} <span className="sr-only">Would apply proposed value</span>
+        {presentation.applyMeaning} <span className="sr-only">Would apply proposed value</span>
       </p>
       {result.rationale && (
         <p className={cn('mt-2 rounded-lg bg-cream-50/80 px-2.5 py-2 text-xs leading-relaxed text-bark-500 admin-surface', adminTheme.text)}>
@@ -174,11 +173,7 @@ function TrailResult({
           {result.unselectedCandidates.length} unselected candidate{result.unselectedCandidates.length === 1 ? '' : 's'} preserved for audit.
         </p>
       )}
-      <TraceDetails rows={[
-        ['Survey ReviewItem', result.reviewItemName],
-        ['Selected candidate', result.selectedCandidateId],
-        ['Selected claim', selectedCandidate?.claimTarget.claimId ?? 'not provided'],
-      ]} />
+      <TraceDetails refs={presentation.traceRefs} />
     </article>
   );
 }
@@ -206,31 +201,31 @@ function DecisionPill({ label, children, muted = false }: { label: string; child
   );
 }
 
-function TraceDetails({ rows }: { rows: Array<readonly [string, string]> }) {
+function TraceDetails({ refs }: { refs: readonly ReviewTraceRef[] }) {
   return (
     <details className="mt-3 rounded-lg border border-cream-300/70 bg-cream-50/70 px-3 py-2 admin-surface">
       <summary className={cn('cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>
         IDs and trace links
       </summary>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {rows.map(([label, value]) => (
-          <InlineId key={label} label={label} value={value} />
+        {refs.map((ref) => (
+          <InlineId key={`${ref.label}:${ref.value}`} refItem={ref} />
         ))}
       </div>
     </details>
   );
 }
 
-function InlineId({ label, value }: { label: string; value: string }) {
+function InlineId({ refItem }: { refItem: ReviewTraceRef }) {
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-cream-300/70 bg-white/70 px-2 py-0.5 admin-chip">
-      <span className={cn('shrink-0 text-[11px] font-semibold text-bark-300', adminTheme.textMuted)}>{label}</span>
-      <span className={cn('min-w-0 break-all font-mono text-[11px] text-bark-500', adminTheme.text)}>{value}</span>
+      <span className={cn('shrink-0 text-[11px] font-semibold text-bark-300', adminTheme.textMuted)}>{refItem.label}</span>
+      <span className={cn('min-w-0 break-all font-mono text-[11px] text-bark-500', adminTheme.text)}>{refItem.value}</span>
       <button
         type="button"
-        title={`Copy ${label}`}
-        aria-label={`Copy ${label}`}
-        onClick={() => void navigator.clipboard?.writeText(value)}
+        title={`Copy ${refItem.label}`}
+        aria-label={`Copy ${refItem.label}`}
+        onClick={() => void navigator.clipboard?.writeText(refItem.value)}
         className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-bark-300 hover:bg-cream-100 hover:text-pine-700"
       >
         <Copy className="h-3 w-3" />
@@ -255,29 +250,4 @@ function buildSurveyReviewTrail(session: CampReviewQueueSession, events: readonl
     decisions: sessionExport.decisions,
     results: sessionExport.results,
   };
-}
-
-function formatDecision(value: string): string {
-  return value
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return 'empty';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  return JSON.stringify(value);
-}
-
-function humanizeFieldName(value: string): string {
-  return value
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
