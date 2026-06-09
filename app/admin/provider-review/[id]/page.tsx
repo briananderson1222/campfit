@@ -22,13 +22,14 @@ function buildDetailHref(id: string, searchParams: { providerId?: string; page?:
   return `/admin/provider-review/${id}${qs.toString() ? `?${qs.toString()}` : ''}`;
 }
 
-export default async function ProviderReviewDetailPage({
-  params,
-  searchParams,
-}: {
-  params: { id: string };
-  searchParams: { providerId?: string; page?: string };
-}) {
+export default async function ProviderReviewDetailPage(
+  props: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<{ providerId?: string; page?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const proposal = await getProviderProposal(params.id);
   if (!proposal) notFound();
 
@@ -49,7 +50,6 @@ export default async function ProviderReviewDetailPage({
         <ArrowLeft className="w-4 h-4" />
         Back to provider queue
       </Link>
-
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
           <h1 className="font-display text-2xl font-extrabold text-bark-700">{proposal.providerName}</h1>
@@ -71,7 +71,6 @@ export default async function ProviderReviewDetailPage({
           </p>
         </div>
       </div>
-
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">
@@ -86,7 +85,6 @@ export default async function ProviderReviewDetailPage({
           </Link>
         )}
       </div>
-
       <ProviderReviewPanel
         proposal={proposal}
         queueContext={{
@@ -95,7 +93,6 @@ export default async function ProviderReviewDetailPage({
           nextHref: queue.nextId ? buildDetailHref(queue.nextId, searchParams) : null,
         }}
       />
-
       <AdminCopilot entityType="PROVIDER" entityId={proposal.providerId} />
     </div>
   );

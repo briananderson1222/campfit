@@ -4,11 +4,12 @@ import { CalendarExplorer } from "@/components/calendar-explorer";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { community: string };
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ community: string }>;
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   const displayName =
     params.community.charAt(0).toUpperCase() + params.community.slice(1);
 
@@ -18,11 +19,12 @@ export async function generateMetadata({
   };
 }
 
-export default async function CommunityCalendarPage({
-  params,
-}: {
-  params: { community: string };
-}) {
+export default async function CommunityCalendarPage(
+  props: {
+    params: Promise<{ community: string }>;
+  }
+) {
+  const params = await props.params;
   const camps = await getAllCamps(params.community);
   // Calendar only shows summer camps (they have week-by-week schedules)
   const summerCamps = camps.filter((c) => c.campType === "SUMMER_DAY");

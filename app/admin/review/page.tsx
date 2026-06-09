@@ -69,11 +69,12 @@ function buildDetailHref(proposalId: string, params: {
   return `/admin/review/${proposalId}${qs.toString() ? `?${qs.toString()}` : ''}`;
 }
 
-export default async function ReviewQueuePage({
-  searchParams,
-}: {
-  searchParams: { page?: string; tab?: string; campId?: string; providerId?: string };
-}) {
+export default async function ReviewQueuePage(
+  props: {
+    searchParams: Promise<{ page?: string; tab?: string; campId?: string; providerId?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return null;
   const tab = searchParams.tab === 'unverified' ? 'unverified'

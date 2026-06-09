@@ -4,11 +4,12 @@ import { CampExplorer } from "@/components/camp-explorer";
 
 export const revalidate = 3600;
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { community: string };
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ community: string }>;
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   // Capitalize first letter of community slug as a fallback display name
   const displayName =
     params.community.charAt(0).toUpperCase() + params.community.slice(1);
@@ -19,11 +20,12 @@ export async function generateMetadata({
   };
 }
 
-export default async function CommunityPage({
-  params,
-}: {
-  params: { community: string };
-}) {
+export default async function CommunityPage(
+  props: {
+    params: Promise<{ community: string }>;
+  }
+) {
+  const params = await props.params;
   const camps = await getAllCamps(params.community);
 
   return <CampExplorer camps={camps} totalCount={camps.length} />;

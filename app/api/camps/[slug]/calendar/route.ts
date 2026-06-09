@@ -48,10 +48,8 @@ function buildIcs(events: { uid: string; summary: string; description: string; l
   return lines.join("\r\n") + "\r\n";
 }
 
-export async function GET(
-  _request: Request,
-  { params }: { params: { slug: string } }
-) {
+export async function GET(_request: Request, props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   const camp = await getCampBySlug(params.slug);
   if (!camp) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

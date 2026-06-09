@@ -3,8 +3,7 @@ import {
   buildReviewWorkbenchSessionExport,
   replayReviewSessionEventsForSnapshot,
   type ReviewWorkbenchResult,
-} from '@kontourai/survey/review-workbench';
-
+} from '@/lib/kontourai/survey-review-workbench';
 import type { CampReviewQueueSession } from './survey-review-items';
 import type { CampChangeProposal } from './types';
 

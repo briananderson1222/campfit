@@ -17,11 +17,11 @@ export function CityPicker({ communities }: { communities: Community[] }) {
     <div className="min-h-[80vh] flex flex-col items-center justify-center px-4 py-16">
       {/* Hero */}
       <div className="text-center mb-12 animate-fade-up">
-        <h1 className="font-display text-5xl sm:text-6xl font-extrabold text-bark-700 tracking-tight mb-4">
+        <h1 className="font-display text-5xl sm:text-6xl font-extrabold city-picker-title tracking-tight mb-4">
           Find camps in<br />
-          <span className="text-pine-500">your city</span>
+          <span className="city-picker-title-accent">your city</span>
         </h1>
-        <p className="text-bark-400 text-lg max-w-md mx-auto">
+        <p className="city-picker-copy text-lg max-w-md mx-auto">
           Browse kids&apos; camps by age, activity, and availability — all in one place.
         </p>
       </div>
@@ -29,13 +29,13 @@ export function CityPicker({ communities }: { communities: Community[] }) {
       {/* Search input */}
       <div className="w-full max-w-md mb-8 animate-fade-up stagger-1">
         <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-bark-300" />
+          <Search className="city-picker-input-icon absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5" />
           <input
             type="text"
             placeholder="Search your city..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full pl-12 pr-4 py-4 rounded-2xl border border-cream-400/60 bg-white/80 backdrop-blur-sm text-bark-600 placeholder-bark-300 focus:outline-none focus:ring-2 focus:ring-pine-400/40 text-lg shadow-sm"
+            className="city-picker-input w-full pl-12 pr-4 py-4 text-lg"
             autoFocus
           />
         </div>
@@ -47,24 +47,24 @@ export function CityPicker({ communities }: { communities: Community[] }) {
           <button
             key={community.communitySlug}
             onClick={() => router.push(routes.community(community.communitySlug))}
-            className="flex items-center justify-between w-full px-6 py-5 rounded-2xl bg-white/80 backdrop-blur-sm border border-cream-400/40 hover:border-pine-300 hover:bg-pine-50/50 transition-all group shadow-sm"
+            className="city-picker-card flex items-center justify-between w-full px-6 py-5 group"
           >
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl bg-pine-100 flex items-center justify-center">
-                <MapPin className="w-5 h-5 text-pine-500" />
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="city-picker-card-icon w-10 h-10 rounded-xl flex shrink-0 items-center justify-center">
+                <MapPin className="w-5 h-5" />
               </div>
-              <div className="text-left">
-                <span className="font-display font-bold text-bark-700 text-lg group-hover:text-pine-600 transition-colors">
+              <div className="text-left min-w-0">
+                <span className="city-picker-card-title block truncate font-display font-bold text-lg transition-colors">
                   {community.displayName}
                 </span>
-                <p className="text-sm text-bark-400">{community.count} camps available</p>
+                <p className="city-picker-card-meta text-sm">{community.count} camps available</p>
               </div>
             </div>
-            <ArrowRight className="w-5 h-5 text-bark-300 group-hover:text-pine-500 group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="city-picker-card-arrow w-5 h-5 shrink-0 group-hover:translate-x-1 transition-all" />
           </button>
         ))}
         {filtered.length === 0 && (
-          <p className="text-center text-bark-400 py-8">No cities found matching &ldquo;{query}&rdquo;</p>
+          <p className="city-picker-copy text-center py-8">No cities found matching &ldquo;{query}&rdquo;</p>
         )}
       </div>
     </div>

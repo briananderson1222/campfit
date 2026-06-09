@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { userId: string } }
-) {
+export async function PATCH(request: Request, props: { params: Promise<{ userId: string }> }) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 

@@ -5,11 +5,9 @@ import { getPool } from '@/lib/db';
 const VALID_TYPES = ['WRONG_INFO', 'MISSING_INFO', 'CAMP_CLOSED', 'OTHER'] as const;
 type ReportType = typeof VALID_TYPES[number];
 
-export async function POST(
-  req: Request,
-  { params }: { params: { slug: string } }
-) {
-  const supabase = createClient();
+export async function POST(req: Request, props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Sign in to report an issue' }, { status: 401 });
 

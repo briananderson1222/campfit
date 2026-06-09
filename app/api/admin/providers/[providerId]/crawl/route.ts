@@ -6,10 +6,8 @@ import { getProviderCommunitySlug } from '@/lib/admin/community-access';
 
 export const maxDuration = 300;
 
-export async function POST(
-  req: Request,
-  { params }: { params: { providerId: string } }
-) {
+export async function POST(req: Request, props: { params: Promise<{ providerId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getProviderCommunitySlug(params.providerId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });

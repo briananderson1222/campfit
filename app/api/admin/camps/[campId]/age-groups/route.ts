@@ -13,7 +13,8 @@ interface AgeGroupInput {
 }
 
 /** Replace all age groups for a camp. */
-export async function PUT(req: Request, { params }: { params: { campId: string } }) {
+export async function PUT(req: Request, props: { params: Promise<{ campId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getCampCommunitySlug(params.campId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });

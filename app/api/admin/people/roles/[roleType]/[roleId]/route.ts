@@ -4,8 +4,9 @@ import { requireAdminAccess } from '@/lib/admin/access';
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { roleType: string; roleId: string } },
+  props: { params: Promise<{ roleType: string; roleId: string }> }
 ) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 

@@ -3,10 +3,8 @@ import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getReportCommunitySlug } from '@/lib/admin/community-access';
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { reportId: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ reportId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getReportCommunitySlug(params.reportId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });

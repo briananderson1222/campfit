@@ -61,7 +61,8 @@ function domainOf(url: string | null): string {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
 
-export default async function AdminCampDetailPage({ params }: { params: { campId: string } }) {
+export default async function AdminCampDetailPage(props: { params: Promise<{ campId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getCampCommunitySlug(params.campId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) notFound();

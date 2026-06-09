@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';

@@ -4,10 +4,8 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { getProviderCommunitySlug } from '@/lib/admin/community-access';
 import { writeProviderChangeLogs } from '@/lib/admin/changelog-repository';
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { providerId: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ providerId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getProviderCommunitySlug(params.providerId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -23,10 +21,8 @@ export async function GET(
   return NextResponse.json({ provider, camps, proposals });
 }
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { providerId: string } }
-) {
+export async function PATCH(request: Request, props: { params: Promise<{ providerId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getProviderCommunitySlug(params.providerId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });

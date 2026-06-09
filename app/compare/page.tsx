@@ -10,11 +10,12 @@ export const metadata = {
     "Compare up to 3 Denver kids camps side by side — pricing, schedules, age groups, and more.",
 };
 
-export default async function ComparePage({
-  searchParams,
-}: {
-  searchParams: { camps?: string };
-}) {
+export default async function ComparePage(
+  props: {
+    searchParams: Promise<{ camps?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const slugList = (searchParams.camps || "")
     .split(",")
     .map((s) => s.trim())

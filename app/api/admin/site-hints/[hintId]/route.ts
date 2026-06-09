@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 
-export async function PATCH(req: Request, { params }: { params: { hintId: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ hintId: string }> }) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -21,7 +22,8 @@ export async function PATCH(req: Request, { params }: { params: { hintId: string
   return NextResponse.json(rows[0]);
 }
 
-export async function DELETE(_req: Request, { params }: { params: { hintId: string } }) {
+export async function DELETE(_req: Request, props: { params: Promise<{ hintId: string }> }) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 

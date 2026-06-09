@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Compass, Mail, Lock, LogIn, AlertCircle, TreePine } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
   return (
@@ -82,30 +81,24 @@ function LoginForm() {
             <div className="w-10 h-10 rounded-xl bg-pine-600 flex items-center justify-center shadow-sm">
               <Compass className="w-5 h-5 text-cream-100" strokeWidth={2.5} />
             </div>
-            <span className="font-display font-bold text-2xl text-bark-700 tracking-tight">
+            <span className="font-display font-bold text-2xl auth-title tracking-tight">
               Camp<span className="text-terracotta-400">Fit</span>
             </span>
           </Link>
-          <h1 className="font-display text-2xl font-extrabold text-bark-700 mt-2">
+          <h1 className="font-display text-2xl font-extrabold auth-title mt-2">
             Welcome back
           </h1>
-          <p className="text-bark-400 text-sm mt-1">
+          <p className="auth-muted text-sm mt-1">
             Sign in to see your saved camps
           </p>
         </div>
 
-        <div className="glass-panel p-6 sm:p-8">
+        <div className="auth-card p-6 sm:p-8">
           {/* Google Sign In */}
           <button
             onClick={handleGoogleLogin}
             disabled={googleLoading}
-            className={cn(
-              "w-full flex items-center justify-center gap-3 px-4 py-3 rounded-2xl",
-              "border-2 border-cream-400/60 bg-white hover:bg-cream-50",
-              "text-bark-600 font-medium text-sm transition-all duration-200",
-              "hover:border-bark-300 hover:shadow-sm active:scale-[0.99]",
-              "disabled:opacity-60 disabled:cursor-not-allowed"
-            )}
+            className="auth-oauth-button"
           >
             {googleLoading ? (
               <div className="w-5 h-5 border-2 border-bark-300 border-t-bark-600 rounded-full animate-spin" />
@@ -121,9 +114,9 @@ function LoginForm() {
           </button>
 
           <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-cream-400/60" />
-            <span className="text-xs text-bark-300 font-medium">or</span>
-            <div className="flex-1 h-px bg-cream-400/60" />
+            <div className="flex-1 h-px auth-divider" />
+            <span className="text-xs auth-muted font-medium">or</span>
+            <div className="flex-1 h-px auth-divider" />
           </div>
 
           {/* Email form */}
@@ -136,11 +129,11 @@ function LoginForm() {
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-bark-500 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold auth-label uppercase tracking-wider mb-1.5">
                 Email
               </label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-bark-300" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 auth-muted" />
                 <input
                   type="email"
                   value={email}
@@ -154,15 +147,15 @@ function LoginForm() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-bark-500 uppercase tracking-wider">
+                <label className="block text-xs font-semibold auth-label uppercase tracking-wider">
                   Password
                 </label>
-                <Link href="/auth/forgot-password" className="text-xs text-pine-500 hover:text-pine-600">
+                <Link href="/auth/forgot-password" className="text-xs auth-link">
                   Forgot password?
                 </Link>
               </div>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-bark-300" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 auth-muted" />
                 <input
                   type="password"
                   value={password}
@@ -191,9 +184,9 @@ function LoginForm() {
           </form>
         </div>
 
-        <p className="text-center text-sm text-bark-400 mt-6">
+        <p className="text-center text-sm auth-muted mt-6">
           Don&apos;t have an account?{" "}
-          <Link href="/auth/signup" className="text-pine-500 font-medium hover:text-pine-600">
+          <Link href="/auth/signup" className="auth-link font-medium">
             Sign up free
           </Link>
         </p>

@@ -3,10 +3,8 @@ import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { accreditationId: string } },
-) {
+export async function PATCH(request: Request, props: { params: Promise<{ accreditationId: string }> }) {
+  const params = await props.params;
   const body = await request.json().catch(() => ({})) as {
     status?: string;
     scope?: string | null;

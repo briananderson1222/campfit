@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Compass, Mail, Lock, User, CheckCircle, AlertCircle, TreePine } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { cn } from "@/lib/utils";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -65,11 +64,11 @@ export default function SignupPage() {
           <div className="w-16 h-16 rounded-full bg-pine-100 flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-8 h-8 text-pine-500" />
           </div>
-          <h2 className="font-display text-2xl font-extrabold text-bark-700 mb-2">
+          <h2 className="font-display text-2xl font-extrabold auth-title mb-2">
             Check your email
           </h2>
-          <p className="text-bark-400 text-sm mb-6">
-            We sent a confirmation link to <strong className="text-bark-600">{email}</strong>.
+          <p className="auth-muted text-sm mb-6">
+            We sent a confirmation link to <strong className="auth-text">{email}</strong>.
             Click it to activate your account.
           </p>
           <Link href="/auth/login" className="btn-secondary">
@@ -94,29 +93,23 @@ export default function SignupPage() {
             <div className="w-10 h-10 rounded-xl bg-pine-600 flex items-center justify-center shadow-sm">
               <Compass className="w-5 h-5 text-cream-100" strokeWidth={2.5} />
             </div>
-            <span className="font-display font-bold text-2xl text-bark-700 tracking-tight">
+            <span className="font-display font-bold text-2xl auth-title tracking-tight">
               Camp<span className="text-terracotta-400">Fit</span>
             </span>
           </Link>
-          <h1 className="font-display text-2xl font-extrabold text-bark-700 mt-2">
+          <h1 className="font-display text-2xl font-extrabold auth-title mt-2">
             Create an account
           </h1>
-          <p className="text-bark-400 text-sm mt-1">
+          <p className="auth-muted text-sm mt-1">
             Save camps, get registration alerts
           </p>
         </div>
 
-        <div className="glass-panel p-6 sm:p-8">
+        <div className="auth-card p-6 sm:p-8">
           <button
             onClick={handleGoogleSignup}
             disabled={googleLoading}
-            className={cn(
-              "w-full flex items-center justify-center gap-3 px-4 py-3 rounded-2xl",
-              "border-2 border-cream-400/60 bg-white hover:bg-cream-50",
-              "text-bark-600 font-medium text-sm transition-all duration-200",
-              "hover:border-bark-300 hover:shadow-sm active:scale-[0.99]",
-              "disabled:opacity-60 disabled:cursor-not-allowed"
-            )}
+            className="auth-oauth-button"
           >
             {googleLoading ? (
               <div className="w-5 h-5 border-2 border-bark-300 border-t-bark-600 rounded-full animate-spin" />
@@ -132,9 +125,9 @@ export default function SignupPage() {
           </button>
 
           <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-cream-400/60" />
-            <span className="text-xs text-bark-300 font-medium">or</span>
-            <div className="flex-1 h-px bg-cream-400/60" />
+            <div className="flex-1 h-px auth-divider" />
+            <span className="text-xs auth-muted font-medium">or</span>
+            <div className="flex-1 h-px auth-divider" />
           </div>
 
           <form onSubmit={handleSignup} className="space-y-4">
@@ -146,11 +139,11 @@ export default function SignupPage() {
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-bark-500 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold auth-label uppercase tracking-wider mb-1.5">
                 Your Name
               </label>
               <div className="relative">
-                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-bark-300" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 auth-muted" />
                 <input
                   type="text"
                   value={name}
@@ -163,11 +156,11 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-bark-500 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold auth-label uppercase tracking-wider mb-1.5">
                 Email
               </label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-bark-300" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 auth-muted" />
                 <input
                   type="email"
                   value={email}
@@ -180,11 +173,11 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-bark-500 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold auth-label uppercase tracking-wider mb-1.5">
                 Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-bark-300" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 auth-muted" />
                 <input
                   type="password"
                   value={password}
@@ -209,17 +202,17 @@ export default function SignupPage() {
               )}
             </button>
 
-            <p className="text-xs text-bark-300 text-center">
+            <p className="text-xs auth-muted text-center">
               By signing up you agree to our{" "}
-              <span className="text-pine-500">Terms</span> &{" "}
-              <span className="text-pine-500">Privacy Policy</span>
+              <span className="auth-link">Terms</span> &{" "}
+              <span className="auth-link">Privacy Policy</span>
             </p>
           </form>
         </div>
 
-        <p className="text-center text-sm text-bark-400 mt-6">
+        <p className="text-center text-sm auth-muted mt-6">
           Already have an account?{" "}
-          <Link href="/auth/login" className="text-pine-500 font-medium hover:text-pine-600">
+          <Link href="/auth/login" className="auth-link font-medium">
             Sign in
           </Link>
         </p>

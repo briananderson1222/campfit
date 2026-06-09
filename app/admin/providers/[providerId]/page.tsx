@@ -86,13 +86,14 @@ function StatusBadge({ value }: { value: RegistrationStatus }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default async function ProviderDetailPage({
-  params,
-  searchParams,
-}: {
-  params: { providerId: string };
-  searchParams: { archived?: string };
-}) {
+export default async function ProviderDetailPage(
+  props: {
+    params: Promise<{ providerId: string }>;
+    searchParams: Promise<{ archived?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const { providerId } = params;
   const communitySlug = await getProviderCommunitySlug(providerId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });

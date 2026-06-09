@@ -5,11 +5,12 @@ import { ProvidersTable } from './providers-table';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminProvidersPage({
-  searchParams,
-}: {
-  searchParams: { archived?: string };
-}) {
+export default async function AdminProvidersPage(
+  props: {
+    searchParams: Promise<{ archived?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return null;
   const archived = searchParams.archived === '1' ? 'archived' : 'active';

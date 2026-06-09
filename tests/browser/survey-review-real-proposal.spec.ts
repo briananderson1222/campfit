@@ -18,6 +18,9 @@ test('renders Survey workbench on a real pending proposal detail page', async ({
   await expect(surveyPanel).toBeVisible();
   await expect(surveyPanel).toContainText('Apply source');
   await expect(surveyPanel).toContainText('Apply actions below replay saved Survey decisions on the server');
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toBeVisible();
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Survey review trail');
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Display-only replay');
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
   await expect(surveyPanel.getByTestId('review-queue')).toBeVisible();
   await expect(surveyPanel.getByTestId('review-focus')).toBeVisible();
@@ -58,6 +61,8 @@ test('persists Survey review decisions on a real pending proposal detail page', 
     ),
     surveyPanel.locator(".decision-column [data-decision='accept-proposed']").click(),
   ]);
+  await expect(surveyPanel.getByTestId('survey-review-trail-result').first()).toBeVisible();
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Would apply proposed value');
 
   await Promise.all([
     page.waitForResponse((response) =>

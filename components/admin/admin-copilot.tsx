@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Bot, Loader2, MessageCircle, Minimize2, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { adminTheme } from './theme';
 
 type Message = {
   role: 'user' | 'assistant';
@@ -137,15 +138,15 @@ export function AdminCopilot({
     <>
       <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
         {open && (
-          <div className="w-[min(92vw,420px)] overflow-hidden rounded-3xl border border-cream-300/80 bg-[#fbf6ec]/95 shadow-2xl backdrop-blur">
+          <div className={cn('w-[min(92vw,420px)] overflow-hidden rounded-3xl shadow-2xl backdrop-blur', adminTheme.panel)}>
             <div className="flex items-center justify-between border-b border-cream-300/70 px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="rounded-full bg-pine-600 p-2 text-cream-50">
                   <Bot className="h-4 w-4" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-bark-700">Admin copilot</div>
-                  <div className="text-[11px] text-bark-400">Tool-enabled chat for this record</div>
+                  <div className={cn('text-sm font-semibold', adminTheme.textStrong)}>Admin copilot</div>
+                  <div className={cn('text-[11px]', adminTheme.textMuted)}>Tool-enabled chat for this record</div>
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -167,20 +168,20 @@ export function AdminCopilot({
             </div>
 
             <div className="space-y-3 p-4">
-              <div className="max-h-[48vh] space-y-2 overflow-y-auto rounded-2xl bg-cream-50/80 p-3">
+              <div className={cn('max-h-[48vh] space-y-2 overflow-y-auto rounded-2xl p-3', adminTheme.surface)}>
                 {messages.map((message, index) => (
                   <div
                     key={`${message.role}-${index}`}
                     className={cn(
                       'max-w-[92%] rounded-2xl px-3 py-2 text-sm',
-                      message.role === 'assistant' ? 'bg-white text-bark-600 shadow-sm' : 'ml-auto bg-pine-600 text-cream-50',
+                      message.role === 'assistant' ? 'admin-surface-raised shadow-sm' : 'ml-auto bg-pine-600 text-cream-50',
                     )}
                   >
                     <p className="whitespace-pre-wrap">{message.content}</p>
                   </div>
                 ))}
                 {busy && (
-                  <div className="flex items-center gap-2 text-sm text-bark-400">
+                  <div className={cn('flex items-center gap-2 text-sm', adminTheme.textMuted)}>
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Thinking…
                   </div>
@@ -193,7 +194,7 @@ export function AdminCopilot({
                     key={starter}
                     onClick={() => sendMessage(starter)}
                     disabled={busy}
-                    className="rounded-full border border-cream-300 bg-white px-3 py-1.5 text-xs font-medium text-bark-500 transition-colors hover:border-pine-300 hover:text-pine-600"
+                    className={cn('rounded-full px-3 py-1.5 text-xs font-medium transition-colors hover:border-pine-300 hover:text-pine-600', adminTheme.chip)}
                   >
                     <Sparkles className="mr-1 inline h-3 w-3" />
                     {starter}
@@ -206,7 +207,7 @@ export function AdminCopilot({
                 onChange={(event) => setInput(event.target.value)}
                 rows={3}
                 placeholder="Ask a question or request an action, for example: 'archive this provider because the site is gone' or 'show related camps'."
-                className="w-full rounded-2xl border border-cream-300 bg-white px-3 py-2 text-sm"
+                className={cn('w-full rounded-2xl', adminTheme.input)}
               />
 
               <div className="flex flex-wrap gap-2">

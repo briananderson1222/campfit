@@ -1,9 +1,9 @@
 @import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Nunito+Sans:ital,opsz,wght@0,6..12,200..1000;1,6..12,200..1000&display=swap");
-@import "@kontourai/survey/review-workbench.css";
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import "../styles/survey-review-workbench.css";
+@import "tailwindcss";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@config "../tailwind.config.ts";
 
 @layer base {
   html {
@@ -85,6 +85,23 @@
       font-body tracking-wide uppercase;
   }
 
+  .badge-contrast {
+    @apply border border-transparent;
+  }
+
+  .compare-chip {
+    @apply flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg
+      border transition-all min-h-8 whitespace-nowrap;
+  }
+
+  .compare-chip-active {
+    @apply bg-pine-100 text-pine-600 border-pine-300/60;
+  }
+
+  .compare-chip-inactive {
+    @apply bg-cream-200/60 text-bark-400 border-transparent hover:bg-cream-200 hover:text-bark-600;
+  }
+
   .section-heading {
     @apply font-display text-2xl sm:text-3xl font-bold text-bark-700 tracking-tight;
   }
@@ -98,8 +115,8 @@
 
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl
-      bg-terracotta-400 text-white font-display font-semibold text-sm
-      hover:bg-terracotta-500 active:bg-terracotta-600
+      bg-terracotta-600 text-white font-display font-semibold text-sm
+      hover:bg-[#9f3425] active:bg-[#84291d]
       shadow-sm hover:shadow-glow
       transition-all duration-200 select-none;
   }
@@ -129,6 +146,91 @@
     @apply bg-cream-50/80 backdrop-blur-md border border-cream-400/30 rounded-3xl;
   }
 
+  .auth-title {
+    @apply text-bark-700;
+  }
+
+  .auth-text {
+    @apply text-bark-600;
+  }
+
+  .auth-muted {
+    @apply text-bark-400;
+  }
+
+  .auth-label {
+    @apply text-bark-500;
+  }
+
+  .auth-link {
+    @apply text-pine-500 hover:text-pine-600;
+  }
+
+  .auth-divider {
+    @apply bg-cream-400/60;
+  }
+
+  .auth-card {
+    @apply bg-cream-50/80 backdrop-blur-md border border-cream-400/30 rounded-3xl;
+  }
+
+  .auth-oauth-button {
+    @apply w-full flex items-center justify-center gap-3 px-4 py-3 rounded-2xl
+      border-2 border-cream-400/60 bg-white hover:bg-cream-50
+      text-bark-600 font-medium text-sm transition-all duration-200
+      hover:border-bark-300 hover:shadow-sm active:scale-[0.99]
+      disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .city-picker-title {
+    @apply text-bark-700;
+  }
+
+  .city-picker-title-accent {
+    @apply text-pine-500;
+  }
+
+  .city-picker-copy {
+    @apply text-bark-400;
+  }
+
+  .city-picker-input {
+    @apply rounded-2xl border border-cream-400/60 bg-white/80 backdrop-blur-sm
+      text-bark-600 placeholder:text-bark-300 shadow-sm
+      focus:outline-none focus:ring-2 focus:ring-pine-400/40;
+    min-height: 60px;
+  }
+
+  .city-picker-input-icon {
+    @apply text-bark-300;
+  }
+
+  .city-picker-card {
+    @apply rounded-2xl border border-cream-400/40 bg-white/80 backdrop-blur-sm
+      shadow-sm transition-all hover:border-pine-300 hover:bg-pine-50/50;
+    min-height: 82px;
+  }
+
+  .city-picker-card-icon {
+    @apply bg-pine-100 text-pine-500;
+  }
+
+  .city-picker-card-title {
+    @apply text-bark-700 group-hover:text-pine-600;
+  }
+
+  .city-picker-card-meta {
+    @apply text-bark-400;
+  }
+
+  .city-picker-card-arrow {
+    @apply text-bark-300 group-hover:text-pine-500;
+  }
+
+  .public-count-chip {
+    @apply rounded-full border border-pine-200/60 bg-pine-100/60 text-pine-600;
+  }
+
   /* ── Dark mode component overrides ─────────────────────────────── */
 
   .dark .camp-card {
@@ -139,6 +241,164 @@
     @apply bg-bark-800/80 border-bark-600/30;
   }
 
+  /*
+   * Dark mode text bridge.
+   * Many screens use the light-theme bark scale directly; on the dark body
+   * those values are illegible. Keep the bridge limited to foreground text
+   * utilities so layout, surfaces, and borders stay component-controlled.
+   */
+  .dark body .text-bark-700:not([class*="dark:text-"]),
+  .dark body .hover\:text-bark-700:not([class*="dark:hover:text-"]):hover {
+    color: var(--color-cream-100);
+  }
+
+  .dark body .text-bark-600:not([class*="dark:text-"]),
+  .dark body .hover\:text-bark-600:not([class*="dark:hover:text-"]):hover {
+    color: var(--color-cream-200);
+  }
+
+  .dark body .text-bark-500:not([class*="dark:text-"]),
+  .dark body .hover\:text-bark-500:not([class*="dark:hover:text-"]):hover {
+    color: var(--color-cream-300);
+  }
+
+  .dark body .text-bark-400:not([class*="dark:text-"]),
+  .dark body .hover\:text-bark-400:not([class*="dark:hover:text-"]):hover,
+  .dark body .text-bark-300:not([class*="dark:text-"]),
+  .dark body .hover\:text-bark-300:not([class*="dark:hover:text-"]):hover,
+  .dark body .text-bark-200:not([class*="dark:text-"]),
+  .dark body .hover\:text-bark-200:not([class*="dark:hover:text-"]):hover {
+    color: var(--color-cream-400);
+  }
+
+  .dark body .text-pine-700:not([class*="dark:text-"]),
+  .dark body .hover\:text-pine-700:not([class*="dark:hover:text-"]):hover,
+  .dark body .text-pine-600:not([class*="dark:text-"]),
+  .dark body .hover\:text-pine-600:not([class*="dark:hover:text-"]):hover,
+  .dark body .text-pine-500:not([class*="dark:text-"]),
+  .dark body .hover\:text-pine-500:not([class*="dark:hover:text-"]):hover {
+    color: var(--color-pine-200);
+  }
+
+  .dark body .text-pine-400:not([class*="dark:text-"]),
+  .dark body .hover\:text-pine-400:not([class*="dark:hover:text-"]):hover,
+  .dark body .text-pine-300:not([class*="dark:text-"]),
+  .dark body .hover\:text-pine-300:not([class*="dark:hover:text-"]):hover {
+    color: var(--color-pine-100);
+  }
+
+  .dark body .badge-contrast {
+    background-color: color-mix(in srgb, currentColor 18%, var(--color-bark-800));
+    border-color: color-mix(in srgb, currentColor 36%, transparent);
+  }
+
+  .dark body .badge-contrast[class~="text-white"],
+  .dark body .badge-contrast[class~="text-bark-700"] {
+    color: var(--color-cream-100);
+  }
+
+  .dark body .badge-contrast[class~="text-pine-700"] {
+    color: var(--color-pine-100);
+  }
+
+  .dark body .badge-contrast[class~="text-clay-500"],
+  .dark body .badge-contrast[class~="text-orange-800"],
+  .dark body .badge-contrast[class~="text-amber-800"] {
+    color: var(--color-amber-200);
+  }
+
+  .dark body .badge-contrast[class~="text-emerald-800"] {
+    color: #a7f3d0;
+  }
+
+  .dark body .badge-contrast[class~="text-red-800"] {
+    color: #fecaca;
+  }
+
+  .dark body .badge-contrast[class~="text-sky-800"] {
+    color: var(--color-sky-100);
+  }
+
+  .dark body .badge-contrast[class~="text-gray-600"] {
+    color: var(--color-cream-300);
+  }
+
+  .dark .city-picker-title {
+    @apply text-cream-100;
+  }
+
+  .dark .city-picker-title-accent {
+    @apply text-pine-200;
+  }
+
+  .dark .city-picker-copy {
+    @apply text-cream-300;
+  }
+
+  .dark .city-picker-input {
+    @apply border-pine-200/35 bg-bark-700/90 text-cream-100 placeholder:text-cream-300
+      shadow-[0_18px_50px_-30px_rgba(0,0,0,0.85)]
+      focus:border-pine-200/70 focus:ring-pine-200/25;
+  }
+
+  .dark .city-picker-input-icon {
+    @apply text-pine-200;
+  }
+
+  .dark .city-picker-card {
+    @apply border-pine-200/25 bg-bark-700/90 shadow-[0_24px_60px_-36px_rgba(0,0,0,0.95)]
+      hover:border-pine-200/60 hover:bg-bark-600/85;
+  }
+
+  .dark .city-picker-card-icon {
+    @apply bg-pine-200/20 text-pine-100;
+  }
+
+  .dark .city-picker-card-title {
+    @apply text-cream-100 group-hover:text-pine-100;
+  }
+
+  .dark .city-picker-card-meta {
+    @apply text-cream-300;
+  }
+
+  .dark .city-picker-card-arrow {
+    @apply text-pine-200 group-hover:text-pine-100;
+  }
+
+  .dark .public-count-chip {
+    @apply border-pine-200/35 bg-pine-900/65 text-pine-100;
+  }
+
+  .dark .auth-title {
+    @apply text-cream-100;
+  }
+
+  .dark .auth-text {
+    @apply text-cream-200;
+  }
+
+  .dark .auth-muted,
+  .dark .auth-label {
+    @apply text-cream-300;
+  }
+
+  .dark .auth-link {
+    @apply text-pine-200 hover:text-pine-100;
+  }
+
+  .dark .auth-divider {
+    @apply bg-bark-500/70;
+  }
+
+  .dark .auth-card {
+    @apply bg-bark-800/90 border-bark-500/60;
+  }
+
+  .dark .auth-oauth-button {
+    @apply border-bark-500/70 bg-bark-700/70 text-cream-200 hover:bg-bark-600/70 hover:border-pine-500/60;
+  }
+
   .dark .filter-chip-inactive {
     @apply bg-bark-600/60 text-cream-300 hover:bg-bark-500/60 hover:text-cream-200;
   }
@@ -147,8 +407,16 @@
     @apply bg-pine-500 text-white;
   }
 
+  .dark .compare-chip-active {
+    @apply bg-pine-300/20 text-pine-100 border-pine-200/45;
+  }
+
+  .dark .compare-chip-inactive {
+    @apply bg-cream-300/20 text-cream-100 border-cream-200/25 hover:bg-cream-300/30 hover:text-white;
+  }
+
   .dark .input-field {
-    @apply border-bark-500/60 bg-bark-700/60 text-cream-200 placeholder:text-bark-300
+    @apply border-bark-500/60 bg-bark-700/60 text-cream-200 placeholder:text-cream-400
       focus:ring-pine-500/40 focus:border-pine-500;
   }
 
@@ -165,7 +433,7 @@
   }
 
   .dark .week-cell-unavailable {
-    @apply bg-bark-700/40 text-bark-400;
+    @apply bg-bark-700/40 text-cream-400;
   }
 
 }

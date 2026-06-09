@@ -114,7 +114,7 @@ export function Nav() {
                   />
                   <div className="absolute right-0 mt-2 w-48 glass-panel border border-cream-400/40 dark:border-bark-600/40 shadow-camp-hover rounded-2xl overflow-hidden z-20 animate-fade-in">
                     <div className="px-4 py-3 border-b border-cream-400/40 dark:border-bark-600/40">
-                      <p className="text-xs text-bark-300 dark:text-bark-400">{t("nav.signedInAs")}</p>
+                      <p className="text-xs text-bark-300 dark:text-cream-400">{t("nav.signedInAs")}</p>
                       <p className="text-sm font-medium text-bark-600 dark:text-cream-200 truncate">
                         {user.email}
                       </p>

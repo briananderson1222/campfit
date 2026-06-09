@@ -1,4 +1,5 @@
 import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbench';
+import { SurveyReviewTrail } from '@/components/admin/survey-review-trail';
 import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { surveyReviewFixtureProposal } from '@/lib/admin/survey-review-fixture';
 
@@ -25,6 +26,7 @@ export default function SurveyReviewFixturePage() {
         </p>
       </header>
 
+      <SurveyReviewTrail session={session} events={[]} />
       <SurveyReviewWorkbench session={session} />
     </div>
   );

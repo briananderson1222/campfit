@@ -3,10 +3,8 @@ import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { writePersonChangeLogs } from '@/lib/admin/changelog-repository';
 
-export async function GET(
-  _request: Request,
-  { params }: { params: { personId: string } },
-) {
+export async function GET(_request: Request, props: { params: Promise<{ personId: string }> }) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -49,10 +47,8 @@ export async function GET(
   });
 }
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { personId: string } },
-) {
+export async function PATCH(request: Request, props: { params: Promise<{ personId: string }> }) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -138,7 +134,7 @@ export async function PATCH(
       console.error('[person PATCH] writePersonChangeLogs failed:', error);
     });
 
-    return GET(request, { params });
+    return GET(request, { params: Promise.resolve(params) });
   } catch (error) {
     await client.query('ROLLBACK');
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Request failed' }, { status: 500 });

@@ -9,7 +9,8 @@ import {
   SurveyReviewEventConflictError,
 } from '@/lib/admin/survey-review-events';
 
-export async function GET(_request: Request, { params }: { params: { id: string } }) {
+export async function GET(_request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const scope = await getProposalCommunityScope(params.id);
   if (!scope) return NextResponse.json({ error: 'Proposal not found.' }, { status: 404 });
 
@@ -19,7 +20,8 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   return NextResponse.json({ events: await getSurveyReviewEvents(params.id) });
 }
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
+export async function PUT(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const scope = await getProposalCommunityScope(params.id);
   if (!scope) return NextResponse.json({ error: 'Proposal not found.' }, { status: 404 });
 

@@ -30,10 +30,8 @@ export function CompareButton({ slug, className }: CompareButtonProps) {
             : "Add to comparison"
       }
       className={cn(
-        "flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-all",
-        active
-          ? "bg-pine-100 text-pine-600 border border-pine-300/60"
-          : "bg-cream-200/60 text-bark-400 border border-transparent hover:bg-cream-200 hover:text-bark-600",
+        "compare-chip",
+        active ? "compare-chip-active" : "compare-chip-inactive",
         atMax && "opacity-40 cursor-not-allowed",
         className
       )}

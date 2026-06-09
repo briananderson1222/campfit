@@ -42,7 +42,8 @@ async function getPersonDetail(personId: string) {
   };
 }
 
-export default async function AdminPersonDetailPage({ params }: { params: { personId: string } }) {
+export default async function AdminPersonDetailPage(props: { params: Promise<{ personId: string }> }) {
+  const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return null;
 

@@ -26,13 +26,14 @@ function buildDetailHref(id: string, searchParams: { campId?: string; providerId
   return `/admin/review/${id}${qs.toString() ? `?${qs.toString()}` : ''}`;
 }
 
-export default async function ReviewDetailPage({
-  params,
-  searchParams,
-}: {
-  params: { id: string };
-  searchParams: { campId?: string; providerId?: string; page?: string };
-}) {
+export default async function ReviewDetailPage(
+  props: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<{ campId?: string; providerId?: string; page?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const proposal = await getProposal(params.id);
   if (!proposal) notFound();
   const auth = await requireAdminAccess({ communitySlug: proposal.communitySlug, allowModerator: true });
@@ -59,7 +60,6 @@ export default async function ReviewDetailPage({
         <ArrowLeft className="w-4 h-4" />
         Back to queue
       </Link>
-
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
           <h1 className="font-display text-2xl font-extrabold text-bark-700">{proposal.campName}</h1>
@@ -88,7 +88,6 @@ export default async function ReviewDetailPage({
           )}
         </div>
       </div>
-
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">
@@ -103,7 +102,6 @@ export default async function ReviewDetailPage({
           </Link>
         )}
       </div>
-
       <ReviewPanel
         proposal={proposal}
         surveyReviewSession={surveyReviewSession}
@@ -116,7 +114,6 @@ export default async function ReviewDetailPage({
           previousHref: queue.previousId ? buildDetailHref(queue.previousId, searchParams) : null,
         }}
       />
-
       <AdminCopilot entityType="CAMP" entityId={proposal.campId} />
     </div>
   );

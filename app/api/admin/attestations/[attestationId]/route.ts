@@ -3,10 +3,8 @@ import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug, getProviderCommunitySlug } from '@/lib/admin/community-access';
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { attestationId: string } },
-) {
+export async function PATCH(request: Request, props: { params: Promise<{ attestationId: string }> }) {
+  const params = await props.params;
   const body = await request.json().catch(() => ({})) as {
     action?: 'recheck' | 'mark_stale' | 'invalidate';
     notes?: string | null;

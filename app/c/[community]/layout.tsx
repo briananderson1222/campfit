@@ -4,13 +4,18 @@ import { CommunityProvider } from "@/lib/community-context";
 
 export const dynamic = "force-dynamic";
 
-export default async function CommunityLayout({
-  children,
-  params,
-}: {
-  children: React.ReactNode;
-  params: { community: string };
-}) {
+export default async function CommunityLayout(
+  props: {
+    children: React.ReactNode;
+    params: Promise<{ community: string }>;
+  }
+) {
+  const params = await props.params;
+
+  const {
+    children
+  } = props;
+
   const communities = await getDistinctCommunities();
   const community = communities.find((c) => c.communitySlug === params.community);
   if (!community) notFound();

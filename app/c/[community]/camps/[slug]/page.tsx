@@ -41,11 +41,12 @@ export const dynamic = "force-dynamic";
 
 const BASE_URL = "https://camp.fit";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { community: string; slug: string };
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ community: string; slug: string }>;
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   const camp = await getCampBySlug(params.slug);
   if (!camp) return {};
 
@@ -105,11 +106,12 @@ export async function generateStaticParams() {
   return slugs.map((c) => ({ community: c.communitySlug, slug: c.slug }));
 }
 
-export default async function CommunityDetailPage({
-  params,
-}: {
-  params: { community: string; slug: string };
-}) {
+export default async function CommunityDetailPage(
+  props: {
+    params: Promise<{ community: string; slug: string }>;
+  }
+) {
+  const params = await props.params;
   const camp = await getCampBySlug(params.slug);
 
   if (!camp) notFound();
@@ -192,7 +194,6 @@ export default async function CommunityDetailPage({
         <ArrowLeft className="w-4 h-4" />
         Back to camps
       </Link>
-
       {/* Header */}
       <div className="mb-8 animate-fade-up">
         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -258,7 +259,6 @@ export default async function CommunityDetailPage({
           )}
         </div>
       </div>
-
       {/* Main content grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column — main content */}
@@ -317,7 +317,7 @@ export default async function CommunityDetailPage({
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-bark-300 dark:text-bark-200 mt-3">
+                  <p className="text-xs text-bark-300 dark:text-cream-400 mt-3">
                     {camp.schedules.length} of {SUMMER_WEEKS.length} weeks available
                   </p>
                 </>
@@ -360,7 +360,7 @@ export default async function CommunityDetailPage({
                       {dateRange ? (
                         <p className="text-xs text-pine-500 mt-0.5">{dateRange}</p>
                       ) : (
-                        <p className="text-xs text-bark-300 dark:text-bark-200 mt-0.5 italic">Dates TBD — check camp website</p>
+                        <p className="text-xs text-bark-300 dark:text-cream-400 mt-0.5 italic">Dates TBD — check camp website</p>
                       )}
                     </div>
                     {s.startTime && (
@@ -423,14 +423,14 @@ export default async function CommunityDetailPage({
                         {p.label}
                       </span>
                       {p.ageQualifier && (
-                        <p className="text-xs text-bark-300 dark:text-bark-200">{p.ageQualifier}</p>
+                        <p className="text-xs text-bark-300 dark:text-cream-400">{p.ageQualifier}</p>
                       )}
                     </div>
                     <div className="text-right shrink-0 ml-3">
                       <span className="font-display font-bold text-bark-700 dark:text-cream-100">
                         {formatCurrency(p.amount)}
                       </span>
-                      <span className="text-xs text-bark-300 dark:text-bark-200 block">
+                      <span className="text-xs text-bark-300 dark:text-cream-400 block">
                         {p.unit === "FLAT"
                           ? "total"
                           : p.unit === "PER_CAMP"
@@ -566,7 +566,7 @@ function DetailRow({
     <div className="flex items-start gap-3">
       <div className="mt-0.5 shrink-0">{icon}</div>
       <div>
-        <span className="text-xs text-bark-300 dark:text-bark-200 uppercase tracking-wide font-semibold">
+        <span className="text-xs text-bark-300 dark:text-cream-400 uppercase tracking-wide font-semibold">
           {label}
         </span>
         <p className="text-sm text-bark-500 dark:text-cream-300">{value}</p>

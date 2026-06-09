@@ -42,7 +42,7 @@ export async function requireAdminAccess(opts?: {
   communitySlug?: string | null;
   allowModerator?: boolean;
 }) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.id || !user.email) return { error: 'Unauthorized', status: 401 as const };
 

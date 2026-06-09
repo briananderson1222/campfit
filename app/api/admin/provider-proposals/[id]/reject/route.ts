@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const pool = getPool();
   const proposalRes = await pool.query(
     `SELECT pcp.id, pcp.status, p."communitySlug"

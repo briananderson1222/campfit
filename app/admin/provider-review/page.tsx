@@ -20,11 +20,12 @@ function buildDetailHref(id: string, params: { page?: number | string; providerI
   return `/admin/provider-review/${id}${qs.toString() ? `?${qs.toString()}` : ''}`;
 }
 
-export default async function ProviderReviewQueuePage({
-  searchParams,
-}: {
-  searchParams: { page?: string; providerId?: string };
-}) {
+export default async function ProviderReviewQueuePage(
+  props: {
+    searchParams: Promise<{ page?: string; providerId?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return null;
 

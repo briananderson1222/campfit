@@ -9,10 +9,8 @@ const ALLOWED_FIELDS = new Set([
   'contactEmail', 'contactPhone', 'notes', 'crawlRootUrl', 'applicationUrl', 'socialLinks',
 ]);
 
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const pool = getPool();
   const { rows } = await pool.query(
     `SELECT pcp.*, p."communitySlug"

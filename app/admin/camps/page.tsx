@@ -54,11 +54,12 @@ async function getCampsWithQuality(
   return result.rows;
 }
 
-export default async function AdminCampsPage({
-  searchParams,
-}: {
-  searchParams: { archived?: string };
-}) {
+export default async function AdminCampsPage(
+  props: {
+    searchParams: Promise<{ archived?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return null;
   const archived = searchParams.archived === '1' ? 'archived' : 'active';

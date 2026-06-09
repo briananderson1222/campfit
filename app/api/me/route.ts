@@ -4,7 +4,7 @@ import { getPool } from '@/lib/db';
 import { evaluateAdminAccess } from '@/lib/admin/access';
 
 export async function GET() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ isAdmin: false });
 

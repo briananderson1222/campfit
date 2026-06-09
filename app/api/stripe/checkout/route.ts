@@ -4,7 +4,7 @@ import { getStripe, STRIPE_PRICE_ID } from "@/lib/stripe";
 import { getPool } from "@/lib/db";
 
 export async function POST() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {

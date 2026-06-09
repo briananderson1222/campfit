@@ -11,7 +11,6 @@ import { Pool } from "pg";
 import { resolvePgConfig } from "./db-config";
 
 declare global {
-  // eslint-disable-next-line no-var
   var _pgPool: Pool | undefined;
 }
 

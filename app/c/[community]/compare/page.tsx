@@ -5,11 +5,12 @@ import { CompareClient } from "@/components/compare-client";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { community: string };
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ community: string }>;
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   const displayName =
     params.community.charAt(0).toUpperCase() + params.community.slice(1);
 
@@ -19,13 +20,13 @@ export async function generateMetadata({
   };
 }
 
-export default async function CommunityComparePage({
-  params,
-  searchParams,
-}: {
-  params: { community: string };
-  searchParams: { camps?: string };
-}) {
+export default async function CommunityComparePage(
+  props: {
+    params: Promise<{ community: string }>;
+    searchParams: Promise<{ camps?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const slugList = (searchParams.camps || "")
     .split(",")
     .map((s) => s.trim())

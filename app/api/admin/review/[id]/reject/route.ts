@@ -4,7 +4,8 @@ import { recordReviewDecision } from '@/lib/admin/metrics-repository';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlug } from '@/lib/admin/community-access';
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const communitySlug = await getProposalCommunitySlug(params.id);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });

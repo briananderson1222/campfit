@@ -11,10 +11,8 @@ const EDITABLE_FIELDS = new Set([
   'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
 ]);
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { campId: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ campId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getCampCommunitySlug(params.campId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -54,10 +52,8 @@ export async function PATCH(
 }
 
 /** Explicit VERIFIED mark — separate from PATCH to enforce intentionality. */
-export async function POST(
-  req: Request,
-  { params }: { params: { campId: string } }
-) {
+export async function POST(req: Request, props: { params: Promise<{ campId: string }> }) {
+  const params = await props.params;
   const communitySlug = await getCampCommunitySlug(params.campId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });

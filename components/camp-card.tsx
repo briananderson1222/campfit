@@ -47,15 +47,15 @@ export function CampCard({ camp }: { camp: Camp }) {
         {/* Top row: badges + save button */}
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <span className={cn("badge", categoryColor)}>
+            <span className={cn("badge badge-contrast", categoryColor)}>
               {CATEGORY_LABELS[campCategory]}
             </span>
             {campTypeVal !== "SUMMER_DAY" && (
-              <span className="badge bg-clay-100 text-clay-500">
+              <span className="badge badge-contrast camp-type-badge bg-clay-100 text-clay-500">
                 {CAMP_TYPE_LABELS[campTypeVal]}
               </span>
             )}
-            <span className={cn("badge whitespace-nowrap", status.color)}>
+            <span className={cn("badge badge-contrast whitespace-nowrap", status.color)}>
               {effectiveStatus === "COMING_SOON" && camp.registrationOpenDate
                 ? `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
                 : status.label}
@@ -72,14 +72,14 @@ export function CampCard({ camp }: { camp: Camp }) {
             className={cn(
               "shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors border",
               saved
-                ? "bg-terracotta-50 border-terracotta-300"
-                : "bg-cream-200/60 hover:bg-terracotta-50 border-cream-400/40"
+                ? "bg-terracotta-50 border-terracotta-300 dark:bg-terracotta-400/20 dark:border-terracotta-300/70"
+                : "bg-cream-200/60 hover:bg-terracotta-50 border-cream-400/40 dark:bg-bark-600/80 dark:hover:bg-terracotta-400/15 dark:border-cream-300/35"
             )}
             title={saved ? "Remove from saved" : "Save camp"}
           >
             <Heart className={cn(
               "w-3.5 h-3.5 transition-colors",
-              saved ? "text-terracotta-400 fill-terracotta-400" : "text-bark-400 hover:text-terracotta-400"
+              saved ? "text-terracotta-400 fill-terracotta-400 dark:text-terracotta-300 dark:fill-terracotta-300" : "text-bark-400 hover:text-terracotta-400 dark:text-cream-300 dark:hover:text-terracotta-300"
             )} />
           </button>
         </div>
@@ -125,13 +125,13 @@ export function CampCard({ camp }: { camp: Camp }) {
         </Link>
 
         {/* Bottom row: age/weeks + compare + price */}
-        <div className="flex items-end justify-between gap-3 pt-3 border-t border-cream-300/60">
+        <div className="flex items-end justify-between gap-3 pt-3 border-t border-cream-300/60 dark:border-cream-300/45">
           <div className="flex flex-col gap-1.5 min-w-0">
-            <span className="text-xs text-bark-300 dark:text-bark-200 uppercase tracking-wide font-semibold">
+            <span className="text-xs text-bark-300 dark:text-cream-400 uppercase tracking-wide font-semibold">
               {ageRange}
             </span>
             {campTypeVal === "SUMMER_DAY" && (
-              <span className="text-xs text-bark-300 dark:text-bark-200">
+              <span className="text-xs text-bark-300 dark:text-cream-400">
                 {weeksAvailable > 0
                   ? `${weeksAvailable} week${weeksAvailable !== 1 ? "s" : ""} available`
                   : "Contact for schedule"}
@@ -147,7 +147,7 @@ export function CampCard({ camp }: { camp: Camp }) {
                 <span className="font-display font-bold text-xl text-bark-700 dark:text-cream-200">
                   {formatCurrency(lowestPrice)}
                 </span>
-                <span className="text-xs text-bark-300 dark:text-bark-200 block">
+                <span className="text-xs text-bark-300 dark:text-cream-400 block">
                   {camp.pricing[0]?.unit === "FLAT"
                     ? "total"
                     : camp.pricing[0]?.unit === "PER_CAMP"
@@ -156,7 +156,7 @@ export function CampCard({ camp }: { camp: Camp }) {
                 </span>
               </>
             ) : (
-              <span className="text-sm text-bark-300 dark:text-bark-200 italic">Contact for pricing</span>
+              <span className="text-sm text-bark-300 dark:text-cream-400 italic">Contact for pricing</span>
             )}
           </div>
         </div>

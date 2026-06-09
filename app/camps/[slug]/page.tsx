@@ -36,11 +36,12 @@ export const dynamic = "force-dynamic";
 
 const BASE_URL = "https://camp.fit";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { slug: string };
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ slug: string }>;
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   const camp = await getCampBySlug(params.slug);
   if (!camp) return {};
 
@@ -98,11 +99,12 @@ export async function generateStaticParams() {
   return slugs.map((s) => ({ slug: s.slug }));
 }
 
-export default async function CampDetailPage({
-  params,
-}: {
-  params: { slug: string };
-}) {
+export default async function CampDetailPage(
+  props: {
+    params: Promise<{ slug: string }>;
+  }
+) {
+  const params = await props.params;
   const camp = await getCampBySlug(params.slug);
 
   if (!camp) notFound();

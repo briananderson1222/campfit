@@ -8,7 +8,13 @@ import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import type { ReviewSessionEvent } from '@kontourai/survey';
+import {
+  buildReviewWorkbenchSessionExportForSnapshot,
+  validateReviewSessionEventsForSnapshot,
+} from '@/lib/kontourai/survey-review-workbench';
 import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbench';
+import { SurveyReviewTrail } from '@/components/admin/survey-review-trail';
+import { adminTheme } from '@/components/admin/theme';
 import {
   CampArrayFieldEditor,
   CampFieldInput,
@@ -79,7 +85,7 @@ export function ReviewPanel({
   const hasSurveyReviewSession = Boolean(surveyReviewSession);
   const [proposedChanges, setProposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
   // Fields already applied in previous partial-approval rounds
-  const alreadyApplied = new Set<string>(proposal.appliedFields ?? []);
+  const alreadyApplied = useMemo(() => new Set<string>(proposal.appliedFields ?? []), [proposal.appliedFields]);
   // Only show unapplied fields as selectable
   const fields = (Object.entries(proposedChanges) as [string, FieldDiff][])
     .filter(([k]) => !alreadyApplied.has(k))
@@ -111,10 +117,14 @@ export function ReviewPanel({
   const handlePersistedSurveyEventsChange = useCallback((events: readonly ReviewSessionEvent[]) => {
     setPersistedSurveyEvents(events);
   }, []);
-  const savedSurveyDecisionCount = useMemo(() => countSavedSurveyDecisions(persistedSurveyEvents), [persistedSurveyEvents]);
+  const surveyReplaySummary = useMemo(
+    () => deriveSurveyReplaySummary(surveyReviewSession, persistedSurveyEvents, alreadyApplied),
+    [alreadyApplied, persistedSurveyEvents, surveyReviewSession],
+  );
+  const savedSurveyDecisionCount = surveyReplaySummary.resolvedCount;
   const surveyItemCount = surveyReviewSession?.items.length ?? 0;
-  const canApplySurveyPartial = savedSurveyDecisionCount > 0;
-  const canApplySurveyFull = surveyItemCount > 0 && savedSurveyDecisionCount >= surveyItemCount;
+  const canApplySurveyPartial = surveyReplaySummary.newlyApplicableCount > 0;
+  const canApplySurveyFull = surveyItemCount > 0 && surveyReplaySummary.isValid && savedSurveyDecisionCount >= surveyItemCount;
 
   const campData = (proposal.campData ?? {}) as Record<string, unknown>;
   const campDomain = (() => {
@@ -286,12 +296,12 @@ export function ReviewPanel({
   const toggleProof = (f: string) => setProofOpen(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n; });
 
   const campSnapshot = (
-      <div className="glass-panel p-5">
+      <div className="glass-panel p-5 admin-surface-raised">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-bark-600 text-sm uppercase tracking-wide">Current Camp Data</h2>
+          <h2 className={cn('font-semibold text-bark-600 text-sm uppercase tracking-wide', adminTheme.textStrong)}>Current Camp Data</h2>
           <button
             onClick={() => setShowAllMeta(v => !v)}
-            className="text-xs text-bark-400 hover:text-pine-500 flex items-center gap-1"
+            className="text-xs text-bark-400 hover:text-pine-500 flex items-center gap-1 admin-text-muted"
           >
             {showAllMeta ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             {showAllMeta ? 'Show less' : 'Show all fields'}
@@ -315,7 +325,7 @@ export function ReviewPanel({
                   isChanged && 'bg-amber-50/40',
                 )}>
                   <p className="text-xs text-bark-300 uppercase tracking-wide flex items-center gap-1">
-                    {FIELD_LABELS[field] ?? field}
+                    <span className={adminTheme.textMuted}>{FIELD_LABELS[field] ?? field}</span>
                     {/* Proof status icon */}
                     {proof ? (
                       <button
@@ -337,7 +347,7 @@ export function ReviewPanel({
                       </button>
                     )}
                   </p>
-                  <FieldTimelineNote timeline={fieldTimeline[field]} className="mt-0.5 text-[11px] text-bark-300" />
+                  <FieldTimelineNote timeline={fieldTimeline[field]} className={cn('mt-0.5 text-[11px] text-bark-300', adminTheme.textMuted)} />
                   {isEditingCamp ? (
                     <div className="flex items-center gap-1 mt-1">
                       <CampFieldInput
@@ -366,20 +376,20 @@ export function ReviewPanel({
                       </div>
                     </div>
                   ) : (
-                    <div className="text-bark-600 text-sm"><CampFieldValue value={val} field={field} /></div>
+                    <div className={cn('text-bark-600 text-sm', adminTheme.text)}><CampFieldValue value={val} field={field} /></div>
                   )}
                   {/* Inline proof */}
                   {proof && isProofOpen && (
-                    <div className="mt-1.5 rounded-lg bg-pine-50/60 border border-pine-200/50 px-2.5 py-2 space-y-1">
+                    <div className="mt-1.5 rounded-lg bg-pine-50/60 border border-pine-200/50 px-2.5 py-2 space-y-1 admin-surface">
                       <p className="text-xs text-pine-600 font-medium flex items-center gap-1">
                         <ShieldCheck className="w-3 h-3" />
                         Verified {new Date(proof.approvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                       {proof.excerpt && (
-                        <p className="text-xs text-bark-500 italic leading-relaxed">&quot;{proof.excerpt}&quot;</p>
+                        <p className={cn('text-xs text-bark-500 italic leading-relaxed', adminTheme.text)}>&quot;{proof.excerpt}&quot;</p>
                       )}
                       {!proof.excerpt && (
-                        <p className="text-xs text-bark-400 italic">Admin attestation — no excerpt</p>
+                        <p className={cn('text-xs text-bark-400 italic', adminTheme.textMuted)}>Admin attestation — no excerpt</p>
                       )}
                       {proof.sourceUrl && (
                         <a
@@ -404,24 +414,24 @@ export function ReviewPanel({
   return (
     <div className="space-y-6">
       {surveyReviewSession && (
-        <section className="glass-panel p-5 space-y-4" data-testid="real-proposal-survey-workbench">
+        <section className="glass-panel p-5 space-y-4 admin-surface-raised" data-testid="real-proposal-survey-workbench">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-pine-500" />
-                <h2 className="font-semibold text-bark-600 text-sm uppercase tracking-wide">Survey Review Workbench</h2>
-                <span className="rounded-full bg-pine-100 px-2 py-0.5 text-[11px] font-semibold text-pine-700">
+                <ShieldCheck className="h-4 w-4 text-pine-500 admin-link" />
+                <h2 className={cn('font-semibold text-bark-600 text-sm uppercase tracking-wide', adminTheme.textStrong)}>Survey Review Workbench</h2>
+                <span className="rounded-full bg-pine-100 px-2 py-0.5 text-[11px] font-semibold text-pine-700 admin-chip">
                   Apply source
                 </span>
               </div>
-              <p className="mt-1 max-w-3xl text-xs text-bark-400">
+              <p className={cn('mt-1 max-w-3xl text-xs text-bark-400', adminTheme.textMuted)}>
                 Survey renders ReviewItems, candidate evidence, reviewer decisions, and Surface previews from this proposal.
                 Apply actions below replay saved Survey decisions on the server before CampFit writes the approved fields.
               </p>
             </div>
             <button
               onClick={() => setSurveyCollapsed((value) => !value)}
-              className="flex items-center gap-1.5 text-xs text-bark-400 hover:text-pine-600"
+              className="flex items-center gap-1.5 text-xs text-bark-400 hover:text-pine-600 admin-text-muted"
             >
               {surveyCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
               {surveyCollapsed ? 'Show Survey' : 'Hide Survey'}
@@ -429,11 +439,18 @@ export function ReviewPanel({
           </div>
 
           {!surveyCollapsed && (
-            <SurveyReviewWorkbench
-              session={surveyReviewSession}
-              eventPersistence={surveyEventPersistence}
-              onPersistedEventsChange={handlePersistedSurveyEventsChange}
-            />
+            <div className="space-y-4">
+              <SurveyReviewTrail
+                session={surveyReviewSession}
+                events={persistedSurveyEvents}
+                fieldLabels={FIELD_LABELS}
+              />
+              <SurveyReviewWorkbench
+                session={surveyReviewSession}
+                eventPersistence={surveyEventPersistence}
+                onPersistedEventsChange={handlePersistedSurveyEventsChange}
+              />
+            </div>
           )}
         </section>
       )}
@@ -442,7 +459,7 @@ export function ReviewPanel({
       <div className="flex items-center gap-2">
         <button
           onClick={() => setProposedCollapsed(v => !v)}
-          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700"
+          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700 admin-text-strong"
         >
           {proposedCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           Proposed Changes
@@ -477,7 +494,7 @@ export function ReviewPanel({
               setLoading(null);
             }
           }}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-cream-300 text-bark-400 hover:text-pine-600 hover:border-pine-300 disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-cream-300 text-bark-400 hover:text-pine-600 hover:border-pine-300 disabled:opacity-40 transition-colors admin-chip"
           title="Re-crawl this camp's website and replace this proposal with fresh results"
         >
           {loading === 'recrawl' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -503,11 +520,11 @@ export function ReviewPanel({
           {alreadyApplied.size > 0 && (
             <div className="space-y-2 opacity-60">
               {Array.from(alreadyApplied).filter(f => proposal.proposedChanges[f]).map(field => (
-                <div key={field} className="rounded-2xl border border-pine-200/60 bg-pine-50/20 px-4 py-2.5 flex items-center gap-3">
+                <div key={field} className="rounded-2xl border border-pine-200/60 bg-pine-50/20 px-4 py-2.5 flex items-center gap-3 admin-surface">
                   <BookmarkCheck className="w-4 h-4 text-pine-500 shrink-0" />
-                  <span className="text-sm font-medium text-bark-500">{FIELD_LABELS[field] ?? field}</span>
+                  <span className={cn('text-sm font-medium text-bark-500', adminTheme.text)}>{FIELD_LABELS[field] ?? field}</span>
                   <span className="text-xs text-pine-500 font-medium ml-1">Applied</span>
-                  <div className="ml-auto max-w-[240px] text-xs text-bark-300">
+                  <div className={cn('ml-auto max-w-[240px] text-xs text-bark-300', adminTheme.textMuted)}>
                     <CampFieldValue value={proposal.proposedChanges[field].new} field={field} />
                   </div>
                 </div>
@@ -530,7 +547,7 @@ export function ReviewPanel({
                 key={field}
                 className={cn(
                   'rounded-2xl border p-4 transition-colors',
-                  isSelected ? 'border-pine-300/60 bg-pine-50/30' : 'border-cream-400/40 bg-cream-100/40'
+                  isSelected ? 'border-pine-300/60 bg-pine-50/30 admin-surface-raised' : 'border-cream-400/40 bg-cream-100/40 admin-surface'
                 )}
               >
                 <div className="flex items-start gap-3">
@@ -542,27 +559,27 @@ export function ReviewPanel({
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      <span className="font-semibold text-bark-600 text-sm">{FIELD_LABELS[field] ?? field}</span>
+                      <span className={cn('font-semibold text-bark-600 text-sm', adminTheme.textStrong)}>{FIELD_LABELS[field] ?? field}</span>
                       <span className={cn(
                         'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                        conf >= 80 ? 'bg-pine-100 text-pine-600' :
-                        conf >= 50 ? 'bg-amber-100 text-amber-600' :
-                        'bg-red-100 text-red-500'
+                        conf >= 80 ? 'bg-pine-100 text-pine-600 admin-chip' :
+                        conf >= 50 ? 'bg-amber-100 text-amber-600 dark:border dark:border-amber-300/30' :
+                        'bg-red-100 text-red-500 dark:border dark:border-red-300/30'
                       )}>
                         {conf}%
                       </span>
                       <span className={cn(
                         'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                        isPopulate ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-700'
+                        isPopulate ? 'bg-blue-100 text-blue-600 dark:bg-pine-800/70 dark:text-cream-200 dark:border dark:border-pine-500/30' : 'bg-amber-100 text-amber-700 dark:border dark:border-amber-300/30'
                       )}>
                         {isPopulate ? 'new data' : 'update'}
                       </span>
                     </div>
-                    <FieldTimelineNote timeline={fieldTimeline[field]} className="mb-2 text-[11px] text-bark-300" />
+                    <FieldTimelineNote timeline={fieldTimeline[field]} className={cn('mb-2 text-[11px] text-bark-300', adminTheme.textMuted)} />
 
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div>
-                        <p className="text-xs text-bark-300 mb-1 uppercase tracking-wide">Current</p>
+                        <p className={cn('text-xs text-bark-300 mb-1 uppercase tracking-wide', adminTheme.textMuted)}>Current</p>
                         <CampFieldValue value={diff.old} field={field} expanded={isExpanded} />
                       </div>
                       <div>
@@ -615,11 +632,11 @@ export function ReviewPanel({
 
                     {/* Excerpt + source link */}
                     {(diff.excerpt || diff.sourceUrl) && (
-                      <div className="mt-3 flex items-start gap-2 bg-amber-50/60 border border-amber-200/60 rounded-lg px-3 py-2">
+                      <div className="mt-3 flex items-start gap-2 bg-amber-50/60 border border-amber-200/60 rounded-lg px-3 py-2 dark:bg-amber-500/15 dark:border-amber-300/30">
                         <Quote className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
                           {diff.excerpt && (
-                            <p className="text-xs text-amber-800 italic leading-relaxed">&quot;{diff.excerpt}&quot;</p>
+                            <p className="text-xs text-amber-800 italic leading-relaxed dark:text-amber-100">&quot;{diff.excerpt}&quot;</p>
                           )}
                           {diff.sourceUrl && (
                             <a
@@ -654,20 +671,20 @@ export function ReviewPanel({
 
         {/* ── Actions sidebar ───────────────────────────────────── */}
         <div className="space-y-4">
-          <div className="glass-panel p-5">
-            <h3 className="font-semibold text-bark-600 mb-3">Reviewer Notes</h3>
+          <div className="glass-panel p-5 admin-surface-raised">
+            <h3 className={cn('font-semibold text-bark-600 mb-3', adminTheme.textStrong)}>Reviewer Notes</h3>
             <textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
               placeholder="Optional notes about this review..."
               rows={4}
-              className="w-full text-sm border border-cream-400/60 rounded-xl p-3 focus:outline-none focus:border-pine-400 resize-none bg-cream-50"
+              className="w-full text-sm border border-cream-400/60 rounded-xl p-3 focus:outline-none focus:border-pine-400 resize-none bg-cream-50 admin-surface"
             />
 
             <div className="space-y-2 mt-4">
               {hasSurveyReviewSession && (
-                <div className="rounded-xl border border-cream-300/70 bg-cream-50/80 p-3 text-xs text-bark-500">
-                  <p className="mb-2 font-semibold text-bark-600">Apply source</p>
+                <div className="rounded-xl border border-cream-300/70 bg-cream-50/80 p-3 text-xs text-bark-500 admin-surface">
+                  <p className={cn('mb-2 font-semibold text-bark-600', adminTheme.textStrong)}>Apply source</p>
                   <div className="space-y-2">
                     <label className="flex items-start gap-2">
                       <input
@@ -678,8 +695,8 @@ export function ReviewPanel({
                         className="mt-0.5"
                       />
                       <span>
-                        <span className="block font-medium text-bark-600">Saved Survey decisions</span>
-                        <span className="block text-bark-400">
+                        <span className={cn('block font-medium text-bark-600', adminTheme.textStrong)}>Saved Survey decisions</span>
+                        <span className={cn('block text-bark-400', adminTheme.textMuted)}>
                           {savedSurveyDecisionCount} of {surveyItemCount} ReviewItems resolved.
                         </span>
                       </span>
@@ -693,8 +710,8 @@ export function ReviewPanel({
                         className="mt-0.5"
                       />
                       <span>
-                        <span className="block font-medium text-bark-600">Selected fields and edits</span>
-                        <span className="block text-bark-400">Use the checkbox selections and inline proposal edits below.</span>
+                        <span className={cn('block font-medium text-bark-600', adminTheme.textStrong)}>Selected fields and edits</span>
+                        <span className={cn('block text-bark-400', adminTheme.textMuted)}>Use the checkbox selections and inline proposal edits below.</span>
                       </span>
                     </label>
                   </div>
@@ -750,8 +767,8 @@ export function ReviewPanel({
             </div>
           </div>
 
-          <div className="glass-panel p-5 space-y-3">
-            <h3 className="font-semibold text-bark-600 mb-1 text-sm">Source</h3>
+          <div className="glass-panel p-5 space-y-3 admin-surface-raised">
+            <h3 className={cn('font-semibold text-bark-600 mb-1 text-sm', adminTheme.textStrong)}>Source</h3>
             <a
               href={proposal.sourceUrl}
               target="_blank"
@@ -777,7 +794,7 @@ export function ReviewPanel({
               </a>
             )}
 
-            <div className="border-t border-cream-300 pt-3 space-y-1 text-xs text-bark-400">
+            <div className={cn('border-t border-cream-300 pt-3 space-y-1 text-xs text-bark-400 dark:border-[var(--admin-border)]', adminTheme.textMuted)}>
               <p>Model: <span className="font-mono">{proposal.extractionModel}</span></p>
               <p>Proposed: {new Date(proposal.createdAt).toLocaleString()}</p>
               {proposal.crawlTriggeredBy && <p>Triggered by: {proposal.crawlTriggeredBy}</p>}
@@ -786,13 +803,13 @@ export function ReviewPanel({
           </div>
 
           {/* Crawl hint */}
-          <div className="glass-panel p-4">
+          <div className="glass-panel p-4 admin-surface-raised">
             <div className="flex items-center gap-1.5 mb-2">
               <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-              <h3 className="text-xs font-semibold text-bark-500 uppercase tracking-wide">Add Crawl Hint</h3>
+              <h3 className={cn('text-xs font-semibold text-bark-500 uppercase tracking-wide', adminTheme.textSubtle)}>Add Crawl Hint</h3>
               {savedHints > 0 && <span className="ml-auto text-xs text-pine-500">{savedHints} saved</span>}
             </div>
-            <p className="text-xs text-bark-300 mb-2">
+            <p className={cn('text-xs text-bark-300 mb-2', adminTheme.textMuted)}>
               Teach future crawls how to extract correctly from <span className="font-mono">{campDomain}</span>
             </p>
             <textarea
@@ -814,7 +831,7 @@ export function ReviewPanel({
                 if (res.ok) { setHintText(''); setSavedHints(n => n + 1); }
                 setSavingHint(false);
               }}
-              className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 disabled:opacity-40 transition-colors"
+              className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 disabled:opacity-40 transition-colors dark:bg-amber-500/15 dark:border-amber-300/30 dark:text-amber-100"
             >
               {savingHint ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
               Save hint for {campDomain}
@@ -828,7 +845,7 @@ export function ReviewPanel({
       <div>
         <button
           onClick={() => setSnapshotCollapsed(v => !v)}
-          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700 mb-3"
+          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700 mb-3 admin-text-strong"
         >
           {snapshotCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           Current Camp Data
@@ -844,16 +861,6 @@ function compareFieldPriority(fieldA: string, fieldB: string) {
   const priorityB = FIELD_PRIORITY[fieldB] ?? 100;
   if (priorityA !== priorityB) return priorityA - priorityB;
   return fieldA.localeCompare(fieldB);
-}
-
-function countSavedSurveyDecisions(events: readonly ReviewSessionEvent[]): number {
-  const reviewedItems = new Set<string>();
-  for (const event of events) {
-    if (event.spec.reviewItemName && event.spec.reviewDecisionName) {
-      reviewedItems.add(event.spec.reviewItemName);
-    }
-  }
-  return reviewedItems.size;
 }
 
 function cloneArrayRows(value: unknown): Record<string, unknown>[] {
@@ -908,4 +915,37 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
     return body.error;
   }
   return fallback;
+}
+
+function deriveSurveyReplaySummary(
+  session: CampReviewQueueSession | undefined,
+  events: readonly ReviewSessionEvent[],
+  alreadyApplied: ReadonlySet<string>,
+) {
+  if (!session) {
+    return { isValid: false, resolvedCount: 0, newlyApplicableCount: 0 };
+  }
+
+  const issues = validateReviewSessionEventsForSnapshot(session, events);
+  if (issues.length > 0) {
+    return { isValid: false, resolvedCount: 0, newlyApplicableCount: 0 };
+  }
+
+  const sessionExport = buildReviewWorkbenchSessionExportForSnapshot(session, events);
+  const itemByName = new Map(session.items.map((item) => [item.metadata.name, item]));
+  const newlyApplicableCount = sessionExport.results.filter((result) => {
+    const target = itemByName.get(result.reviewItemName)?.spec.target;
+    return Boolean(
+      target &&
+      !alreadyApplied.has(target) &&
+      result.decision === 'accept-proposed' &&
+      result.selectedCandidateRole === 'proposed',
+    );
+  }).length;
+
+  return {
+    isValid: true,
+    resolvedCount: sessionExport.results.length,
+    newlyApplicableCount,
+  };
 }

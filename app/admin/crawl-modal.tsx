@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import {
   Play, X, RefreshCw, Loader2, CheckCircle, XCircle,
   AlertTriangle, Clock, Zap, Calendar, Database, Search, Telescope, Globe,
@@ -309,7 +310,7 @@ export function CrawlModal({
                 <p className="text-bark-400 mt-1">{runProgress?.processed} camps · {runProgress?.proposals} proposals · {runProgress?.errors} errors</p>
                 <div className="flex gap-3 justify-center mt-6">
                   <button onClick={reset} className="btn-secondary gap-2 text-sm"><RefreshCw className="w-3.5 h-3.5" /> Run Another</button>
-                  <a href="/admin/review" className="btn-primary text-sm">Review Proposals →</a>
+                  <Link href="/admin/review" className="btn-primary text-sm">Review Proposals →</Link>
                 </div>
               </div>
             )}

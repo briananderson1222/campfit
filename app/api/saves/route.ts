@@ -5,7 +5,7 @@ import { getUserTier, FREE_SAVE_LIMIT } from "@/lib/tier";
 
 // GET /api/saves — list the current user's saved camp IDs
 export async function GET() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -25,7 +25,7 @@ export async function GET() {
 
 // POST /api/saves — save a camp
 export async function POST(request: Request) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
 
 // DELETE /api/saves?campId=xxx — remove a saved camp
 export async function DELETE(request: Request) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {

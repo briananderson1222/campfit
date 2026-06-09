@@ -78,8 +78,9 @@ function isAllowedAttestationField(entityType: AdminEntityType, fieldKey: string
 
 export async function GET(
   request: Request,
-  { params }: { params: { entityType: string; entityId: string } },
+  props: { params: Promise<{ entityType: string; entityId: string }> }
 ) {
+  const params = await props.params;
   const entityType = parseEntityType(params.entityType);
   if (!entityType) return NextResponse.json({ error: 'Invalid entityType' }, { status: 400 });
   const communitySlug = entityType === 'CAMP'
@@ -107,8 +108,9 @@ export async function GET(
 
 export async function POST(
   request: Request,
-  { params }: { params: { entityType: string; entityId: string } },
+  props: { params: Promise<{ entityType: string; entityId: string }> }
 ) {
+  const params = await props.params;
   const entityType = parseEntityType(params.entityType);
   if (!entityType) return NextResponse.json({ error: 'Invalid entityType' }, { status: 400 });
   const communitySlug = entityType === 'CAMP'

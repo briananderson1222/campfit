@@ -6,23 +6,175 @@
  * dependency errors that occur when Tailwind class names appear as selectors.
  */
 
-.dark main .text-bark-700,
+.dark main {
+  --admin-text-strong: var(--color-cream-100);
+  --admin-text: var(--color-cream-200);
+  --admin-text-subtle: var(--color-cream-300);
+  --admin-text-muted: color-mix(in srgb, var(--color-cream-400) 82%, var(--color-pine-200));
+  --admin-link: var(--color-pine-200);
+  --admin-link-hover: color-mix(in srgb, var(--color-pine-200) 76%, var(--color-cream-100));
+  --admin-warning-text: var(--color-amber-200);
+  --admin-danger-text: var(--color-terracotta-300);
+  --admin-surface: color-mix(in srgb, var(--color-pine-800) 72%, var(--color-bark-800));
+  --admin-surface-raised: color-mix(in srgb, var(--color-pine-800) 58%, var(--color-bark-800));
+  --admin-surface-subtle: color-mix(in srgb, var(--color-pine-700) 70%, var(--color-bark-800));
+  --admin-surface-selected: color-mix(in srgb, var(--color-pine-700) 62%, transparent);
+  --admin-surface-warning: color-mix(in srgb, var(--color-amber-500) 18%, var(--color-bark-800));
+  --admin-surface-danger: color-mix(in srgb, var(--color-terracotta-500) 18%, var(--color-bark-800));
+  --admin-border: color-mix(in srgb, var(--color-pine-600) 58%, transparent);
+  --admin-border-strong: color-mix(in srgb, var(--color-pine-500) 46%, transparent);
+}
+
+.dark main .admin-text-strong { color: var(--admin-text-strong); }
+.dark main .admin-text { color: var(--admin-text); }
+.dark main .admin-text-subtle { color: var(--admin-text-subtle); }
+.dark main .admin-text-muted { color: var(--admin-text-muted); }
+.dark main .admin-link { color: var(--admin-link); }
+.dark main .admin-link:hover { color: var(--admin-link-hover); }
+.dark main .admin-surface {
+  color: var(--admin-text);
+  background-color: var(--admin-surface);
+  border-color: var(--admin-border);
+}
+.dark main .admin-surface-raised {
+  color: var(--admin-text);
+  background-color: var(--admin-surface-raised);
+  border-color: var(--admin-border);
+}
+.dark main .admin-chip {
+  color: var(--admin-text-subtle);
+  background-color: var(--admin-surface-subtle);
+  border-color: var(--admin-border);
+}
+
+.dark main .text-bark-700 { color: var(--color-cream-100); }
 .dark main .text-bark-600 { color: var(--color-cream-200); }
 .dark main .text-bark-500 { color: var(--color-cream-300); }
 .dark main .text-bark-400 { color: var(--color-cream-400); }
-.dark main .text-bark-300 { color: var(--color-bark-300); }
-.dark main .text-bark-200 { color: var(--color-bark-400); }
+.dark main .text-bark-300,
+.dark main .text-bark-200,
+.dark main .dark\:text-bark-400,
+.dark main .dark\:text-bark-300,
+.dark main .dark\:text-bark-200 { color: var(--admin-text-muted); }
 
-.dark main .bg-cream-50  { background-color: color-mix(in srgb, var(--color-pine-800) 60%, transparent); }
-.dark main .bg-cream-100 { background-color: color-mix(in srgb, var(--color-pine-800) 40%, transparent); }
-.dark main .bg-cream-200 { background-color: color-mix(in srgb, var(--color-pine-700) 60%, transparent); }
-.dark main .bg-cream-300 { background-color: color-mix(in srgb, var(--color-pine-700) 80%, transparent); }
+.dark main .text-pine-700,
+.dark main .text-pine-600 { color: var(--admin-link); }
+.dark main .text-pine-500 { color: var(--color-pine-300); }
+.dark main .text-pine-400 { color: var(--admin-link-hover); }
 
-.dark main .border-cream-200 { border-color: color-mix(in srgb, var(--color-pine-600) 50%, transparent); }
-.dark main .border-cream-300 { border-color: color-mix(in srgb, var(--color-pine-600) 60%, transparent); }
-.dark main .border-cream-400 { border-color: color-mix(in srgb, var(--color-pine-600) 70%, transparent); }
+.dark main .text-amber-700,
+.dark main .text-amber-600 { color: var(--admin-warning-text); }
+.dark main .text-amber-500 { color: var(--color-amber-300); }
+
+.dark main .text-terracotta-600,
+.dark main .text-terracotta-500,
+.dark main .text-terracotta-400 { color: var(--admin-danger-text); }
+.dark main .text-red-700,
+.dark main .text-red-600,
+.dark main .text-red-500 { color: var(--color-red-300); }
+.dark main .text-rose-700,
+.dark main .text-rose-600,
+.dark main .text-rose-500 { color: var(--color-rose-300); }
+.dark main .text-sky-700,
+.dark main .text-sky-600,
+.dark main .text-sky-500 { color: var(--color-sky-200); }
+
+.dark main .bg-white,
+.dark main .bg-white\/20,
+.dark main .bg-white\/30,
+.dark main .bg-white\/60,
+.dark main .bg-white\/65,
+.dark main .bg-white\/70,
+.dark main .bg-white\/75,
+.dark main .bg-white\/80,
+.dark main .bg-cream-50  { background-color: var(--admin-surface); }
+.dark main .bg-cream-50\/20,
+.dark main .bg-cream-50\/30,
+.dark main .bg-cream-50\/40,
+.dark main .bg-cream-50\/50,
+.dark main .bg-cream-50\/60,
+.dark main .bg-cream-50\/70,
+.dark main .bg-cream-50\/80 { background-color: var(--admin-surface); }
+.dark main .bg-cream-100,
+.dark main .bg-cream-100\/40,
+.dark main .bg-cream-100\/50,
+.dark main .bg-cream-100\/60 { background-color: var(--admin-surface-raised); }
+.dark main .bg-cream-200,
+.dark main .bg-cream-200\/40,
+.dark main .bg-cream-200\/50,
+.dark main .bg-cream-200\/60 { background-color: var(--admin-surface-subtle); }
+.dark main .bg-cream-200\/80 { background-color: var(--admin-surface-subtle); }
+.dark main .bg-cream-300,
+.dark main .bg-cream-300\/60 { background-color: color-mix(in srgb, var(--admin-surface-subtle) 86%, var(--color-cream-500)); }
+
+.dark main .bg-pine-50,
+.dark main .bg-pine-50\/20,
+.dark main .bg-pine-50\/30,
+.dark main .bg-pine-50\/40,
+.dark main .bg-pine-50\/50,
+.dark main .bg-pine-50\/60,
+.dark main .bg-pine-100 { background-color: var(--admin-surface-selected); }
+.dark main .bg-amber-50,
+.dark main .bg-amber-50\/50,
+.dark main .bg-amber-100 { background-color: var(--admin-surface-warning); }
+.dark main .bg-amber-200 { background-color: color-mix(in srgb, var(--color-amber-500) 24%, var(--color-bark-800)); }
+.dark main .bg-terracotta-50,
+.dark main .bg-terracotta-100 { background-color: var(--admin-surface-danger); }
+.dark main .bg-bark-100 { background-color: color-mix(in srgb, var(--color-bark-600) 55%, var(--color-pine-800)); }
+.dark main .bg-red-50,
+.dark main .bg-red-50\/20,
+.dark main .bg-red-50\/30,
+.dark main .bg-red-50\/40,
+.dark main .bg-red-100 { background-color: color-mix(in srgb, var(--color-red-500) 16%, var(--color-bark-800)); }
+.dark main .bg-rose-50,
+.dark main .bg-rose-100 { background-color: color-mix(in srgb, var(--color-rose-500) 16%, var(--color-bark-800)); }
+.dark main .bg-sky-50,
+.dark main .bg-sky-100 { background-color: color-mix(in srgb, var(--color-sky-500) 18%, var(--color-bark-800)); }
+
+.dark main .border-cream-200 { border-color: color-mix(in srgb, var(--admin-border) 86%, transparent); }
+.dark main .border-cream-200\/40,
+.dark main .border-cream-200\/50,
+.dark main .border-cream-200\/60 { border-color: color-mix(in srgb, var(--admin-border) 72%, transparent); }
+.dark main .border-cream-300 { border-color: var(--admin-border); }
+.dark main .border-cream-300\/40,
+.dark main .border-cream-300\/60,
+.dark main .border-cream-300\/70,
+.dark main .border-cream-300\/80 { border-color: var(--admin-border); }
+.dark main .border-cream-400 { border-color: var(--admin-border-strong); }
 .dark main .border-cream-400\/40 { border-color: color-mix(in srgb, var(--color-pine-600) 40%, transparent); }
 .dark main .border-cream-400\/60 { border-color: color-mix(in srgb, var(--color-pine-600) 60%, transparent); }
+.dark main .border-pine-200,
+.dark main .border-pine-200\/50,
+.dark main .border-pine-200\/60,
+.dark main .border-pine-200\/70,
+.dark main .border-pine-200\/80,
+.dark main .border-pine-300,
+.dark main .border-pine-300\/60 { border-color: color-mix(in srgb, var(--color-pine-300) 46%, transparent); }
+.dark main .border-amber-200,
+.dark main .border-amber-300 { border-color: color-mix(in srgb, var(--color-amber-300) 44%, transparent); }
+.dark main .border-terracotta-200,
+.dark main .border-red-100,
+.dark main .border-red-200,
+.dark main .border-rose-200 { border-color: color-mix(in srgb, var(--color-terracotta-300) 42%, transparent); }
+.dark main .border-sky-200 { border-color: color-mix(in srgb, var(--color-sky-300) 42%, transparent); }
 
-.dark main input::placeholder { color: var(--color-bark-400); }
-.dark main textarea::placeholder { color: var(--color-bark-400); }
+.dark main .hover\:bg-cream-100\/40:hover,
+.dark main .hover\:bg-cream-100\/60:hover,
+.dark main .hover\:bg-cream-200:hover,
+.dark main .hover\:bg-cream-200\/40:hover,
+.dark main .hover\:bg-cream-200\/60:hover { background-color: var(--admin-surface-subtle); }
+.dark main .hover\:bg-pine-50:hover,
+.dark main .hover\:bg-pine-50\/20:hover,
+.dark main .hover\:bg-pine-50\/60:hover { background-color: var(--admin-surface-selected); }
+.dark main .hover\:bg-amber-200:hover { background-color: color-mix(in srgb, var(--color-amber-500) 28%, var(--color-bark-800)); }
+.dark main .hover\:bg-red-100:hover { background-color: color-mix(in srgb, var(--color-red-500) 24%, var(--color-bark-800)); }
+
+.dark main input,
+.dark main textarea,
+.dark main select {
+  color: var(--color-cream-200);
+  background-color: color-mix(in srgb, var(--color-pine-800) 72%, var(--color-bark-800));
+}
+
+.dark main input::placeholder { color: color-mix(in srgb, var(--color-cream-400) 75%, transparent); }
+.dark main textarea::placeholder { color: color-mix(in srgb, var(--color-cream-400) 75%, transparent); }

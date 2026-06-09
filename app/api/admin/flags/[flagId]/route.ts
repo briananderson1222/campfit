@@ -3,10 +3,8 @@ import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getFlagCommunity } from '@/lib/admin/community-access';
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: { flagId: string } },
-) {
+export async function PATCH(request: Request, props: { params: Promise<{ flagId: string }> }) {
+  const params = await props.params;
   const flagContext = await getFlagCommunity(params.flagId);
   if (!flagContext) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 

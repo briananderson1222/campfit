@@ -9,6 +9,15 @@ import { CAMP_TYPE_DESCRIPTIONS } from '@/lib/types';
 type ArrayRow = Record<string, unknown>;
 type SocialLinksValue = Record<string, string>;
 
+const fieldInputClass =
+  'border-cream-300 bg-white text-bark-600 focus:border-pine-400 dark:border-bark-500 dark:bg-bark-700 dark:text-cream-200 dark:placeholder:text-cream-400 dark:focus:border-pine-400';
+const fieldPanelClass = 'border-cream-300 bg-white text-bark-500 dark:border-bark-500 dark:bg-bark-700/70 dark:text-cream-300';
+const fieldSubtlePanelClass = 'border-cream-300 bg-cream-100 text-bark-500 dark:border-bark-500 dark:bg-bark-700/70 dark:text-cream-300';
+const fieldHighlightPanelClass = 'border-pine-200 bg-pine-50 text-pine-700 dark:border-pine-700/50 dark:bg-pine-900/30 dark:text-pine-200';
+const fieldLabelClass = 'text-bark-300 dark:text-cream-400';
+const fieldLinkClass = 'text-pine-600 hover:text-pine-700 dark:text-pine-300 dark:hover:text-pine-200';
+const fieldEmptyClass = 'text-bark-200 italic dark:text-cream-400';
+
 export function cloneEditableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((row) => ({ ...(row as Record<string, unknown>) }));
   if (value && typeof value === 'object') return { ...(value as Record<string, unknown>) };
@@ -76,11 +85,11 @@ export function CampFieldValue({
   highlight?: boolean;
 }) {
   if (value === null || value === undefined || value === '') {
-    return <span className="text-bark-200 italic">empty</span>;
+    return <span className={fieldEmptyClass}>empty</span>;
   }
 
   if (typeof value === 'boolean') {
-    return <span className={highlight ? 'text-pine-600 font-medium' : 'text-bark-500'}>{value ? 'Yes' : 'No'}</span>;
+    return <span className={highlight ? 'text-pine-600 font-medium dark:text-pine-200' : 'text-bark-500 dark:text-cream-300'}>{value ? 'Yes' : 'No'}</span>;
   }
 
   if (Array.isArray(value)) {
@@ -91,7 +100,7 @@ export function CampFieldValue({
     return (
       <pre className={cn(
         'text-xs rounded-lg p-2 overflow-hidden whitespace-pre-wrap break-all font-mono',
-        highlight ? 'bg-pine-50 text-pine-700 border border-pine-200/50' : 'bg-cream-200/60 text-bark-500',
+        highlight ? `border ${fieldHighlightPanelClass}` : `border ${fieldSubtlePanelClass}`,
         !expanded && 'max-h-24',
       )}>
         {JSON.stringify(value, null, 2)}
@@ -106,7 +115,7 @@ export function CampFieldValue({
   const str = String(value);
   if (ENUM_OPTIONS[field]) {
     return (
-      <p className={cn('leading-relaxed', highlight ? 'text-pine-700 font-medium' : 'text-bark-500')}>
+      <p className={cn('leading-relaxed', highlight ? 'text-pine-700 font-medium dark:text-pine-200' : 'text-bark-500 dark:text-cream-300')}>
         {labelFor(field, str)}
       </p>
     );
@@ -114,7 +123,7 @@ export function CampFieldValue({
 
   if (str.match(/^\d{4}-\d{2}-\d{2}/)) {
     return (
-      <p className={cn('leading-relaxed', highlight ? 'text-pine-700 font-medium' : 'text-bark-500')}>
+      <p className={cn('leading-relaxed', highlight ? 'text-pine-700 font-medium dark:text-pine-200' : 'text-bark-500 dark:text-cream-300')}>
         {new Date(str).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
       </p>
     );
@@ -123,14 +132,14 @@ export function CampFieldValue({
   const text = !expanded && str.length > 120 ? `${str.slice(0, 120)}…` : str;
   const isUrl = field === 'websiteUrl' || field === 'applicationUrl';
   return (
-    <div className={cn('leading-relaxed', highlight ? 'text-pine-700' : 'text-bark-500')}>
+    <div className={cn('leading-relaxed', highlight ? 'text-pine-700 dark:text-pine-200' : 'text-bark-500 dark:text-cream-300')}>
       <span>{text}</span>
       {isUrl && (
         <a
           href={str}
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-1.5 inline-flex items-center gap-0.5 text-pine-500 hover:text-pine-700"
+          className="ml-1.5 inline-flex items-center gap-0.5 text-pine-500 hover:text-pine-700 dark:text-pine-300 dark:hover:text-pine-200"
         >
           <ExternalLink className="h-3 w-3" />
         </a>
@@ -174,7 +183,7 @@ export function CampFieldInput({
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Escape') onCancel(); }}
         onBlur={onCommit}
-        className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none bg-white', className)}
+        className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none', fieldInputClass, className)}
       >
         <option value="">— unset —</option>
         {enumOpts.map((option) => (
@@ -198,7 +207,7 @@ export function CampFieldInput({
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Escape') onCancel(); }}
         onBlur={onCommit}
-        className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none bg-white', className)}
+        className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none', fieldInputClass, className)}
       >
         <option value="">— unset —</option>
         <option value="true">Yes</option>
@@ -224,7 +233,7 @@ export function CampFieldInput({
           if (event.key === 'Escape') onCancel();
         }}
         rows={3}
-        className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none bg-white resize-none', className)}
+        className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none resize-none', fieldInputClass, className)}
       />
     );
   }
@@ -239,7 +248,7 @@ export function CampFieldInput({
         if (event.key === 'Enter') onCommit();
         if (event.key === 'Escape') onCancel();
       }}
-      className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none bg-white', className)}
+      className={cn('flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none', fieldInputClass, className)}
     />
   );
 }
@@ -287,16 +296,16 @@ export function CampArrayFieldEditor({
   return (
     <div className="space-y-2">
       {rows.map((row, index) => (
-        <div key={`${field}-${index}`} className="rounded-lg border border-cream-300 bg-white p-2">
+        <div key={`${field}-${index}`} className={cn('rounded-lg border p-2', fieldPanelClass)}>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {columns.map((column) => (
               column.type === 'select' ? (
                 <label key={column.key} className="space-y-1">
-                  <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
+                  <span className={cn('text-[11px] uppercase tracking-wide', fieldLabelClass)}>{column.label}</span>
                   <select
                     value={String(row[column.key] ?? 'PER_WEEK')}
                     onChange={(event) => onChange(field, index, column.key, event.target.value)}
-                    className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
+                    className={cn('w-full rounded border px-2 py-1 text-xs', fieldInputClass)}
                   >
                     <option value="PER_WEEK">Per Week</option>
                     <option value="PER_SESSION">Per Session</option>
@@ -307,12 +316,12 @@ export function CampArrayFieldEditor({
                 </label>
               ) : (
                 <label key={column.key} className="space-y-1">
-                  <span className="text-[11px] uppercase tracking-wide text-bark-300">{column.label}</span>
+                  <span className={cn('text-[11px] uppercase tracking-wide', fieldLabelClass)}>{column.label}</span>
                   <input
                     type={column.type}
                     value={row[column.key] == null ? '' : gradeAwareDisplayValue(column.key, row[column.key])}
                     onChange={(event) => onChange(field, index, column.key, event.target.value)}
-                    className="w-full rounded border border-cream-300 px-2 py-1 text-xs"
+                    className={cn('w-full rounded border px-2 py-1 text-xs', fieldInputClass)}
                     placeholder={column.key === 'minGrade' || column.key === 'maxGrade' ? 'K' : undefined}
                   />
                 </label>
@@ -320,13 +329,13 @@ export function CampArrayFieldEditor({
             ))}
           </div>
           <div className="mt-2 flex justify-end">
-            <button onClick={() => onRemove(field, index)} className="text-xs text-red-500 hover:text-red-700">
+            <button onClick={() => onRemove(field, index)} className="text-xs text-red-500 hover:text-red-700 dark:text-red-300 dark:hover:text-red-200">
               Remove row
             </button>
           </div>
         </div>
       ))}
-      <button onClick={() => onAdd(field)} className="text-xs text-pine-600 hover:text-pine-700">
+      <button onClick={() => onAdd(field)} className={cn('text-xs', fieldLinkClass)}>
         Add row
       </button>
     </div>
@@ -368,7 +377,7 @@ function SocialLinksEditor({
   }
 
   return (
-    <div className={cn('flex-1 space-y-2 rounded-lg border border-cream-300 bg-white p-2', className)}>
+    <div className={cn('flex-1 space-y-2 rounded-lg border p-2', fieldPanelClass, className)}>
       {nextRows.map(([platform, url], index) => (
         <div key={`${platform}-${index}`} className="grid grid-cols-[minmax(0,140px)_1fr_28px] items-center gap-2">
           <input
@@ -376,20 +385,20 @@ function SocialLinksEditor({
             value={platform}
             onChange={(event) => replaceRow(index, 'platform', event.target.value)}
             placeholder="platform"
-            className="rounded border border-cream-300 px-2 py-1 text-xs"
+            className={cn('rounded border px-2 py-1 text-xs', fieldInputClass)}
           />
           <input
             value={url}
             onChange={(event) => replaceRow(index, 'url', event.target.value)}
             placeholder="https://..."
-            className="rounded border border-cream-300 px-2 py-1 text-xs"
+            className={cn('rounded border px-2 py-1 text-xs', fieldInputClass)}
           />
-          <button onClick={() => removeRow(index)} className="p-1 text-bark-300 hover:text-red-500">
+          <button onClick={() => removeRow(index)} className="p-1 text-bark-300 hover:text-red-500 dark:text-cream-400 dark:hover:text-red-300">
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       ))}
-      <button onClick={addRow} className="inline-flex items-center gap-1 text-xs text-pine-600 hover:text-pine-700">
+      <button onClick={addRow} className={cn('inline-flex items-center gap-1 text-xs', fieldLinkClass)}>
         <Plus className="h-3.5 w-3.5" />
         Add social link
       </button>
@@ -399,7 +408,7 @@ function SocialLinksEditor({
 
 function SocialLinksValueView({ value, highlight }: { value: SocialLinksValue; highlight?: boolean }) {
   const entries = Object.entries(value ?? {});
-  if (!entries.length) return <span className="text-bark-200 italic">empty</span>;
+  if (!entries.length) return <span className={fieldEmptyClass}>empty</span>;
   return (
     <div className="flex flex-wrap gap-2">
       {entries.map(([platform, url]) => (
@@ -410,7 +419,7 @@ function SocialLinksValueView({ value, highlight }: { value: SocialLinksValue; h
           rel="noopener noreferrer"
           className={cn(
             'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
-            highlight ? 'border-pine-200 bg-pine-50 text-pine-700' : 'border-cream-300 bg-cream-100 text-bark-500',
+            highlight ? fieldHighlightPanelClass : fieldSubtlePanelClass,
           )}
         >
           <span className="font-medium capitalize">{platform}</span>
@@ -427,7 +436,7 @@ function AgeGroupsValue({ rows, highlight }: { rows: ArrayRow[]; highlight?: boo
       {rows.map((row, index) => (
         <Badge key={`age-${index}`} highlight={highlight}>
           {row.label ? String(row.label) : 'Age Group'}
-          {ageGradeSuffix(row) ? <span className="ml-1 text-bark-300">{ageGradeSuffix(row)}</span> : null}
+          {ageGradeSuffix(row) ? <span className={cn('ml-1', fieldLabelClass)}>{ageGradeSuffix(row)}</span> : null}
         </Badge>
       ))}
     </div>
@@ -442,7 +451,7 @@ function SchedulesValue({ rows, highlight }: { rows: ArrayRow[]; highlight?: boo
           key={`schedule-${index}`}
           className={cn(
             'rounded-lg border px-3 py-2 text-xs',
-            highlight ? 'border-pine-200 bg-pine-50 text-pine-700' : 'border-cream-300 bg-cream-100 text-bark-500',
+            highlight ? fieldHighlightPanelClass : fieldSubtlePanelClass,
           )}
         >
           <div className="font-medium">{String(row.label ?? 'Session')}</div>
@@ -466,7 +475,7 @@ function PricingValue({ rows, highlight }: { rows: ArrayRow[]; highlight?: boole
           key={`price-${index}`}
           className={cn(
             'rounded-lg border px-3 py-2 text-xs',
-            highlight ? 'border-pine-200 bg-pine-50 text-pine-700' : 'border-cream-300 bg-cream-100 text-bark-500',
+            highlight ? fieldHighlightPanelClass : fieldSubtlePanelClass,
           )}
         >
           <div className="font-medium">{String(row.label ?? 'Pricing')}</div>
@@ -486,7 +495,7 @@ function Badge({ children, highlight }: { children: ReactNode; highlight?: boole
   return (
     <span className={cn(
       'rounded-full border px-2.5 py-1 text-xs',
-      highlight ? 'border-pine-200 bg-pine-50 text-pine-700' : 'border-cream-300 bg-cream-100 text-bark-500',
+      highlight ? fieldHighlightPanelClass : fieldSubtlePanelClass,
     )}>
       {children}
     </span>

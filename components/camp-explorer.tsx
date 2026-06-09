@@ -112,7 +112,7 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
 
         <div className="relative mx-auto max-w-7xl px-4 sm:px-6 pt-16 sm:pt-24 pb-12 sm:pb-16">
           <div className="max-w-2xl mx-auto text-center mb-10">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pine-100/60 border border-pine-200/60 text-pine-600 text-sm font-medium mb-6 animate-fade-in">
+            <div className="public-count-chip inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium mb-6 animate-fade-in">
               <Sparkles className="w-4 h-4" />
               Denver Summer 2026 — {totalCount} camps
             </div>
@@ -228,7 +228,7 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
             <h3 className="font-display font-bold text-bark-500 dark:text-cream-400 text-lg mb-2">
               No camps found
             </h3>
-            <p className="text-bark-300 dark:text-bark-200 mb-6">
+            <p className="text-bark-300 dark:text-cream-400 mb-6">
               Try adjusting your filters or search terms
             </p>
             <button
