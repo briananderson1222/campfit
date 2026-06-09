@@ -1,7 +1,12 @@
-import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 
 import { getPool } from '@/lib/db';
+import {
+  assertServerReviewSessionFreshness,
+  createServerReviewSessionRecord,
+  hashReviewSessionSnapshot,
+  StaleServerReviewSessionError,
+} from '@/lib/kontourai/survey-review-server-session';
 import { defaultReviewSessionName } from '@/lib/kontourai/survey-review-workbench';
 import { buildCampSurveyReviewQueueSession, type CampReviewQueueSession } from './survey-review-items';
 import type { CampChangeProposal } from './types';
@@ -105,13 +110,13 @@ export function assertSurveyReviewSessionFreshForProposal(
 }
 
 export function hashSurveyReviewSnapshot(snapshot: CampReviewQueueSession): string {
-  return createHash('sha256').update(canonicalJson(snapshot)).digest('hex');
+  return hashReviewSessionSnapshot(snapshot);
 }
 
 function isSurveyReviewSessionFresh(record: SurveyReviewSessionRecord, proposal: CampChangeProposal): boolean {
   if (record.proposalId !== proposal.id) return false;
   if (record.proposalStatus !== proposal.status) return false;
-  if (record.snapshotHash !== hashSurveyReviewSnapshot(record.snapshot)) return false;
+  if (record.snapshotHash !== hashReviewSessionSnapshot(record.snapshot)) return false;
 
   const current = buildCampSurveyReviewQueueSession(proposal, {
     actorId: record.snapshot.actorId,
@@ -119,13 +124,20 @@ function isSurveyReviewSessionFresh(record: SurveyReviewSessionRecord, proposal:
     includeAppliedFields: true,
   });
 
-  return canonicalJson({
-    activeItemName: current.activeItemName,
-    items: current.items,
-  }) === canonicalJson({
-    activeItemName: record.snapshot.activeItemName,
-    items: record.snapshot.items,
-  });
+  try {
+    assertServerReviewSessionFreshness(
+      createServerReviewSessionRecord({
+        sessionName: record.sessionName,
+        snapshot: record.snapshot,
+        updatedAt: record.updatedAt,
+      }),
+      current,
+    );
+    return true;
+  } catch (error) {
+    if (error instanceof StaleServerReviewSessionError) return false;
+    throw error;
+  }
 }
 
 async function findSurveyReviewSession(opts: {
@@ -156,28 +168,6 @@ function toSurveyReviewSessionRecord(row: SurveyReviewSessionRow): SurveyReviewS
     updatedAt: toIsoString(row.updatedAt),
     appliedAt: row.appliedAt ? toIsoString(row.appliedAt) : null,
   };
-}
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(sortJson(value));
-}
-
-function sortJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortJson);
-  }
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, sortJson(entry)]),
-  );
 }
 
 function toIsoString(value: string | Date): string {

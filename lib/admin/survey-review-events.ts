@@ -2,6 +2,11 @@ import type { ReviewSessionEvent } from '@kontourai/survey';
 
 import { getPool } from '@/lib/db';
 import {
+  assertServerReviewSessionEvents,
+  createServerReviewSessionRecord,
+  ServerReviewSessionEventValidationError,
+} from '@/lib/kontourai/survey-review-server-session';
+import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
   type SurveyReviewSessionRecord,
@@ -173,30 +178,20 @@ export function validateSurveyReviewEventsForSession(
   reviewSession: SurveyReviewSessionRecord,
   events: readonly ReviewSessionEvent[],
 ): void {
-  const itemByName = new Map(reviewSession.snapshot.items.map((item) => [item.metadata.name, item]));
-  const candidatesByItemName = new Map(
-    reviewSession.snapshot.items.map((item) => [
-      item.metadata.name,
-      new Set(item.spec.candidates.map((candidate) => candidate.id)),
-    ]),
-  );
-
-  for (const event of events) {
-    const spec = event.spec;
-    if (spec.sessionName !== reviewSession.sessionName) {
-      throw new SurveyReviewEventValidationError('Survey event belongs to a different review session.');
+  try {
+    assertServerReviewSessionEvents(
+      createServerReviewSessionRecord({
+        sessionName: reviewSession.sessionName,
+        snapshot: reviewSession.snapshot,
+        eventCount: events.length,
+        updatedAt: reviewSession.updatedAt,
+      }),
+      events,
+    );
+  } catch (error) {
+    if (error instanceof ServerReviewSessionEventValidationError) {
+      throw new SurveyReviewEventValidationError(error.message);
     }
-    if (spec.reviewItemName && !itemByName.has(spec.reviewItemName)) {
-      throw new SurveyReviewEventValidationError('Survey event references a ReviewItem outside this review session.');
-    }
-    if (spec.activeItemName && !itemByName.has(spec.activeItemName)) {
-      throw new SurveyReviewEventValidationError('Survey event references an active ReviewItem outside this review session.');
-    }
-    if (spec.candidateId && spec.reviewItemName) {
-      const candidateIds = candidatesByItemName.get(spec.reviewItemName);
-      if (!candidateIds?.has(spec.candidateId)) {
-        throw new SurveyReviewEventValidationError('Survey event references a candidate outside this review session.');
-      }
-    }
+    throw error;
   }
 }
