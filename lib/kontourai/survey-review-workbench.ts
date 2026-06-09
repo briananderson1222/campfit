@@ -8,7 +8,7 @@ export {
   mountReviewWorkbench,
   replayReviewSessionEventsForSnapshot,
   validateReviewSessionEventsForSnapshot,
-} from '../../node_modules/@kontourai/survey/dist/src/review-workbench/review-workbench.js';
+} from '@kontourai/survey/review-workbench';
 
 export type {
   ReviewCandidatePresentation,
@@ -17,4 +17,4 @@ export type {
   ReviewResultPresentation,
   ReviewTraceRef,
   ReviewWorkbenchResult,
-} from '../../node_modules/@kontourai/survey/dist/src/review-workbench/review-workbench.js';
+} from '@kontourai/survey/review-workbench';

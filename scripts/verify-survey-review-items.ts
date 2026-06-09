@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildReviewWorkbenchResultsFromSession } from '../lib/kontourai/survey-review-workbench';
+import {
+  buildReviewItemPresentation,
+  buildReviewResultPresentation,
+  buildReviewWorkbenchResultsFromSession,
+} from '../lib/kontourai/survey-review-workbench';
+import { createCampSurveyPresentationAdapter } from '../lib/admin/survey-presentation';
 
 import { SurveyReviewWorkbench } from '../components/admin/survey-review-workbench';
 import { buildCampSurveyReviewItems, buildCampSurveyReviewQueueSession } from '../lib/admin/survey-review-items';
@@ -84,6 +89,21 @@ assert.equal(session.activeItemName, 'camp-proposal-proposal-1-description');
 assert.equal(session.actorId, 'operator@example.test');
 assert.equal(session.reviewedAt, '2026-06-01T12:00:00.000Z');
 
+const presentationAdapter = createCampSurveyPresentationAdapter({ description: 'Description' });
+const presentation = buildReviewItemPresentation(session.items[0]!, presentationAdapter);
+const proposedPresentation = presentation.candidates.find((candidate) => candidate.candidate.role === 'proposed');
+assert.equal(presentation.targetLabel, 'Description');
+assert.equal(presentation.statusLabel, 'Needs Review');
+assert.equal(presentation.reviewItemLink?.href, '/admin/camps/camp-1');
+assert.equal(presentation.traceRefs.find((ref) => ref.kind === 'candidate-set')?.value, 'camp.camp-1.field.description.proposal.proposal-1.candidates');
+assert.ok(proposedPresentation);
+assert.equal(proposedPresentation.valueText, 'Outdoor day camp for ages 7-12.');
+assert.equal(proposedPresentation.sourceLink?.href, 'https://example.test/camps/summer');
+assert.equal(
+  proposedPresentation.traceRefs.find((ref) => ref.kind === 'claim')?.value,
+  'camp.camp-1.field.description.proposal.proposal-1.proposed.claim',
+);
+
 const results = buildReviewWorkbenchResultsFromSession({
   ...session,
   decisionsByItemName: {
@@ -94,6 +114,10 @@ assert.equal(results.length, 1);
 assert.equal(results[0]?.selectedCandidateRole, 'proposed');
 assert.equal(results[0]?.selectedValue, 'Outdoor day camp for ages 7-12.');
 assert.equal(results[0]?.reviewDecision.spec.status, 'verified');
+const resultPresentation = buildReviewResultPresentation(results[0]!, session.items[0], presentationAdapter);
+assert.equal(resultPresentation.targetLabel, 'Description');
+assert.equal(resultPresentation.selectedValueText, 'Outdoor day camp for ages 7-12.');
+assert.equal(resultPresentation.applyMeaning, 'Saved decision applies proposed value');
 
 const markup = renderToStaticMarkup(createElement(SurveyReviewWorkbench, { session }));
 assert.match(markup, /Survey queue payload/);
