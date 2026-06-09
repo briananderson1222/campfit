@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, CircleDashed, FileJson2, Telescope } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Copy, ExternalLink, FileJson2, Fingerprint, GitBranch, Link2, Telescope } from 'lucide-react';
 import type { ReviewSessionEvent } from '@kontourai/survey';
 
 import { createPersistentReviewSessionEventStore, mountReviewWorkbench } from '@/lib/kontourai/survey-review-workbench';
@@ -13,6 +13,7 @@ export function SurveyReviewWorkbench({
   session,
   eventPersistence,
   onPersistedEventsChange,
+  fieldLabels = {},
 }: {
   session: CampReviewQueueSession;
   eventPersistence?: {
@@ -20,6 +21,7 @@ export function SurveyReviewWorkbench({
     readonly initialEvents: readonly ReviewSessionEvent[];
   };
   onPersistedEventsChange?: (events: readonly ReviewSessionEvent[]) => void;
+  fieldLabels?: Record<string, string>;
 }) {
   const workbenchRef = useRef<HTMLDivElement | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
@@ -54,6 +56,11 @@ export function SurveyReviewWorkbench({
 
   const current = activeItem.spec.candidates.find((candidate) => candidate.role === 'current');
   const proposed = activeItem.spec.candidates.find((candidate) => candidate.role === 'proposed');
+  const labels = activeItem.metadata.labels ?? {};
+  const fieldName = typeof labels.field === 'string' ? labels.field : activeItem.spec.target;
+  const fieldLabel = fieldLabels[fieldName] ?? humanizeFieldName(fieldName);
+  const campId = typeof labels.campId === 'string' ? labels.campId : undefined;
+  const proposalId = typeof labels.proposalId === 'string' ? labels.proposalId : undefined;
 
   return (
     <section className="space-y-3" aria-label="Survey review workbench">
@@ -68,39 +75,62 @@ export function SurveyReviewWorkbench({
       )}
 
       <div className="grid grid-cols-1 gap-2">
-        <div className="rounded-xl border border-cream-300/70 bg-cream-50/80 p-3 admin-surface">
+        <div className="rounded-xl border border-cream-300/70 bg-cream-50/80 p-4 admin-surface">
           <div className="mb-2 flex items-start justify-between gap-3">
             <div>
-              <p className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>Active ReviewItem</p>
-              <p className={cn('font-mono text-xs text-bark-600 break-all', adminTheme.textStrong)}>{activeItem.metadata.name}</p>
+              <p className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>Review field</p>
+              <p className={cn('text-base font-semibold text-bark-700', adminTheme.textStrong)}>{fieldLabel}</p>
+              <p className={cn('mt-1 max-w-2xl text-xs leading-relaxed text-bark-400', adminTheme.textMuted)}>
+                Survey is deciding which observed value should become the trusted CampFit value. Trace IDs are kept below for audit/debug, but the review should start with the value and source.
+              </p>
             </div>
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:border dark:border-amber-300/30">
-              {activeItem.spec.candidateSetStatus ?? 'needs-review'}
+              {statusLabel(activeItem.spec.candidateSetStatus ?? 'needs-review')}
             </span>
           </div>
           <dl className="grid grid-cols-2 gap-2 text-xs">
-            <Field label="Target" value={activeItem.spec.target} />
+            <Field label="CampFit field" value={fieldName} />
             <Field label="Actor" value={session.actorId} />
             <Field label="Items" value={String(session.items.length)} />
             <Field label="Reviewed at" value={new Date(session.reviewedAt).toLocaleString()} />
           </dl>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {campId && (
+              <a
+                href={`/admin/camps/${campId}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-cream-300/70 bg-white/75 px-2 py-1 text-[11px] font-semibold text-bark-500 hover:text-pine-700 admin-chip"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Camp record
+              </a>
+            )}
+            {proposalId && <IdAffordance label="Proposal" value={proposalId} compact />}
+          </div>
+          <TraceDetails className="mt-3" rows={[
+            ['Survey ReviewItem', activeItem.metadata.name],
+            ['Candidate set', activeItem.spec.projection?.candidateSetId ?? 'not provided'],
+          ]} />
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <CandidateCard title="Current" tone="current" candidate={current} />
-          <CandidateCard title="Proposed" tone="proposed" candidate={proposed} />
+          <CandidateCard title="Current value" tone="current" candidate={current} fieldLabel={fieldLabel} />
+          <CandidateCard title="Proposed value" tone="proposed" candidate={proposed} fieldLabel={fieldLabel} />
         </div>
 
-        <div className="rounded-xl border border-pine-200/70 bg-pine-50/50 p-3 admin-surface">
+        <div className="rounded-xl border border-pine-200/70 bg-pine-50/50 p-4 admin-surface">
           <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-pine-700 admin-link">
             <Telescope className="h-3.5 w-3.5" />
-            Surface preview
+            Projection summary
           </div>
-          <dl className="grid grid-cols-1 gap-2 text-xs">
-            <Field label="Candidate set" value={activeItem.spec.projection?.candidateSetId ?? 'not provided'} />
-            <Field label="Selected claim after review" value={proposed?.claimTarget.claimId ?? 'choose a candidate'} />
-            <Field label="Source authority" value={sourceAuthorityLabel(proposed?.producer?.sourceAuthority)} />
-          </dl>
+          <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+            <ProjectionPill icon={<GitBranch className="h-3.5 w-3.5" />} label="Review set" value={`${session.items.length} field${session.items.length === 1 ? '' : 's'}`} />
+            <ProjectionPill icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="If accepted" value={formatValue(proposed?.value)} />
+            <ProjectionPill icon={<Fingerprint className="h-3.5 w-3.5" />} label="Authority" value={sourceAuthorityLabel(proposed?.producer?.sourceAuthority)} />
+          </div>
+          <TraceDetails className="mt-3" rows={[
+            ['Candidate set', activeItem.spec.projection?.candidateSetId ?? 'not provided'],
+            ['Proposed claim', proposed?.claimTarget.claimId ?? 'choose a candidate'],
+          ]} />
         </div>
       </div>
 
@@ -121,10 +151,12 @@ function CandidateCard({
   title,
   tone,
   candidate,
+  fieldLabel,
 }: {
   title: string;
   tone: 'current' | 'proposed';
   candidate: CampReviewQueueSession['items'][number]['spec']['candidates'][number] | undefined;
+  fieldLabel: string;
 }) {
   if (!candidate) {
     return (
@@ -149,15 +181,20 @@ function CandidateCard({
           </span>
         )}
       </div>
-      <div className={cn('mb-2 rounded-lg bg-white/70 p-2 text-sm font-medium text-bark-700 admin-surface', adminTheme.textStrong)}>
+      <p className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>{fieldLabel}</p>
+      <div className={cn('mb-2 mt-1 rounded-lg bg-white/70 p-2 text-sm font-medium text-bark-700 admin-surface', adminTheme.textStrong)}>
         {formatValue(candidate.value)}
       </div>
       <dl className="space-y-2 text-xs">
-        <Field label="Source" value={candidate.source.sourceRef} />
-        <Field label="Locator" value={candidate.locator?.locator ?? candidate.locator?.scheme ?? 'not provided'} />
+        <SourceField value={candidate.source.sourceRef} />
         <Field label="Excerpt" value={candidate.locator?.excerpt ?? 'not provided'} />
-        <Field label="Claim" value={candidate.claimTarget.claimId ?? candidate.claimTarget.fieldOrBehavior} />
       </dl>
+      <TraceDetails className="mt-3" rows={[
+        ['Candidate ID', candidate.id],
+        ['Claim ID', candidate.claimTarget.claimId ?? candidate.claimTarget.fieldOrBehavior],
+        ['Source ID', candidate.source.sourceId ?? candidate.source.sourceRef],
+        ['Locator', candidate.locator?.locator ?? candidate.locator?.scheme ?? 'not provided'],
+      ]} />
     </article>
   );
 }
@@ -167,6 +204,78 @@ function Field({ label, value }: { label: string; value: string }) {
     <div>
       <dt className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>{label}</dt>
       <dd className={cn('break-words text-bark-600', adminTheme.textStrong)}>{value}</dd>
+    </div>
+  );
+}
+
+function ProjectionPill({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-pine-200/60 bg-white/75 px-2.5 py-2 admin-surface">
+      <p className={cn('flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>
+        {icon}
+        {label}
+      </p>
+      <p className={cn('mt-0.5 break-words font-medium text-bark-600', adminTheme.textStrong)}>{value}</p>
+    </div>
+  );
+}
+
+function TraceDetails({ rows, className }: { rows: Array<readonly [string, string]>; className?: string }) {
+  return (
+    <details className={cn('rounded-lg border border-cream-300/70 bg-white/60 px-3 py-2 admin-surface', className)}>
+      <summary className={cn('cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>
+        IDs and trace links
+      </summary>
+      <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+        {rows.map(([label, value]) => (
+          <IdAffordance key={label} label={label} value={value} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function SourceField({ value }: { value: string }) {
+  const isUrl = /^https?:\/\//.test(value);
+  return (
+    <div>
+      <dt className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>Source</dt>
+      {isUrl ? (
+        <dd>
+          <a
+            href={value}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex max-w-full items-center gap-1.5 break-all text-bark-600 underline decoration-cream-400 underline-offset-2 hover:text-pine-700 admin-link"
+          >
+            <Link2 className="h-3 w-3 shrink-0" />
+            {displayUrl(value)}
+          </a>
+        </dd>
+      ) : (
+        <dd className={cn('break-words text-bark-600', adminTheme.textStrong)}>{value}</dd>
+      )}
+    </div>
+  );
+}
+
+function IdAffordance({ label, value, compact = false, className }: { label: string; value: string; compact?: boolean; className?: string }) {
+  const canCopy = value && value !== 'not provided' && value !== 'choose a candidate';
+  return (
+    <div className={cn(compact ? 'inline-flex max-w-full items-center gap-1.5 rounded-full border border-cream-300/70 bg-white/75 px-2 py-1 admin-chip' : 'min-w-0', className)}>
+      <span className={cn('text-[11px] text-bark-300', compact ? 'font-semibold' : 'block uppercase tracking-wide', adminTheme.textMuted)}>{label}</span>
+      <span className={cn('min-w-0 break-all font-mono text-[11px] text-bark-500', adminTheme.text)}>{value}</span>
+      {canCopy && (
+        <button
+          type="button"
+          title={`Copy ${label}`}
+          aria-label={`Copy ${label}`}
+          onClick={() => void navigator.clipboard?.writeText(value)}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-bark-300 hover:bg-cream-100 hover:text-pine-700"
+        >
+          <Copy className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }
@@ -184,6 +293,26 @@ function formatValue(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === null || value === undefined) return 'empty';
   return JSON.stringify(value);
+}
+
+function humanizeFieldName(value: string): string {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function statusLabel(value: string): string {
+  return value.replace(/-/g, ' ');
+}
+
+function displayUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.hostname.replace(/^www\./, '')}${url.pathname === '/' ? '' : url.pathname}`;
+  } catch {
+    return value;
+  }
 }
 
 function createSessionStorageEventStore(key: string) {

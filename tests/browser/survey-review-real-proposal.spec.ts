@@ -19,12 +19,14 @@ test('renders Survey workbench on a real pending proposal detail page', async ({
   await expect(surveyPanel).toContainText('Apply source');
   await expect(surveyPanel).toContainText('Apply actions below replay saved Survey decisions on the server');
   await expect(surveyPanel.getByTestId('survey-review-trail')).toBeVisible();
-  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Survey review trail');
-  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Display-only replay');
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Saved Survey decisions');
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Replay checked');
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
   await expect(surveyPanel.getByTestId('review-queue')).toBeVisible();
   await expect(surveyPanel.getByTestId('review-focus')).toBeVisible();
   await expect(surveyPanel.getByTestId('surface-preview')).toContainText('Surface preview');
+  await expect(surveyPanel).toContainText('Projection summary');
+  await expect(surveyPanel).toContainText('IDs and trace links');
 
   await page.getByRole('button', { name: 'Hide Survey' }).click();
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeHidden();
@@ -62,7 +64,7 @@ test('persists Survey review decisions on a real pending proposal detail page', 
     surveyPanel.locator(".decision-column [data-decision='accept-proposed']").click(),
   ]);
   await expect(surveyPanel.getByTestId('survey-review-trail-result').first()).toBeVisible();
-  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Would apply proposed value');
+  await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Saved decision applies proposed value');
 
   await Promise.all([
     page.waitForResponse((response) =>

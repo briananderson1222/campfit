@@ -449,6 +449,7 @@ export function ReviewPanel({
                 session={surveyReviewSession}
                 eventPersistence={surveyEventPersistence}
                 onPersistedEventsChange={handlePersistedSurveyEventsChange}
+                fieldLabels={FIELD_LABELS}
               />
             </div>
           )}

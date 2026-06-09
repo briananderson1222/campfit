@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CampFit">
+  <rect width="512" height="512" rx="112" fill="#1B4332"/>
+  <circle cx="376" cy="140" r="44" fill="#E76F51"/>
+  <path d="M100 366 218 156l66 118 34-58 94 150H100Z" fill="#FEFCF3"/>
+  <path d="M158 366 228 244l40 72 28-45 65 95H158Z" fill="#95D5B2"/>
+  <path d="M256 118c-73 0-132 59-132 132 0 44 22 83 55 107l28-49a78 78 0 1 1 111-4l32 50c31-24 51-62 51-104 0-73-60-132-133-132h-12Z" fill="#F4A261" opacity=".95"/>
+</svg>
