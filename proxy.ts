@@ -37,7 +37,10 @@ export async function proxy(request: NextRequest) {
   if (isAdminRoute) {
     if (!user?.email) {
       const loginUrl = new URL("/auth/login", request.url);
-      loginUrl.searchParams.set("next", request.nextUrl.pathname);
+      loginUrl.searchParams.set(
+        "next",
+        `${request.nextUrl.pathname}${request.nextUrl.search}`
+      );
       return NextResponse.redirect(loginUrl);
     }
     const adminEmails = (process.env.ADMIN_EMAILS ?? "")
