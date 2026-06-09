@@ -12,6 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { adminTheme } from '@/components/admin/theme';
+import { CampFieldValue } from '@/components/admin/camp-field-controls';
 
 export function SurveyReviewTrail({
   session,
@@ -150,9 +151,15 @@ function TrailResult({
         </span>
       </div>
       <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-3">
-        <DecisionPill label="Current" value={formatValue(currentCandidate?.value)} muted={result.selectedCandidateRole !== 'current'} />
-        <DecisionPill label="Proposed" value={formatValue(proposedCandidate?.value)} muted={result.selectedCandidateRole !== 'proposed'} />
-        <DecisionPill label="Saved selection" value={result.selectedDisplayValue || formatValue(result.selectedValue)} />
+        <DecisionPill label="Current" muted={result.selectedCandidateRole !== 'current'}>
+          <CampFieldValue field={target} value={currentCandidate?.value} expanded />
+        </DecisionPill>
+        <DecisionPill label="Proposed" muted={result.selectedCandidateRole !== 'proposed'}>
+          <CampFieldValue field={target} value={proposedCandidate?.value} highlight={result.selectedCandidateRole === 'proposed'} expanded />
+        </DecisionPill>
+        <DecisionPill label="Saved selection">
+          <CampFieldValue field={target} value={result.selectedValue} highlight expanded />
+        </DecisionPill>
       </div>
       <p className={cn('mt-2 text-xs font-medium text-bark-500', adminTheme.text)}>
         {applyMeaning} <span className="sr-only">Would apply proposed value</span>
@@ -188,12 +195,12 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
   );
 }
 
-function DecisionPill({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) {
+function DecisionPill({ label, children, muted = false }: { label: string; children: ReactNode; muted?: boolean }) {
   return (
     <div className={cn('rounded-lg border px-2.5 py-2 admin-surface', muted ? 'border-cream-300/60 bg-cream-50/60' : 'border-pine-200/70 bg-pine-50/60')}>
       <dt className={cn('text-[11px] uppercase tracking-wide text-bark-300', adminTheme.textMuted)}>{label}</dt>
       <dd className={cn('mt-0.5 break-words font-medium', muted ? 'text-bark-400' : 'text-bark-700', muted ? adminTheme.textMuted : adminTheme.textStrong)}>
-        {value}
+        {children}
       </dd>
     </div>
   );
