@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, Check, ExternalLink, Loader2, Pencil, Quote, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FieldDiff, ProviderChangeProposal } from '@/lib/admin/types';
+import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Provider Name',
@@ -187,17 +188,7 @@ export function ProviderReviewPanel({
                         {diff.excerpt && (
                           <p className="text-xs text-amber-800 italic leading-relaxed">&quot;{diff.excerpt}&quot;</p>
                         )}
-                        {diff.sourceUrl && (
-                          <a
-                            href={diff.sourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-pine-500 hover:text-pine-700 mt-1 break-all"
-                          >
-                            <ExternalLink className="w-3 h-3 shrink-0" />
-                            {diff.sourceUrl.replace(/^https?:\/\//, '').slice(0, 70)}
-                          </a>
-                        )}
+                        {diff.sourceUrl && <ExternalSourceLink url={diff.sourceUrl} />}
                       </div>
                     </div>
                   )}
@@ -278,4 +269,33 @@ function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+function ExternalSourceLink({ url }: { url: string }) {
+  const safeHref = safeExternalHref(url);
+  const content = (
+    <>
+      <ExternalLink className="w-3 h-3 shrink-0" />
+      {displayExternalUrl(url, 70)}
+    </>
+  );
+
+  if (!safeHref) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 break-all text-xs text-bark-400">
+        {content}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={safeHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 inline-flex items-center gap-1 break-all text-xs text-pine-500 hover:text-pine-700"
+    >
+      {content}
+    </a>
+  );
 }

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
 import { CAMP_TYPE_DESCRIPTIONS } from '@/lib/types';
 import { formatCampDate } from '@/lib/date-format';
+import { safeExternalHref } from '@/lib/admin/safe-url';
 
 type ArrayRow = Record<string, unknown>;
 type SocialLinksValue = Record<string, string>;
@@ -132,12 +133,13 @@ export function CampFieldValue({
 
   const text = !expanded && str.length > 120 ? `${str.slice(0, 120)}…` : str;
   const isUrl = field === 'websiteUrl' || field === 'applicationUrl';
+  const safeHref = isUrl ? safeExternalHref(str) : undefined;
   return (
     <div className={cn('leading-relaxed', highlight ? 'text-pine-700 dark:text-pine-200' : 'text-bark-500 dark:text-cream-300')}>
       <span>{text}</span>
-      {isUrl && (
+      {safeHref && (
         <a
-          href={str}
+          href={safeHref}
           target="_blank"
           rel="noopener noreferrer"
           className="ml-1.5 inline-flex items-center gap-0.5 text-pine-500 hover:text-pine-700 dark:text-pine-300 dark:hover:text-pine-200"
@@ -412,21 +414,35 @@ function SocialLinksValueView({ value, highlight }: { value: SocialLinksValue; h
   if (!entries.length) return <span className={fieldEmptyClass}>empty</span>;
   return (
     <div className="flex flex-wrap gap-2">
-      {entries.map(([platform, url]) => (
-        <a
-          key={`${platform}-${url}`}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
-            highlight ? fieldHighlightPanelClass : fieldSubtlePanelClass,
-          )}
-        >
-          <span className="font-medium capitalize">{platform}</span>
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      ))}
+      {entries.map(([platform, url]) => {
+        const safeHref = safeExternalHref(url);
+        const className = cn(
+          'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
+          highlight ? fieldHighlightPanelClass : fieldSubtlePanelClass,
+        );
+        const content = (
+          <>
+            <span className="font-medium capitalize">{platform}</span>
+            {safeHref && <ExternalLink className="h-3 w-3" />}
+          </>
+        );
+
+        return safeHref ? (
+          <a
+            key={`${platform}-${url}`}
+            href={safeHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={className}
+          >
+            {content}
+          </a>
+        ) : (
+          <span key={`${platform}-${url}`} className={className}>
+            {content}
+          </span>
+        );
+      })}
     </div>
   );
 }

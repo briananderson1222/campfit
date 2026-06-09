@@ -5,6 +5,7 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { getPendingProviderProposalQueue, getProviderProposal } from '@/lib/admin/provider-repository';
 import { ProviderReviewPanel } from './provider-review-panel';
 import { AdminCopilot } from '@/components/admin/admin-copilot';
+import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,10 +55,7 @@ export default async function ProviderReviewDetailPage(
         <div>
           <h1 className="font-display text-2xl font-extrabold text-bark-700">{proposal.providerName}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-sm">
-            <a href={proposal.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-pine-500 hover:text-pine-600">
-              {proposal.sourceUrl.replace(/^https?:\/\//, '')}
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            <ExternalSourceLink url={proposal.sourceUrl} />
             <Link href={providerHref} className="inline-flex items-center gap-1 text-bark-400 hover:text-pine-600">
               View provider data
             </Link>
@@ -95,5 +93,25 @@ export default async function ProviderReviewDetailPage(
       />
       <AdminCopilot entityType="PROVIDER" entityId={proposal.providerId} />
     </div>
+  );
+}
+
+function ExternalSourceLink({ url }: { url: string }) {
+  const safeHref = safeExternalHref(url);
+  const content = (
+    <>
+      {displayExternalUrl(url)}
+      <ExternalLink className="w-3.5 h-3.5" />
+    </>
+  );
+
+  if (!safeHref) {
+    return <span className="inline-flex items-center gap-1 text-bark-400">{content}</span>;
+  }
+
+  return (
+    <a href={safeHref} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-pine-500 hover:text-pine-600">
+      {content}
+    </a>
   );
 }

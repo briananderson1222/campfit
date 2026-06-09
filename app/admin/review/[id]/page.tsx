@@ -7,6 +7,7 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { AdminCopilot } from '@/components/admin/admin-copilot';
 import { buildCampSurveyReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
+import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,10 +65,7 @@ export default async function ReviewDetailPage(
         <div>
           <h1 className="font-display text-2xl font-extrabold text-bark-700">{proposal.campName}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-sm">
-            <a href={proposal.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-pine-500 hover:text-pine-600">
-              {proposal.sourceUrl.replace(/^https?:\/\//, '')}
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            <ExternalSourceLink url={proposal.sourceUrl} />
             <Link href={campHref} className="inline-flex items-center gap-1 text-bark-400 hover:text-pine-600">
               View camp data
             </Link>
@@ -116,5 +114,25 @@ export default async function ReviewDetailPage(
       />
       <AdminCopilot entityType="CAMP" entityId={proposal.campId} />
     </div>
+  );
+}
+
+function ExternalSourceLink({ url }: { url: string }) {
+  const safeHref = safeExternalHref(url);
+  const content = (
+    <>
+      {displayExternalUrl(url)}
+      <ExternalLink className="w-3.5 h-3.5" />
+    </>
+  );
+
+  if (!safeHref) {
+    return <span className="inline-flex items-center gap-1 text-bark-400">{content}</span>;
+  }
+
+  return (
+    <a href={safeHref} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-pine-500 hover:text-pine-600">
+      {content}
+    </a>
   );
 }

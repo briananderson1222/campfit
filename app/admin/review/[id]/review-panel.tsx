@@ -23,6 +23,7 @@ import {
 } from '@/components/admin/camp-field-controls';
 import { FieldTimelineNote } from '@/components/admin/field-timeline';
 import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
+import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Camp Name', organizationName: 'Organization', description: 'Description', campType: 'Camp Type',
@@ -391,17 +392,7 @@ export function ReviewPanel({
                       {!proof.excerpt && (
                         <p className={cn('text-xs text-bark-400 italic', adminTheme.textMuted)}>Admin attestation — no excerpt</p>
                       )}
-                      {proof.sourceUrl && (
-                        <a
-                          href={proof.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-pine-500 hover:text-pine-700 break-all"
-                        >
-                          <Link2 className="w-3 h-3 shrink-0" />
-                          {proof.sourceUrl.replace(/^https?:\/\//, '').slice(0, 60)}
-                        </a>
-                      )}
+                      {proof.sourceUrl && <AdminSourceLink url={proof.sourceUrl} maxLength={60} />}
                     </div>
                   )}
                 </div>
@@ -639,17 +630,7 @@ export function ReviewPanel({
                           {diff.excerpt && (
                             <p className="text-xs text-amber-800 italic leading-relaxed dark:text-amber-100">&quot;{diff.excerpt}&quot;</p>
                           )}
-                          {diff.sourceUrl && (
-                            <a
-                              href={diff.sourceUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-pine-500 hover:text-pine-700 mt-1 break-all"
-                            >
-                              <Link2 className="w-3 h-3 shrink-0" />
-                              {diff.sourceUrl.replace(/^https?:\/\//, '').slice(0, 70)}
-                            </a>
-                          )}
+                          {diff.sourceUrl && <AdminSourceLink url={diff.sourceUrl} maxLength={70} className="mt-1" />}
                         </div>
                       </div>
                     )}
@@ -770,15 +751,11 @@ export function ReviewPanel({
 
           <div className="glass-panel p-5 space-y-3 admin-surface-raised">
             <h3 className={cn('font-semibold text-bark-600 mb-1 text-sm', adminTheme.textStrong)}>Source</h3>
-            <a
-              href={proposal.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-start gap-1.5 text-xs text-pine-500 hover:text-pine-700 break-all leading-relaxed"
-            >
-              <ExternalLink className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              {proposal.sourceUrl.replace(/^https?:\/\//, '')}
-            </a>
+            <AdminSourceLink
+              url={proposal.sourceUrl}
+              icon="external"
+              className="flex items-start gap-1.5 text-xs leading-relaxed"
+            />
 
             {proposal.crawlRunId && (
               <a
@@ -908,6 +885,49 @@ function formatValue(val: unknown): string {
     return formatCampDate(val);
   }
   return String(val);
+}
+
+function AdminSourceLink({
+  url,
+  maxLength,
+  icon = 'link',
+  className,
+}: {
+  url: string;
+  maxLength?: number;
+  icon?: 'link' | 'external';
+  className?: string;
+}) {
+  const safeHref = safeExternalHref(url);
+  const content = (
+    <>
+      {icon === 'external' ? (
+        <ExternalLink className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+      ) : (
+        <Link2 className="w-3 h-3 shrink-0" />
+      )}
+      {displayExternalUrl(url, maxLength)}
+    </>
+  );
+
+  if (!safeHref) {
+    return (
+      <span className={cn('inline-flex items-center gap-1 break-all text-bark-400', className)}>
+        {content}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={safeHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn('inline-flex items-center gap-1 break-all text-pine-500 hover:text-pine-700', className)}
+    >
+      {content}
+    </a>
+  );
 }
 
 async function readErrorMessage(response: Response, fallback: string): Promise<string> {
