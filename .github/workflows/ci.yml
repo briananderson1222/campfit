@@ -103,6 +103,94 @@ jobs:
           export RESEND_FROM_EMAIL="${RESEND_FROM_EMAIL:-CampFit <notifications@example.com>}"
           npm run build
 
+  survey_review_proof:
+    name: Survey review proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: validate
+    env:
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+      PLAYWRIGHT_ADMIN_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL || secrets.PLAYWRIGHT_PROD_ADMIN_EMAIL }}
+      PLAYWRIGHT_ADMIN_PASSWORD: ${{ secrets.PLAYWRIGHT_ADMIN_PASSWORD || secrets.PLAYWRIGHT_PROD_ADMIN_PASSWORD }}
+      IS_UNTRUSTED_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Survey server session and apply contracts
+        run: |
+          npm run verify:survey-session
+          npm run verify:survey-apply
+          npm run verify:survey
+
+      - name: Check required browser proof env
+        id: browser-preflight
+        run: |
+          missing=""
+          for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY PGHOST PGUSER PGPASSWORD PLAYWRIGHT_ADMIN_EMAIL PLAYWRIGHT_ADMIN_PASSWORD; do
+            eval "value=\${$key}"
+            if [ -z "$value" ]; then
+              missing="$missing $key"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            if [ "$IS_UNTRUSTED_FORK" = "true" ]; then
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping Survey browser proof for untrusted fork PR. Missing:$missing"
+            else
+              echo "Survey browser proof requires:$missing" >&2
+              exit 1
+            fi
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write browser proof env file
+        if: steps.browser-preflight.outputs.enabled == 'true'
+        run: |
+          {
+            printf 'ADMIN_EMAILS=%s\n' "$ADMIN_EMAILS"
+            printf 'NEXT_PUBLIC_APP_URL=%s\n' "${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3100}"
+            printf 'NEXT_PUBLIC_SUPABASE_URL=%s\n' "$NEXT_PUBLIC_SUPABASE_URL"
+            printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SUPABASE_SERVICE_ROLE_KEY"
+            printf 'PGHOST=%s\n' "$PGHOST"
+            printf 'PGPORT=%s\n' "${PGPORT:-6543}"
+            printf 'PGDATABASE=%s\n' "${PGDATABASE:-postgres}"
+            printf 'PGUSER=%s\n' "$PGUSER"
+            printf 'PGPASSWORD=%s\n' "$PGPASSWORD"
+            printf 'PLAYWRIGHT_ADMIN_EMAIL=%s\n' "$PLAYWRIGHT_ADMIN_EMAIL"
+            printf 'PLAYWRIGHT_ADMIN_PASSWORD=%s\n' "$PLAYWRIGHT_ADMIN_PASSWORD"
+          } > .env.local
+
+      - name: Install Playwright browser
+        if: steps.browser-preflight.outputs.enabled == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify Survey browser integration
+        if: steps.browser-preflight.outputs.enabled == 'true'
+        run: npm run verify:survey-browser
+
   verify_admin:
     name: Verify admin platform
     runs-on: ubuntu-latest
