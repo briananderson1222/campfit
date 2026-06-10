@@ -1,8 +1,13 @@
 import type { ReviewDecision, ReviewSessionEvent } from '@kontourai/survey';
 import {
-  deriveReviewSessionApplyResultForSnapshot,
   type ReviewWorkbenchResult,
 } from '@/lib/kontourai/survey-review-workbench';
+import {
+  createServerReviewSessionRecord,
+  deriveServerReviewSessionApplyResult,
+  ServerReviewSessionEventValidationError,
+  StaleServerReviewSessionError,
+} from '@/lib/kontourai/survey-review-server-session';
 import type { CampReviewQueueSession } from './survey-review-items';
 import type { CampChangeProposal } from './types';
 
@@ -28,15 +33,45 @@ export function deriveCampApplyFromSurveySession(opts: {
   readonly session: CampReviewQueueSession;
   readonly events: readonly ReviewSessionEvent[];
   readonly mode?: SurveyReviewApplyMode;
+  readonly serverSession?: {
+    readonly sessionName: string;
+    readonly snapshotHash: string;
+    readonly updatedAt: string;
+  };
 }): SurveyReviewApplyResult {
   const mode = opts.mode ?? 'full';
   validateSessionItems(opts.proposal, opts.session);
 
-  const applyResult = deriveReviewSessionApplyResultForSnapshot({
-    snapshot: opts.session,
-    events: opts.events,
-    requiredResolvedItems: mode === 'full' ? 'all' : 'any',
-  });
+  const record = opts.serverSession
+    ? {
+        sessionName: opts.serverSession.sessionName,
+        snapshot: opts.session,
+        snapshotHash: opts.serverSession.snapshotHash,
+        updatedAt: opts.serverSession.updatedAt,
+      }
+    : createServerReviewSessionRecord({
+        sessionName: opts.events[0]?.spec.sessionName ?? 'review-workbench-session',
+        snapshot: opts.session,
+        updatedAt: opts.session.reviewedAt,
+      });
+
+  const applyResult = (() => {
+    try {
+      return deriveServerReviewSessionApplyResult({
+        record,
+        events: opts.events,
+        requiredResolvedItems: mode === 'full' ? 'all' : 'any',
+      });
+    } catch (error) {
+      if (
+        error instanceof ServerReviewSessionEventValidationError ||
+        error instanceof StaleServerReviewSessionError
+      ) {
+        throw new SurveyReviewApplyError(error.message);
+      }
+      throw error;
+    }
+  })();
   if (!applyResult.ok) {
     throw new SurveyReviewApplyError(
       applyResult.issues.map((issue) => issue.message).join(' '),

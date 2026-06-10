@@ -2,9 +2,9 @@ import type { ReviewSessionEvent } from '@kontourai/survey';
 
 import { getPool } from '@/lib/db';
 import {
-  assertServerReviewSessionEvents,
-  createServerReviewSessionRecord,
+  deriveServerReviewSessionApplyResult,
   ServerReviewSessionEventValidationError,
+  StaleServerReviewSessionError,
 } from '@/lib/kontourai/survey-review-server-session';
 import {
   assertSurveyReviewSessionFreshForProposal,
@@ -179,17 +179,18 @@ export function validateSurveyReviewEventsForSession(
   events: readonly ReviewSessionEvent[],
 ): void {
   try {
-    assertServerReviewSessionEvents(
-      createServerReviewSessionRecord({
+    deriveServerReviewSessionApplyResult({
+      record: {
         sessionName: reviewSession.sessionName,
         snapshot: reviewSession.snapshot,
+        snapshotHash: reviewSession.snapshotHash,
         eventCount: events.length,
         updatedAt: reviewSession.updatedAt,
-      }),
+      },
       events,
-    );
+    });
   } catch (error) {
-    if (error instanceof ServerReviewSessionEventValidationError) {
+    if (error instanceof ServerReviewSessionEventValidationError || error instanceof StaleServerReviewSessionError) {
       throw new SurveyReviewEventValidationError(error.message);
     }
     throw error;

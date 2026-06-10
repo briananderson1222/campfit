@@ -87,6 +87,11 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
         session: surveySessionRecord.snapshot,
         events: surveyEvents,
         mode: keepPending ? 'partial' : 'full',
+        serverSession: {
+          sessionName: surveySessionRecord.sessionName,
+          snapshotHash: surveySessionRecord.snapshotHash,
+          updatedAt: surveySessionRecord.updatedAt,
+        },
       });
       approvedFields = surveyApply.approvedFields;
       surveyRejectedFields = surveyApply.rejectedFields;

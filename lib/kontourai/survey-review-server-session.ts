@@ -2,6 +2,7 @@ export {
   assertServerReviewSessionEvents,
   assertServerReviewSessionFreshness,
   createServerReviewSessionRecord,
+  deriveServerReviewSessionApplyResult,
   hashReviewSessionSnapshot,
   ServerReviewSessionEventValidationError,
   StaleServerReviewSessionError,
