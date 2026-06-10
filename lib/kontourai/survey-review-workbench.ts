@@ -7,13 +7,18 @@ export {
   createPersistentReviewSessionEventStore,
   defaultReviewSessionName,
   deriveReviewSessionApplyResultForSnapshot,
+  mapReviewWorkbenchResultsToApplyActions,
   mountReviewWorkbench,
   persistReviewSessionEvents,
   replayReviewSessionEventsForSnapshot,
+  ReviewApplyActionMappingError,
   validateReviewSessionEventsForSnapshot,
 } from '@kontourai/survey/review-workbench';
 
 export type {
+  ReviewApplyActionContext,
+  ReviewApplyActionIssue,
+  ReviewApplyActionMapping,
   ReviewCandidatePresentation,
   ReviewItemPresentation,
   ReviewPresentationAdapter,
