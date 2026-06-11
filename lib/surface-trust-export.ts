@@ -1,8 +1,8 @@
 import type { Camp, CampSchedule, RegistrationStatus } from './types';
 import type { CampChangeProposal, ProposalStatus } from './admin/types';
-import type { ConfidenceBasis, TrustInput, TrustStatus } from '@kontourai/surface';
+import type { ConfidenceBasis, TrustBundle, TrustStatus } from '@kontourai/surface';
 import {
-  buildSurveyTrustInput,
+  buildSurveyTrustBundle,
   repeatedObservation,
   sourceOfAuthorityObservationBuilder,
   SurveyInputBuilder,
@@ -87,8 +87,8 @@ interface RegistrationStatusObservationContext {
   campfitMetadata: Record<string, unknown>;
 }
 
-export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustInput {
-  return buildSurveyTrustInput(buildCampfitSurveyInput(input));
+export function buildCampfitSurfaceTrustInput(input: CampfitSurfaceExportInput): TrustBundle {
+  return buildSurveyTrustBundle(buildCampfitSurveyInput(input));
 }
 
 function buildCampfitSurveyInput(input: CampfitSurfaceExportInput): SurveyInput {

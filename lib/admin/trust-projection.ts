@@ -1,6 +1,6 @@
-import { validateTrustInput, type TrustInput, type TrustStatus } from '@kontourai/surface';
+import { validateTrustBundle, type TrustBundle, type TrustStatus } from '@kontourai/surface';
 import {
-  buildSurveyTrustInput,
+  buildSurveyTrustBundle,
   fieldObservation,
   manualEntrySource,
   reviewedCurrentProposedResolution,
@@ -44,8 +44,8 @@ export interface CampAttestationTrustInputArgs {
   values?: Record<string, unknown>;
 }
 
-export function buildCampReviewTrustInput(args: CampReviewTrustInputArgs): TrustInput {
-  return validateTrustInput(buildSurveyTrustInput(buildCampReviewSurveyInput(args)));
+export function buildCampReviewTrustInput(args: CampReviewTrustInputArgs): TrustBundle {
+  return validateTrustBundle(buildSurveyTrustBundle(buildCampReviewSurveyInput(args)));
 }
 
 export function buildCampReviewSurveyInput(args: CampReviewTrustInputArgs): SurveyInput {
@@ -77,7 +77,7 @@ export function buildCampReviewSurveyInput(args: CampReviewTrustInputArgs): Surv
   return builder.build();
 }
 
-export function buildCampAttestationTrustInput(args: CampAttestationTrustInputArgs): TrustInput {
+export function buildCampAttestationTrustInput(args: CampAttestationTrustInputArgs): TrustBundle {
   const builder = new SurveyInputBuilder({
     source: 'campfit.admin.attestation',
     generatedAt: args.attestedAt,
@@ -125,7 +125,7 @@ export function buildCampAttestationTrustInput(args: CampAttestationTrustInputAr
     }));
   }
 
-  return validateTrustInput(buildSurveyTrustInput(builder.build()));
+  return validateTrustBundle(buildSurveyTrustBundle(builder.build()));
 }
 
 function campReviewResolution(args: {
@@ -163,21 +163,41 @@ function campReviewResolution(args: {
       reviewKind: 'crawl-proposal',
       decisionEffect,
     },
-    reviewOutcome: {
-      id: `${campCandidateSetId(args.campId, args.field, args.proposalId)}.review`,
-      status: 'verified',
-      actor: args.reviewer,
-      reviewedAt: args.reviewedAt,
-      rationale: args.reviewerNotes ?? undefined,
-      withinComfortZone: !approved && comfortZoneNote ? false : undefined,
-      comfortZoneNote,
-      metadata: {
-        proposalId: args.proposalId,
-        proposalDecision: approved ? 'approved' : 'rejected',
-        decisionEffect,
-        feedbackTags: args.feedbackTags,
-      },
-    },
+    reviewOutcome: (() => {
+      // Structural authorizing block — typed locally for 0.5.1 compat; import
+      // ReviewAuthorizing once ^0.5.2 is the baseline (see commit message).
+      const authorizing: {
+        kind: 'authorized-action';
+        promptRef: string;
+        renderedPrompt: string;
+        action: 'affirmed-control' | 'typed';
+        authorityRef: string;
+      } = {
+        kind: 'authorized-action',
+        promptRef: 'survey://campfit/approve-field@v1',
+        renderedPrompt: `${approved ? 'Approve' : 'Reject'} the proposed value for field \`${args.field}\` on camp ${args.campId}?`,
+        action: args.reviewerNotes?.trim() ? 'typed' : 'affirmed-control',
+        authorityRef: `campfit-reviewer:${args.reviewer}`,
+      };
+      // Cast through unknown: authorizing lands on ReviewOutcome in ^0.5.2;
+      // absent from the 0.5.1 type but accepted at runtime.
+      return {
+        id: `${campCandidateSetId(args.campId, args.field, args.proposalId)}.review`,
+        status: 'verified',
+        actor: args.reviewer,
+        reviewedAt: args.reviewedAt,
+        rationale: args.reviewerNotes ?? undefined,
+        withinComfortZone: !approved && comfortZoneNote ? false : undefined,
+        comfortZoneNote,
+        authorizing,
+        metadata: {
+          proposalId: args.proposalId,
+          proposalDecision: approved ? 'approved' : 'rejected',
+          decisionEffect,
+          feedbackTags: args.feedbackTags,
+        },
+      } as unknown as Parameters<typeof reviewedCurrentProposedResolution>[0]['reviewOutcome'];
+    })(),
     selectedClaimStatus: 'verified',
     unselectedClaimStatus: approved ? 'superseded' : 'rejected',
     currentObservation: currentCampReviewObservation({
