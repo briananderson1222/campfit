@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildTrustReport, validateTrustInput } from '@kontourai/surface';
+import { buildTrustReport, validateTrustBundle } from '@kontourai/surface';
 
 import {
   buildCampAttestationTrustInput,
@@ -56,7 +56,7 @@ const reviewTrustInput = buildCampReviewTrustInput({
   },
 });
 
-const reviewReport = buildTrustReport(validateTrustInput(reviewTrustInput));
+const reviewReport = buildTrustReport(validateTrustBundle(reviewTrustInput));
 assert.equal(reviewReport.summary.totalClaims, 4);
 assert.equal(reviewReport.summary.byStatus.verified, 2);
 assert.equal(reviewReport.summary.byStatus.rejected, 1);
@@ -159,7 +159,7 @@ const attestationTrustInput = buildCampAttestationTrustInput({
   },
 });
 
-const attestationReport = buildTrustReport(validateTrustInput(attestationTrustInput));
+const attestationReport = buildTrustReport(validateTrustBundle(attestationTrustInput));
 assert.equal(attestationReport.summary.byStatus.assumed, 1);
 assert.equal(attestationReport.events[0]?.method, 'survey-assumption');
 assert.equal(attestationReport.claims[0]?.confidenceBasis?.reviewerAuthority, 'operator');
