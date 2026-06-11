@@ -6,6 +6,7 @@ import {
   reviewedCurrentProposedResolution,
   SurveyInputBuilder,
   webPageSource,
+  type ReviewAuthorizingAuthorizedAction,
   type SurveyObservationInput,
   type SurveyInput,
 } from '@kontourai/survey';
@@ -164,23 +165,13 @@ function campReviewResolution(args: {
       decisionEffect,
     },
     reviewOutcome: (() => {
-      // Structural authorizing block — typed locally for 0.5.1 compat; import
-      // ReviewAuthorizing once ^0.5.2 is the baseline (see commit message).
-      const authorizing: {
-        kind: 'authorized-action';
-        promptRef: string;
-        renderedPrompt: string;
-        action: 'affirmed-control' | 'typed';
-        authorityRef: string;
-      } = {
+      const authorizing: ReviewAuthorizingAuthorizedAction = {
         kind: 'authorized-action',
         promptRef: 'survey://campfit/approve-field@v1',
         renderedPrompt: `${approved ? 'Approve' : 'Reject'} the proposed value for field \`${args.field}\` on camp ${args.campId}?`,
         action: args.reviewerNotes?.trim() ? 'typed' : 'affirmed-control',
         authorityRef: `campfit-reviewer:${args.reviewer}`,
       };
-      // Cast through unknown: authorizing lands on ReviewOutcome in ^0.5.2;
-      // absent from the 0.5.1 type but accepted at runtime.
       return {
         id: `${campCandidateSetId(args.campId, args.field, args.proposalId)}.review`,
         status: 'verified',
@@ -196,7 +187,7 @@ function campReviewResolution(args: {
           decisionEffect,
           feedbackTags: args.feedbackTags,
         },
-      } as unknown as Parameters<typeof reviewedCurrentProposedResolution>[0]['reviewOutcome'];
+      };
     })(),
     selectedClaimStatus: 'verified',
     unselectedClaimStatus: approved ? 'superseded' : 'rejected',
