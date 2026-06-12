@@ -1,13 +1,15 @@
 /**
  * dry-run-driving-session.ts
- * Simulates 5 review decisions against the seeded driving-session proposals via API.
+ * Simulates review decisions against the seeded driving-session proposals via API.
+ * Verifies event persistence, session creation, and event structure end-to-end.
  * Run: npm run dry-run:driving-session
  */
 import fs from 'fs';
-import { loadLocalEnv } from './load-env.ts';
+import { loadLocalEnv } from './load-env';
 loadLocalEnv();
 
-import { getPool } from '../lib/db.ts';
+import { getPool } from '../lib/db';
+import type { ReviewQueueSessionState } from '@kontourai/survey/review-workbench';
 import {
   buildReviewSessionEvents,
 } from '@kontourai/survey/review-workbench';
@@ -21,9 +23,11 @@ async function main() {
     process.exit(1);
   }
 
-  const authState = JSON.parse(fs.readFileSync(authStatePath, 'utf8'));
+  const authState = JSON.parse(fs.readFileSync(authStatePath, 'utf8')) as {
+    cookies: Array<{ name: string; value: string }>;
+  };
   const cookieHeader = authState.cookies
-    .map((c: { name: string; value: string }) => `${c.name}=${c.value}`)
+    .map((c) => `${c.name}=${c.value}`)
     .join('; ');
   const baseUrl = 'http://127.0.0.1:3100';
 
@@ -56,10 +60,10 @@ async function main() {
     }
     console.log(`  page: ${pageResp.status}`);
 
-    // Check for session in DB
+    // Check for session in DB (typed as ReviewQueueSessionState for the snapshot)
     const sessionRow = await pool.query<{
       id: string;
-      snapshot: { items: Array<{ metadata: { name: string }; spec: { target: string } }> };
+      snapshot: ReviewQueueSessionState;
       sessionName: string;
       updatedAt: string;
     }>(
@@ -94,7 +98,11 @@ async function main() {
       }
     });
 
-    const simulatedSession = { ...snapshot, decisionsByItemName, notesByItemName };
+    const simulatedSession: ReviewQueueSessionState = {
+      ...snapshot,
+      decisionsByItemName,
+      notesByItemName,
+    };
     const newEvents = buildReviewSessionEvents(simulatedSession);
 
     const putResp = await fetch(
@@ -118,7 +126,11 @@ async function main() {
       { headers },
     );
     const { events: savedEvents } = await verifyResp.json() as { events: Array<{
-      spec?: { eventType?: string; data?: { authorizing?: { action?: string; promptRef?: string } }; rationale?: string }
+      spec?: {
+        eventType?: string;
+        data?: { authorizing?: { action?: string; promptRef?: string } };
+        rationale?: string;
+      };
     }> };
 
     const authorizingCodes: string[] = [];
@@ -138,7 +150,6 @@ async function main() {
     console.log(`  ${r.campName}: ${r.events} events, authorizing=[${r.authorizing.join(', ')}]`);
   }
 
-  // Run metrics
   console.log('\n=== Metrics preview ===');
   console.log('Run: node scripts/session-metrics.mjs');
 
