@@ -25,7 +25,10 @@
     "verify:survey-browser": "playwright test tests/browser/survey-review-fixture.spec.ts tests/browser/survey-review-real-proposal.spec.ts",
     "smoke:prod": "playwright test --config=playwright.prod.config.ts",
     "verify:survey": "tsx scripts/verify-survey-integration.ts",
-    "verify:admin": "tsx scripts/verify-admin-platform.ts"
+    "verify:admin": "tsx scripts/verify-admin-platform.ts",
+    "seed:driving-session": "tsx scripts/seed-driving-session.ts",
+    "dry-run:driving-session": "tsx scripts/dry-run-driving-session.ts",
+    "dev:review-session": "next dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
