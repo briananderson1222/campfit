@@ -5,7 +5,9 @@ nothing is removed or replaced).
 Package: [`@kontourai/traverse@0.2.0`](https://www.npmjs.com/package/@kontourai/traverse)
 (npm-live), Anthropic adapter via `@kontourai/traverse/anthropic`. `0.2.0` adds
 `opts.baseUrl`, letting the pilot point at any Anthropic-compatible endpoint
-(e.g. Z.AI) — see the parity-run recipes below.
+(e.g. Z.AI). Provider/model/key resolution for the LIVE parity run goes through
+[`@kontourai/datum@0.2.0`](https://www.npmjs.com/package/@kontourai/datum)
+(npm-live) — see the datum recipe below.
 
 ## Why
 
@@ -30,8 +32,9 @@ wires traverse outputs into the **existing** review sink.
 | --- | --- |
 | `lib/ingestion/traverse-schema.ts` | `CAMP_TARGET_SCHEMA` — the camp/program listing shape (name, description, category, registration URL, location, session dates, ages, price) derived from the real `CampInput` scraper output type. Traverse defines no field names itself; every path/enum/description here is caller-owned. |
 | `lib/ingestion/traverse-extractor.ts` | Pilot wiring: `runTraverseExtraction()` runs `extract()` against the schema; `traverseProposalsToProposedChanges()` + `buildTraverseProposalRecord()` map proposals into CampFit's existing `ProposedChanges` / `createProposal` review contract — the same sink the crawl pipeline feeds the Survey review workflow (PR #31). It does **not** write to the DB; human-review policy owns the write. |
+| `lib/ingestion/resolve-extraction-provider.ts` | `resolveExtractionProvider()` — resolves the LIVE traverse `ExtractionProvider` via `@kontourai/datum`'s `resolve(ref)` (default ref: `extraction-default`, or `TRAVERSE_ROLE`), reading `.datum/config.json`'s `zai` / `anthropic` providers. Only imported by `scripts/traverse-parity.ts` — never by the replay test, so CI needs no datum config or key. |
 | `scripts/test-traverse-replay.ts` (`npm run test:traverse-replay`) | CI-safe REPLAY proof over stored HTML snapshots with a deterministic STUB provider (no API key). |
-| `scripts/traverse-parity.ts` (`npm run traverse:parity`) | LIVE parity harness (NOT in CI) — real Anthropic provider vs the legacy scraper over the same fetched pages. |
+| `scripts/traverse-parity.ts` (`npm run traverse:parity`) | LIVE parity harness (NOT in CI) — real Anthropic-compatible provider (resolved via datum) vs the legacy scraper over the same fetched pages. |
 | `tests/fixtures/traverse/*.html` | Stored snapshots: one healthy source, plus the rebuilt Denver Art Museum page. |
 | `tests/fixtures/traverse/stub-provider.ts` | Deterministic `ExtractionProvider` for the replay test. |
 
@@ -78,46 +81,71 @@ asserts, over the two stored snapshots:
 
 ## Parity harness (LIVE) — status: NOT_VERIFIED
 
-`npm run traverse:parity` runs the legacy scraper and the real Anthropic
-traverse provider over the same freshly-fetched pages and writes a per-field
+`npm run traverse:parity` runs the legacy scraper and the real traverse
+provider over the same freshly-fetched pages and writes a per-field
 agreement / traverse-only / selector-only / confidence-distribution report to
 `artifacts/traverse-parity/<timestamp>/` (gitignored).
 
-It was **NOT run** in this pilot because **`ANTHROPIC_API_KEY` was not available
-in the local environment** (nor in `.env.local`). The harness detects the
-missing key and prints NOT_VERIFIED instructions rather than fabricating a
-report. To verify against Anthropic directly:
+It was **NOT run** in this pilot because no key was available for the
+`extraction-default` role in the local environment (nor in `.env.local`). The
+harness detects the resolution failure and prints NOT_VERIFIED instructions
+rather than fabricating a report.
+
+### Provider resolution via datum
+
+The provider, model, base URL, and API key are resolved by
+[`@kontourai/datum@0.2.0`](https://www.npmjs.com/package/@kontourai/datum)
+(`lib/ingestion/resolve-extraction-provider.ts`), not hand-plumbed env vars.
+This repo commits `.datum/config.json` with two providers — `zai`
+(Anthropic-compatible, `https://api.z.ai/api/anthropic`, key from
+`ZAI_API_KEY`) and `anthropic` (key from `ANTHROPIC_API_KEY`) — and one role,
+`extraction-default: "glm-5.2@zai"`. The file holds **references only**
+(env var names), never a secret, and is safe to commit — datum's validator
+rejects a key-looking literal in any auth field.
+
+To run the parity harness:
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...      # or add it to .env.local
+export ZAI_API_KEY=...          # the key the extraction-default role's
+                                 # zai provider references (or add it to
+                                 # .env.local)
 npm run traverse:parity
 # → artifacts/traverse-parity/<timestamp>/report.md
 ```
 
-### Running parity against Z.AI (or any Anthropic-compatible endpoint)
-
-`traverse-parity.ts` passes `TRAVERSE_MODEL` and `ANTHROPIC_BASE_URL` through
-to `createAnthropicExtractionProvider` as explicit `opts.model` / `opts.baseUrl`
-(requires `@kontourai/traverse` `^0.2.0`, already the pinned version). Set
-`ANTHROPIC_API_KEY` to the Z.AI key — the harness's presence check only cares
-that the variable is set, not which backend it authenticates against:
+Preflight check (confirms the config parses, the role resolves, and the key
+actually works against the live endpoint with a single `max_tokens: 1` call —
+the only place datum touches the network):
 
 ```sh
-export ANTHROPIC_API_KEY="$ZAI_API_KEY"                     # your Z.AI key
-export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
-export TRAVERSE_MODEL="glm-4.6"                              # pin explicitly — Z.AI
-                                                               # remaps Claude model
-                                                               # names to GLM equivalents
-npm run traverse:parity
-# → artifacts/traverse-parity/<timestamp>/report.md
+npx datum doctor --probe
 ```
+
+### Switching models / providers
+
+- `TRAVERSE_ROLE=<role>` — resolve a different datum role entirely (e.g. a
+  `worker` or `anthropic-default` role added to `.datum/config.json`).
+- `DATUM_ROLE_EXTRACTION_DEFAULT=<model@provider>` — datum-native escape
+  hatch: override what the `extraction-default` role points at for one run,
+  without touching the config file, e.g.:
+
+  ```sh
+  export ANTHROPIC_API_KEY=sk-ant-...
+  export DATUM_ROLE_EXTRACTION_DEFAULT="claude-sonnet-5@anthropic"
+  npm run traverse:parity
+  ```
+
+- `TRAVERSE_MODEL` / `ANTHROPIC_BASE_URL` — explicit, final overrides applied
+  on top of whatever datum resolves (kept for one-off pins). Prefer the
+  datum-native mechanisms above for anything more than a one-off.
 
 Both the console output and `report.md`/`report.json` record which backend
 produced the run: `provider.name` gets an `@<host>` suffix from `baseUrl`
-(e.g. `anthropic-extraction-provider:glm-4.6@api.z.ai`), and each source entry
-also carries `traverseModel` — the model the provider's raw response actually
-reports, which may differ from `TRAVERSE_MODEL` if the backend remaps model
-names.
+(e.g. `anthropic-extraction-provider:glm-5.2@api.z.ai`); each source entry
+also carries `datumRef`/`datumProvider` (which role/provider resolved) and
+`traverseModel` — the model the provider's raw response actually reports,
+which may differ from the resolved model id if the backend remaps model
+names (e.g. Z.AI remaps Claude-style names to GLM equivalents).
 
 (There is no sidecar tooling in this repo, so the original NOT_VERIFIED gap is
 recorded here and in the PR body rather than in a tracker.)
@@ -154,3 +182,8 @@ Until then: keep both paths; traverse stays behind `traverse:parity` /
   highlighting must re-run the same prep. Documented in traverse's README.
 - PDF content-prep is deferred in 0.1.0 (returns a typed error) — not exercised
   here; all snapshots are HTML.
+- `resolveExtractionProvider()` (`lib/ingestion/resolve-extraction-provider.ts`)
+  is the ONLY place datum's `resolve()` is called; it is only imported from
+  `scripts/traverse-parity.ts`. `test:traverse-replay` and its stub provider
+  (`tests/fixtures/traverse/stub-provider.ts`) never import it — CI needs no
+  `.datum/config.json` and no key present to stay green.

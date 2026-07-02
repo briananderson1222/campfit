@@ -1,30 +1,34 @@
 /**
  * traverse-parity.ts — LIVE parity harness for the @kontourai/traverse pilot
  * (Slice 1b). NOT part of CI. Runs BOTH the legacy selector scraper AND
- * schema-directed traverse extraction (real Anthropic provider, or any
- * Anthropic-compatible endpoint — see below) over the SAME freshly-fetched
- * pages, then writes a parity report to a local artifacts dir.
+ * schema-directed traverse extraction (real Anthropic-compatible provider)
+ * over the SAME freshly-fetched pages, then writes a parity report to a
+ * local artifacts dir.
  *
  *   npm run traverse:parity
  *
- * Requires ANTHROPIC_API_KEY (env or .env.local). If it is absent, the harness
- * prints NOT_VERIFIED with exact run instructions and exits 0 — it never
- * fabricates a report.
+ * The provider is resolved via `@kontourai/datum@^0.2.0`
+ * (`lib/ingestion/resolve-extraction-provider.ts`) from the `extraction-default`
+ * role in `.datum/config.json` (committed — see that file for the `zai` /
+ * `anthropic` providers). Requires the referenced key to be exported (e.g.
+ * `ZAI_API_KEY` for the default `glm-5.2@zai` role). If resolution fails —
+ * no key set, unknown role, etc. — the harness prints NOT_VERIFIED with exact
+ * run instructions and exits 0; it never fabricates a report.
  *
- * Optional env passthrough into `createAnthropicExtractionProvider`
- * (@kontourai/traverse ^0.2.0):
- *   - TRAVERSE_MODEL      — model id, passed as `opts.model` (e.g. "glm-4.6"
- *     for a Z.AI run — the default Anthropic alias is not guaranteed to
- *     resolve on a third-party endpoint, so pin this explicitly there).
- *   - ANTHROPIC_BASE_URL  — Anthropic-compatible endpoint base URL, passed as
- *     `opts.baseUrl` (e.g. "https://api.z.ai/api/anthropic"). Passed
- *     explicitly rather than left to the SDK's own env fallback so
- *     `provider.name` picks up the "@<host>" suffix and the report below can
- *     record which backend produced the traverse side.
+ * Overrides, highest precedence first:
+ *   - `TRAVERSE_ROLE`       — resolve a different datum ref/role entirely
+ *     (e.g. `TRAVERSE_ROLE=anthropic-default` to run against Anthropic
+ *     directly instead of the default Z.AI role).
+ *   - `DATUM_ROLE_<ROLE>`   — datum-native escape hatch: override what a role
+ *     points at without touching `.datum/config.json` (see datum's README).
+ *   - `TRAVERSE_MODEL` / `ANTHROPIC_BASE_URL` — explicit, final overrides on
+ *     top of whatever datum resolves (kept for one-off pins; datum-native
+ *     mechanisms above are preferred for anything more than that).
  *
  * The report captures, per source:
- *   - which traverse provider (name, incl. "@<host>" for a custom baseUrl)
- *     and which model (from the provider's raw response) produced the run
+ *   - which traverse provider (name, incl. "@<host>" for a custom baseUrl),
+ *     the datum ref/provider it resolved from, and which model (from the
+ *     provider's raw response) produced the run
  *   - per-field agreement (legacy value vs traverse proposal)
  *   - traverse-only finds (fields traverse proposed that legacy missed)
  *   - selector-only finds (fields legacy produced that traverse missed)
@@ -41,8 +45,9 @@ import { BaseScraper } from "@/lib/ingestion/scraper-base";
 import { CampInput } from "@/lib/ingestion/adapter";
 import { runTraverseExtraction } from "@/lib/ingestion/traverse-extractor";
 import { SCALAR_SCHEMA_PATHS } from "@/lib/ingestion/traverse-schema";
+import { resolveExtractionProvider } from "@/lib/ingestion/resolve-extraction-provider";
 import type { ExtractionProposal } from "@kontourai/traverse";
-import { createAnthropicExtractionProvider } from "@kontourai/traverse/anthropic";
+import { DatumError } from "@kontourai/datum";
 
 loadLocalEnv();
 
@@ -108,20 +113,28 @@ function sameish(a: unknown, b: unknown): boolean {
 }
 
 async function main() {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.log("NOT_VERIFIED: ANTHROPIC_API_KEY is not set — the live parity harness was not run.");
-    console.log("To run it:");
-    console.log("  1. export ANTHROPIC_API_KEY=sk-ant-...   (or add it to .env.local)");
-    console.log("  2. npm run traverse:parity");
-    console.log(`  3. Read the report at ${path.relative(process.cwd(), ARTIFACT_ROOT)}/<timestamp>/report.md`);
-    process.exit(0);
+  let resolution: ReturnType<typeof resolveExtractionProvider>;
+  try {
+    resolution = resolveExtractionProvider();
+  } catch (err) {
+    if (err instanceof DatumError) {
+      console.log(`NOT_VERIFIED: datum could not resolve an extraction provider (${err.code}): ${err.message}`);
+      console.log("To run it:");
+      console.log("  1. export ZAI_API_KEY=...   (the key for the extraction-default role in .datum/config.json;");
+      console.log("     or add it to .env.local)");
+      console.log("  2. Preflight check: npx datum doctor --probe");
+      console.log("  3. npm run traverse:parity");
+      console.log(`  4. Read the report at ${path.relative(process.cwd(), ARTIFACT_ROOT)}/<timestamp>/report.md`);
+      process.exit(0);
+    }
+    throw err;
   }
 
-  const provider = createAnthropicExtractionProvider({
-    model: process.env.TRAVERSE_MODEL || undefined,
-    baseUrl: process.env.ANTHROPIC_BASE_URL || undefined,
-  });
-  console.log(`Traverse provider: ${provider.name}`);
+  const { provider, ref, datumProvider, model: resolvedModelId, baseUrl: resolvedBaseUrl } = resolution;
+  console.log(
+    `Traverse provider: ${provider.name} (datum ref: "${ref}" -> ${datumProvider}, model: ${resolvedModelId}` +
+      `${resolvedBaseUrl ? `, baseUrl: ${resolvedBaseUrl}` : ""})`
+  );
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = path.join(ARTIFACT_ROOT, stamp);
   fs.mkdirSync(outDir, { recursive: true });
@@ -131,7 +144,7 @@ async function main() {
     `# Traverse parity report`,
     ``,
     `Generated: ${new Date().toISOString()}`,
-    `Traverse provider: ${provider.name}`,
+    `Traverse provider: ${provider.name} (datum ref: "${ref}" -> ${datumProvider}, model: ${resolvedModelId})`,
     ``,
   ];
 
@@ -207,8 +220,12 @@ async function main() {
       // points at a non-default (e.g. Z.AI) endpoint; traverseModel is the model
       // the provider's raw response actually reports (may differ from
       // TRAVERSE_MODEL if the backend remaps model names, e.g. Z.AI -> GLM).
+      // datumRef/datumProvider record which @kontourai/datum role/provider the
+      // extraction-side credentials and model were resolved from.
       traverseProviderName: provider.name,
       traverseModel,
+      datumRef: ref,
+      datumProvider,
       traverseProposalCount: traverseProposals.length,
       traverseError: traverseErr,
       traverseWarnings,
