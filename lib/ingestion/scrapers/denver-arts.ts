@@ -1,5 +1,5 @@
 /**
- * Denver Art Museum scraper — denverartmuseum.org/learn/youth-family/youth-camps
+ * Denver Art Museum scraper — denverartmuseum.org/en/summer-camps
  *
  * DAM runs popular art day camps for kids. Their site lists camps
  * with age groups, session dates, and pricing.
@@ -7,6 +7,24 @@
  * Scrape strategy:
  * 1. Fetch the youth camps page
  * 2. Extract each camp's name, dates, price, age range from the listing
+ *
+ * ⚠️  NEEDS REVIEW (2026-07): the original entryUrl
+ *     (denverartmuseum.org/learn/youth-family/youth-camps) started
+ *     returning HTTP 404 the week of 2026-06-15, failing the weekly
+ *     scrape workflow (see scrape.yml run history). The site's
+ *     sitemap.xml shows the camps page moved to
+ *     denverartmuseum.org/en/summer-camps (confirmed 200 OK,
+ *     <title>Summer Camps | Denver Art Museum</title>), so the entryUrl
+ *     below has been updated to that URL. HOWEVER the page markup has
+ *     changed substantially (no `.program-item` / `.camp-item` /
+ *     `.event-card` / `<article>` cards were found in a manual check),
+ *     so the selectors in `scrape()` below are almost certainly stale
+ *     and this scraper likely now returns 0 camps. Owner: please
+ *     re-verify selectors against the live page with
+ *     `npm run scrape -- --scraper "denver art" --dry-run` and update
+ *     `scrape()` accordingly. Left in the registry (not disabled) so
+ *     the 0-camps-found case stays visible in the scrape report rather
+ *     than silently disappearing.
  *
  * ⚠️  Selectors target the DAM site structure as of early 2026.
  *     Verify with `npm run scrape -- --dry-run` before production use.
@@ -19,7 +37,7 @@ import { slugify, parseDate, extractAgeGroups, extractPrices } from "../scraper-
 export class DenverArtMuseumScraper extends BaseScraper {
   readonly scraperName = "Denver Art Museum";
   readonly entryUrl =
-    "https://www.denverartmuseum.org/learn/youth-family/youth-camps";
+    "https://www.denverartmuseum.org/en/summer-camps"; // NEEDS REVIEW — see file header, URL changed 2026-06-15+, selectors unverified against new markup
 
   async scrape(ctx: ScrapeContext): Promise<CampInput[]> {
     const { $ } = ctx;
