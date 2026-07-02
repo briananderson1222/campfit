@@ -2,8 +2,10 @@
 
 Status: **PILOT** (runs beside the legacy scrapers behind a separate command;
 nothing is removed or replaced).
-Package: [`@kontourai/traverse@0.1.0`](https://www.npmjs.com/package/@kontourai/traverse)
-(npm-live), Anthropic adapter via `@kontourai/traverse/anthropic`.
+Package: [`@kontourai/traverse@0.2.0`](https://www.npmjs.com/package/@kontourai/traverse)
+(npm-live), Anthropic adapter via `@kontourai/traverse/anthropic`. `0.2.0` adds
+`opts.baseUrl`, letting the pilot point at any Anthropic-compatible endpoint
+(e.g. Z.AI) — see the parity-run recipes below.
 
 ## Why
 
@@ -84,7 +86,7 @@ agreement / traverse-only / selector-only / confidence-distribution report to
 It was **NOT run** in this pilot because **`ANTHROPIC_API_KEY` was not available
 in the local environment** (nor in `.env.local`). The harness detects the
 missing key and prints NOT_VERIFIED instructions rather than fabricating a
-report. To verify:
+report. To verify against Anthropic directly:
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...      # or add it to .env.local
@@ -92,8 +94,33 @@ npm run traverse:parity
 # → artifacts/traverse-parity/<timestamp>/report.md
 ```
 
-(There is no sidecar tooling in this repo, so this gap is recorded here and in
-the PR body rather than in a tracker.)
+### Running parity against Z.AI (or any Anthropic-compatible endpoint)
+
+`traverse-parity.ts` passes `TRAVERSE_MODEL` and `ANTHROPIC_BASE_URL` through
+to `createAnthropicExtractionProvider` as explicit `opts.model` / `opts.baseUrl`
+(requires `@kontourai/traverse` `^0.2.0`, already the pinned version). Set
+`ANTHROPIC_API_KEY` to the Z.AI key — the harness's presence check only cares
+that the variable is set, not which backend it authenticates against:
+
+```sh
+export ANTHROPIC_API_KEY="$ZAI_API_KEY"                     # your Z.AI key
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+export TRAVERSE_MODEL="glm-4.6"                              # pin explicitly — Z.AI
+                                                               # remaps Claude model
+                                                               # names to GLM equivalents
+npm run traverse:parity
+# → artifacts/traverse-parity/<timestamp>/report.md
+```
+
+Both the console output and `report.md`/`report.json` record which backend
+produced the run: `provider.name` gets an `@<host>` suffix from `baseUrl`
+(e.g. `anthropic-extraction-provider:glm-4.6@api.z.ai`), and each source entry
+also carries `traverseModel` — the model the provider's raw response actually
+reports, which may differ from `TRAVERSE_MODEL` if the backend remaps model
+names.
+
+(There is no sidecar tooling in this repo, so the original NOT_VERIFIED gap is
+recorded here and in the PR body rather than in a tracker.)
 
 ## Promotion criteria — making traverse the primary extractor
 
