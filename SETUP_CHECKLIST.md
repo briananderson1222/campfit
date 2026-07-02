@@ -1,4 +1,4 @@
-# CampScout Setup Checklist
+# CampFit Setup Checklist
 
 ## ✅ Done Automatically
 - Supabase DB schema + 158 camps seeded
@@ -13,13 +13,13 @@
 ### 1. Google OAuth (optional but recommended)
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) → Create project → APIs & Services → Credentials
 2. Create OAuth 2.0 Client ID (Web application)
-3. Add authorized redirect URI: `https://rpnzolnnhbzhuspwpajq.supabase.co/auth/v1/callback`
+3. Add authorized redirect URI: `https://<your-supabase-project-ref>.supabase.co/auth/v1/callback`
 4. Go to Supabase dashboard → Authentication → Providers → Google
 5. Paste the Client ID and Client Secret → Save
 
 ### 2. Stripe (monetization)
 1. Create account at [stripe.com](https://stripe.com)
-2. Create a Product: "CampScout Premium" → Price: $8/month recurring
+2. Create a Product: "CampFit Premium" → Price: $8/month recurring
 3. Copy the Price ID (starts with `price_...`)
 4. Go to Stripe → Developers → Webhooks → Add endpoint:
    - URL: `https://camp-scout-pied.vercel.app/api/stripe/webhook`
@@ -36,7 +36,7 @@
 3. Create an API key
 4. Add to Vercel:
    - `RESEND_API_KEY` = your API key
-   - `RESEND_FROM_EMAIL` = `CampScout <notifications@yourdomain.com>`
+   - `RESEND_FROM_EMAIL` = `CampFit <notifications@yourdomain.com>`
 
 ### 4. Cron security
 - Add to Vercel: `CRON_SECRET` = any long random string (e.g. run `openssl rand -hex 32`)

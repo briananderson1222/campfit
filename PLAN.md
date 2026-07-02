@@ -1,4 +1,4 @@
-# CampScout — Denver Kids Camp Discovery Platform
+# CampFit — Denver Kids Camp Discovery Platform
 
 ## Vision
 A PWA for Denver parents to discover, compare, save, and get notified about kids' camps. Seeded from curated CSV data, architected for automated web scraping and multi-city expansion.
