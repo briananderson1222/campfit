@@ -91,15 +91,27 @@ export abstract class BaseScraper {
 
   /**
    * Main entrypoint — runs the scraper and returns results.
+   *
+   * Never throws: a network error, HTTP error (e.g. 404 for a dead source
+   * URL), timeout, or unexpected parse exception is caught here and
+   * returned as a source-level error instead of propagating up. Callers
+   * (see scripts/scrape.ts + lib/ingestion/scrape-runner.ts) rely on this
+   * so one dead source doesn't abort the whole scrape sweep.
    */
   async run(): Promise<{ camps: CampInput[]; errors: string[] }> {
     console.log(`\n[${this.scraperName}] Starting scrape of ${this.entryUrl}`);
 
-    const ctx = await this.fetchPage(this.entryUrl);
-    const camps = await this.scrape(ctx);
+    try {
+      const ctx = await this.fetchPage(this.entryUrl);
+      const camps = await this.scrape(ctx);
 
-    console.log(`[${this.scraperName}] Extracted ${camps.length} camps`);
-    return { camps, errors: [] };
+      console.log(`[${this.scraperName}] Extracted ${camps.length} camps`);
+      return { camps, errors: [] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[${this.scraperName}] Failed to scrape ${this.entryUrl}: ${message}`);
+      return { camps: [], errors: [message] };
+    }
   }
 }
 

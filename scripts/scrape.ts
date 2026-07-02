@@ -18,6 +18,13 @@ import { DenverArtMuseumScraper } from "@/lib/ingestion/scrapers/denver-arts";
 import { CampInput } from "@/lib/ingestion/adapter";
 import { resolvePgConfig } from "@/lib/db-config";
 import { loadLocalEnv } from "./load-env";
+import {
+  runScraperSafe,
+  summarizeReport,
+  printReport,
+  resolveFailureThreshold,
+  ScraperReportEntry,
+} from "@/lib/ingestion/scrape-runner";
 
 loadLocalEnv();
 
@@ -152,37 +159,24 @@ async function main() {
     console.log("✓ Connected to Supabase\n");
   }
 
-  const report: {
-    scraper: string;
-    found: number;
-    upserted: number;
-    errors: string[];
-  }[] = [];
+  // Each source is isolated: a dead URL / HTTP error / parse failure for
+  // one scraper is caught and recorded here, it never aborts the loop —
+  // see lib/ingestion/scrape-runner.ts for the isolation + threshold logic.
+  const report: ScraperReportEntry[] = [];
 
   for (const scraper of scrapers) {
-    const { camps, errors } = await scraper.run();
-    let upserted = 0;
-
-    if (!dryRun && client) {
-      for (const camp of camps) {
-        try {
-          await upsertCamp(client, camp);
-          upserted++;
-        } catch (e) {
-          errors.push(`${camp.name}: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    }
-
-    report.push({
-      scraper: scraper.scraperName,
-      found: camps.length,
-      upserted: dryRun ? 0 : upserted,
-      errors,
-    });
+    const entry = await runScraperSafe(
+      scraper,
+      !dryRun && client
+        ? async (camp) => {
+            await upsertCamp(client as Client, camp);
+          }
+        : undefined
+    );
+    report.push(entry);
 
     if (dryRun) {
-      camps.slice(0, 3).forEach((c) =>
+      entry.camps.slice(0, 3).forEach((c) =>
         console.log(`  → ${c.name} | ${c.category} | ${c.schedules.length} sessions`)
       );
     }
@@ -190,17 +184,14 @@ async function main() {
 
   if (client) await client.end();
 
-  console.log("\n📊 Scrape Report:");
-  console.log("─".repeat(50));
-  for (const r of report) {
-    const status = r.errors.length > 0 ? "⚠️" : "✅";
-    console.log(`${status} ${r.scraper}: ${r.found} found, ${r.upserted} upserted`);
-    r.errors.slice(0, 3).forEach((e) => console.log(`   ✗ ${e}`));
-  }
+  const thresholdRatio = resolveFailureThreshold(process.env.SCRAPE_FAILURE_THRESHOLD);
+  const summary = summarizeReport(report, thresholdRatio);
+  printReport(report, summary);
 
-  const totalUpserted = report.reduce((s, r) => s + r.upserted, 0);
-  const totalErrors = report.reduce((s, r) => s + r.errors.length, 0);
-  console.log(`\n✅ Done: ${totalUpserted} camps updated, ${totalErrors} errors`);
+  if (summary.shouldExitNonZero) {
+    console.error(`\n❌ Scrape sweep failed: ${summary.reasonLine}`);
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {
