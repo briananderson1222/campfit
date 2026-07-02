@@ -5,7 +5,7 @@ import {
   deriveServerReviewSessionApplyResult,
   ServerReviewSessionEventValidationError,
   StaleServerReviewSessionError,
-} from '@/lib/kontourai/survey-review-server-session';
+} from '@kontourai/survey/review-workbench/server-review-session';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,

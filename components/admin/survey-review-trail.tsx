@@ -9,7 +9,7 @@ import {
   deriveReviewSessionApplyResultForSnapshot,
   type ReviewWorkbenchResult,
   type ReviewTraceRef,
-} from '@/lib/kontourai/survey-review-workbench';
+} from '@kontourai/survey/review-workbench';
 import { cn } from '@/lib/utils';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { createCampSurveyPresentationAdapter, fieldNameForSurveyItem, formatSurveyDate } from '@/lib/admin/survey-presentation';

@@ -6,7 +6,7 @@ import {
   buildCampAttestationTrustInput,
   buildCampReviewTrustInput,
 } from '../lib/admin/trust-projection';
-import { CAMPFIT_CLAIM_TYPES, CAMPFIT_DECISION_EFFECTS } from '../lib/trust-vocabulary';
+import { campfitVocabulary } from '../lib/trust-vocabulary';
 
 const reviewedAt = '2026-06-01T12:00:00.000Z';
 
@@ -70,10 +70,10 @@ const acceptedProposal = reviewReport.claims.find((claim) =>
 );
 assert.equal(acceptedProposal?.id, 'camp.camp-1.field.description');
 assert.equal(acceptedProposal?.value, 'Outdoor day camp for ages 7-12.');
-assert.equal(acceptedProposal?.claimType, CAMPFIT_CLAIM_TYPES.scalarField);
+assert.equal(acceptedProposal?.claimType, campfitVocabulary.claimTypes.scalarField);
 assert.equal(
   (acceptedProposal?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
-  CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
+  campfitVocabulary.decisionEffects.acceptedCandidateValue,
 );
 const acceptedSurvey = surveyMetadata(acceptedProposal);
 assert.equal(acceptedSurvey.candidateSetId, 'camp.camp-1.field.description.proposal.proposal-1.candidates');
@@ -92,7 +92,7 @@ const supersededCurrent = reviewReport.claims.find((claim) =>
 );
 assert.equal(supersededCurrent?.value, '');
 assert.equal(supersededCurrent?.id, 'camp.camp-1.field.description.proposal.proposal-1.current.claim');
-assert.equal(supersededCurrent?.claimType, CAMPFIT_CLAIM_TYPES.scalarFieldCandidate);
+assert.equal(supersededCurrent?.claimType, campfitVocabulary.claimTypes.scalarFieldCandidate);
 const supersededSurvey = surveyMetadata(supersededCurrent);
 assert.equal(supersededSurvey.candidateSetId, acceptedSurvey.candidateSetId);
 assert.equal(supersededSurvey.candidateId, 'camp.camp-1.field.description.proposal.proposal-1.candidates.current.candidate');
@@ -105,10 +105,10 @@ const retainedCurrent = reviewReport.claims.find((claim) =>
 );
 assert.equal(retainedCurrent?.id, 'camp.camp-1.field.contactPhone');
 assert.equal(retainedCurrent?.value, null);
-assert.equal(retainedCurrent?.claimType, CAMPFIT_CLAIM_TYPES.scalarField);
+assert.equal(retainedCurrent?.claimType, campfitVocabulary.claimTypes.scalarField);
 assert.equal(
   (retainedCurrent?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
-  CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+  campfitVocabulary.decisionEffects.keptCurrentValue,
 );
 const retainedSurvey = surveyMetadata(retainedCurrent);
 assert.equal(retainedSurvey.candidateSetId, 'camp.camp-1.field.contactPhone.proposal.proposal-1.candidates');
@@ -123,11 +123,11 @@ const rejectedProposal = reviewReport.claims.find((claim) =>
   && claim.status === 'rejected'
   && claim.metadata?.candidateRole === 'proposed-value'
 );
-assert.equal(rejectedProposal?.claimType, CAMPFIT_CLAIM_TYPES.scalarFieldCandidate);
+assert.equal(rejectedProposal?.claimType, campfitVocabulary.claimTypes.scalarFieldCandidate);
 assert.equal(rejectedProposal?.value, '303-555-0100');
 assert.equal(
   (rejectedProposal?.metadata as { decisionEffect?: string } | undefined)?.decisionEffect,
-  CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+  campfitVocabulary.decisionEffects.keptCurrentValue,
 );
 assert.equal(rejectedProposal?.id, 'camp.camp-1.field.contactPhone.proposal.proposal-1.proposed.claim');
 const rejectedSurvey = surveyMetadata(rejectedProposal);
@@ -144,7 +144,7 @@ assert.ok(reviewReport.events.some((event) =>
   && event.method === 'survey-rejection'
 ));
 assert.equal(
-  reviewReport.evidence.filter((evidence) => evidence.metadata?.decisionEffect === CAMPFIT_DECISION_EFFECTS.keptCurrentValue).length,
+  reviewReport.evidence.filter((evidence) => evidence.metadata?.decisionEffect === campfitVocabulary.decisionEffects.keptCurrentValue).length,
   2,
 );
 
