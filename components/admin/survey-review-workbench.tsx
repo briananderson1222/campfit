@@ -10,7 +10,7 @@ import {
   mountReviewWorkbench,
   type ReviewCandidatePresentation,
   type ReviewTraceRef,
-} from '@/lib/kontourai/survey-review-workbench';
+} from '@kontourai/survey/review-workbench';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import { createCampSurveyPresentationAdapter, fieldNameForSurveyItem, sourceAuthorityLabel } from '@/lib/admin/survey-presentation';
 import { cn } from '@/lib/utils';

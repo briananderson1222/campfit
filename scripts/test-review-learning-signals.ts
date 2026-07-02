@@ -4,7 +4,7 @@ import { buildSurveyLearningProjections } from '@kontourai/survey';
 
 import { buildRejectedProposalLearningDimensions } from '../lib/admin/metrics-repository';
 import { buildCampReviewSurveyInput } from '../lib/admin/trust-projection';
-import { CAMPFIT_DECISION_EFFECTS } from '../lib/trust-vocabulary';
+import { campfitVocabulary } from '../lib/trust-vocabulary';
 
 const ordinaryRejectionReason = 'Phone number belongs to a different location.';
 const ordinaryProposalId = 'proposal-1';
@@ -30,7 +30,7 @@ const dimensions = buildRejectedProposalLearningDimensions({
 
 assert.equal(dimensions.proposalId, ordinaryProposalId);
 assert.equal(dimensions.field, ordinaryField);
-assert.equal(dimensions.decisionEffect, CAMPFIT_DECISION_EFFECTS.keptCurrentValue);
+assert.equal(dimensions.decisionEffect, campfitVocabulary.decisionEffects.keptCurrentValue);
 assert.equal(dimensions.currentValue, ordinaryDiff.old);
 assert.equal(dimensions.proposedValue, ordinaryDiff.new);
 assert.equal(dimensions.confidence, '0.64');

@@ -1,5 +1,5 @@
 import { getPool } from '@/lib/db';
-import { CAMPFIT_DECISION_EFFECTS } from '@/lib/trust-vocabulary';
+import { campfitVocabulary } from '@/lib/trust-vocabulary';
 import type { FieldDiff, LLMExtractionResult, ProposedChanges } from './types';
 
 export async function recordExtractionMetrics(opts: {
@@ -89,6 +89,14 @@ export async function recordReviewDecision(opts: {
   }
 }
 
+// SKIP decision (survey 1.x adoption): NOT adopting Survey's
+// buildSurveyLearningProjections here. That helper produces an in-memory
+// LearningProjection[] audit trail from a SurveyInput; this field_rejection_learning_signal
+// is a persisted SQL row in the shared CrawlMetric table, aggregated by
+// getDashboardMetrics()'s GROUP BY/time-window queries — a different consumption
+// shape with no shipped BI/dashboard equivalent. Forcing adoption would mean a
+// dual write with no consumer, or rewriting the SQL aggregation layer (out of
+// scope for a dependency bump). See docs/survey-1.x-migration.md.
 export function buildRejectedProposalLearningDimensions(opts: {
   proposalId: string;
   field: string;
@@ -101,7 +109,7 @@ export function buildRejectedProposalLearningDimensions(opts: {
   return compactStringRecord({
     proposalId: opts.proposalId,
     field: opts.field,
-    decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+    decisionEffect: campfitVocabulary.decisionEffects.keptCurrentValue,
     sourceUrl: opts.diff.sourceUrl,
     excerpt: opts.diff.excerpt,
     proposedValue: summarizeMetricValue(opts.diff.new),

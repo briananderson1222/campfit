@@ -3,8 +3,10 @@ import type { CampChangeProposal, ProposalStatus } from './admin/types';
 import type { ConfidenceBasis, TrustBundle, TrustStatus } from '@kontourai/surface';
 import {
   buildSurveyTrustBundle,
+  confidenceBasisForReview,
   repeatedObservation,
   sourceOfAuthorityObservationBuilder,
+  stableId,
   SurveyInputBuilder,
   webPageSource,
   type RawSource,
@@ -12,9 +14,7 @@ import {
   type SurveyObservationInput,
 } from '@kontourai/survey';
 import {
-  CAMPFIT_CLAIM_TYPES,
-  CAMPFIT_TRUST_SUBJECT_TYPE,
-  CAMPFIT_TRUST_SURFACE,
+  campfitVocabulary,
   type CampfitRepeatedClaimType,
   type CampfitScalarClaimType,
 } from './trust-vocabulary';
@@ -137,7 +137,7 @@ function toRegistrationStatusObservation(context: RegistrationStatusObservationC
       authorityClass: 'publisher_owned_page',
       scope: {
         productArea: 'public-directory',
-        subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+        subjectType: campfitVocabulary.subjectType,
         subjectId: context.campId,
         field: 'registrationStatus',
       },
@@ -154,9 +154,9 @@ function toRegistrationStatusObservation(context: RegistrationStatusObservationC
     .withReviewOutcome(context.review)
     .forClaim({
       id: context.claimId,
-      subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+      subjectType: campfitVocabulary.subjectType,
       subjectId: context.campId,
-      surface: CAMPFIT_TRUST_SURFACE,
+      surface: campfitVocabulary.surface,
       claimType: context.projection.claimType,
       status: context.status,
       createdAt: context.projection.createdAt,
@@ -189,9 +189,9 @@ function toScheduleObservation<TItem>(context: ScheduleObservationContext<TItem>
     reviewOutcome: context.review,
     claim: {
       id: context.claimId,
-      subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+      subjectType: campfitVocabulary.subjectType,
       subjectId: context.campId,
-      surface: CAMPFIT_TRUST_SURFACE,
+      surface: campfitVocabulary.surface,
       claimType: context.projection.claimType,
       status: context.status,
       createdAt: context.projection.createdAt,
@@ -254,7 +254,7 @@ function currentRegistrationObservation(
         }
       : undefined,
     projection: {
-      claimType: CAMPFIT_CLAIM_TYPES.scalarField,
+      claimType: campfitVocabulary.claimTypes.scalarField,
       createdAt: observedAt,
       eventMethod: fieldSource ? 'field-source-approval' : 'candidate-resolution',
       updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
@@ -303,7 +303,7 @@ function proposedRegistrationObservation(
         }
       : undefined,
     projection: {
-      claimType: CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      claimType: campfitVocabulary.claimTypes.scalarFieldCandidate,
       createdAt: proposal.createdAt,
       eventMethod: proposal.status === 'PENDING' ? 'crawl-proposal' : 'field-review',
       updatedAt: proposal.reviewedAt ?? generatedAt,
@@ -358,7 +358,7 @@ function currentScheduleObservation(
     },
     review,
     projection: {
-      claimType: CAMPFIT_CLAIM_TYPES.repeatedField,
+      claimType: campfitVocabulary.claimTypes.repeatedField,
       createdAt: observedAt,
       updatedAt: camp.lastVerifiedAt ?? fieldSource?.approvedAt ?? generatedAt,
       collectedBy: fieldSource ? 'campfit-field-review' : 'campfit',
@@ -410,7 +410,7 @@ function proposedScheduleObservation(
     },
     review,
     projection: {
-      claimType: CAMPFIT_CLAIM_TYPES.repeatedFieldCandidate,
+      claimType: campfitVocabulary.claimTypes.repeatedFieldCandidate,
       createdAt: proposal.createdAt,
       updatedAt: proposal.reviewedAt ?? generatedAt,
       collectedBy: proposal.extractionModel,
@@ -455,15 +455,23 @@ function confidenceBasisFor(
   review: ObservationReview | undefined,
   extractionConfidence?: number,
 ): ConfidenceBasis {
-  const hasSupport = review || extractionConfidence !== undefined;
+  const hasSupport = review !== undefined || extractionConfidence !== undefined;
 
-  return {
-    sourceQuality: hasSupport ? 'moderate' : 'unknown',
-    extractionConfidence,
-    reviewerAuthority: status === 'verified' ? 'operator' : 'none',
-    evidenceStrength: hasSupport ? 'moderate' : 'none',
+  // sourceQuality/evidenceStrength stay campfit-owned and are fed in as explicit
+  // inputs, NOT left to confidenceBasisForReview's bare "unknown"/"none" defaults:
+  // campfit's hasSupport-driven mapping (never returns 'strong', moderate iff any
+  // extraction/review support exists) is exactly the "conservative" reference
+  // consumer confidenceBasisForReview's own docstring is modeled on. We delegate
+  // assembly to the shipped helper (reviewerAuthority default is byte-identical to
+  // our prior status==='verified'?'operator':'none' formula) while keeping the
+  // domain heuristic here. See docs/survey-1.x-migration.md.
+  return confidenceBasisForReview({
+    status,
     impactLevel: 'medium',
-  };
+    sourceQuality: hasSupport ? 'moderate' : 'unknown',
+    evidenceStrength: hasSupport ? 'moderate' : 'none',
+    extractionConfidence,
+  });
 }
 
 function proposalStatus(status: ProposalStatus): TrustStatus {
@@ -486,9 +494,6 @@ function proposedClaimId(campId: string, field: CampfitField, proposalId: string
   return stableId(['campfit', campId, field, proposalId]);
 }
 
-function stableId(parts: Array<string | number>): string {
-  return parts.map((part) => String(part).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase()).join('.');
-}
 
 export function isRegistrationStatus(value: unknown): value is RegistrationStatus {
   return value === 'OPEN' || value === 'FULL' || value === 'WAITLIST' || value === 'CLOSED' || value === 'COMING_SOON' || value === 'UNKNOWN';

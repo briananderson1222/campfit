@@ -2,6 +2,9 @@
   "name": "camp-fit",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -30,8 +33,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
-    "@kontourai/surface": "^0.9.0",
-    "@kontourai/survey": "^0.5.2",
+    "@kontourai/surface": "^1.3.1",
+    "@kontourai/survey": "^1.3.0",
     "@prisma/client": "^7.8.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.108.0",

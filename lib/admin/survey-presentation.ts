@@ -1,4 +1,4 @@
-import type { ReviewPresentationAdapter } from '@/lib/kontourai/survey-review-workbench';
+import type { ReviewPresentationAdapter } from '@kontourai/survey/review-workbench';
 import { formatCampDate } from '@/lib/date-format';
 
 export function createCampSurveyPresentationAdapter(fieldLabels: Record<string, string> = {}): ReviewPresentationAdapter {
