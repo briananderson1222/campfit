@@ -187,7 +187,7 @@ async function upsertCamp(client: Client, camp: CampInput): Promise<string | nul
 // ─── Main ─────────────────────────────────────────────────────
 
 async function main() {
-  console.log("🏕️  CampScout Seed Script\n");
+  console.log("🏕️  CampFit Seed Script\n");
 
   const client = getClient();
 

@@ -16,10 +16,10 @@
  * Idempotent: won't re-seed if proposals for these camps already exist (tagged ds1).
  */
 
-import { loadLocalEnv } from './load-env.ts';
+import { loadLocalEnv } from './load-env';
 loadLocalEnv();
 
-import { getPool } from '../lib/db.ts';
+import { getPool } from '../lib/db';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Proposal definitions

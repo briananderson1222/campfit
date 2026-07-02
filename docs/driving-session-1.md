@@ -8,7 +8,7 @@
 
 ### Prerequisites
 
-`.env.local` must exist with `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ADMIN_EMAILS` containing your email. These are already set in the repo.
+`.env.local` must exist with `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ADMIN_EMAILS` containing your email. Copy `.env.example` and fill in your values — env files are gitignored and never committed.
 
 ### Steps from a clean checkout
 
@@ -23,7 +23,7 @@ npm run seed:driving-session
 npm run dev
 
 # 4. Open http://localhost:3000/auth/login
-#    Sign in with your Supabase credentials (brian.anderson1222@gmail.com)
+#    Sign in with your Supabase credentials (an email listed in ADMIN_EMAILS)
 
 # 5. Navigate to the review queue
 open http://localhost:3000/admin/review
@@ -37,7 +37,7 @@ npm install && npm run seed:driving-session && npm run dev
 # then: http://localhost:3000/admin/review
 ```
 
-**Auth note:** The admin review area requires Supabase login. No local bypass exists — the Supabase project is live and your email (`brian.anderson1222@gmail.com`) is listed in `ADMIN_EMAILS`. Login takes under 10 seconds.
+**Auth note:** The admin review area requires Supabase login. No local bypass exists — the Supabase project is live and your email must be listed in `ADMIN_EMAILS`. Login takes under 10 seconds.
 
 ---
 
@@ -83,7 +83,7 @@ You get the sessionId from the page URL or from the `SurveyReviewSession` table.
         "kind": "authorized-action",
         "promptRef": "survey://campfit/approve-field@v1",
         "action": "typed",           // ← "typed" if you wrote a note; "affirmed-control" if you just clicked
-        "authorityRef": "campfit-reviewer:brian.anderson1222@gmail.com"
+        "authorityRef": "campfit-reviewer:<admin-email>"
       }
     }
   }
@@ -212,5 +212,5 @@ Fill this in as you go. These are pre-found friction points from the prep run �
 | Metrics command | `node scripts/session-metrics.mjs` |
 | Verify trust integration | `npm run verify:survey` |
 | Verify review items | `npm run verify:survey-review-items` |
-| Supabase project | https://rpnzolnnhbzhuspwpajq.supabase.co |
-| Admin email | brian.anderson1222@gmail.com (in ADMIN_EMAILS) |
+| Supabase project | see `NEXT_PUBLIC_SUPABASE_URL` in `.env.local` |
+| Admin email | your email (in ADMIN_EMAILS) |

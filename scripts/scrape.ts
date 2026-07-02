@@ -134,7 +134,7 @@ async function main() {
     ? args[args.indexOf("--scraper") + 1]
     : null;
 
-  console.log(`\n🕷️  CampScout Scraper${dryRun ? " (DRY RUN)" : ""}\n`);
+  console.log(`\n🕷️  CampFit Scraper${dryRun ? " (DRY RUN)" : ""}\n`);
 
   const scrapers = onlyScraper
     ? SCRAPERS.filter((s) => s.scraperName.toLowerCase().includes(onlyScraper.toLowerCase()))
