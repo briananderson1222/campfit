@@ -35,6 +35,9 @@ jobs:
       - name: TypeScript compile check
         run: npx tsc --noEmit
 
+      - name: Traverse replay proof (schema-directed extraction pilot)
+        run: npm run test:traverse-replay
+
   build:
     name: Next.js production build
     runs-on: ubuntu-latest
