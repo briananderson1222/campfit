@@ -1,15 +1,6 @@
 import type { ReviewDecision, ReviewSessionEvent } from '@kontourai/survey';
-import {
-  mapReviewWorkbenchResultsToApplyActions,
-  ReviewApplyActionMappingError,
-  type ReviewWorkbenchResult,
-} from '@/lib/kontourai/survey-review-workbench';
-import {
-  createServerReviewSessionRecord,
-  deriveServerReviewSessionApplyResult,
-  ServerReviewSessionEventValidationError,
-  StaleServerReviewSessionError,
-} from '@/lib/kontourai/survey-review-server-session';
+import { applyReviewSession } from '@kontourai/survey/review-workbench/server-review-session';
+import type { ReviewWorkbenchResult } from '@kontourai/survey/review-workbench';
 import type { CampReviewQueueSession } from './survey-review-items';
 import type { CampChangeProposal } from './types';
 
@@ -48,48 +39,55 @@ export function deriveCampApplyFromSurveySession(opts: {
   const mode = opts.mode ?? 'full';
   validateSessionItems(opts.proposal, opts.session);
 
-  const record = opts.serverSession
-    ? {
-        sessionName: opts.serverSession.sessionName,
-        snapshot: opts.session,
-        snapshotHash: opts.serverSession.snapshotHash,
-        updatedAt: opts.serverSession.updatedAt,
-      }
-    : createServerReviewSessionRecord({
-        sessionName: opts.events[0]?.spec.sessionName ?? 'review-workbench-session',
-        snapshot: opts.session,
-        updatedAt: opts.session.reviewedAt,
-      });
+  const alreadyApplied = new Set(opts.proposal.appliedFields ?? []);
 
-  const applyResult = (() => {
-    try {
-      return deriveServerReviewSessionApplyResult({
-        record,
-        events: opts.events,
-        requiredResolvedItems: mode === 'full' ? 'all' : 'any',
-      });
-    } catch (error) {
-      if (
-        error instanceof ServerReviewSessionEventValidationError ||
-        error instanceof StaleServerReviewSessionError
-      ) {
-        throw new SurveyReviewApplyError(error.message);
-      }
-      throw error;
-    }
-  })();
+  // Adopts Survey's applyReviewSession, which collapses the prior manual
+  // resolve-record -> derive-apply-result -> normalize freshness/event errors ->
+  // map-actions choreography into one call. It returns a discriminated { ok }
+  // result instead of throwing for expected failures; we convert a falsy `ok`
+  // into the existing SurveyReviewApplyError throw so both callers (which do not
+  // wrap this in try/catch) keep the throw-on-failure contract. When a pre-built
+  // serverSession is supplied we pass its record; otherwise applyReviewSession
+  // builds one from the reviewed snapshot (matching createServerReviewSessionRecord).
+  const applyResult = applyReviewSession<CampSurveyApplyAction>({
+    ...(opts.serverSession
+      ? {
+          record: {
+            sessionName: opts.serverSession.sessionName,
+            snapshot: opts.session,
+            snapshotHash: opts.serverSession.snapshotHash,
+            updatedAt: opts.serverSession.updatedAt,
+          },
+        }
+      : {
+          snapshot: opts.session,
+          sessionName: opts.events[0]?.spec.sessionName ?? 'review-workbench-session',
+          recordUpdatedAt: opts.session.reviewedAt,
+        }),
+    events: opts.events,
+    requiredResolvedItems: mode === 'full' ? 'all' : 'any',
+    mapActions: {
+      requireUniqueTargets: true,
+      skip: ({ target }) => alreadyApplied.has(target),
+      map: ({ result, target }) => {
+        if (result.decision === 'accept-proposed' && result.selectedCandidateRole === 'proposed') {
+          return { kind: 'approve-field', field: target };
+        }
+        if (result.decision === 'keep-current' || result.decision === 'reject-proposed') {
+          return { kind: 'reject-field', field: target };
+        }
+        return undefined;
+      },
+    },
+  });
+
   if (!applyResult.ok) {
     throw new SurveyReviewApplyError(
       applyResult.issues.map((issue) => issue.message).join(' '),
     );
   }
 
-  const alreadyApplied = new Set(opts.proposal.appliedFields ?? []);
-  const actions = mapCampSurveyApplyActions({
-    results: applyResult.results,
-    session: opts.session,
-    alreadyApplied,
-  });
+  const actions = applyResult.actions.map((mapping) => mapping.action);
   const approvedFields = actions
     .filter((action) => action.kind === 'approve-field')
     .map((action) => action.field);
@@ -108,35 +106,6 @@ export function deriveCampApplyFromSurveySession(opts: {
     decisions: applyResult.decisions,
     results: applyResult.results,
   };
-}
-
-function mapCampSurveyApplyActions(opts: {
-  readonly results: readonly ReviewWorkbenchResult[];
-  readonly session: CampReviewQueueSession;
-  readonly alreadyApplied: ReadonlySet<string>;
-}): CampSurveyApplyAction[] {
-  try {
-    return mapReviewWorkbenchResultsToApplyActions<CampSurveyApplyAction>({
-      results: opts.results,
-      items: opts.session.items,
-      requireUniqueTargets: true,
-      skip: ({ target }) => opts.alreadyApplied.has(target),
-      map: ({ result, target }) => {
-        if (result.decision === 'accept-proposed' && result.selectedCandidateRole === 'proposed') {
-          return { kind: 'approve-field', field: target };
-        }
-        if (result.decision === 'keep-current' || result.decision === 'reject-proposed') {
-          return { kind: 'reject-field', field: target };
-        }
-        return undefined;
-      },
-    }).map((mapping) => mapping.action);
-  } catch (error) {
-    if (error instanceof ReviewApplyActionMappingError) {
-      throw new SurveyReviewApplyError(error.message);
-    }
-    throw error;
-  }
 }
 
 function validateSessionItems(proposal: CampChangeProposal, session: CampReviewQueueSession): void {

@@ -5,10 +5,7 @@ import {
 } from '@kontourai/survey';
 
 import {
-  CAMPFIT_CLAIM_TYPES,
-  CAMPFIT_DECISION_EFFECTS,
-  CAMPFIT_TRUST_SUBJECT_TYPE,
-  CAMPFIT_TRUST_SURFACE,
+  campfitVocabulary,
 } from '../trust-vocabulary';
 import type { CampChangeProposal, FieldDiff } from './types';
 
@@ -54,6 +51,18 @@ export function buildCampSurveyReviewItems(
     .map(([field, diff]) => buildCampSurveyReviewItem(proposal, field, diff));
 }
 
+// SKIP decision (survey 1.x adoption): NOT built on Survey's
+// currentProposedReviewItem. That builder derives each candidate's top-level
+// `id` as `${metadata.name}.${suffix}`, coupling the candidate-id prefix to the
+// ReviewItem name. CampFit deliberately uses two distinct namespaces: a
+// human-readable item name (camp-proposal-<id>-<field>) and a structured
+// candidate-set id (camp.<campId>.field.<field>.proposal.<proposalId>.candidates)
+// that candidate ids are built from. No candidateIdSuffix + projection.candidateSetId
+// combination reproduces campfit's exact candidate ids without changing either
+// metadata.name (breaking name-keyed session maps + sessionStorage event replay)
+// or the candidate ids (breaking persisted candidate/stableId lookups). Adopting
+// would silently rename persisted candidate ids. Empirically verified byte-for-byte;
+// see docs/survey-1.x-migration.md and the friction journal.
 function buildCampSurveyReviewItem(
   proposal: CampChangeProposal,
   field: string,
@@ -139,10 +148,10 @@ function currentCandidate(
     },
     claimTarget: {
       claimId: campCandidateClaimId(proposal.campId, field, proposal.id, 'current'),
-      subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+      subjectType: campfitVocabulary.subjectType,
       subjectId: proposal.campId,
-      surface: CAMPFIT_TRUST_SURFACE,
-      claimType: CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      surface: campfitVocabulary.surface,
+      claimType: campfitVocabulary.claimTypes.scalarFieldCandidate,
       fieldOrBehavior: field,
       impactLevel: 'medium',
       evidenceType: 'human_attestation',
@@ -159,7 +168,7 @@ function currentCandidate(
     producer: {
       status: 'current-managed-value',
       rawValue: diff.old,
-      decisionEffect: CAMPFIT_DECISION_EFFECTS.keptCurrentValue,
+      decisionEffect: campfitVocabulary.decisionEffects.keptCurrentValue,
     },
   };
 }
@@ -200,10 +209,10 @@ function proposedCandidate(
     },
     claimTarget: {
       claimId: campCandidateClaimId(proposal.campId, field, proposal.id, 'proposed'),
-      subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+      subjectType: campfitVocabulary.subjectType,
       subjectId: proposal.campId,
-      surface: CAMPFIT_TRUST_SURFACE,
-      claimType: CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      surface: campfitVocabulary.surface,
+      claimType: campfitVocabulary.claimTypes.scalarFieldCandidate,
       fieldOrBehavior: field,
       impactLevel: 'medium',
       evidenceType: 'crawl_observation',
@@ -227,7 +236,7 @@ function proposedCandidate(
         declaredBy: proposal.extractionModel || 'campfit-crawler',
         scope: `Camp ${proposal.campId} field ${field}`,
       },
-      decisionEffect: CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue,
+      decisionEffect: campfitVocabulary.decisionEffects.acceptedCandidateValue,
     },
   };
 }

@@ -5,7 +5,7 @@ import {
   buildReviewItemPresentation,
   buildReviewResultPresentation,
   buildReviewWorkbenchResultsFromSession,
-} from '../lib/kontourai/survey-review-workbench';
+} from '@kontourai/survey/review-workbench';
 import { createCampSurveyPresentationAdapter } from '../lib/admin/survey-presentation';
 
 import { SurveyReviewWorkbench } from '../components/admin/survey-review-workbench';

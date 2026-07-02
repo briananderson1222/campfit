@@ -10,7 +10,7 @@ import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
 import type { ReviewSessionEvent } from '@kontourai/survey';
 import {
   deriveReviewSessionApplyResultForSnapshot,
-} from '@/lib/kontourai/survey-review-workbench';
+} from '@kontourai/survey/review-workbench';
 import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbench';
 import { SurveyReviewTrail } from '@/components/admin/survey-review-trail';
 import { adminTheme } from '@/components/admin/theme';

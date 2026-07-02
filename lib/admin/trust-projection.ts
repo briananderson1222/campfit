@@ -1,22 +1,20 @@
 import { validateTrustBundle, type TrustBundle, type TrustStatus } from '@kontourai/surface';
 import {
+  buildAuthorizedActionAuthorizing,
+  buildPromptRef,
   buildSurveyTrustBundle,
   fieldObservation,
   manualEntrySource,
   reviewedCurrentProposedResolution,
   SurveyInputBuilder,
   webPageSource,
-  type ReviewAuthorizingAuthorizedAction,
   type SurveyObservationInput,
   type SurveyInput,
 } from '@kontourai/survey';
 
 import type { FieldDiff, ProposedChanges } from './types';
 import {
-  CAMPFIT_CLAIM_TYPES,
-  CAMPFIT_DECISION_EFFECTS,
-  CAMPFIT_TRUST_SUBJECT_TYPE,
-  CAMPFIT_TRUST_SURFACE,
+  campfitVocabulary,
   type CampfitScalarClaimType,
 } from '../trust-vocabulary';
 
@@ -145,8 +143,8 @@ function campReviewResolution(args: {
 }) {
   const approved = args.status === 'verified';
   const decisionEffect = approved
-    ? CAMPFIT_DECISION_EFFECTS.acceptedCandidateValue
-    : CAMPFIT_DECISION_EFFECTS.keptCurrentValue;
+    ? campfitVocabulary.decisionEffects.acceptedCandidateValue
+    : campfitVocabulary.decisionEffects.keptCurrentValue;
 
   const comfortZoneNote = explicitComfortZoneNote(args.feedbackTags, args.reviewerNotes);
 
@@ -165,13 +163,12 @@ function campReviewResolution(args: {
       decisionEffect,
     },
     reviewOutcome: (() => {
-      const authorizing: ReviewAuthorizingAuthorizedAction = {
-        kind: 'authorized-action',
-        promptRef: 'survey://campfit/approve-field@v1',
+      const authorizing = buildAuthorizedActionAuthorizing({
+        promptRef: buildPromptRef({ scheme: 'survey', module: 'campfit', component: 'approve-field' }),
         renderedPrompt: `${approved ? 'Approve' : 'Reject'} the proposed value for field \`${args.field}\` on camp ${args.campId}?`,
         action: args.reviewerNotes?.trim() ? 'typed' : 'affirmed-control',
         authorityRef: `campfit-reviewer:${args.reviewer}`,
-      };
+      });
       return {
         id: `${campCandidateSetId(args.campId, args.field, args.proposalId)}.review`,
         status: 'verified',
@@ -266,7 +263,7 @@ function currentCampReviewObservation(args: {
       campId: args.campId,
       field: args.field,
       status: args.selected ? 'verified' : 'superseded',
-      claimType: args.selected ? CAMPFIT_CLAIM_TYPES.scalarField : CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      claimType: args.selected ? campfitVocabulary.claimTypes.scalarField : campfitVocabulary.claimTypes.scalarFieldCandidate,
       collectedBy: 'campfit-current-record',
       value: args.diff.old,
       claimId: args.selected
@@ -338,7 +335,7 @@ function proposedCampReviewObservation(args: {
       campId: args.campId,
       field: args.field,
       status: args.status,
-      claimType: args.selected ? CAMPFIT_CLAIM_TYPES.scalarField : CAMPFIT_CLAIM_TYPES.scalarFieldCandidate,
+      claimType: args.selected ? campfitVocabulary.claimTypes.scalarField : campfitVocabulary.claimTypes.scalarFieldCandidate,
       collectedBy: args.extractionModel ?? 'campfit-crawler',
       value: args.diff.new,
       claimId: args.selected
@@ -373,10 +370,10 @@ function campClaim(args: {
 }) {
   return {
     id: args.claimId ?? campCanonicalClaimId(args.campId, args.field),
-    subjectType: CAMPFIT_TRUST_SUBJECT_TYPE,
+    subjectType: campfitVocabulary.subjectType,
     subjectId: args.campId,
-    surface: CAMPFIT_TRUST_SURFACE,
-    claimType: args.claimType ?? CAMPFIT_CLAIM_TYPES.scalarField,
+    surface: campfitVocabulary.surface,
+    claimType: args.claimType ?? campfitVocabulary.claimTypes.scalarField,
     fieldOrBehavior: args.field,
     value: args.value,
     status: args.status,

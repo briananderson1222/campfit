@@ -6,8 +6,8 @@ import {
   createServerReviewSessionRecord,
   hashReviewSessionSnapshot,
   StaleServerReviewSessionError,
-} from '@/lib/kontourai/survey-review-server-session';
-import { defaultReviewSessionName } from '@/lib/kontourai/survey-review-workbench';
+} from '@kontourai/survey/review-workbench/server-review-session';
+import { defaultReviewSessionName } from '@kontourai/survey/review-workbench';
 import { buildCampSurveyReviewQueueSession, type CampReviewQueueSession } from './survey-review-items';
 import type { CampChangeProposal } from './types';
 
