@@ -1,8 +1,9 @@
 /**
  * traverse-parity.ts — LIVE parity harness for the @kontourai/traverse pilot
  * (Slice 1b). NOT part of CI. Runs BOTH the legacy selector scraper AND
- * schema-directed traverse extraction (real Anthropic provider) over the SAME
- * freshly-fetched pages, then writes a parity report to a local artifacts dir.
+ * schema-directed traverse extraction (real Anthropic provider, or any
+ * Anthropic-compatible endpoint — see below) over the SAME freshly-fetched
+ * pages, then writes a parity report to a local artifacts dir.
  *
  *   npm run traverse:parity
  *
@@ -10,7 +11,20 @@
  * prints NOT_VERIFIED with exact run instructions and exits 0 — it never
  * fabricates a report.
  *
+ * Optional env passthrough into `createAnthropicExtractionProvider`
+ * (@kontourai/traverse ^0.2.0):
+ *   - TRAVERSE_MODEL      — model id, passed as `opts.model` (e.g. "glm-4.6"
+ *     for a Z.AI run — the default Anthropic alias is not guaranteed to
+ *     resolve on a third-party endpoint, so pin this explicitly there).
+ *   - ANTHROPIC_BASE_URL  — Anthropic-compatible endpoint base URL, passed as
+ *     `opts.baseUrl` (e.g. "https://api.z.ai/api/anthropic"). Passed
+ *     explicitly rather than left to the SDK's own env fallback so
+ *     `provider.name` picks up the "@<host>" suffix and the report below can
+ *     record which backend produced the traverse side.
+ *
  * The report captures, per source:
+ *   - which traverse provider (name, incl. "@<host>" for a custom baseUrl)
+ *     and which model (from the provider's raw response) produced the run
  *   - per-field agreement (legacy value vs traverse proposal)
  *   - traverse-only finds (fields traverse proposed that legacy missed)
  *   - selector-only finds (fields legacy produced that traverse missed)
@@ -103,13 +117,23 @@ async function main() {
     process.exit(0);
   }
 
-  const provider = createAnthropicExtractionProvider({ model: process.env.TRAVERSE_MODEL || undefined });
+  const provider = createAnthropicExtractionProvider({
+    model: process.env.TRAVERSE_MODEL || undefined,
+    baseUrl: process.env.ANTHROPIC_BASE_URL || undefined,
+  });
+  console.log(`Traverse provider: ${provider.name}`);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = path.join(ARTIFACT_ROOT, stamp);
   fs.mkdirSync(outDir, { recursive: true });
 
   const report: Record<string, unknown>[] = [];
-  const mdLines: string[] = [`# Traverse parity report`, ``, `Generated: ${new Date().toISOString()}`, ``];
+  const mdLines: string[] = [
+    `# Traverse parity report`,
+    ``,
+    `Generated: ${new Date().toISOString()}`,
+    `Traverse provider: ${provider.name}`,
+    ``,
+  ];
 
   for (const src of SOURCES) {
     const url = src.scraper.entryUrl;
@@ -129,11 +153,13 @@ async function main() {
     let traverseProposals: ExtractionProposal[] = [];
     let traverseErr: string | null = null;
     let traverseWarnings: string[] = [];
+    let traverseModel: string | null = null;
     if (html) {
       const tr = await runTraverseExtraction({ content: html, sourceRef: url, provider });
       traverseProposals = tr.proposals;
       traverseErr = tr.error ?? null;
       traverseWarnings = tr.warnings ?? [];
+      traverseModel = tr.raw?.model ?? null;
     } else {
       traverseErr = "no HTML fetched (legacy fetch failed)";
     }
@@ -176,6 +202,13 @@ async function main() {
       url,
       legacyCampCount: legacyCamps.length,
       legacyError: legacyErr,
+      // Which backend + model produced the traverse side of this comparison —
+      // providerName carries the "@<host>" suffix when ANTHROPIC_BASE_URL/opts.baseUrl
+      // points at a non-default (e.g. Z.AI) endpoint; traverseModel is the model
+      // the provider's raw response actually reports (may differ from
+      // TRAVERSE_MODEL if the backend remaps model names, e.g. Z.AI -> GLM).
+      traverseProviderName: provider.name,
+      traverseModel,
       traverseProposalCount: traverseProposals.length,
       traverseError: traverseErr,
       traverseWarnings,
@@ -192,6 +225,7 @@ async function main() {
     mdLines.push(`## ${src.key}`);
     mdLines.push(`- URL: ${url}`);
     mdLines.push(`- Legacy scraper: ${legacyCamps.length} camps${legacyErr ? ` (error: ${legacyErr})` : ""}`);
+    mdLines.push(`- Traverse provider: ${provider.name}${traverseModel ? ` (model: ${traverseModel})` : ""}`);
     mdLines.push(`- Traverse: ${traverseProposals.length} proposals${traverseErr ? ` (error: ${traverseErr})` : ""}`);
     mdLines.push(`- Fields compared: ${Object.keys(agreement).length}, agreed: ${agreeCount}`);
     mdLines.push(`- Traverse-only finds: ${traverseOnly.join(", ") || "(none)"}`);
