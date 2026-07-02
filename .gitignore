@@ -16,3 +16,6 @@ test-results/
 playwright-report/
 .playwright/
 .flow-agents/
+
+# Traverse pilot local parity artifacts (Slice 1b)
+artifacts/
