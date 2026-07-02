@@ -15,7 +15,7 @@ next-env.d.ts
 test-results/
 playwright-report/
 .playwright/
-.flow-agents/
+.kontourai/
 
 # Traverse pilot local parity artifacts (Slice 1b)
 artifacts/
