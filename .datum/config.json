@@ -1,0 +1,19 @@
+{
+  "$schema": "https://github.com/kontourai/datum/datum.schema.json",
+  "providers": {
+    "zai": {
+      "kind": "anthropic-compatible",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "auth": { "env": "ZAI_API_KEY" },
+      "models": ["glm-5.2", "glm-4.6"]
+    },
+    "anthropic": {
+      "kind": "anthropic-compatible",
+      "auth": { "env": "ANTHROPIC_API_KEY" },
+      "models": ["claude-sonnet-5", "claude-haiku-4-5"]
+    }
+  },
+  "roles": {
+    "extraction-default": "glm-5.2@zai"
+  }
+}
