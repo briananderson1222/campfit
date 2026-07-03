@@ -43,10 +43,19 @@ import { Avid4Scraper } from "@/lib/ingestion/scrapers/avid4";
 import { DenverArtMuseumScraper } from "@/lib/ingestion/scrapers/denver-arts";
 import { BaseScraper } from "@/lib/ingestion/scraper-base";
 import { CampInput } from "@/lib/ingestion/adapter";
-import { runTraverseExtraction } from "@/lib/ingestion/traverse-extractor";
-import { SCALAR_SCHEMA_PATHS } from "@/lib/ingestion/traverse-schema";
+import { IdTechScraper } from "@/lib/ingestion/scrapers/idtech";
+import {
+  CAMP_TARGET_SCHEMA,
+  CAMP_FIELD_HINTS,
+  SCALAR_SCHEMA_PATHS,
+} from "@/lib/ingestion/traverse-schema";
+import {
+  createCampfitSnapshotStore,
+  CAMPFIT_FETCH_USER_AGENT,
+} from "@/lib/ingestion/traverse-snapshot-store";
 import { resolveExtractionProvider } from "@/lib/ingestion/resolve-extraction-provider";
 import type { ExtractionProposal } from "@kontourai/traverse";
+import { fetchAndExtract } from "@kontourai/traverse/fetch";
 import { DatumError } from "@kontourai/datum";
 
 loadLocalEnv();
@@ -59,22 +68,13 @@ interface SourceSpec {
 }
 
 const SOURCES: SourceSpec[] = [
+  // Selector-dead / dying sources — traverse rescue candidates.
   { key: "avid4", scraper: new Avid4Scraper() },
   { key: "denver-art-museum", scraper: new DenverArtMuseumScraper() },
+  // Healthy source (Slice 2b): its JSON-LD legacy scraper still works live, so
+  // field agreement vs traverse (promotion criterion 4) is measurable here.
+  { key: "idtech", scraper: new IdTechScraper() },
 ];
-
-/** Fetch raw HTML with a browsery UA (mirrors the scrapers' own fetch). */
-async function fetchHtml(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; CampFitBot/1.0; +https://campfit.app/bot)",
-      Accept: "text/html,application/xhtml+xml,*/*",
-    },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return res.text();
-}
 
 /** Flatten the first legacy camp into a comparable field map. */
 function legacyFields(camp: CampInput | undefined): Record<string, unknown> {
@@ -138,6 +138,9 @@ async function main() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = path.join(ARTIFACT_ROOT, stamp);
   fs.mkdirSync(outDir, { recursive: true });
+  // Every traverse extraction below fetches via live-with-capture into this
+  // snapshot store, so each proposal is traceable to byte-identical bytes.
+  const store = createCampfitSnapshotStore();
 
   const report: Record<string, unknown>[] = [];
   const mdLines: string[] = [
@@ -151,11 +154,9 @@ async function main() {
   for (const src of SOURCES) {
     const url = src.scraper.entryUrl;
     console.log(`\n=== ${src.key} (${url}) ===`);
-    let html = "";
     let legacyCamps: CampInput[] = [];
     let legacyErr: string | null = null;
     try {
-      html = await fetchHtml(url);
       const result = await src.scraper.run();
       legacyCamps = result.camps;
       legacyErr = result.errors[0] ?? null;
@@ -163,19 +164,58 @@ async function main() {
       legacyErr = e instanceof Error ? e.message : String(e);
     }
 
+    // Traverse side: fetch WITH snapshot capture (live-with-capture) so every
+    // proposal is traceable to the exact bytes and a future run can replay.
     let traverseProposals: ExtractionProposal[] = [];
     let traverseErr: string | null = null;
     let traverseWarnings: string[] = [];
     let traverseModel: string | null = null;
-    if (html) {
-      const tr = await runTraverseExtraction({ content: html, sourceRef: url, provider });
-      traverseProposals = tr.proposals;
-      traverseErr = tr.error ?? null;
-      traverseWarnings = tr.warnings ?? [];
-      traverseModel = tr.raw?.model ?? null;
-    } else {
-      traverseErr = "no HTML fetched (legacy fetch failed)";
+    let snapshotInfo: Record<string, unknown> | null = null;
+    const far = await fetchAndExtract(
+      { id: src.key, url, contentType: "html", userAgent: CAMPFIT_FETCH_USER_AGENT },
+      {
+        targetSchema: CAMP_TARGET_SCHEMA,
+        fieldHints: CAMP_FIELD_HINTS,
+        provider,
+        store,
+        mode: "live-with-capture",
+      }
+    );
+    for (const w of far.fetch.warnings ?? []) console.log(`  [fetch warning] ${w}`);
+    if (far.fetch.error) {
+      traverseErr = `fetch ${far.fetch.error.kind}: ${far.fetch.error.message}`;
     }
+    if (far.extraction) {
+      traverseProposals = far.extraction.proposals;
+      traverseErr = traverseErr ?? far.extraction.error ?? null;
+      traverseWarnings = far.extraction.warnings ?? [];
+      traverseModel = far.extraction.raw?.model ?? null;
+    }
+    if (far.fetch.snapshot) {
+      const snap = far.fetch.snapshot;
+      snapshotInfo = {
+        sourceRef: far.sourceRef ?? null,
+        bodyHash: snap.bodyHash,
+        status: snap.status,
+        fetchedAt: snap.fetchedAt,
+        finalUrl: snap.url,
+        contentType: snap.contentType,
+        bodyChars: snap.body.length,
+      };
+      // Durable copy of the exact page bytes next to the report (artifacts/ is
+      // gitignored; the adjudication doc is the version-controlled record).
+      fs.mkdirSync(path.join(outDir, "snapshots"), { recursive: true });
+      fs.writeFileSync(path.join(outDir, "snapshots", `${src.key}.html`), snap.body);
+    }
+
+    // Full per-proposal detail (value + verified provenance) for adjudication.
+    const fullProposals = traverseProposals.map((pr) => ({
+      fieldPath: pr.fieldPath,
+      candidateValue: pr.candidateValue,
+      confidence: pr.confidence,
+      excerpt: pr.provenance.excerpt,
+      locator: pr.provenance.locator,
+    }));
 
     const legacy = legacyFields(legacyCamps[0]);
     const trav = traverseFields(traverseProposals);
@@ -236,6 +276,10 @@ async function main() {
       selectorOnly,
       confidenceDistribution: confDist,
       scalarSchemaPaths: SCALAR_SCHEMA_PATHS,
+      // Slice 2b additions for adjudication + snapshot traceability:
+      legacyFields: legacy,
+      proposals: fullProposals,
+      snapshot: snapshotInfo,
     };
     report.push(srcReport);
 
@@ -249,6 +293,7 @@ async function main() {
     mdLines.push(`- Selector-only finds: ${selectorOnly.join(", ") || "(none)"}`);
     mdLines.push(`- Confidence: mean ${confDist.mean}, buckets ${JSON.stringify(confDist.buckets)}`);
     if (traverseWarnings.length) mdLines.push(`- Traverse warnings: ${traverseWarnings.length}`);
+    if (snapshotInfo) mdLines.push(`- Snapshot: ${snapshotInfo.bodyHash} (status ${snapshotInfo.status}, ${snapshotInfo.bodyChars} bytes) — captured to snapshots/${src.key}.html`);
     mdLines.push("");
 
     console.log(`legacy=${legacyCamps.length} camps, traverse=${traverseProposals.length} proposals, agreed ${agreeCount}/${Object.keys(agreement).length}, traverse-only=[${traverseOnly.join(",")}]`);

@@ -33,6 +33,9 @@ wires traverse outputs into the **existing** review sink.
 | `lib/ingestion/traverse-schema.ts` | `CAMP_TARGET_SCHEMA` — the camp/program listing shape (name, description, category, registration URL, location, session dates, ages, price) derived from the real `CampInput` scraper output type. Traverse defines no field names itself; every path/enum/description here is caller-owned. |
 | `lib/ingestion/traverse-extractor.ts` | Pilot wiring: `runTraverseExtraction()` runs `extract()` against the schema; `traverseProposalsToProposedChanges()` + `buildTraverseProposalRecord()` map proposals into CampFit's existing `ProposedChanges` / `createProposal` review contract — the same sink the crawl pipeline feeds the Survey review workflow (PR #31). It does **not** write to the DB; human-review policy owns the write. |
 | `lib/ingestion/resolve-extraction-provider.ts` | `resolveExtractionProvider()` — resolves the LIVE traverse `ExtractionProvider` via `@kontourai/datum`'s `resolve(ref)` (default ref: `extraction-default`, or `TRAVERSE_ROLE`), reading `.datum/config.json`'s `zai` / `anthropic` providers. Only imported by `scripts/traverse-parity.ts` — never by the replay test, so CI needs no datum config or key. |
+| `lib/ingestion/traverse-snapshot-store.ts` | Shared filesystem snapshot store (`@kontourai/traverse/fetch`) + honest fetch UA. Every LIVE traverse fetch captures byte-identical bytes under `.kontourai/campfit/snapshots/` (gitignored) so proposals are replay-traceable. |
+| `lib/ingestion/traverse-ingestion.ts` | The **flagged** ingestion path (`TRAVERSE_INGESTION`): `runTraverseIngestion()` routes the rotted sources through `fetchAndExtract` (`live-with-capture`) → `buildTraverseProposalRecord` → an injected review **sink**, running the legacy scraper in shadow for count telemetry. DB-free + testable (injected sink/store/fetch). |
+| `lib/ingestion/scrapers/idtech.ts` | `IdTechScraper` — the first **healthy** live source, parsing idtech.com/courses schema.org JSON-LD (robust, not CSS-selector-fragile). Makes field agreement (criterion 4) measurable. |
 | `scripts/test-traverse-replay.ts` (`npm run test:traverse-replay`) | CI-safe REPLAY proof over stored HTML snapshots with a deterministic STUB provider (no API key). |
 | `scripts/traverse-parity.ts` (`npm run traverse:parity`) | LIVE parity harness (NOT in CI) — real Anthropic-compatible provider (resolved via datum) vs the legacy scraper over the same fetched pages. |
 | `tests/fixtures/traverse/*.html` | Stored snapshots: one healthy source, plus the rebuilt Denver Art Museum page. |
@@ -79,17 +82,25 @@ asserts, over the two stored snapshots:
    next source in a sweep still runs — matching `scrape-runner.ts`'s contract
    from PR #32.
 
-## Parity harness (LIVE) — status: NOT_VERIFIED
+## Parity harness (LIVE) — status: VERIFIED (Slice 2b, glm-5.2@zai)
 
 `npm run traverse:parity` runs the legacy scraper and the real traverse
 provider over the same freshly-fetched pages and writes a per-field
 agreement / traverse-only / selector-only / confidence-distribution report to
-`artifacts/traverse-parity/<timestamp>/` (gitignored).
+`artifacts/traverse-parity/<timestamp>/` (gitignored). As of Slice 2b it also
+fetches the traverse side via `@kontourai/traverse/fetch` `fetchAndExtract`
+(`live-with-capture`), so each run captures a byte-identical **snapshot** per
+source (under `.kontourai/campfit/snapshots/`) and persists **full per-proposal
+detail** (value + verified excerpt + locator) for adjudication.
 
-It was **NOT run** in this pilot because no key was available for the
-`extraction-default` role in the local environment (nor in `.env.local`). The
-harness detects the resolution failure and prints NOT_VERIFIED instructions
-rather than fabricating a report.
+It was run live on **3 sources** (`avid4`, `denver-art-museum`, `idtech`) via
+the datum `extraction-default` role (`glm-5.2@zai`). The adjudication of that
+run — every proposal judged for factual correctness, the Denver disagreements
+ruled, and the observed glm-5.2 quality characteristics — is in
+[`docs/traverse-adjudication-2026-07.md`](./traverse-adjudication-2026-07.md).
+Headline: 14/18 surviving values correct, 4 ambiguous (plausible-but-mis-composed
+ranges/names), **0 fabricated** (the verbatim-excerpt gate dropped everything
+unanchored).
 
 ### Provider resolution via datum
 
@@ -152,25 +163,60 @@ recorded here and in the PR body rather than in a tracker.)
 
 ## Promotion criteria — making traverse the primary extractor
 
-Promote traverse from pilot to primary only when ALL hold:
+Status legend: ✅ met · 🟡 partial/scoped · ⬜ open.
 
-1. **Live parity captured on ≥3 sources** (incl. Denver Art Museum) via
-   `traverse:parity`, reviewed by a human — the NOT_VERIFIED gap above closed.
-2. **Denver rescue confirmed live:** traverse produces correct, human-approved
-   proposals for the source the selectors can no longer read.
-3. **No provenance regressions:** every promoted proposal carries a verified
-   excerpt + locator (the replay invariants hold on live output too).
-4. **Field agreement bar:** on healthy sources, traverse agrees with the
-   selector scraper on the core fields (name, dates, price, ages, registration
-   URL) at an acceptable rate, and traverse-only finds are net-positive on
-   review (approve rate ≥ the selector baseline).
-5. **Cost/latency acceptable** for the weekly sweep cadence at the chosen model.
-6. **Reviewer sink wired for real:** a crawl step calls `createProposal` with
-   `buildTraverseProposalRecord(...)` output behind a flag, and the Survey
-   review workflow renders traverse provenance unchanged.
+| # | Criterion | Status | Evidence / gap |
+| --- | --- | --- | --- |
+| 1 | **Live parity on ≥3 sources** (incl. Denver Art Museum), human-reviewed | ✅ | avid4 + denver-art-museum + idtech run live (glm-5.2@zai); adjudicated in `traverse-adjudication-2026-07.md`. NOT_VERIFIED gap closed. |
+| 2 | **Denver rescue confirmed live** — correct proposals where selectors read nothing | ✅ | Legacy 1 weak camp; traverse recovered price ($400/$450), ages, session window, OPEN status, all excerpt-verified. |
+| 3 | **No provenance regressions** — every proposal carries a verified excerpt + locator | ✅ | Live output holds the replay invariant; glm-5.2 paraphrases were dropped, not accepted (Denver ×2). |
+| 4 | **Field agreement bar on a healthy source** | 🟡 | First measurable via idtech (working JSON-LD scraper). Agree on page-level fields (category, min age); all disagreements are per-course-vs-page **granularity** artifacts of the single-entity schema, not accuracy failures. A per-item schema is the follow-up to fully clear this bar. |
+| 5 | **Cost/latency acceptable** at the weekly cadence | ⬜ | Not yet measured for a full sweep. |
+| 6 | **Reviewer sink wired for real** behind a flag | ✅ | `TRAVERSE_INGESTION` routes rotted sources through `buildTraverseProposalRecord → createProposal` (see below); routing proven network-free in `test:traverse-replay`. |
 
-Until then: keep both paths; traverse stays behind `traverse:parity` /
-`test:traverse-replay` and does not touch the weekly `scrape.yml` sweep.
+### Decision record (Slice 2b)
+
+**Traverse is primary *behind a flag* for the selector-dead sources
+(`avid4`, `denver-art-museum`), with the legacy scraper running in shadow;
+healthy sources stay legacy-primary until the field-agreement bar (criterion 4)
+is cleared with a per-item schema.**
+
+Rationale: both live selector sources are dead or dying, so the legacy baseline
+can no longer anchor a quality bar there — traverse is strictly better than 0
+camps, and its worst surviving errors are reviewer-catchable structural ones
+(never fabrications). On the one *healthy* source, traverse and the working
+scraper agree on genuinely page-level fields; the remaining disagreements are
+granularity (one page-level record vs. 23 per-course rows), not wrongness — not
+yet enough to promote traverse ahead of a healthy per-item scraper. So: rotted
+sources → traverse-primary-behind-flag + legacy shadow; healthy sources →
+legacy-primary, traverse compared only.
+
+### How the flag is scoped + how to flip it
+
+`TRAVERSE_INGESTION` (env flag; truthy = `1`/`true`/`on`/`yes`) — off by
+default, and with it off the scrape sweep is **byte-identical** to before.
+
+When on, in `scripts/scrape.ts`:
+
+- the **rotted** sources (`ROTTED_SOURCE_KEYS` = `avid4`, `denver-art-museum`)
+  route through `runTraverseIngestion` — fetch `live-with-capture` → traverse
+  extract → `buildTraverseProposalRecord` → `createProposal` (the Survey review
+  sink), with the legacy scraper still run in **shadow** and its camp count
+  logged next to the traverse proposal count;
+- **healthy** sources (e.g. `idtech`) are **not** in the rotted set and run the
+  normal legacy path unchanged — the flag does not touch them in this slice.
+
+```sh
+# Route the two selector-dead sources through traverse into the review queue:
+export ZAI_API_KEY=...            # key for the extraction-default datum role
+export TRAVERSE_INGESTION=1
+npm run scrape                    # needs the DB; writes CampChangeProposals for review
+```
+
+The extraction provider is resolved via datum (`extraction-default` role); if it
+cannot resolve, the rotted sources **fall through to legacy** rather than fail
+the sweep. Snapshots land under `.kontourai/campfit/snapshots/` (gitignored);
+CI never runs this path (it uses the replay/stub provider and never fetches).
 
 ## Notes / deviations
 

@@ -61,6 +61,7 @@ function minimalCamp(name: string): CampInput {
 /** A scraper that fetches fine and extracts one camp. */
 class HealthyScraper extends BaseScraper {
   readonly scraperName = "Healthy Source";
+  readonly sourceKey = "test-healthy";
   readonly entryUrl = "https://healthy.example.test/camps";
 
   protected async fetchPage(url: string): Promise<ScrapeContext> {
@@ -79,6 +80,7 @@ class HealthyScraper extends BaseScraper {
  */
 class DeadScraper extends BaseScraper {
   readonly scraperName = "Dead Source";
+  readonly sourceKey = "test-dead";
   readonly entryUrl = "https://dead.example.test/camps";
 
   protected async fetchPage(url: string): Promise<ScrapeContext> {
@@ -93,6 +95,7 @@ class DeadScraper extends BaseScraper {
 /** A scraper whose fetch succeeds but scrape() throws unexpectedly. */
 class ParseFailureScraper extends BaseScraper {
   readonly scraperName = "Parse Failure Source";
+  readonly sourceKey = "test-parse-failure";
   readonly entryUrl = "https://parsefail.example.test/camps";
 
   protected async fetchPage(url: string): Promise<ScrapeContext> {
@@ -176,6 +179,7 @@ async function testPerCampUpsertIsolation() {
 
   class ThreeCampScraper extends BaseScraper {
     readonly scraperName = "Three Camp Source";
+  readonly sourceKey = "test-three-camp";
     readonly entryUrl = "https://threecamp.example.test";
     protected async fetchPage(url: string): Promise<ScrapeContext> {
       return { $: cheerio.load("<html></html>"), html: "<html></html>", url };

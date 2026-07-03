@@ -36,6 +36,7 @@ import { slugify, parseDate, extractAgeGroups, extractPrices } from "../scraper-
 
 export class DenverArtMuseumScraper extends BaseScraper {
   readonly scraperName = "Denver Art Museum";
+  readonly sourceKey = "denver-art-museum";
   readonly entryUrl =
     "https://www.denverartmuseum.org/en/summer-camps"; // NEEDS REVIEW — see file header, URL changed 2026-06-15+, selectors unverified against new markup
 

@@ -39,6 +39,17 @@ import {
 import { DenverArtMuseumScraper } from "../lib/ingestion/scrapers/denver-arts";
 import { ScrapeContext } from "../lib/ingestion/scraper-base";
 import { createStubProvider, StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
+import {
+  runTraverseIngestionForSource,
+  isTraverseIngestionEnabled,
+  isRottedSource,
+  type TraverseProposalSink,
+} from "../lib/ingestion/traverse-ingestion";
+import {
+  createInMemorySnapshotStore,
+  replaySource,
+  type FetchLike,
+} from "@kontourai/traverse/fetch";
 
 const FIXTURE_DIR = path.join(
   path.dirname(url.fileURLToPath(import.meta.url)),
@@ -237,12 +248,111 @@ async function testExtractionFailureIsolation() {
   console.log("✓ extraction failure isolated: throwing provider → result.error (no throw); next source still runs");
 }
 
+// ─── 6. Flagged traverse ingestion routing (TRAVERSE_INGESTION) ────────────
+
+/**
+ * A network-free FetchLike for fetchSource: answers /robots.txt allow-all and
+ * every other URL with the given fixture HTML. Lets the flagged ingestion path
+ * (fetchSource -> live-with-capture -> extract -> buildRecord -> sink) run end-
+ * to-end in CI with no network.
+ */
+function makeFixtureFetch(html: string): FetchLike {
+  return async (fetchUrl: string) => {
+    const isRobots = fetchUrl.endsWith("/robots.txt");
+    return {
+      status: 200,
+      headers: {
+        get: (n: string) =>
+          n.toLowerCase() === "content-type"
+            ? isRobots
+              ? "text/plain"
+              : "text/html; charset=utf-8"
+            : null,
+      },
+      text: async () => (isRobots ? "User-agent: *\nDisallow:" : html),
+    };
+  };
+}
+
+async function testFlaggedIngestionRouting() {
+  // Flag gate semantics first — OFF by default (byte-identical default sweep).
+  assert.equal(isTraverseIngestionEnabled({}), false, "flag off by default");
+  assert.equal(isTraverseIngestionEnabled({ TRAVERSE_INGESTION: "1" }), true, "'1' enables");
+  assert.equal(isTraverseIngestionEnabled({ TRAVERSE_INGESTION: "true" }), true, "'true' enables");
+  assert.equal(isTraverseIngestionEnabled({ TRAVERSE_INGESTION: "0" }), false, "'0' stays off");
+  assert.equal(isRottedSource("denver-art-museum"), true, "DAM is a rotted, flag-routed source");
+  assert.equal(isRottedSource("idtech"), false, "healthy source is NOT routed by the flag");
+
+  const html = loadFixture("denver-art-museum.html");
+  const legacy = new FixtureDenverScraper(html); // sourceKey "denver-art-museum", 0 camps
+
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "name", candidateValue: "Young Artists Summer Camp", needle: "Young Artists Summer Camp" },
+    { fieldPath: "ageGroups[].minAge", candidateValue: 7, needle: "Ages 7-11" },
+    { fieldPath: "pricing[].amount", candidateValue: 385, needle: "$385 per week" },
+    { fieldPath: "city", candidateValue: "Denver", needle: "Denver, Colorado" },
+  ];
+  const provider = createStubProvider(specs, { model: "stub-flagged" });
+  const store = createInMemorySnapshotStore();
+
+  const captured: { record: ReturnType<typeof buildTraverseProposalRecord>; meta: { sourceKey: string; sourceUrl: string; snapshotRef: string | null } }[] = [];
+  const sink: TraverseProposalSink = async (record, meta) => {
+    captured.push({ record, meta });
+    return "proposal-test-1";
+  };
+
+  const res = await runTraverseIngestionForSource(
+    { key: legacy.sourceKey, url: legacy.entryUrl, scraper: legacy },
+    {
+      provider,
+      store,
+      sink,
+      // Network-free: inject a fixture fetch + no-op politeness sleep.
+      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      log: () => {},
+    }
+  );
+
+  // Legacy runs in shadow (0 camps) — traverse rescues + routes to the sink.
+  assert.equal(res.source, "denver-art-museum");
+  assert.equal(res.legacyShadowCount, 0, "legacy shadow finds 0 camps (rotted selectors)");
+  assert.equal(res.legacyShadowError, null, "legacy shadow fetch/parse does not error on the fixture");
+  assert.equal(res.traverseProposalCount, specs.length, "all stub proposals survive + counted");
+  assert.ok(res.routedFieldCount > 0, "proposedChanges is non-empty");
+  assert.equal(res.routedProposalId, "proposal-test-1", "record routed to the review sink");
+  assert.equal(res.extractionError, null, "no extraction error");
+  assert.equal(res.fetchError, null, "no fetch error");
+
+  // The routed record is createProposal-shaped with real provenance.
+  assert.equal(captured.length, 1, "sink invoked exactly once");
+  const rec = captured[0].record;
+  assert.ok(rec.extractionModel.startsWith("traverse:"), "extractionModel tagged traverse");
+  assert.ok(rec.overallConfidence >= 0 && rec.overallConfidence <= 1, "overallConfidence in 0..1");
+  assert.equal((rec.rawExtraction as { via: string }).via, "traverse", "rawExtraction carries traverse audit payload");
+  assert.ok(Object.keys(rec.proposedChanges).length > 0, "record proposedChanges non-empty");
+  for (const key of Object.keys(rec.proposedChanges)) {
+    const diff = rec.proposedChanges[key];
+    assert.ok(typeof diff.excerpt === "string" && diff.excerpt!.length > 0, `routed FieldDiff ${key} carries an excerpt`);
+  }
+
+  // Snapshot captured (provenance continuity) → replays byte-identically.
+  assert.ok(res.snapshotRef && res.snapshotRef.startsWith("traverse-snapshot:"), "snapshot-anchored sourceRef threaded");
+  assert.ok(res.snapshotBodyHash && res.snapshotBodyHash.length === 64, "sha-256 body hash captured");
+  const replay = await replaySource(store, "denver-art-museum");
+  assert.ok(replay.snapshot?.fromCache, "captured snapshot replays from the store");
+  assert.equal(replay.snapshot?.body, html, "replayed bytes are byte-identical to what was extracted");
+  assert.equal(replay.snapshot?.bodyHash, res.snapshotBodyHash, "replay hash matches the routed proposal's snapshot");
+
+  console.log(`✓ flagged ingestion: legacy(shadow)=0, traverse routed ${res.routedFieldCount} fields to createProposal sink; snapshot captured + replays byte-identical; flag gates rotted-only`);
+}
+
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
   await testHealthySourceReplay();
   await testDenverRescue();
   await testExtractionFailureIsolation();
+  await testFlaggedIngestionRouting();
   console.log("\ntraverse replay verification passed");
 }
 
