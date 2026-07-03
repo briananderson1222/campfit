@@ -29,6 +29,7 @@ import {
 } from "@/lib/types";
 import { cn, formatCurrency, getAgeRangeSummary } from "@/lib/utils";
 import { useCommunity } from "@/lib/community-context";
+import { TrustBadge } from "@/components/trust-badge";
 import { routes } from "@/lib/routes";
 
 const MAX_COMPARE = 3;
@@ -172,6 +173,7 @@ export function CompareClient({ initialCamps }: CompareClientProps) {
                         >
                           {STATUS_CONFIG[camp.registrationStatus].label}
                         </span>
+                        <TrustBadge camp={camp} className="text-[10px]" />
                       </div>
                       <Link
                         href={routes.campDetail(communitySlug, camp.slug)}

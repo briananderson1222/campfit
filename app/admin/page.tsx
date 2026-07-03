@@ -1,9 +1,9 @@
 import { getRecentCrawlRuns } from '@/lib/admin/crawl-repository';
 import { getPendingCount } from '@/lib/admin/review-repository';
 import { getMostChangedFields } from '@/lib/admin/changelog-repository';
-import { getDashboardMetrics } from '@/lib/admin/metrics-repository';
+import { getDashboardMetrics, getVerifiedCoverageMetric } from '@/lib/admin/metrics-repository';
 import { CrawlModal } from './crawl-modal';
-import { ClipboardList, TrendingUp, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
+import { ClipboardList, TrendingUp, AlertTriangle, CheckCircle, Activity, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { requireAdminAccess } from '@/lib/admin/access';
@@ -15,7 +15,7 @@ export default async function AdminDashboard() {
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return null;
 
-  const [pendingCount, recentRunsRaw, changedFields, metrics] = await Promise.all([
+  const [pendingCount, recentRunsRaw, changedFields, metrics, coverage] = await Promise.all([
     getPendingCount(auth.access.isAdmin ? undefined : auth.access.communities).catch(() => 0),
     getRecentCrawlRuns(10).catch(() => []),
     auth.access.isAdmin ? getMostChangedFields(30, 5).catch(() => []) : Promise.resolve([]),
@@ -26,6 +26,8 @@ export default async function AdminDashboard() {
       : Promise.resolve({
           approvalRate: 0, avgConfidence: 0, siteFailureRates: [], fieldRejectionRates: []
         }),
+    getVerifiedCoverageMetric(auth.access.isAdmin ? undefined : auth.access.communities)
+      .catch(() => ({ total: 0, verified: 0, pct: 0 })),
   ]);
   const recentRuns = auth.access.isAdmin
     ? recentRunsRaw.slice(0, 5)
@@ -70,6 +72,36 @@ export default async function AdminDashboard() {
           value={auth.access.isAdmin ? metrics.siteFailureRates.filter(s => s.failureRate > 0.5).length : 'Scoped'}
           icon={<AlertTriangle className="w-5 h-5 text-terracotta-400" />}
         />
+      </div>
+
+      {/* Verified coverage — the user-acquisition gate metric (I21 / #48) */}
+      <div className="glass-panel p-6 mb-8" data-testid="verified-coverage">
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h2 className="font-display font-bold text-bark-700 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-pine-500" />
+              Verified Coverage
+            </h2>
+            <p className="text-xs text-bark-300 mt-1 max-w-md">
+              {auth.access.isAdmin ? 'Share of all camps' : 'Share of your scoped camps'} whose
+              every required field is attested — the user-acquisition gate metric.
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="font-display text-3xl font-extrabold text-bark-700" data-testid="coverage-pct">
+              {coverage.pct}%
+            </p>
+            <p className="text-xs text-bark-300">
+              {coverage.verified} / {coverage.total} verified
+            </p>
+          </div>
+        </div>
+        <div className="h-3 bg-cream-300 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full bg-pine-500 transition-all"
+            style={{ width: `${coverage.pct}%` }}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
