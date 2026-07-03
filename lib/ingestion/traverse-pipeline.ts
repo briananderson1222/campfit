@@ -28,17 +28,49 @@
  *  - Cost/latency capture (closes half of campfit#39): every source result
  *    records `tokensUsed` (from the provider's raw response — the Anthropic
  *    adapter reports `input_tokens + output_tokens`) and `latencyMs` (wall
- *    time for the fetch+extract call), so model/provider choice is a
- *    data-backed decision (see docs/cutover-report-2026-07.md).
+ *    time for the fetch+extract call(s) — see the shell-retry seam below),
+ *    so model/provider choice is a data-backed decision (see
+ *    docs/cutover-report-2026-07.md).
+ *
+ * Shell-detection auto-retry (closes campfit#41 follow-up /
+ * kontourai/traverse#11). @kontourai/traverse@0.6.0 added a machine-actionable
+ * warning to `ExtractionResult.warnings` when a page's prepared text looks
+ * like an un-rendered JS shell (`SHELL_WARNING_CODE`,
+ * `"js-shell-suspected: …"`), plus a downgraded variant when the page also
+ * carried usable embedded state (`SHELL_WARNING_CODE_EMBEDDED`,
+ * `"js-shell-suspected-embedded-state-available: …"`) — see
+ * `node_modules/@kontourai/traverse/README.md`'s "SPA / JS-rendered pages"
+ * section. `runTraversePipelineForSource` acts on both:
+ *  - Pure `js-shell-suspected` on a NON-render source: retry that source
+ *    exactly ONCE with the render `FetchLike` (lib/ingestion/render-fetch.ts),
+ *    re-running the SAME snapshot-capture -> extraction path a `render: true`
+ *    source uses. The retry's results REPLACE the first attempt's for
+ *    routing (it is a strictly better read of the page) UNLESS the render
+ *    itself fails, in which case the first attempt's (partial) results are
+ *    kept — partial beats none. Either way the escalation is recorded on the
+ *    result (`shellEscalation`) so the sweep summary can surface it.
+ *  - Downgraded `js-shell-suspected-embedded-state-available`: no render (the
+ *    sidecar already makes the page extractable) — the sidecar's PRESENCE and
+ *    counts are recorded on the result (`embeddedStateAvailable`) so the
+ *    owner can see which sources could adopt sidecar-based extraction later.
+ *    Mapping the sidecar's contents onto proposals is out of scope here.
+ *  - A `render: true` source never re-enters this seam (it is already
+ *    rendered) — never more than one render per source per run.
  */
 
 import { fetchAndExtract } from "@kontourai/traverse/fetch";
 import type {
+  FetchAndExtractResult,
   FetchMode,
   FetchSourceOptions,
   SnapshotStore,
 } from "@kontourai/traverse/fetch";
-import type { ExtractionProvider } from "@kontourai/traverse";
+import {
+  SHELL_WARNING_CODE,
+  SHELL_WARNING_CODE_EMBEDDED,
+  type EmbeddedState,
+  type ExtractionProvider,
+} from "@kontourai/traverse";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS } from "./traverse-schema";
 import {
   buildTraverseItemProposalRecords,
@@ -49,15 +81,6 @@ import { assembleItems } from "./traverse-item-grouping";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import type { IngestionSourceConfig } from "./sources";
 import { createRenderFetchLike, DEFAULT_RENDER_TIMEOUT_MS, type RenderResult } from "./render-fetch";
-
-// TODO(#41 follow-up, blocked on kontourai/traverse#11): today `render` is an
-// explicit per-source opt-in (IngestionSourceConfig.render). Once traverse's
-// JS-shell-detection warning (kontourai/traverse#11: "content looks like a
-// JS-rendered shell — render and retry") lands, this is the place to
-// auto-retry a NON-render source with rendering when that warning fires on
-// its extraction, and record the escalation on the result (alongside the
-// `render` telemetry below) rather than requiring every JS-heavy source to
-// be curated by hand up front.
 
 /**
  * The review-sink seam. Given one item's traverse proposal record + which
@@ -98,6 +121,44 @@ export interface TraversePipelineDeps {
   now?: () => number;
 }
 
+/**
+ * Presence/counts of the embedded-state sidecar (@kontourai/traverse@0.6.0's
+ * `ExtractionResult.embedded`) a source's page carried, when the DOWNGRADED
+ * `js-shell-suspected-embedded-state-available` warning fired for it. Purely
+ * telemetry: mapping the sidecar's contents onto proposals is a separate,
+ * out-of-scope mapping/product decision — this just plumbs its presence
+ * through so the owner can see which sources have it available.
+ */
+export interface TraverseEmbeddedStateInfo {
+  /** number of `<script type="application/ld+json">` blocks harvested. */
+  jsonLdCount: number;
+  /** whether a Next.js `__NEXT_DATA__` payload was harvested. */
+  hasNextData: boolean;
+  /** whether a generic `__INITIAL_STATE__`/`__PRELOADED_STATE__` hydration blob was harvested. */
+  hasInitialState: boolean;
+}
+
+/**
+ * Records a NON-render source's automatic shell-detection retry (see the
+ * file doc). Present only when the first attempt's extraction fired the pure
+ * `js-shell-suspected` warning.
+ */
+export interface TraverseShellEscalation {
+  /** the first attempt fired the pure (non-downgraded) js-shell-suspected warning. */
+  shellDetected: true;
+  /** a render retry was attempted (always true today — see the file doc). */
+  renderRetried: boolean;
+  /** true when the render retry itself failed (fetch/timeout) — first attempt's results were kept. */
+  renderRetryFailed: boolean;
+  /** true when the retry grouped MORE items than the first attempt. Absent when the retry failed. */
+  renderImprovedProposalCount?: boolean;
+  firstAttemptItemCount: number;
+  firstAttemptWarnings: string[];
+  /** Absent when the retry failed outright (no extraction to count/report from). */
+  retryAttemptItemCount?: number;
+  retryAttemptWarnings?: string[];
+}
+
 export interface TraversePipelineSourceResult {
   source: string;
   url: string;
@@ -119,15 +180,58 @@ export interface TraversePipelineSourceResult {
   tokensUsed: number | null;
   /** model id the provider's raw response reported. */
   model: string | null;
-  /** wall time (ms) for the fetch+extract call. */
+  /** wall time (ms) for the fetch+extract call(s) — sums both attempts when a shell retry fires. */
   latencyMs: number;
   /**
-   * Render telemetry (see lib/ingestion/render-fetch.ts) — present only
-   * when this source has `render: true` AND the render itself completed
-   * (a render that timed out surfaces on `fetchError` instead, with no
-   * telemetry, exactly like any other fetch failure).
+   * Render telemetry (see lib/ingestion/render-fetch.ts) — present when this
+   * source had a page RENDERED and the render itself completed, whether from
+   * `render: true` or from a shell-detection auto-retry (a render that timed
+   * out surfaces on `fetchError` — or, for a retry, on `shellEscalation` —
+   * instead, with no telemetry, exactly like any other fetch failure).
    */
   render?: { durationMs: number; usedNetworkidleFallback: boolean };
+  /** see {@link TraverseShellEscalation}. Present only for a NON-render source whose first attempt looked like a JS shell. */
+  shellEscalation?: TraverseShellEscalation;
+  /** see {@link TraverseEmbeddedStateInfo}. Present only when the downgraded (embedded-state-available) shell warning fired. */
+  embeddedStateAvailable?: TraverseEmbeddedStateInfo;
+}
+
+function summarizeEmbeddedState(embedded: EmbeddedState | undefined): TraverseEmbeddedStateInfo {
+  return {
+    jsonLdCount: embedded?.jsonLd?.length ?? 0,
+    hasNextData: embedded?.nextData !== undefined,
+    hasInitialState: embedded?.initialState !== undefined,
+  };
+}
+
+/** One fetch+extract call (a "attempt") — factored out so the shell-retry seam can run it twice. */
+async function runFetchAndExtractAttempt(
+  src: IngestionSourceConfig,
+  deps: TraversePipelineDeps,
+  fetchOptions: FetchSourceOptions | undefined,
+  timeoutOverrideMs: number | undefined,
+  now: () => number
+): Promise<{ far: FetchAndExtractResult; latencyMs: number }> {
+  const startedAt = now();
+  const far = await fetchAndExtract(
+    {
+      id: src.key,
+      url: src.url,
+      contentType: "html",
+      userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
+      ...(timeoutOverrideMs !== undefined ? { timeoutMs: timeoutOverrideMs, retries: 0 } : {}),
+    },
+    {
+      targetSchema: CAMP_TARGET_SCHEMA,
+      fieldHints: CAMP_FIELD_HINTS,
+      provider: deps.provider,
+      store: deps.store,
+      mode: deps.mode ?? "live-with-capture",
+      maxContentChars: deps.maxContentChars,
+      fetchOptions,
+    }
+  );
+  return { far, latencyMs: now() - startedAt };
 }
 
 /**
@@ -165,40 +269,110 @@ export async function runTraversePipelineForSource(
   // AbortController/retry loop doesn't fight (or triple) renderPage()'s own
   // hard, two-attempt timeout budget (see render-fetch.ts). Any other
   // injected fetchOptions (e.g. a test's `sleep`/`politenessState`) are
-  // preserved; only `fetch` is overridden.
+  // preserved; only `fetch` is overridden. The same helper backs the
+  // shell-detection auto-retry below, so a retry renders exactly the same
+  // way a curated `render: true` source does.
   const renderTimeoutMs = src.renderTimeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
-  const fetchOptions: FetchSourceOptions | undefined = src.render
-    ? {
-        ...deps.fetchOptions,
-        fetch: createRenderFetchLike({
-          timeoutMs: renderTimeoutMs,
-          onRendered: (info: RenderResult) => {
-            result.render = { durationMs: info.durationMs, usedNetworkidleFallback: info.usedNetworkidleFallback };
-          },
-        }),
-      }
+  const renderFetchOptions = (): FetchSourceOptions => ({
+    ...deps.fetchOptions,
+    fetch: createRenderFetchLike({
+      timeoutMs: renderTimeoutMs,
+      onRendered: (info: RenderResult) => {
+        result.render = { durationMs: info.durationMs, usedNetworkidleFallback: info.usedNetworkidleFallback };
+      },
+    }),
+  });
+  const renderTimeoutOverrideMs = renderTimeoutMs * 2 + 5_000;
+
+  const primaryFetchOptions: FetchSourceOptions | undefined = src.render
+    ? renderFetchOptions()
     : deps.fetchOptions;
 
-  const startedAt = now();
-  const far = await fetchAndExtract(
-    {
-      id: src.key,
-      url: src.url,
-      contentType: "html",
-      userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
-      ...(src.render ? { timeoutMs: renderTimeoutMs * 2 + 5_000, retries: 0 } : {}),
-    },
-    {
-      targetSchema: CAMP_TARGET_SCHEMA,
-      fieldHints: CAMP_FIELD_HINTS,
-      provider: deps.provider,
-      store: deps.store,
-      mode: deps.mode ?? "live-with-capture",
-      maxContentChars: deps.maxContentChars,
-      fetchOptions,
-    }
+  let totalLatencyMs = 0;
+  const attempt1 = await runFetchAndExtractAttempt(
+    src,
+    deps,
+    primaryFetchOptions,
+    src.render ? renderTimeoutOverrideMs : undefined,
+    now
   );
-  result.latencyMs = now() - startedAt;
+  totalLatencyMs += attempt1.latencyMs;
+  let far = attempt1.far;
+
+  // Shell-detection auto-retry (see the file doc). Only a NON-render source
+  // is eligible — a `render: true` source is already rendered, so it never
+  // re-enters this seam (never more than one render per source per run).
+  if (!src.render && far.extraction) {
+    const firstWarnings = far.extraction.warnings ?? [];
+    const pureShellSuspected = firstWarnings.some((w) => w.startsWith(`${SHELL_WARNING_CODE}:`));
+    const embeddedStateShellSuspected = firstWarnings.some((w) =>
+      w.startsWith(`${SHELL_WARNING_CODE_EMBEDDED}:`)
+    );
+
+    if (embeddedStateShellSuspected) {
+      result.embeddedStateAvailable = summarizeEmbeddedState(far.extraction.embedded);
+      log(
+        `[traverse-pipeline] ${src.key}: js-shell-suspected but embedded state is available ` +
+          `(${result.embeddedStateAvailable.jsonLdCount} json-ld block(s)` +
+          `${result.embeddedStateAvailable.hasNextData ? ", __NEXT_DATA__" : ""}` +
+          `${result.embeddedStateAvailable.hasInitialState ? ", hydration state" : ""}) — skipping render`
+      );
+    }
+
+    if (pureShellSuspected) {
+      const firstAttemptItemCount = assembleItems(far.extraction.proposals).length;
+      log(`[traverse-pipeline] ${src.key}: js-shell-suspected — auto-retrying with a render`);
+
+      const retryAttempt = await runFetchAndExtractAttempt(
+        src,
+        deps,
+        renderFetchOptions(),
+        renderTimeoutOverrideMs,
+        now
+      );
+      totalLatencyMs += retryAttempt.latencyMs;
+
+      const renderRetryFailed = retryAttempt.far.fetch.error !== undefined;
+      if (renderRetryFailed) {
+        // Render itself failed (timeout/network) — partial (first-attempt)
+        // results beat none: keep `far` as the first attempt and just note
+        // the failed retry. `result.render` stays unset, exactly like any
+        // other render that never completed.
+        result.shellEscalation = {
+          shellDetected: true,
+          renderRetried: true,
+          renderRetryFailed: true,
+          firstAttemptItemCount,
+          firstAttemptWarnings: firstWarnings,
+          retryAttemptWarnings: retryAttempt.far.fetch.warnings ?? [],
+        };
+        log(
+          `[traverse-pipeline] ${src.key}: render retry failed ` +
+            `(${retryAttempt.far.fetch.error?.kind}: ${retryAttempt.far.fetch.error?.message}) — keeping first attempt's results`
+        );
+      } else {
+        const retryAttemptItemCount = retryAttempt.far.extraction
+          ? assembleItems(retryAttempt.far.extraction.proposals).length
+          : 0;
+        result.shellEscalation = {
+          shellDetected: true,
+          renderRetried: true,
+          renderRetryFailed: false,
+          renderImprovedProposalCount: retryAttemptItemCount > firstAttemptItemCount,
+          firstAttemptItemCount,
+          firstAttemptWarnings: firstWarnings,
+          retryAttemptItemCount,
+          retryAttemptWarnings: retryAttempt.far.extraction?.warnings ?? [],
+        };
+        // The retry is a strictly better read of the page (it rendered what
+        // the first attempt only saw as a shell) — its results replace the
+        // first attempt's for routing.
+        far = retryAttempt.far;
+      }
+    }
+  }
+
+  result.latencyMs = totalLatencyMs;
 
   result.warnings.push(...(far.fetch.warnings ?? []));
   if (far.fetch.error) {
@@ -245,7 +419,8 @@ export async function runTraversePipelineForSource(
       `(${result.routedProposalIds.filter((id) => id !== null).length} proposal(s) created)` +
       `${result.tokensUsed !== null ? `, ${result.tokensUsed} tokens` : ""}, ${result.latencyMs}ms` +
       `${result.snapshotBodyHash ? ` [snapshot ${result.snapshotBodyHash.slice(0, 12)}]` : ""}` +
-      `${result.render ? ` [rendered in ${result.render.durationMs}ms${result.render.usedNetworkidleFallback ? ", networkidle→domcontentloaded fallback" : ""}]` : ""}`
+      `${result.render ? ` [rendered in ${result.render.durationMs}ms${result.render.usedNetworkidleFallback ? ", networkidle→domcontentloaded fallback" : ""}]` : ""}` +
+      `${result.shellEscalation ? ` [shell-suspected retry: ${result.shellEscalation.renderRetryFailed ? "render failed, kept first attempt" : `${result.shellEscalation.firstAttemptItemCount}->${result.shellEscalation.retryAttemptItemCount} item(s)`}]` : ""}`
   );
   return result;
 }

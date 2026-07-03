@@ -63,6 +63,31 @@ jobs:
       - name: Render-fetch proof (local fixture server, no network/DB)
         run: npm run test:render-fetch
 
+  shell_detect_retry_proof:
+    name: Shell-detection auto-retry proof (traverse#11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Shell-detection auto-retry proof (local fixture server, no network/DB)
+        run: npm run test:shell-detect-retry
+
   build:
     name: Next.js production build
     runs-on: ubuntu-latest
