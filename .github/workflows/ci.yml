@@ -29,6 +29,9 @@ jobs:
       - name: Check content boundary
         run: npm run check:content-boundary
 
+      - name: Check decision registry
+        run: npm run check:decisions
+
       - name: Validate Prisma schema
         run: npx prisma validate
 
