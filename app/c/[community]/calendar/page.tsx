@@ -14,7 +14,7 @@ export async function generateMetadata(
     params.community.charAt(0).toUpperCase() + params.community.slice(1);
 
   return {
-    title: `${displayName} Camp Calendar | CampFit`,
+    title: `${displayName} Camp Calendar`,
     description: `Browse kids' summer camp availability by week in ${displayName}. Find open spots that match your schedule.`,
   };
 }

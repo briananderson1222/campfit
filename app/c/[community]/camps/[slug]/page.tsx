@@ -36,6 +36,7 @@ import { ReportButton } from "@/components/report-button";
 import { AdminCampBar } from "@/components/admin-camp-bar";
 import { routes } from "@/lib/routes";
 import { resolvePgConfig } from "@/lib/db-config";
+import { truncateAtWord, joinMetaDescription } from "@/lib/seo/meta-description";
 
 export const dynamic = "force-dynamic";
 
@@ -67,19 +68,17 @@ export async function generateMetadata(
         })()
       : null;
 
-  const description = [
-    camp.description?.slice(0, 120),
+  const description = joinMetaDescription([
+    camp.description ? truncateAtWord(camp.description, 120) : null,
     ageRange && `For ${ageRange}.`,
     minPrice && `Starting at ${formatCurrency(minPrice)}.`,
     camp.neighborhood && `Located in ${camp.neighborhood}, ${camp.displayName}.`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  ]);
 
   const canonicalUrl = `${BASE_URL}/c/${params.community}/camps/${camp.slug}`;
 
   return {
-    title: `${camp.name} — ${camp.displayName} Kids Camp | CampFit`,
+    title: `${camp.name} — ${camp.displayName} Kids Camp`,
     description,
     openGraph: {
       title: `${camp.name} | CampFit`,
