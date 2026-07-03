@@ -64,7 +64,16 @@ import type { IngestionSourceConfig } from "../lib/ingestion/sources";
 //  anything else (incl. /robots.txt) — 404, handled as "no restrictions" by
 //                fetchSource's fail-open robots handling.
 
-const HYDRATED_MARKER = "REND" + "ERED_MARKER_XYZ"; // built at runtime — see assertion below
+const HYDRATED_MARKER = "REND" + "EREDMARKERXYZ"; // built at runtime — see assertion below
+// No "_"/"*"/"[" etc: traverse 0.5.0+ prepares HTML as Markdown by default
+// (Turndown), which backslash-escapes markdown-special characters in text
+// nodes (e.g. "A_B" -> "A\\_B") — a real LLM provider naturally echoes the
+// text it was shown (escapes and all) as its verbatim excerpt, so this is a
+// non-issue for a real provider, but this file's stub uses the ORIGINAL
+// marker string as both the excerpt needle and the field value, so an
+// escaped character here would make the needle search miss the prepared
+// text and the proposal would be (correctly) dropped as unverifiable —
+// alnum-only sidesteps that stub simplification entirely.
 
 function startFixtureServer(): Promise<{ baseUrl: string; server: http.Server }> {
   const server = http.createServer((req, res) => {

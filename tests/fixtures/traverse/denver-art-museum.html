@@ -11,6 +11,15 @@
     card anywhere below — the legacy DenverArtMuseumScraper selectors match
     zero elements and it returns 0 camps. The camp facts are still plainly in
     the visible text, which is what schema-directed traverse extraction reads.
+
+    Traverse 0.5.0+: each <li> below carries a DISTINCT class
+    (tile__fact-ages/-dates/-price/-location) rather than a shared one — with
+    identical/no classes, traverse's structural chunker (repeated same-tag/
+    same-class-signature sibling detection, ADR 0004) mistook this 4-item facts
+    list for the page's "repeated card" and chunked around it, dropping the
+    heading/category/CTA outside it. Distinct per-fact classes keep this fixture
+    on the non-structural (character-window, full-content) chunking path, which
+    is what this fixture is actually testing (no real card structure).
   -->
   <main>
     <h1>Summer Camps</h1>
@@ -20,10 +29,10 @@
         <div class="tile__body">
           <p>Hands-on studio time in painting, sculpture, and printmaking led by working teaching artists in the museum studios.</p>
           <ul class="tile__facts">
-            <li>Ages 7-11</li>
-            <li>July 14-18, 2026</li>
-            <li>$385 per week</li>
-            <li>Denver, Colorado</li>
+            <li class="tile__fact-ages">Ages 7-11</li>
+            <li class="tile__fact-dates">July 14-18, 2026</li>
+            <li class="tile__fact-price">$385 per week</li>
+            <li class="tile__fact-location">Denver, Colorado</li>
           </ul>
           <a class="tile__cta" href="https://www.denverartmuseum.org/en/summer-camps/young-artists">Enroll online</a>
         </div>

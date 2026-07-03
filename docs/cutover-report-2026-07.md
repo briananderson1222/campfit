@@ -167,3 +167,152 @@ human-visible facts (name, description, typical age range) the JSON-LD scraper
 read, so the marginal value of a second code path was low relative to that
 structural cost. Deleted; see this report's iD Tech row for the live result.
 
+## Addendum (2026-07-03): traverse 0.5.1 bump — idtech regression outcome
+
+Bumped `@kontourai/traverse` `^0.4.0` -> `^0.5.1` (0.5.0: "large-page
+extraction via markdown prep + structural chunking", closes upstream #9;
+0.5.1: "dedup on verified source span; keep prepareContent from throwing",
+closes upstream #12). This addendum records the LIVE re-run outcome for the
+⚠️ OWNER DECISION idtech row above and does not replace it — the original
+before/after numbers stay as the historical record of what prompted this
+work.
+
+### idtech: items extracted, before vs after
+
+| Run | idtech items | Note |
+| --- | --- | --- |
+| Legacy baseline (JSON-LD scraper, pre-cutover) | 23 | `tests/fixtures/cutover-baseline-2026-07.json` |
+| Cutover report above (traverse 0.4.0, live) | 10 | 43% of baseline — regression rule tripped |
+| Most recent production run (traverse 0.4.0, live) | 1 | single tool-use response truncated almost immediately |
+| **This bump, traverse 0.5.1 (live, glm-5.2@zai)** | **17** | **74% of baseline — regression rule no longer trips** |
+
+17/23 = 74%, clear of the >40%-drop regression tripwire (was 43%, then 1/23 =
+4% in the latest production run). `result.warnings` confirms the mechanism:
+`"chunked into 2 chunks by repeated-card structure (72 cards detected)"` —
+the page was split into 2 provider calls instead of 1, each with far fewer
+courses to enumerate, so each response got much further before hitting
+`stop_reason === "max_tokens"` (both chunks still hit it — see below, this is
+not yet a full fix of the underlying per-call output-length ceiling, just a
+mitigation that shrinks what has to fit under it per call).
+
+### A NEW cross-chunk bug this bump introduced, found and fixed here
+
+Chunking is not opt-in — `extract()`/`fetchAndExtract()` apply it
+automatically whenever a page's prepared content exceeds one chunk (defaults:
+`chunkSize` 12,000, `maxChunks` 40, `prep` "markdown" for HTML); campfit's
+call sites (`lib/ingestion/traverse-extractor.ts`,
+`lib/ingestion/traverse-pipeline.ts`) pass no chunk-related options, so this
+triggers automatically once a page is large enough — idtech's page reliably
+is.
+
+Each chunk is sent to the provider as an independent tool-use call, and
+`ExtractionProposal.pathIndices[0]` (which
+`lib/ingestion/traverse-item-grouping.ts`'s `assembleItems()` uses to regroup
+proposals into one record per source item) is whatever index the provider
+echoes back FOR THAT CHUNK — traverse does not renumber it against the whole
+document, and `ExtractionProposal` carries no chunk id a consumer could use
+instead (confirmed by reading traverse 0.5.1's shipped `dist/`, README, and
+ADR 0004; this is not a bug in traverse, `pathIndices` was never contracted to
+be chunk-aware). Empirically (live idtech run), glm-5.2 numbers each chunk's
+`items[N]` from `N=0` again. Grouping naively by raw `pathIndices[0]` across
+the WHOLE proposal list therefore silently MERGES chunk 2's item 0 into chunk
+1's item 0 (and so on) — reintroducing, at chunk granularity, exactly the
+cross-item stitching failure class `pathIndices`-based grouping was built to
+prevent at field granularity (docs/traverse-adjudication-2026-07.md). Left
+unfixed, this would have capped idtech's real recovery at ~8 items (the raw
+per-chunk index range) instead of 17, and for other sources could silently
+compose two unrelated items' fields into one merged record.
+
+**Fix** (`lib/ingestion/traverse-item-grouping.ts`, `assignGlobalItemIndices`):
+a decrease in the raw `pathIndices[0]` is rebased into a document-global item
+index ONLY when the proposal's verified `provenance.locator` offset also did
+NOT move backward — a genuine chunk restart shows the index resetting while
+the document position keeps advancing (chunk 2's content is later in the
+shared `fullText`), whereas legitimate same-chunk out-of-order emission (a
+provider revisiting an earlier item's field within one response — already
+covered by the existing `test:traverse-replay` "multi-item grouping" case)
+moves the index AND the locator backward together. Each rebase point is
+recorded as a visible warning on the affected item rather than applied
+silently. Verified against the live idtech run (8 broken/collided items ->
+17 correctly-separated items, with the rebase warning landing exactly on the
+first item of the second chunk) and covered by two new deterministic CI
+cases in `test:traverse-replay` (`testCrossChunkItemIndexRebase`,
+`testSameChunkOutOfOrderIsNotMistakenForAChunkBoundary`).
+
+A second, unrelated `test:traverse-replay` fixture issue surfaced by the same
+bump: 0.5.0's default HTML->Markdown prep also ships **structural chunking**
+that treats the largest run of same-tag/same-class-signature sibling
+elements as a page's "repeated card" and (per traverse's own design) keeps
+only that card content, dropping everything else. `tests/fixtures/traverse/denver-art-museum.html`
+(a deliberately single-item, no-card-structure fixture) has a 4-`<li>` facts
+list that was the only same-signature sibling run on the page, so it got
+misdetected as "the card," dropping the item's name/category/CTA link
+entirely (5/8 stub proposals survived instead of 8/8). Fixed by giving each
+`<li>` a distinct class (`tests/fixtures/traverse/denver-art-museum.html`) —
+same DOM structure/semantics, no longer a false "repeated signature" match.
+This is a fixture-construction artifact, not a real-world regression risk:
+avid4's fixtures use per-field `<span class="...">` (never a same-signature
+sibling run) and were unaffected; a real single-item page is very unlikely to
+coincidentally repeat a 3+-sibling identical-signature list.
+
+### Spot checks (no regression)
+
+Live-run spot checks with the same bump + fix in place:
+
+| Source | Before (this addendum's baseline: cutover report above) | After (0.5.1, live) |
+| --- | --- | --- |
+| avid4 | 4 | 18 |
+| denver-art-museum | 3 | 6 |
+
+Both improved, no field classes disappeared, no cross-item stitching observed
+in either (item names/fields are distinct and sensible; avid4's chunking used
+the character-window fallback, not structural — both paths exercise the
+rebasing fix, and both `test:traverse-replay` cases above cover the two
+possible outcomes).
+
+### Wiring changes made
+
+- `package.json`/`package-lock.json`: `@kontourai/traverse` `^0.4.0` ->
+  `^0.5.1`. No other campfit code needed new `extract()` options — chunking,
+  markdown prep, and the per-chunk `maxContentChars` redefinition are all
+  library defaults; campfit's call sites already passed none of `prep`/
+  `chunkSize`/`chunkOverlap`/`maxChunks` and did not need to start.
+  `DEFAULT_EXTRACTION_MAX_TOKENS` (2048, `resolve-extraction-provider.ts`) was
+  NOT changed — re-probed live under 0.5.1, still the best-available value
+  for the same reason as before (raising it makes glm-5.2 truncate before any
+  usable tool_use JSON, chunked or not); see that file's updated docstring
+  for the 0.5.1-specific addendum to that rationale.
+- `lib/ingestion/traverse-item-grouping.ts`: cross-chunk item-index rebasing
+  fix described above — REQUIRED, not optional; without it, the version bump
+  alone would have been a data-correctness regression wearing an
+  extraction-count improvement.
+- `lib/ingestion/resolve-extraction-provider.ts`: docstring addendum only
+  (no behavior change) clarifying `maxTokens` vs. the new per-chunk
+  `maxContentChars`, per the task brief's callout to revisit this comment.
+- `tests/fixtures/traverse/denver-art-museum.html`: per-`<li>` classes, fixture-only.
+- `scripts/test-traverse-replay.ts`: two new deterministic cases for the
+  rebasing fix (see above); no provider-CONTRACT changes were needed — the
+  stub `ExtractionProvider` shape (`tests/fixtures/traverse/stub-provider.ts`)
+  is unchanged, since chunking is entirely inside `extract()` and invisible to
+  a single-chunk-sized stub call.
+
+### OWNER DECISION status
+
+The idtech ⚠️ OWNER DECISION item in the report above is **substantially
+addressed, not fully closed**: 74% of legacy baseline clears the >40%
+regression tripwire (vs. 43%, and vs. 1/23 = 4% in the most recent production
+run), field coverage recovers proportionally (name/category/ageGroups now
+populate on 17 items instead of 8-10), and the cross-chunk grouping
+correctness bug this bump could have introduced is fixed and covered. It is
+not 23/23: both of idtech's chunks still hit `stop_reason === "max_tokens"`
+per-chunk, so some courses near the end of each chunk are still lost to
+per-call output-length truncation — recoverable via further-reduced
+`chunkSize` (more, smaller chunks) as a follow-up, deliberately NOT done here
+per the task's "prefer library defaults, only add config if required"
+guidance, since the >40% bar is already cleared on defaults alone. Traverse
+issue **#14** (the upstream tracking issue for this exact idtech
+under-extraction) can reasonably be considered **superseded by 0.5.0/0.5.1**
+for the regression-bar purpose it was opened for, with a note that full 23/23
+recovery would need either a smaller default `chunkSize` for very dense
+listing pages or a provider-side fix to glm-5.2's per-call output-length
+behavior — neither of which is this bump's scope.

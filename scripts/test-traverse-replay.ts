@@ -172,6 +172,101 @@ async function testMultiItemGrouping() {
   console.log("✓ multi-item grouping: 2 items, each age/date/price band correctly scoped to its own item (no cross-band stitching)");
 }
 
+// ─── 1b. Cross-CHUNK item-index rebasing (traverse 0.5.0+ chunking) ──────
+
+/**
+ * Builds a synthetic ExtractionProposal directly (bypassing extract()/a
+ * stub provider) — assembleItems() only reads fieldPath/pathIndices/
+ * provenance/candidateValue/confidence/extractor, so this is sufficient to
+ * exercise its grouping logic against exactly the shape a chunked
+ * traverse 0.5.0+ result produces: raw pathIndices[0] restarting at 0 per
+ * chunk, with `locator` still monotonically anchored to the shared
+ * `fullText` (see traverse's extract.js normalizeChunkProposals).
+ */
+function proposal(
+  fieldPath: string,
+  candidateValue: unknown,
+  pathIndices: number[] | undefined,
+  locatorStart: number,
+  excerptLen = 5
+): ExtractionProposal {
+  return {
+    fieldPath,
+    candidateValue,
+    confidence: 0.9,
+    provenance: { excerpt: "x".repeat(excerptLen), locator: `chars:${locatorStart}-${locatorStart + excerptLen}` },
+    extractor: "test",
+    ...(pathIndices ? { pathIndices } : {}),
+  };
+}
+
+async function testCrossChunkItemIndexRebase() {
+  // Simulates a REAL observed shape (live idtech run, 2026-07): two chunks,
+  // each numbering items[0..N] from 0 again, but with monotonically
+  // increasing `locator` offsets into the shared fullText (chunk 2's card
+  // content is later in the document than chunk 1's, even though its own
+  // item numbering restarts).
+  const proposals: ExtractionProposal[] = [
+    // chunk 1: items 0 and 1, locators 0-99
+    proposal("items[].name", "Course A", [0], 10),
+    proposal("items[].ageGroups[].minAge", 7, [0, 0], 20),
+    proposal("items[].name", "Course B", [1], 40),
+    proposal("items[].ageGroups[].minAge", 8, [1, 0], 50),
+    // chunk 2: items 0 and 1 again, but locators are HIGHER (later document
+    // position) — this is the discriminator vs. genuine same-chunk
+    // out-of-order emission (see testMultiItemGrouping), which would move
+    // the locator BACKWARD together with the index.
+    proposal("items[].name", "Course C", [0], 500),
+    proposal("items[].ageGroups[].minAge", 9, [0, 0], 510),
+    proposal("items[].name", "Course D", [1], 540),
+    proposal("items[].ageGroups[].minAge", 10, [1, 0], 550),
+  ];
+
+  const items = assembleItems(proposals);
+  assert.equal(items.length, 4, "4 real courses across 2 chunks must assemble into 4 items, not collide down to 2");
+
+  const names = items.map((i) => i.scalars.name?.candidateValue);
+  assert.deepEqual(names, ["Course A", "Course B", "Course C", "Course D"], "each course keeps its own name — no cross-chunk merge");
+
+  const ages = items.map((i) => i.ageGroups[0]?.minAge);
+  assert.deepEqual(ages, [7, 8, 9, 10], "each course keeps its own age band — no cross-chunk field stitching");
+
+  assert.deepEqual(items.map((i) => i.itemIndex), [0, 1, 2, 3], "rebased item indices are contiguous across the chunk boundary");
+
+  assert.deepEqual(items[0].warnings, [], "the first chunk's items carry no rebase warning");
+  assert.deepEqual(items[1].warnings, [], "the first chunk's items carry no rebase warning");
+  assert.ok(
+    items[2].warnings.some((w) => w.includes("rebased across a traverse chunk boundary")),
+    "the first item of the second chunk must record the rebase as a visible warning"
+  );
+  assert.deepEqual(items[3].warnings, [], "only the FIRST item of a new chunk carries the boundary warning, not every item after it");
+
+  console.log("✓ cross-chunk item-index rebasing: 2 chunks' colliding pathIndices[0] resolve to 4 distinct items via locator-disambiguated rebasing, with a visible boundary warning");
+}
+
+async function testSameChunkOutOfOrderIsNotMistakenForAChunkBoundary() {
+  // The mirror-image case: index AND locator both move BACKWARD together
+  // (revisiting an earlier item within the SAME chunk, exactly what
+  // testMultiItemGrouping already proves end-to-end via real traverse
+  // normalization) must NOT be rebased — this directly guards against an
+  // overzealous chunk-boundary heuristic.
+  const proposals: ExtractionProposal[] = [
+    proposal("items[].name", "Course B", [1], 200),
+    proposal("items[].name", "Course A", [0], 50), // index AND locator both go backward
+    proposal("items[].ageGroups[].minAge", 8, [1, 0], 250),
+    proposal("items[].ageGroups[].minAge", 7, [0, 0], 60),
+  ];
+
+  const items = assembleItems(proposals);
+  assert.equal(items.length, 2, "an out-of-order same-chunk emission must still assemble into exactly 2 items");
+  assert.equal(items[0].scalars.name?.candidateValue, "Course A");
+  assert.equal(items[1].scalars.name?.candidateValue, "Course B");
+  assert.deepEqual(items[0].warnings, [], "no chunk-boundary warning for a same-chunk out-of-order emission");
+  assert.deepEqual(items[1].warnings, [], "no chunk-boundary warning for a same-chunk out-of-order emission");
+
+  console.log("✓ same-chunk out-of-order emission (index AND locator both move backward together) is correctly NOT mistaken for a chunk boundary");
+}
+
 // ─── 2. Positional-pairing fallback for an un-indexed nested array ───────
 
 async function testPositionalPairingFallback() {
@@ -502,6 +597,8 @@ async function testPipelineFailureIsolation() {
 
 async function main() {
   await testMultiItemGrouping();
+  await testCrossChunkItemIndexRebase();
+  await testSameChunkOutOfOrderIsNotMistakenForAChunkBoundary();
   await testPositionalPairingFallback();
   await testHealthySourceReplay();
   await testDenverPageExtraction();
