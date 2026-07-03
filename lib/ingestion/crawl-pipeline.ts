@@ -1,11 +1,15 @@
 import { getPool } from '@/lib/db';
-import { extractCampDataFromUrl } from './llm-extractor';
-import { computeDiff, computeOverallConfidence } from './diff-engine';
+import type { ExtractionProvider } from '@kontourai/traverse';
+import type { SnapshotStore } from '@kontourai/traverse/fetch';
+import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
+import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
+import { resolveExtractionProvider } from './resolve-extraction-provider';
+import { createCampfitSnapshotStore } from './traverse-snapshot-store';
 import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
 import { createProposal } from '@/lib/admin/review-repository';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
-import type { CrawlProgressEvent, CrawlRun } from '@/lib/admin/types';
+import type { CrawlProgressEvent, CrawlRun, LLMExtractionResult } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 
 // ── Provider matching helpers ──────────────────────────────────────────────────
@@ -88,6 +92,93 @@ async function matchOrCreateProvider(
   return action;
 }
 
+// ── Traverse extraction shape adapters (Wave 2 rewire) ─────────────────────────
+//
+// `runTraverseRecrawlForCamp` (traverse-recrawl-adapter.ts) already runs
+// `computeDiff` internally and hands back `ProposedChanges` directly — see
+// that module's `TraverseRecrawlResult` doc for the shape-adapter contract
+// this consumes (skip the old inline `computeDiff`/`JSON.parse` steps; use
+// `result.proposedChanges`/`result.rawExtraction` as-is).
+
+/**
+ * `recordExtractionMetrics` (lib/admin/metrics-repository.ts) is typed to the
+ * legacy `LLMExtractionResult` shape — kept as-is per plan scope (the metrics
+ * table/dashboard is unchanged). This adapts one `TraverseRecrawlResult` into
+ * just enough of that shape for the metrics it actually reads
+ * (`confidence`, `overallConfidence`, `error`, `tokensUsed`) — `extracted`/
+ * `excerpts`/`rawResponse`/`extractedAt` are not read by
+ * `recordExtractionMetrics` and are filled with inert placeholders.
+ */
+function toLegacyMetricsResult(result: TraverseRecrawlResult): LLMExtractionResult {
+  const confidence: Record<string, number> = {};
+  for (const [field, diff] of Object.entries(result.proposedChanges)) {
+    confidence[field] = diff.confidence;
+  }
+  return {
+    extracted: {},
+    confidence,
+    excerpts: {},
+    overallConfidence: result.overallConfidence,
+    rawResponse: '',
+    model: result.model,
+    tokensUsed: result.tokensUsed ?? 0,
+    extractedAt: new Date().toISOString(),
+    ...(result.error ? { error: result.error } : {}),
+  };
+}
+
+/**
+ * Synthetic per-camp failure used when the run-level extraction provider
+ * failed to resolve (see `providerInitError` below) — every camp in the run
+ * gets the SAME clearly-tagged failure via the normal per-camp error path,
+ * instead of the whole run crashing before any `CrawlRun`/`campLog` record
+ * exists. `traverse-recrawl:provider-unavailable:` follows
+ * traverse-recrawl-adapter.ts's own `traverse-recrawl:<reason>:` vocabulary
+ * so `crawl-failures-table.tsx`'s classifier (Task 2.2) recognizes it.
+ */
+function providerUnavailableResult(error: string): TraverseRecrawlResult {
+  return {
+    ok: false,
+    error,
+    proposedChanges: {},
+    overallConfidence: 0,
+    model: 'traverse:unavailable',
+    rawExtraction: { via: 'traverse-recrawl', error },
+    matchedItemName: null,
+    itemCount: 0,
+    snapshot: { ref: null, bodyHash: null },
+    tokensUsed: null,
+    latencyMs: 0,
+    warnings: [],
+  };
+}
+
+/**
+ * Provider/model-choice decision (traverse-recrawl-cutover plan, AC8; Task
+ * 1.4's `models/route.ts`/`crawl-modal.tsx` rewrite already scopes the admin
+ * model picker to datum-registered models). `CrawlOptions.model` — the
+ * per-run override `crawl-modal.tsx`/the five routes post — is NOT expressible
+ * against `resolveExtractionProvider()` as written (it resolves a single
+ * process-level provider from `TRAVERSE_ROLE`/datum config, with no per-call
+ * ref parameter). Rather than silently dropping the override, this is
+ * recorded in the run's `campLog` (see `withModelOverrideNote` below) and
+ * logged once here for operators. Discovery's `options.model` usage (the
+ * pre-pass below, `discoverCampsFromUrl`) is UNCHANGED and still honors it —
+ * only the traverse-backed extraction step cannot.
+ */
+function warnModelOverrideIgnored(model: string | undefined): void {
+  if (!model) return;
+  console.warn(
+    `[crawl] model override '${model}' requested but traverse-backed extraction resolves its provider from datum (.datum/config.json via resolve-extraction-provider.ts), not a per-run override — the override is NOT applied to extraction (discovery, if enabled, still honors it). Recorded on each camp's crawl-log entry.`
+  );
+}
+
+/** Appends a note to a camp-log-display model string when a per-run override was requested but couldn't be honored (see `warnModelOverrideIgnored`). Only decorates the human-readable `campLog` display field — `extractionModel` written to `CampChangeProposal` stays the real, undecorated model id. */
+function withModelOverrideNote(model: string, requestedOverride: string | undefined): string {
+  if (!requestedOverride) return model;
+  return `${model} [requested override "${requestedOverride}" not applied — traverse extraction resolves its provider via datum, not a per-run override]`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class Semaphore {
@@ -154,7 +245,13 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     resolvedCampIds?.length ? [resolvedCampIds] : []
   );
 
-  // Fetch neighborhoods once for the run (community slug from first camp or default 'denver')
+  // Fetch neighborhoods once for the run (community slug from first camp or
+  // default 'denver') — restored Wave 3 gap closure: this feeds the
+  // traverse-recrawl-adapter's `neighborhoods` field hint (the retired
+  // `llm-provider.ts` buildPrompt's neighborhood enum-constraint), which was
+  // dropped along with this query during the Wave 2 extraction-call rewire
+  // and is re-wired here through the adapter's `extraFieldHints` seam
+  // instead of a hardcoded prompt string.
   const communitySlug = campsResult.rows[0]?.communitySlug ?? 'denver';
   const neighborhoodsResult = await pool.query<{ name: string }>(
     `SELECT name FROM "CommunityNeighborhood" WHERE "communitySlug" = $1 ORDER BY name ASC`,
@@ -182,6 +279,23 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
 
   await emit({ type: 'started', runId: run.id, totalCamps: camps.length });
 
+  // Resolve the traverse extraction provider + snapshot store ONCE for the
+  // whole run (a datum-resolved provider is a process-level resource, not a
+  // per-camp one — mirrors scripts/scrape.ts's convention). See AC8: this is
+  // where the live provider changes from admin-selectable Anthropic/Gemini/
+  // Ollama to one datum-resolved provider per process.
+  let extractionProvider: ExtractionProvider | null = null;
+  let snapshotStore: SnapshotStore | null = null;
+  let providerInitError: string | null = null;
+  try {
+    extractionProvider = resolveExtractionProvider().provider;
+    snapshotStore = createCampfitSnapshotStore();
+  } catch (err) {
+    providerInitError = `traverse-recrawl:provider-unavailable: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(`[crawl] extraction provider resolution failed — every camp in this run will fail with a config error: ${providerInitError}`);
+  }
+  warnModelOverrideIgnored(options.model);
+
   let processedCamps = 0;
   let errorCount = 0;
   let newProposals = 0;
@@ -206,6 +320,9 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
       // ── Discovery pre-pass ──────────────────────────────────────────────────
       // Prefer provider-level discovery roots so discovery can start from the site root/listing
       // instead of only from a downstream camp page.
+      // Discovery stays on the legacy `discoverCampsFromUrl`/`callLLM` path
+      // (traverse-recrawl-cutover plan AC11 — no traverse equivalent for
+      // listing-page enumeration); `options.model` is still honored here.
       const providerId = domainCamps[0]?.providerId ?? null;
       const preferredListingUrl = providerId ? providerDiscoveryRoots[providerId] : null;
       if (options.discover === true) {
@@ -273,58 +390,60 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
           );
           const siteHints = hintsResult.rows.map(r => r.hint);
 
-          // Extract
-          const result = await extractCampDataFromUrl(camp.websiteUrl, camp.name, {
-            model: options.model,
-            siteHints,
-            neighborhoods,
-          });
+          // Extract + diff — the traverse-backed per-camp adapter
+          // (traverse-recrawl-adapter.ts) targets ONLY this camp's own row
+          // and already runs `diff-engine.ts`'s `computeDiff` internally
+          // (30-day/0.8-confidence suppression via `fieldSources`, confidence
+          // floor, additive-vs-replace array detection) — no inline
+          // computeDiff/JSON.parse step needed here anymore (Wave 1 Task 1.3
+          // / Wave 2 Task 2.1).
+          const fieldSources = (camp as unknown as { fieldSources: Record<string, { approvedAt?: string }> }).fieldSources ?? {};
+          const result: TraverseRecrawlResult = providerInitError
+            ? providerUnavailableResult(providerInitError)
+            : await runTraverseRecrawlForCamp({
+                campId: camp.id,
+                websiteUrl: camp.websiteUrl,
+                campName: camp.name,
+                current: camp as unknown as Camp,
+                fieldSources,
+                siteHints,
+                neighborhoods,
+                provider: extractionProvider!,
+                store: snapshotStore!,
+                mode: 'live-with-capture',
+              });
           const durationMs = Date.now() - startMs;
+          const displayModel = withModelOverrideNote(result.model, options.model);
 
-          if (result.error) {
+          if (!result.ok) {
+            const error = result.error ?? 'traverse-recrawl: unknown extraction failure';
             errorCount++;
-            errorLog.push({ campId: camp.id, error: result.error, url: camp.websiteUrl });
-            await appendCrawlError(run.id, { campId: camp.id, error: result.error, url: camp.websiteUrl });
+            errorLog.push({ campId: camp.id, error, url: camp.websiteUrl });
+            await appendCrawlError(run.id, { campId: camp.id, error, url: camp.websiteUrl });
             await appendCrawlLog(run.id, {
               campId: camp.id, campName: camp.name, url: camp.websiteUrl,
-              status: 'error', model: result.model ?? 'unknown',
-              proposals: 0, fieldsChanged: [], error: result.error,
+              status: 'error', model: displayModel,
+              proposals: 0, fieldsChanged: [], error,
               durationMs, processedAt: new Date().toISOString(),
             });
-            await emit({ type: 'camp_error', campId: camp.id, campName: camp.name, error: result.error });
+            await emit({ type: 'camp_error', campId: camp.id, campName: camp.name, error });
 
-            // Still record failure metric
+            // Still record failure metric (shape-adapted — see toLegacyMetricsResult)
             const siteHost = getSiteHost(camp.websiteUrl);
-            await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result, changesFound: 0, durationMs });
+            await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound: 0, durationMs });
           } else {
-            // Diff (with fieldSources for suppression of recently-approved fields)
-            const fieldSources = (camp as unknown as { fieldSources: Record<string, { approvedAt?: string }> }).fieldSources ?? {};
-            const proposedChanges = computeDiff(
-              camp as unknown as import('@/lib/types').Camp,
-              result.extracted,
-              result.confidence,
-              result.excerpts,
-              fieldSources,
-              camp.websiteUrl
-            );
+            const proposedChanges = result.proposedChanges;
             const changesFound = Object.keys(proposedChanges).length;
 
             let proposalId: string | null = null;
             if (changesFound > 0) {
-              const confidence = computeOverallConfidence(proposedChanges);
-              let rawExtractionObj: Record<string, unknown> = {};
-              try {
-                rawExtractionObj = JSON.parse(result.rawResponse || '{}');
-              } catch {
-                rawExtractionObj = { _raw: result.rawResponse };
-              }
               proposalId = await createProposal({
                 campId: camp.id,
                 crawlRunId: run.id,
                 sourceUrl: camp.websiteUrl,
-                rawExtraction: rawExtractionObj,
+                rawExtraction: result.rawExtraction,
                 proposedChanges,
-                overallConfidence: confidence,
+                overallConfidence: result.overallConfidence,
                 extractionModel: result.model,
               });
               newProposals++;
@@ -343,14 +462,14 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               return null;
             });
 
-            // Record metrics
+            // Record metrics (shape-adapted — see toLegacyMetricsResult)
             const siteHost = getSiteHost(camp.websiteUrl);
-            await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result, changesFound, durationMs });
+            await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound, durationMs });
 
             await appendCrawlLog(run.id, {
               campId: camp.id, campName: camp.name, url: camp.websiteUrl,
               status: changesFound > 0 ? 'ok' : 'no_changes',
-              model: result.model,
+              model: displayModel,
               proposals: changesFound > 0 ? 1 : 0,
               fieldsChanged: Object.keys(proposedChanges),
               durationMs, processedAt: new Date().toISOString(),

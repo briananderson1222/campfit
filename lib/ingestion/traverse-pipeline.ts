@@ -77,7 +77,7 @@ import {
   itemDisplayName,
   type TraverseItemProposalRecord,
 } from "./traverse-extractor";
-import { assembleItems } from "./traverse-item-grouping";
+import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import type { IngestionSourceConfig } from "./sources";
 import { createRenderFetchLike, DEFAULT_RENDER_TIMEOUT_MS, type RenderResult } from "./render-fetch";
@@ -113,6 +113,16 @@ export interface TraversePipelineDeps {
     sourceKey: string,
     itemNames: string[]
   ) => Promise<Map<string, Record<string, unknown>>> | Map<string, Record<string, unknown>>;
+  /**
+   * Optional extra per-field hints for THIS run's extraction call, merged
+   * on top of the static `CAMP_FIELD_HINTS` (traverse-schema.ts) — e.g.
+   * admin-authored `CrawlSiteHint` rows for the target domain
+   * (`crawl-pipeline.ts`'s per-domain hint fetch, preserved by the per-camp
+   * re-crawl adapter — see `lib/ingestion/traverse-recrawl-adapter.ts`).
+   * Overlapping keys win over `CAMP_FIELD_HINTS`'s defaults; this never
+   * REPLACES the static hints, only augments them for one run.
+   */
+  extraFieldHints?: Record<string, string>;
   /** content-prep truncation forwarded to extract(). */
   maxContentChars?: number;
   /** log sink; defaults to console.log. */
@@ -204,6 +214,12 @@ function summarizeEmbeddedState(embedded: EmbeddedState | undefined): TraverseEm
   };
 }
 
+/** Merge a per-run `deps.extraFieldHints` override on top of the static `CAMP_FIELD_HINTS` (see `TraversePipelineDeps.extraFieldHints`'s doc). */
+function mergeFieldHints(deps: TraversePipelineDeps): Record<string, string> {
+  if (!deps.extraFieldHints || Object.keys(deps.extraFieldHints).length === 0) return CAMP_FIELD_HINTS;
+  return { ...CAMP_FIELD_HINTS, ...deps.extraFieldHints };
+}
+
 /** One fetch+extract call (a "attempt") — factored out so the shell-retry seam can run it twice. */
 async function runFetchAndExtractAttempt(
   src: IngestionSourceConfig,
@@ -223,7 +239,7 @@ async function runFetchAndExtractAttempt(
     },
     {
       targetSchema: CAMP_TARGET_SCHEMA,
-      fieldHints: CAMP_FIELD_HINTS,
+      fieldHints: mergeFieldHints(deps),
       provider: deps.provider,
       store: deps.store,
       mode: deps.mode ?? "live-with-capture",
@@ -234,25 +250,31 @@ async function runFetchAndExtractAttempt(
   return { far, latencyMs: now() - startedAt };
 }
 
+/** Shared source-result fields produced by fetch + the shell-detection auto-retry + extraction — every {@link TraversePipelineSourceResult} field EXCEPT the per-item routing fields (`itemCount`/`routedProposalIds`/`routedFieldCount`), which depend on what a caller does with `far.extraction.proposals` once grouped. */
+type TraverseCoreFetchResult = Omit<TraversePipelineSourceResult, "itemCount" | "routedProposalIds" | "routedFieldCount">;
+
 /**
- * Run one source through the full pipeline. Never throws: fetch and
- * extraction failures are surfaced on the result (mirrors
- * ingestion-runner.ts's per-source isolation contract).
+ * Run one source through fetch + the shell-detection auto-retry (see the file
+ * doc) and return the raw `FetchAndExtractResult` alongside every telemetry
+ * field {@link TraverseCoreFetchResult} carries. Never throws: fetch and
+ * extraction failures are surfaced on `core` (mirrors ingestion-runner.ts's
+ * per-source isolation contract). Factored out of
+ * `runTraversePipelineForSource` so a second caller
+ * (`runTraverseFetchAndAssemble`, below) can reuse the identical fetch/retry
+ * plumbing without also inheriting the per-item sink-routing shape that
+ * function is built for.
  */
-export async function runTraversePipelineForSource(
+async function runCoreFetchAndExtract(
   src: IngestionSourceConfig,
   deps: TraversePipelineDeps
-): Promise<TraversePipelineSourceResult> {
+): Promise<{ far: FetchAndExtractResult; core: TraverseCoreFetchResult }> {
   const log = deps.log ?? ((m: string) => console.log(m));
   const now = deps.now ?? (() => Date.now());
 
-  const result: TraversePipelineSourceResult = {
+  const core: TraverseCoreFetchResult = {
     source: src.key,
     url: src.url,
     ok: false,
-    itemCount: 0,
-    routedProposalIds: [],
-    routedFieldCount: 0,
     snapshotRef: null,
     snapshotBodyHash: null,
     fetchError: null,
@@ -278,7 +300,7 @@ export async function runTraversePipelineForSource(
     fetch: createRenderFetchLike({
       timeoutMs: renderTimeoutMs,
       onRendered: (info: RenderResult) => {
-        result.render = { durationMs: info.durationMs, usedNetworkidleFallback: info.usedNetworkidleFallback };
+        core.render = { durationMs: info.durationMs, usedNetworkidleFallback: info.usedNetworkidleFallback };
       },
     }),
   });
@@ -310,12 +332,12 @@ export async function runTraversePipelineForSource(
     );
 
     if (embeddedStateShellSuspected) {
-      result.embeddedStateAvailable = summarizeEmbeddedState(far.extraction.embedded);
+      core.embeddedStateAvailable = summarizeEmbeddedState(far.extraction.embedded);
       log(
         `[traverse-pipeline] ${src.key}: js-shell-suspected but embedded state is available ` +
-          `(${result.embeddedStateAvailable.jsonLdCount} json-ld block(s)` +
-          `${result.embeddedStateAvailable.hasNextData ? ", __NEXT_DATA__" : ""}` +
-          `${result.embeddedStateAvailable.hasInitialState ? ", hydration state" : ""}) — skipping render`
+          `(${core.embeddedStateAvailable.jsonLdCount} json-ld block(s)` +
+          `${core.embeddedStateAvailable.hasNextData ? ", __NEXT_DATA__" : ""}` +
+          `${core.embeddedStateAvailable.hasInitialState ? ", hydration state" : ""}) — skipping render`
       );
     }
 
@@ -336,9 +358,9 @@ export async function runTraversePipelineForSource(
       if (renderRetryFailed) {
         // Render itself failed (timeout/network) — partial (first-attempt)
         // results beat none: keep `far` as the first attempt and just note
-        // the failed retry. `result.render` stays unset, exactly like any
+        // the failed retry. `core.render` stays unset, exactly like any
         // other render that never completed.
-        result.shellEscalation = {
+        core.shellEscalation = {
           shellDetected: true,
           renderRetried: true,
           renderRetryFailed: true,
@@ -354,7 +376,7 @@ export async function runTraversePipelineForSource(
         const retryAttemptItemCount = retryAttempt.far.extraction
           ? assembleItems(retryAttempt.far.extraction.proposals).length
           : 0;
-        result.shellEscalation = {
+        core.shellEscalation = {
           shellDetected: true,
           renderRetried: true,
           renderRetryFailed: false,
@@ -372,27 +394,56 @@ export async function runTraversePipelineForSource(
     }
   }
 
-  result.latencyMs = totalLatencyMs;
+  core.latencyMs = totalLatencyMs;
 
-  result.warnings.push(...(far.fetch.warnings ?? []));
+  core.warnings.push(...(far.fetch.warnings ?? []));
   if (far.fetch.error) {
-    result.fetchError = `${far.fetch.error.kind}: ${far.fetch.error.message}`;
+    core.fetchError = `${far.fetch.error.kind}: ${far.fetch.error.message}`;
   }
   if (far.fetch.snapshot) {
-    result.snapshotRef = far.sourceRef ?? null;
-    result.snapshotBodyHash = far.fetch.snapshot.bodyHash;
+    core.snapshotRef = far.sourceRef ?? null;
+    core.snapshotBodyHash = far.fetch.snapshot.bodyHash;
   }
 
   if (!far.extraction) {
-    log(`[traverse-pipeline] ${src.key}: no extraction (${result.fetchError ?? "no snapshot"})`);
-    return result;
+    log(`[traverse-pipeline] ${src.key}: no extraction (${core.fetchError ?? "no snapshot"})`);
+    return { far, core };
   }
 
-  result.extractionError = far.extraction.error ?? null;
-  result.warnings.push(...(far.extraction.warnings ?? []));
-  result.tokensUsed = far.extraction.raw?.tokensUsed ?? null;
-  result.model = far.extraction.raw?.model ?? null;
-  result.ok = !result.extractionError;
+  core.extractionError = far.extraction.error ?? null;
+  core.warnings.push(...(far.extraction.warnings ?? []));
+  core.tokensUsed = far.extraction.raw?.tokensUsed ?? null;
+  core.model = far.extraction.raw?.model ?? null;
+  core.ok = !core.extractionError;
+
+  return { far, core };
+}
+
+/**
+ * Run one source through the full pipeline: fetch + extract (via
+ * {@link runCoreFetchAndExtract}), group into `AssembledItem`s
+ * (traverse-item-grouping.ts), map EVERY item to a `ProposedChanges` review
+ * record (traverse-extractor.ts's `itemToProposedChanges`, via
+ * `buildTraverseItemProposalRecords`), and route each to the injected
+ * `sink`. This is the "many items, create-if-new" shape `scripts/scrape.ts`
+ * uses. Never throws: fetch and extraction failures are surfaced on the
+ * result (mirrors ingestion-runner.ts's per-source isolation contract).
+ *
+ * NOT the shape a per-camp re-crawl of one already-known camp wants — see
+ * {@link runTraverseFetchAndAssemble} below.
+ */
+export async function runTraversePipelineForSource(
+  src: IngestionSourceConfig,
+  deps: TraversePipelineDeps
+): Promise<TraversePipelineSourceResult> {
+  const log = deps.log ?? ((m: string) => console.log(m));
+
+  const { far, core } = await runCoreFetchAndExtract(src, deps);
+  const result: TraversePipelineSourceResult = { ...core, itemCount: 0, routedProposalIds: [], routedFieldCount: 0 };
+
+  if (!far.extraction) {
+    return result;
+  }
 
   const itemNames = assembleItems(far.extraction.proposals).map((item) => itemDisplayName(item));
   const currentByItemName = deps.currentByItemNames
@@ -423,6 +474,42 @@ export async function runTraversePipelineForSource(
       `${result.shellEscalation ? ` [shell-suspected retry: ${result.shellEscalation.renderRetryFailed ? "render failed, kept first attempt" : `${result.shellEscalation.firstAttemptItemCount}->${result.shellEscalation.retryAttemptItemCount} item(s)`}]` : ""}`
   );
   return result;
+}
+
+/**
+ * Result of {@link runTraverseFetchAndAssemble}: every
+ * {@link TraverseCoreFetchResult} telemetry field, plus the raw grouped
+ * `items` — WITHOUT diffing (`itemToProposedChanges`) or sink-routing any of
+ * them. `items` is empty when fetch/extraction failed (see `ok`/`fetchError`/
+ * `extractionError`).
+ */
+export interface TraverseCampFetchResult extends TraverseCoreFetchResult {
+  /** every item traverse's per-item grouping found on the page, in item-index order. */
+  items: AssembledItem[];
+}
+
+/**
+ * Fetch + extract one source's page (via {@link runCoreFetchAndExtract}) and
+ * group its proposals into `AssembledItem`s — WITHOUT routing anything to a
+ * sink and WITHOUT diffing via `itemToProposedChanges`. This is the seam the
+ * per-camp re-crawl adapter (`lib/ingestion/traverse-recrawl-adapter.ts`)
+ * uses instead of `runTraversePipelineForSource`: a re-crawl of one
+ * already-known camp needs the raw candidate items so IT can select (never
+ * guess/name-match against the whole DB the way `currentByItemNames` does)
+ * the one item that is THIS camp, then diff it itself via `diff-engine.ts`'s
+ * `computeDiff` — not `itemToProposedChanges`, which has no confidence
+ * floor, suppression, or additive-array logic (traverse-recrawl-cutover
+ * plan, Task 1.3 / Stop-short risk 5). Never throws.
+ */
+export async function runTraverseFetchAndAssemble(
+  src: IngestionSourceConfig,
+  deps: TraversePipelineDeps
+): Promise<TraverseCampFetchResult> {
+  const { far, core } = await runCoreFetchAndExtract(src, deps);
+  if (!far.extraction) {
+    return { ...core, items: [] };
+  }
+  return { ...core, items: assembleItems(far.extraction.proposals) };
 }
 
 /**

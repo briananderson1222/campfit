@@ -14,6 +14,11 @@
  *                               correctly (the source's CSS selectors were
  *                               already dead; see docs/cutover-report-2026-07.md
  *                               for the retired legacy comparison).
+ *  - avid4-full-fields.html   — single-item page exercising the AC5
+ *                               field-schema-parity additions (the 10
+ *                               previously-missing legacy scalars plus the
+ *                               campTypes[]/categories[] enum-array
+ *                               families); see traverse-schema.ts's header.
  *
  * Asserts:
  *  1. Per-item grouping via REAL traverse 0.4.0 pathIndices normalization:
@@ -38,6 +43,13 @@
  *     fetch/extraction failure never throws and never stops the next
  *     source in a sweep — every source goes through the same path now
  *     (no more rotted/healthy split).
+ *  7. Field-schema parity (AC5, traverse-recrawl-cutover): the 10 scalar
+ *     fields the legacy `buildPrompt` extractor covered but traverse's
+ *     schema previously did not (organizationName, registrationOpenDate,
+ *     registrationCloseDate, lunchIncluded, contactEmail, contactPhone,
+ *     socialLinks, interestingDetails, state, zip) extract and assemble
+ *     correctly, and the new campTypes[]/categories[] enum-array families
+ *     reconstruct as arrays of distinct values (not row objects).
  */
 
 import assert from "node:assert/strict";
@@ -422,6 +434,68 @@ async function testDenverPageExtraction() {
   console.log(`✓ Denver page: traverse produced ${result.proposals.length} verified proposals, routed with RELATIONS-shaped arrays`);
 }
 
+// ─── 4b. Field-schema parity (AC5): new scalars + enum-array families ────
+
+async function testFieldParityFullFields() {
+  const html = loadFixture("avid4-full-fields.html");
+  const sourceRef = "https://avid4.com/day-camps/colorado/";
+  const prepared = prepareContent(html, "html", 32_000).text ?? "";
+
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[].organizationName", candidateValue: "Boulder Outdoor Education Center", needle: "Boulder Outdoor Education Center" },
+    { fieldPath: "items[].registrationOpenDate", candidateValue: "2026-03-01", needle: "March 1, 2026" },
+    { fieldPath: "items[].registrationCloseDate", candidateValue: "2026-05-15", needle: "May 15, 2026" },
+    { fieldPath: "items[].lunchIncluded", candidateValue: true, needle: "Lunch and snacks are included every day." },
+    { fieldPath: "items[].contactEmail", candidateValue: "camps@avid4.com", needle: "camps@avid4.com" },
+    { fieldPath: "items[].contactPhone", candidateValue: "(303) 555-0142", needle: "(303) 555-0142" },
+    { fieldPath: "items[].socialLinks", candidateValue: { instagram: "https://instagram.com/avid4adventure" }, needle: "https://instagram.com/avid4adventure" },
+    { fieldPath: "items[].state", candidateValue: "CO", needle: "CO 80301" },
+    { fieldPath: "items[].zip", candidateValue: "80301", needle: "CO 80301" },
+    { fieldPath: "items[].interestingDetails", candidateValue: "Campers get to keep a reusable water bottle from our sponsor.", needle: "Campers get to keep a reusable water bottle from our sponsor." },
+    { fieldPath: "items[].campTypes[]", candidateValue: "SUMMER_DAY", needle: "drop-off day camp" },
+    { fieldPath: "items[].categories[]", candidateValue: "SPORTS", needle: "SPORTS" },
+    { fieldPath: "items[].categories[]", candidateValue: "NATURE", needle: "NATURE" },
+  ];
+
+  const provider = createStubProvider(specs, { model: "stub-field-parity" });
+  const result = await runTraverseExtraction({ content: html, sourceRef, provider, maxContentChars: 32_000 });
+
+  assert.equal(result.error, undefined, "field-parity extraction must not error");
+  assert.equal(result.proposals.length, specs.length, "every field-parity proposal must survive normalization");
+  assertProvenanceVerified(prepared, result.proposals);
+
+  const items = assembleItems(result.proposals);
+  assert.equal(items.length, 1, "a single-item page (no pathIndices) must default to item 0");
+  const item = items[0];
+
+  // The 10 previously-missing legacy scalars (AC5) — each must assemble as a
+  // bare scalar on the item, exactly like the original 9 scalars already did.
+  assert.equal(item.scalars.organizationName?.candidateValue, "Boulder Outdoor Education Center");
+  assert.equal(item.scalars.registrationOpenDate?.candidateValue, "2026-03-01");
+  assert.equal(item.scalars.registrationCloseDate?.candidateValue, "2026-05-15");
+  assert.equal(item.scalars.lunchIncluded?.candidateValue, true);
+  assert.equal(item.scalars.contactEmail?.candidateValue, "camps@avid4.com");
+  assert.equal(item.scalars.contactPhone?.candidateValue, "(303) 555-0142");
+  assert.deepEqual(item.scalars.socialLinks?.candidateValue, { instagram: "https://instagram.com/avid4adventure" });
+  assert.equal(item.scalars.state?.candidateValue, "CO");
+  assert.equal(item.scalars.zip?.candidateValue, "80301");
+  assert.equal(item.scalars.interestingDetails?.candidateValue, "Campers get to keep a reusable water bottle from our sponsor.");
+
+  // The two enum-array families (campTypes/categories) — reconstructed as
+  // arrays of distinct { value, confidence, excerpt } entries, NOT row
+  // objects like ageGroups/schedules/pricing.
+  assert.equal(item.campTypes.length, 1, "one campTypes[] tag must assemble");
+  assert.equal(item.campTypes[0].value, "SUMMER_DAY");
+  assert.equal(item.categories.length, 2, "two categories[] entries must assemble, in encounter order");
+  assert.deepEqual(item.categories.map((c) => c.value), ["SPORTS", "NATURE"]);
+  assert.ok(item.categories.every((c) => c.confidence > 0 && typeof c.excerpt === "string" && c.excerpt.length > 0));
+
+  console.log(
+    `\u2713 field-schema parity (AC5): ${result.proposals.length} proposals covering 10 new legacy scalars + campTypes[]/categories[] enum-arrays assembled correctly`
+  );
+}
+
 // ─── 5. Per-source isolation on extraction failure (extract() level) ─────
 
 async function testExtractionFailureIsolation() {
@@ -602,6 +676,7 @@ async function main() {
   await testPositionalPairingFallback();
   await testHealthySourceReplay();
   await testDenverPageExtraction();
+  await testFieldParityFullFields();
   await testExtractionFailureIsolation();
   await testSnapshotReplayDeterminism();
   await testPipelineFailureIsolation();
