@@ -1,0 +1,201 @@
+{
+  "generatedAt": "2026-07-03T01:17:27.223Z",
+  "note": "BEFORE baseline for the traverse full cutover (owner directive, 2026-07). Captured live, while the legacy CSS-selector scrapers still existed. Snapshot bytes are NOT stored here (gitignored .kontourai/campfit/snapshots/); this file references them by sourceId + bodyHash so a later run can replaySource(store, sourceId) to reproduce the exact page these counts came from.",
+  "sources": {
+    "avid4": {
+      "key": "avid4",
+      "url": "https://avid4.com/day-camps/colorado/",
+      "scraperName": "Avid4 Adventure",
+      "campCount": 0,
+      "legacyErrors": [],
+      "fieldCoverage": {
+        "name": {
+          "count": 0,
+          "fraction": 0
+        },
+        "description": {
+          "count": 0,
+          "fraction": 0
+        },
+        "category": {
+          "count": 0,
+          "fraction": 0
+        },
+        "registrationStatus": {
+          "count": 0,
+          "fraction": 0
+        },
+        "applicationUrl": {
+          "count": 0,
+          "fraction": 0
+        },
+        "websiteUrl": {
+          "count": 0,
+          "fraction": 0
+        },
+        "city": {
+          "count": 0,
+          "fraction": 0
+        },
+        "neighborhood": {
+          "count": 0,
+          "fraction": 0
+        },
+        "address": {
+          "count": 0,
+          "fraction": 0
+        },
+        "ageGroups": {
+          "count": 0,
+          "fraction": 0
+        },
+        "schedules": {
+          "count": 0,
+          "fraction": 0
+        },
+        "pricing": {
+          "count": 0,
+          "fraction": 0
+        }
+      },
+      "snapshot": {
+        "bodyHash": "019643f2cd3bfa858b268200d17d079e3c2d1e69bc35bda27bbfdba9c7e6bdf0",
+        "status": 200,
+        "fetchedAt": "2026-07-03T01:17:25.815Z",
+        "finalUrl": "https://avid4.com/golden-colorado-summer-camps",
+        "bodyChars": 337667
+      },
+      "fetchError": null
+    },
+    "denver-art-museum": {
+      "key": "denver-art-museum",
+      "url": "https://www.denverartmuseum.org/en/summer-camps",
+      "scraperName": "Denver Art Museum",
+      "campCount": 1,
+      "legacyErrors": [],
+      "fieldCoverage": {
+        "name": {
+          "count": 1,
+          "fraction": 1
+        },
+        "description": {
+          "count": 1,
+          "fraction": 1
+        },
+        "category": {
+          "count": 1,
+          "fraction": 1
+        },
+        "registrationStatus": {
+          "count": 1,
+          "fraction": 1
+        },
+        "applicationUrl": {
+          "count": 0,
+          "fraction": 0
+        },
+        "websiteUrl": {
+          "count": 1,
+          "fraction": 1
+        },
+        "city": {
+          "count": 1,
+          "fraction": 1
+        },
+        "neighborhood": {
+          "count": 1,
+          "fraction": 1
+        },
+        "address": {
+          "count": 1,
+          "fraction": 1
+        },
+        "ageGroups": {
+          "count": 1,
+          "fraction": 1
+        },
+        "schedules": {
+          "count": 0,
+          "fraction": 0
+        },
+        "pricing": {
+          "count": 0,
+          "fraction": 0
+        }
+      },
+      "snapshot": {
+        "bodyHash": "f0b67b36696ff2e8f99849b7c1b9ea62aa51b15f28257772c2dbb3296e03211d",
+        "status": 200,
+        "fetchedAt": "2026-07-03T01:17:26.323Z",
+        "finalUrl": "https://www.denverartmuseum.org/en/summer-camps",
+        "bodyChars": 59778
+      },
+      "fetchError": null
+    },
+    "idtech": {
+      "key": "idtech",
+      "url": "https://www.idtech.com/courses",
+      "scraperName": "iD Tech",
+      "campCount": 23,
+      "legacyErrors": [],
+      "fieldCoverage": {
+        "name": {
+          "count": 23,
+          "fraction": 1
+        },
+        "description": {
+          "count": 23,
+          "fraction": 1
+        },
+        "category": {
+          "count": 23,
+          "fraction": 1
+        },
+        "registrationStatus": {
+          "count": 23,
+          "fraction": 1
+        },
+        "applicationUrl": {
+          "count": 0,
+          "fraction": 0
+        },
+        "websiteUrl": {
+          "count": 23,
+          "fraction": 1
+        },
+        "city": {
+          "count": 0,
+          "fraction": 0
+        },
+        "neighborhood": {
+          "count": 0,
+          "fraction": 0
+        },
+        "address": {
+          "count": 0,
+          "fraction": 0
+        },
+        "ageGroups": {
+          "count": 23,
+          "fraction": 1
+        },
+        "schedules": {
+          "count": 0,
+          "fraction": 0
+        },
+        "pricing": {
+          "count": 0,
+          "fraction": 0
+        }
+      },
+      "snapshot": {
+        "bodyHash": "2812d46dd41a28f69ccfa12fd7d985407fb1dd1619ff40660d45dd67d14d3d56",
+        "status": 200,
+        "fetchedAt": "2026-07-03T01:17:27.107Z",
+        "finalUrl": "https://www.idtech.com/courses",
+        "bodyChars": 2728569
+      },
+      "fetchError": null
+    }
+  }
+}

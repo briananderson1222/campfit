@@ -1,3 +1,16 @@
+> **SUPERSEDED (2026-07 full cutover).** This document describes the
+> Slice 1b/2b PILOT state (traverse behind a flag for 2 rotted sources,
+> legacy CSS-selector scrapers primary elsewhere, single-entity schema).
+> That state no longer exists: traverse is now THE ingestion pipeline for
+> every source, the legacy scrapers/flag/shadow plumbing described below
+> were deleted, and the schema is per-item, not single-entity. See
+> **[`docs/traverse-ingestion.md`](./traverse-ingestion.md)** for the
+> current architecture and **[`docs/cutover-report-2026-07.md`](./cutover-report-2026-07.md)**
+> for the before/after cutover results. Kept as-is below for historical
+> record of the pilot decision process.
+
+---
+
 # Traverse pilot (Slice 1b) — schema-directed extraction alongside the selector scrapers
 
 Status: **PILOT** (runs beside the legacy scrapers behind a separate command;

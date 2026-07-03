@@ -1,3 +1,16 @@
+> **Status update (2026-07 full cutover).** The two structural gaps this
+> adjudication identifies — single-entity schema causing cross-band
+> stitching, and the missing per-item enumeration that understated iD
+> Tech's field agreement — are now CLOSED: `lib/ingestion/traverse-schema.ts`
+> is per-item (`items[]`) and `lib/ingestion/traverse-item-grouping.ts`
+> groups by `pathIndices` with no cross-band stitching (see
+> `docs/cutover-report-2026-07.md` and the CI-proven anti-stitching test in
+> `npm run test:traverse-replay`). The adjudication content below is kept
+> unchanged as the historical record that motivated that work
+> (campfit#39).
+
+---
+
 # Traverse adjudication — glm-5.2 via Z.AI (Slice 2b, 2026-07)
 
 Adjudicates the LIVE parity run that pointed `@kontourai/traverse` (schema
