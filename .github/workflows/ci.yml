@@ -38,6 +38,31 @@ jobs:
       - name: Traverse replay proof (schema-directed extraction pilot)
         run: npm run test:traverse-replay
 
+  render_fetch_proof:
+    name: Render-fetch proof (Playwright headless fetch, #41)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Render-fetch proof (local fixture server, no network/DB)
+        run: npm run test:render-fetch
+
   build:
     name: Next.js production build
     runs-on: ubuntu-latest

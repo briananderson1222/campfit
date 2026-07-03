@@ -35,6 +35,7 @@ import {
   printReport,
   resolveFailureThreshold,
 } from "@/lib/ingestion/ingestion-runner";
+import { closeRenderBrowser } from "@/lib/ingestion/render-fetch";
 
 loadLocalEnv();
 
@@ -197,6 +198,12 @@ async function main() {
   }
 
   if (client) await client.end();
+
+  // Closes the shared headless-Chromium instance if any `render: true`
+  // source launched one this sweep (see lib/ingestion/render-fetch.ts) — a
+  // no-op when no source rendered. Must run before the summary/exit so a
+  // lingering browser process never keeps the sweep alive.
+  await closeRenderBrowser();
 
   const report = results.map(toIngestionReportEntry);
   const thresholdRatio = resolveFailureThreshold(process.env.SCRAPE_FAILURE_THRESHOLD);
