@@ -28,13 +28,36 @@
  * datum-native mechanisms (`DATUM_ROLE_*`, `DATUM_BASEURL_*`, or just editing
  * `.datum/config.json`) for anything more than a one-off override.
  *
- * NEVER imported from a CI-executed path: `test:traverse-replay` supplies its
- * own stub `ExtractionProvider` (tests/fixtures/traverse/stub-provider.ts)
- * and does not import this module, so CI needs no datum config and no key.
+ * `TRAVERSE_MAX_TOKENS` overrides the Anthropic adapter's response token
+ * budget (default {@link DEFAULT_EXTRACTION_MAX_TOKENS}, currently 2048 —
+ * the adapter's own default). Counter-intuitively, RAISING this for the
+ * per-item schema made glm-5.2-via-Z.AI extraction WORSE, not better: probed
+ * live against the same idtech snapshot at 2048/4096/6144/8192,
+ * `stop_reason === "max_tokens"` fired at EVERY budget (this model spends
+ * output tokens on something ahead of the tool_use block — the response
+ * never has room to finish it once the budget grows past ~2048), but at
+ * 4096+ the response was truncated before ANY valid tool_use JSON completed
+ * (0 proposals); only 2048 forced the model to reach usable tool_use content
+ * before truncating. See the idtech row and its root-cause note in
+ * docs/cutover-report-2026-07.md. Left overridable per-provider/model via
+ * this env var since a different provider may not share this behavior.
+ *
+ * Only imported by LIVE scripts (scripts/scrape.ts, scripts/cutover-report.ts) —
+ * never by `test:traverse-replay`, which supplies its own stub
+ * `ExtractionProvider` (tests/fixtures/traverse/stub-provider.ts), so CI needs
+ * no datum config and no key.
  */
 import { resolve } from "@kontourai/datum";
 import { createAnthropicExtractionProvider } from "@kontourai/traverse/anthropic";
 import type { ExtractionProvider } from "@kontourai/traverse";
+
+/**
+ * Default output token budget for the Anthropic adapter. Explicitly set to
+ * match the adapter's own built-in default (2048) — see the module doc
+ * above for why raising it empirically made glm-5.2-via-Z.AI extraction
+ * WORSE on the per-item schema, not better.
+ */
+export const DEFAULT_EXTRACTION_MAX_TOKENS = 2048;
 
 export interface ResolvedExtractionProvider {
   /** The traverse ExtractionProvider, ready to pass to runTraverseExtraction/extract. */
@@ -47,6 +70,8 @@ export interface ResolvedExtractionProvider {
   model: string;
   /** Base URL actually passed to the SDK (after ANTHROPIC_BASE_URL override, if any). */
   baseUrl?: string;
+  /** Output token budget actually passed to the SDK (after TRAVERSE_MAX_TOKENS override, if any). */
+  maxTokens: number;
 }
 
 /**
@@ -62,12 +87,16 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
 
   const model = process.env.TRAVERSE_MODEL || resolved.model;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || resolved.baseUrl;
+  const maxTokens = process.env.TRAVERSE_MAX_TOKENS
+    ? Number(process.env.TRAVERSE_MAX_TOKENS)
+    : DEFAULT_EXTRACTION_MAX_TOKENS;
 
   const provider = createAnthropicExtractionProvider({
     apiKey: resolved.apiKey,
     model,
+    maxTokens,
     ...(baseUrl ? { baseUrl } : {}),
   });
 
-  return { provider, ref, datumProvider: resolved.provider, model, baseUrl };
+  return { provider, ref, datumProvider: resolved.provider, model, baseUrl, maxTokens };
 }

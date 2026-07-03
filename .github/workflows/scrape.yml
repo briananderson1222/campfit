@@ -10,8 +10,8 @@ on:
         description: "Dry run (extract but don't write to DB)"
         type: boolean
         default: false
-      scraper:
-        description: "Run a specific scraper (e.g. 'avid4')"
+      source:
+        description: "Run a specific source (e.g. 'avid4')"
         type: string
         required: false
 
@@ -34,11 +34,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run scraper
+      - name: Run traverse ingestion pipeline
         run: |
           ARGS=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
-          if [ -n "${{ inputs.scraper }}" ]; then ARGS="$ARGS --scraper ${{ inputs.scraper }}"; fi
+          if [ -n "${{ inputs.source }}" ]; then ARGS="$ARGS --source ${{ inputs.source }}"; fi
           npx tsx scripts/scrape.ts $ARGS
         env:
           PGHOST: ${{ secrets.PGHOST }}
@@ -46,6 +46,12 @@ jobs:
           PGDATABASE: ${{ secrets.PGDATABASE }}
           PGUSER: ${{ secrets.PGUSER }}
           PGPASSWORD: ${{ secrets.PGPASSWORD }}
+          # Traverse's extraction provider is resolved via @kontourai/datum's
+          # "extraction-default" role (.datum/config.json -> glm-5.2@zai) —
+          # needs ZAI_API_KEY. Full cutover (2026-07): this workflow now does
+          # the ENTIRE ingestion sweep (it used to only need PG creds for the
+          # CSS-selector scrapers), so this secret must exist in the repo.
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
 
       - name: Trigger Vercel revalidation
         if: ${{ inputs.dry_run != 'true' }}

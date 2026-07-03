@@ -10,7 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "npm run check:content-boundary && npm run test:safe-url && npm run test:scrape-errors && npm run test:traverse-replay && eslint .",
+    "lint": "npm run check:content-boundary && npm run test:safe-url && npm run test:ingestion-runner && npm run test:cutover-baseline && npm run test:traverse-replay && eslint .",
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "crawl": "tsx scripts/run-crawl.ts",
     "backfill:providers": "tsx scripts/backfill-providers.ts",
@@ -21,7 +21,7 @@
     "test:access": "tsx scripts/test-access.ts",
     "test:learning": "tsx scripts/test-review-learning-signals.ts",
     "test:safe-url": "tsx scripts/test-safe-url.ts",
-    "test:scrape-errors": "tsx scripts/test-scrape-error-handling.ts",
+    "test:ingestion-runner": "tsx scripts/test-ingestion-runner.ts",
     "test:surface": "tsx scripts/test-surface-trust-export.ts",
     "verify:survey-review-items": "tsx scripts/verify-survey-review-items.ts",
     "verify:survey-apply": "tsx scripts/verify-survey-apply-path.ts",
@@ -31,9 +31,8 @@
     "verify:survey": "tsx scripts/verify-survey-integration.ts",
     "verify:admin": "tsx scripts/verify-admin-platform.ts",
     "test:traverse-replay": "tsx scripts/test-traverse-replay.ts",
-    "cutover:baseline": "tsx scripts/cutover-baseline.ts",
-    "cutover:report": "tsx scripts/cutover-report.ts",
-    "test:cutover-baseline": "tsx scripts/test-cutover-baseline.ts"
+    "test:cutover-baseline": "tsx scripts/test-cutover-baseline.ts",
+    "cutover:report": "tsx scripts/cutover-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

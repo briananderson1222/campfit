@@ -1,9 +1,9 @@
 /**
  * traverse-snapshot-store.ts — the shared snapshot store + fetch identity for
- * the traverse fetch/capture path (@kontourai/traverse@^0.3.0, Slice 2b).
+ * the traverse fetch/capture path (@kontourai/traverse@^0.4.0).
  *
- * Every LIVE traverse extraction (the parity harness and the flagged ingestion
- * path) fetches through `@kontourai/traverse/fetch`'s `fetchAndExtract` in
+ * Every LIVE traverse extraction (the traverse pipeline and the cutover report
+ * harness) fetches through `@kontourai/traverse/fetch`'s `fetchAndExtract` in
  * `live-with-capture` mode, persisting the exact bytes it extracted from into
  * this store. That makes each proposal traceable to a byte-identical snapshot
  * (via the `traverse-snapshot:<id>?...sha256=<hash>` sourceRef) and lets a
