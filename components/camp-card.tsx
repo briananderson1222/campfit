@@ -20,6 +20,7 @@ import {
 } from "@/lib/types";
 import { cn, formatCurrency, getLowestPrice, getAgeRangeSummary } from "@/lib/utils";
 import { CompareButton } from "@/components/compare-button";
+import { TrustBadge } from "@/components/trust-badge";
 import { useCommunity } from "@/lib/community-context";
 import { useSaves } from "@/lib/saves-context";
 import { routes } from "@/lib/routes";
@@ -60,6 +61,7 @@ export function CampCard({ camp }: { camp: Camp }) {
                 ? `Opens ${new Date(camp.registrationOpenDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
                 : status.label}
             </span>
+            <TrustBadge camp={camp} className="badge-contrast" />
           </div>
 
           {/* Save button — always visible, stops link navigation */}

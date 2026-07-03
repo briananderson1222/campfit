@@ -14,6 +14,7 @@ import {
 } from "@/lib/types";
 import { cn, getLowestPrice } from "@/lib/utils";
 import { useCommunity } from "@/lib/community-context";
+import { applyDefaultRanking } from "@/lib/trust";
 import { routes } from "@/lib/routes";
 
 interface CampExplorerProps {
@@ -28,7 +29,7 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
   const [filters, setFilters] = useState<CampFilters>({});
 
   const filteredCamps = useMemo(() => {
-    return camps.filter((camp) => {
+    const matched = camps.filter((camp) => {
       if (query) {
         const q = query.toLowerCase();
         const searchable = [
@@ -71,6 +72,9 @@ export function CampExplorer({ camps, totalCount }: CampExplorerProps) {
 
       return true;
     });
+    // R2/AC2: default browse + search results rank verified camps first
+    // (flag-gated via applyDefaultRanking; stable, drops nothing).
+    return applyDefaultRanking(matched);
   }, [camps, query, filters]);
 
   const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
