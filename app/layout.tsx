@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { ThemeProvider } from "next-themes";
 import { CompareProvider } from "@/lib/compare-context";
 import { SavesProvider } from "@/lib/saves-context";
@@ -67,6 +69,8 @@ export default function RootLayout({
             </CompareProvider>
           </SavesProvider>
         </ThemeProvider>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

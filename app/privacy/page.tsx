@@ -111,7 +111,7 @@ const sections: Section[] = [
       {
         kind: "p",
         text:
-          "Technical information and cookies. When you sign in, Supabase sets secure session cookies so you stay logged in (strictly necessary). We store a small, non-tracking language-preference cookie. Your light/dark theme choice is stored in your browser, not sent to us. Our host, Vercel, processes standard request data (such as IP address and browser type) to serve and secure the site. We use Vercel Web Analytics, a privacy-focused, cookieless tool that measures aggregate page views and performance; it does not use cross-site tracking cookies or build advertising profiles.",
+          "Technical information and cookies. When you sign in, Supabase sets secure session cookies so you stay logged in (strictly necessary). We store a small, non-tracking language-preference cookie. Your light/dark theme choice is stored in your browser, not sent to us. Our host, Vercel, processes standard request data (such as IP address and browser type) to serve and secure the site. We use Vercel Web Analytics and Vercel Speed Insights, privacy-focused, cookieless tools that measure aggregate page views and performance (Web Vitals); they do not use cross-site tracking cookies or build advertising profiles.",
       },
       {
         kind: "p",
