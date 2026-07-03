@@ -20,16 +20,17 @@
  *    used the un-indexed declared path directly, valid for a single-item
  *    page) is treated as item 0.
  *  - `pathIndices[1]`, when present, identifies which nested row (age band /
- *    session / price tier) within that item a `ageGroups[]` / `schedules[]` /
- *    `pricing[]` field belongs to — so a camp's own ages/dates/price come
- *    ONLY from its own item + its own sub-item group, never a different one.
+ *    session / price tier) — or, for the enum-array families below, which
+ *    array SLOT (e.g. `campTypes[N]`) — within that item a `ageGroups[]` /
+ *    `schedules[]` / `pricing[]` / `campTypes[]` / `categories[]` field
+ *    belongs to — so a camp's own ages/dates/price/types/categories come
+ *    ONLY from its own item, never a different one.
  *  - When a provider does not index a nested array at all (valid when an
- *    item genuinely has only one band/session/price), proposals for that
- *    nested field are paired POSITIONALLY in encounter order (the Nth
- *    `minAge` pairs with the Nth `maxAge`) — still scoped to the correct
- *    ITEM (no cross-camp stitching is possible either way), and a warning is
- *    recorded so this degraded-but-still-item-scoped path stays visible
- *    rather than silent.
+ *    item genuinely has only one band/session/price/type/category), proposals
+ *    for that field are paired POSITIONALLY in encounter order — still
+ *    scoped to the correct ITEM (no cross-camp stitching is possible either
+ *    way), and a warning is recorded so this degraded-but-still-item-scoped
+ *    path stays visible rather than silent.
  *
  * Cross-CHUNK item-index rebasing (traverse 0.5.0+ structural chunking).
  * `pathIndices[0]` is derived from the indexed source path a provider echoes
@@ -52,10 +53,27 @@
  * does not expose a per-proposal chunk id to make it exact), so each rebase
  * point is recorded as a warning on the item where it was detected rather
  * than applied silently.
+ *
+ * ENUM-ARRAY FAMILIES (traverse-recrawl-cutover, 2026-07, AC5): `campTypes`
+ * and `categories` are lists of enum STRINGS on one item — declared in
+ * traverse-schema.ts as `items[].campTypes[]` / `items[].categories[]` — not
+ * row objects with multiple sub-fields like `ageGroups[]`/`schedules[]`/
+ * `pricing[]`. `assembleEnumArrayEntries()` below is the matching
+ * reconstruction logic: it groups a field's proposals by `pathIndices[1]`
+ * (the array slot) when indexed, falls back to encounter order when not, and
+ * de-duplicates repeated identical values (keeping the highest-confidence
+ * occurrence) — a provider is free to emit the same tag/category more than
+ * once across chunks without producing a duplicated array entry downstream.
  */
 
 import type { ExtractionProposal } from "@kontourai/traverse";
-import { ITEMS_ARRAY_PREFIX, SCALAR_SCHEMA_PATHS, type ScalarSchemaPath } from "./traverse-schema";
+import {
+  ENUM_ARRAY_SCHEMA_PATHS,
+  ITEMS_ARRAY_PREFIX,
+  SCALAR_SCHEMA_PATHS,
+  type EnumArraySchemaPath,
+  type ScalarSchemaPath,
+} from "./traverse-schema";
 
 /** One nested array field family this module reconstructs full rows for. */
 const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
@@ -72,6 +90,13 @@ export interface FieldProposal {
   extractor: string;
 }
 
+/** One reconstructed entry of an enum-array family (e.g. one campTypes[] tag). */
+export interface EnumArrayEntry {
+  value: string;
+  confidence: number;
+  excerpt: string;
+}
+
 export interface AssembledItem {
   /** the source item index (pathIndices[0], or 0 when the model didn't index). */
   itemIndex: number;
@@ -83,6 +108,10 @@ export interface AssembledItem {
   schedules: { startDate: string | null; endDate: string | null; label: string; confidence: number }[];
   /** each entry is one price tier, fully reconstructed from its own excerpt(s). */
   pricing: { amount: number | null; label: string; confidence: number }[];
+  /** every distinct camp-type tag proposed for this item (enum-array family, not row objects). */
+  campTypes: EnumArrayEntry[];
+  /** every distinct category proposed for this item (enum-array family, not row objects). */
+  categories: EnumArrayEntry[];
   /** every proposal that contributed to this item, for audit (rawExtraction). */
   allProposals: ExtractionProposal[];
   /** non-fatal notes, e.g. positional-pairing fallback used for an unindexed nested field. */
@@ -102,7 +131,7 @@ function toFieldProposal(p: ExtractionProposal): FieldProposal {
 interface RelativeProposal {
   /** fieldPath with the "items[]." prefix stripped, e.g. "name" or "ageGroups[].minAge". */
   relPath: string;
-  /** pathIndices[1] when present — the nested row this belongs to. */
+  /** pathIndices[1] when present — the nested row (or enum-array slot) this belongs to. */
   subIndex?: number;
   proposal: ExtractionProposal;
 }
@@ -245,6 +274,54 @@ function assembleNestedRows(
   return { rows, warnings };
 }
 
+/**
+ * Reconstruct one enum-array family's entries (e.g. campTypes[]) within one
+ * item, from its relative proposals. Unlike {@link assembleNestedRows}, each
+ * entry is a single scalar value (no sub-fields) — so indexed proposals
+ * (pathIndices[1] present) are keyed directly by that slot index, and
+ * un-indexed proposals are appended in encounter order. Identical values
+ * (a provider re-affirming the same tag across chunks, or emitting it twice
+ * within one chunk) are de-duplicated, keeping the highest-confidence
+ * occurrence, so the reconstructed array never carries a repeated tag.
+ */
+function assembleEnumArrayEntries(
+  entries: RelativeProposal[]
+): { rows: EnumArrayEntry[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const indexedRows = new Map<number, FieldProposal>();
+  const unindexedRows: FieldProposal[] = [];
+
+  for (const entry of entries) {
+    const fp = toFieldProposal(entry.proposal);
+    if (entry.subIndex !== undefined) {
+      indexedRows.set(entry.subIndex, fp);
+    } else {
+      unindexedRows.push(fp);
+    }
+  }
+
+  if (unindexedRows.length > 0) {
+    warnings.push(
+      `enum-array field had ${unindexedRows.length} un-indexed proposal(s) — appended in encounter order (still item-scoped, not cross-item)`
+    );
+  }
+
+  const ordered: FieldProposal[] = [
+    ...[...indexedRows.entries()].sort((a, b) => a[0] - b[0]).map(([, fp]) => fp),
+    ...unindexedRows,
+  ];
+
+  const byValue = new Map<string, EnumArrayEntry>();
+  for (const fp of ordered) {
+    const value = String(fp.candidateValue);
+    const candidate: EnumArrayEntry = { value, confidence: fp.confidence, excerpt: fp.excerpt };
+    const existing = byValue.get(value);
+    if (!existing || candidate.confidence > existing.confidence) byValue.set(value, candidate);
+  }
+
+  return { rows: [...byValue.values()], warnings };
+}
+
 function rowExcerpt(row: Map<string, FieldProposal>): string {
   return [...row.values()][0]?.excerpt ?? "";
 }
@@ -314,9 +391,30 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         confidence: rowConfidence(row),
       }));
 
+    const enumArrayResults: Record<EnumArraySchemaPath, EnumArrayEntry[]> = {
+      campTypes: [],
+      categories: [],
+    };
+    for (const enumField of ENUM_ARRAY_SCHEMA_PATHS) {
+      const fieldEntries = entries.filter((e) => e.relPath === `${enumField}[]`);
+      const result = assembleEnumArrayEntries(fieldEntries);
+      enumArrayResults[enumField] = result.rows;
+      warnings.push(...result.warnings);
+    }
+
     for (const e of entries) allProposals.push(e.proposal);
 
-    items.push({ itemIndex, scalars, ageGroups, schedules, pricing, allProposals, warnings });
+    items.push({
+      itemIndex,
+      scalars,
+      ageGroups,
+      schedules,
+      pricing,
+      campTypes: enumArrayResults.campTypes,
+      categories: enumArrayResults.categories,
+      allProposals,
+      warnings,
+    });
   }
 
   return items;

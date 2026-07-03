@@ -1,11 +1,37 @@
+/**
+ * /api/admin/crawl/models — the admin crawl-modal's model picker options.
+ *
+ * PROVIDER-CHOICE DECISION (traverse-recrawl-cutover plan, Task 1.4 / AC8):
+ * the traverse-backed re-crawl path resolves its extraction provider via
+ * datum (`lib/ingestion/resolve-extraction-provider.ts`) against
+ * `.datum/config.json`'s `anthropic-compatible` providers — `@kontourai/traverse`
+ * ships ONLY an Anthropic-compatible adapter (`./anthropic` export; no
+ * Gemini/Ollama `ExtractionProvider` exists upstream, and campfit does not
+ * fork one in-repo per consume-never-fork, ADR 0008/0010). The legacy
+ * hardcoded Anthropic/Gemini/Ollama picker below therefore offered THREE
+ * options traverse cannot honor for a migrated route (Gemini, both Ollama
+ * entries) — a dead dropdown that silently no-ops when picked.
+ *
+ * DECISION: scope this endpoint to datum-registered `anthropic-compatible`
+ * models only (read live from `.datum/config.json` via `@kontourai/datum`'s
+ * `loadConfig()`), rather than badging/disabling the old hardcoded list.
+ * Reading live (not a hardcoded copy) means the picker never drifts out of
+ * sync with `.datum/config.json`'s actual registered providers/models —
+ * whatever `resolveExtractionProvider()` can actually resolve is exactly
+ * what this endpoint offers, so no option can silently no-op. Rationale
+ * recorded here + in the durable migration doc (Task 3.3).
+ */
 import { NextResponse } from 'next/server';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { loadConfig, describeAuth, defaultSecretRunner } from '@kontourai/datum';
 
 export interface LLMModel {
+  /** datum model ref shape: "<model>@<providerId>" — what `TRAVERSE_ROLE`/a future per-run provider override would consume. */
   id: string;
   label: string;
-  provider: 'anthropic' | 'gemini' | 'ollama';
-  badge: string;
+  /** datum provider id (e.g. "zai", "anthropic") — open-ended, not a fixed union, since it's read live from `.datum/config.json`. */
+  provider: string;
+  badge: 'Key Set' | 'No Key';
 }
 
 export interface ModelsResponse {
@@ -17,32 +43,31 @@ export async function GET() {
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  const { config } = loadConfig();
+  const providers = config.providers ?? {};
   const models: LLMModel[] = [];
 
-  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
-  const hasGemini = !!process.env.GEMINI_API_KEY;
+  for (const [providerId, providerConfig] of Object.entries(providers)) {
+    // traverse ships only the Anthropic-compatible adapter — see this file's
+    // header doc and lib/ingestion/resolve-extraction-provider.ts.
+    if (providerConfig.kind !== 'anthropic-compatible') continue;
+    const status = describeAuth(providerConfig.auth, process.env, defaultSecretRunner);
+    for (const model of providerConfig.models) {
+      models.push({
+        id: `${model}@${providerId}`,
+        label: model,
+        provider: providerId,
+        badge: status.available ? 'Key Set' : 'No Key',
+      });
+    }
+  }
 
-  models.push(
-    { id: 'anthropic:claude-haiku-4-5-20251001', label: 'Claude Haiku', provider: 'anthropic', badge: hasAnthropic ? 'Fastest' : 'No Key' },
-    { id: 'anthropic:claude-sonnet-4-6', label: 'Claude Sonnet', provider: 'anthropic', badge: hasAnthropic ? 'Best' : 'No Key' },
-    { id: 'gemini:gemini-2.0-flash', label: 'Gemini Flash', provider: 'gemini', badge: hasGemini ? 'Free' : 'No Key' },
-    { id: 'gemini:gemini-1.5-pro', label: 'Gemini Pro', provider: 'gemini', badge: hasGemini ? 'Slow' : 'No Key' },
-  );
-
-  // Ollama models — only usable when running locally (dev server / CLI crawl)
-  const isLocal = process.env.NODE_ENV === 'development' || !!process.env.OLLAMA_MODEL;
-  const ollamaDefault = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
-  const ollamaBadge = isLocal ? 'Local' : 'Local Only';
-  const ollamaModels: LLMModel[] = [
-    { id: `ollama:${ollamaDefault}`, label: ollamaDefault, provider: 'ollama', badge: ollamaBadge },
-  ];
-  if (ollamaDefault !== 'llama3.2:3b') ollamaModels.push({ id: 'ollama:llama3.2:3b', label: 'Llama 3.2 3B', provider: 'ollama', badge: ollamaBadge });
-  if (ollamaDefault !== 'gemma3:1b') ollamaModels.push({ id: 'ollama:gemma3:1b', label: 'Gemma 3 1B', provider: 'ollama', badge: ollamaBadge });
-  models.push(...ollamaModels);
-
-  // Default: first model with a real key, otherwise first Ollama model
-  const firstWithKey = models.find(m => m.badge !== 'No Key');
-  const defaultModel = firstWithKey?.id ?? ollamaModels[0].id;
+  const defaultRole = config.roles?.['extraction-default'];
+  const defaultModel =
+    models.find((m) => m.id === defaultRole)?.id ??
+    models.find((m) => m.badge === 'Key Set')?.id ??
+    models[0]?.id ??
+    '';
 
   return NextResponse.json({ models, default: defaultModel } satisfies ModelsResponse);
 }

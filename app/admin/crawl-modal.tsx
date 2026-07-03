@@ -25,20 +25,26 @@ const PRIORITY_OPTIONS: { value: ModalPriority; label: string; description: stri
 
 const LIMIT_OPTIONS = [5, 10, 20, 50];
 
+// Provider-choice decision (traverse-recrawl-cutover plan, Task 1.4 / AC8):
+// `/api/admin/crawl/models` now reads live from `.datum/config.json`'s
+// `anthropic-compatible` providers (traverse ships no Gemini/Ollama adapter —
+// see that route's header doc), so `provider` here is an open-ended datum
+// provider id (e.g. "zai", "anthropic"), not the old fixed 3-way union.
+// `PROVIDER_COLORS` keeps curated colors for the providers datum actually
+// registers today, falling back to a neutral color for any other id so a new
+// datum provider never renders unstyled.
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: 'bg-violet-100 text-violet-700',
-  gemini:    'bg-blue-100 text-blue-700',
-  ollama:    'bg-bark-100 text-bark-600',
+  zai:       'bg-teal-100 text-teal-700',
 };
 
 function modelBadgeClass(badge: string, provider: string): string {
   if (badge === 'No Key') return 'bg-red-100 text-red-500 line-through opacity-60';
-  if (badge === 'Local Only') return 'bg-amber-100 text-amber-600';
   return PROVIDER_COLORS[provider] ?? 'bg-gray-100 text-gray-600';
 }
 
 function isModelDisabled(badge: string): boolean {
-  return badge === 'No Key' || badge === 'Local Only';
+  return badge === 'No Key';
 }
 
 function formatDate(iso: string | null) {
@@ -74,9 +80,12 @@ export function CrawlModal({
   const [limit, setLimit] = useState(10);
   const [onboardUrl, setOnboardUrl] = useState('');
 
-  // Model selection
+  // Model selection — only meaningful for the discovery pre-pass (see the
+  // "Model selector" section below); extraction always resolves its provider
+  // via datum, never this picker (AC8, docs/traverse-recrawl-cutover-2026-07.md).
   const [models, setModels] = useState<LLMModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [defaultModelId, setDefaultModelId] = useState<string>('');
 
   // Specific-camp search
   const [searchQuery, setSearchQuery] = useState('');
@@ -117,6 +126,7 @@ export function CrawlModal({
       .then(r => r.json())
       .then(d => {
         setModels(d.models ?? []);
+        setDefaultModelId(d.default ?? '');
         if (!selectedModel) setSelectedModel(d.default ?? '');
       })
       .catch(() => {});
@@ -168,6 +178,12 @@ export function CrawlModal({
   const crawlCamps = priority === 'specific'
     ? searchResults.filter(c => selectedCampIds.has(c.id))
     : (preview?.camps ?? []);
+
+  // Label of the datum-resolved default extraction model (models/route.ts's
+  // `default`, i.e. the `extraction-default` datum role) — surfaced as helper
+  // text so the discovery-only model picker below can't be mistaken for an
+  // extraction-model choice.
+  const defaultModelLabel = models.find(m => m.id === defaultModelId)?.label ?? defaultModelId;
 
   const startCrawl = async () => {
     // Onboard URL mode — separate flow
@@ -448,16 +464,46 @@ export function CrawlModal({
                     </div>
                   )}
 
-                  {/* Model selector */}
-                  {models.length > 0 && (
+                  {/* Discover toggle */}
+                  <div>
+                    <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Options</label>
+                    <button
+                      onClick={() => setDiscover(d => !d)}
+                      className={cn(
+                        'flex items-center gap-2.5 w-full p-3 rounded-xl border text-left transition-all',
+                        discover
+                          ? 'border-pine-400 bg-pine-50 text-pine-700'
+                          : 'border-cream-300/60 hover:border-cream-400 hover:bg-cream-100/60 text-bark-500'
+                      )}
+                    >
+                      <Telescope className={cn('w-4 h-4 shrink-0', discover ? 'text-pine-500' : 'text-bark-300')} />
+                      <div>
+                        <p className="text-sm font-semibold leading-tight">Discover new programs</p>
+                        <p className="text-xs opacity-70 mt-0.5">On listing pages with multiple camps, find and create new programs automatically</p>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Model selector — discovery-only (AC8, iteration-2 fix). Field
+                      extraction ALWAYS resolves its provider via datum
+                      (resolve-extraction-provider.ts) and ignores this picker
+                      entirely (see crawl-pipeline.ts's warnModelOverrideIgnored /
+                      withModelOverrideNote — the per-run `model` override is only
+                      ever honored by this legacy discovery pre-pass). Rendering
+                      this picker unconditionally would make it a dead control for
+                      the default/common re-crawl flow (discover off), so it's
+                      shown only when the toggle above is on, matching this
+                      modal's existing pattern of hiding sections that don't apply
+                      to the current mode (search/onboard-url/limit above). */}
+                  {discover && models.length > 0 && (
                     <div>
-                      <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">LLM Model</label>
+                      <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Discovery LLM Model</label>
                       <div className="flex flex-wrap gap-2">
                         {models.map(m => {
                           const disabled = isModelDisabled(m.badge);
-                          const disabledTitle = m.badge === 'No Key'
-                            ? `Set ${m.provider.toUpperCase()}_API_KEY in environment to enable`
-                            : 'Ollama only works when running the dev server locally';
+                          const disabledTitle = disabled
+                            ? `No API key configured for the "${m.provider}" datum provider (.datum/config.json) — set its auth env var to enable`
+                            : undefined;
                           return (
                             <button
                               key={m.id}
@@ -481,31 +527,13 @@ export function CrawlModal({
                           );
                         })}
                       </div>
-                      {models.some(m => m.badge === 'Local Only') && (
-                        <p className="text-xs text-bark-300 mt-1.5">Ollama models require the local dev server — use CLI crawl instead: <code className="font-mono bg-cream-200/60 px-1 rounded">npm run crawl</code></p>
-                      )}
+                      <p className="text-xs text-bark-300 mt-1.5">
+                        Only used for finding new programs on listing pages. Field extraction
+                        always uses the datum-resolved default{defaultModelLabel ? ` (${defaultModelLabel})` : ''} —
+                        this selection has no effect on it.
+                      </p>
                     </div>
                   )}
-
-                  {/* Discover toggle */}
-                  <div>
-                    <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Options</label>
-                    <button
-                      onClick={() => setDiscover(d => !d)}
-                      className={cn(
-                        'flex items-center gap-2.5 w-full p-3 rounded-xl border text-left transition-all',
-                        discover
-                          ? 'border-pine-400 bg-pine-50 text-pine-700'
-                          : 'border-cream-300/60 hover:border-cream-400 hover:bg-cream-100/60 text-bark-500'
-                      )}
-                    >
-                      <Telescope className={cn('w-4 h-4 shrink-0', discover ? 'text-pine-500' : 'text-bark-300')} />
-                      <div>
-                        <p className="text-sm font-semibold leading-tight">Discover new programs</p>
-                        <p className="text-xs opacity-70 mt-0.5">On listing pages with multiple camps, find and create new programs automatically</p>
-                      </div>
-                    </button>
-                  </div>
 
                   {/* Priority preview list */}
                   {priority !== 'specific' && priority !== 'onboard_url' && (

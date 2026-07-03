@@ -48,6 +48,15 @@ export interface TraverseExtractOptions {
   /** Any ExtractionProvider — the Anthropic adapter in prod, a stub in tests. */
   provider: ExtractionProvider;
   maxContentChars?: number;
+  /**
+   * Optional extra per-field hints for THIS call, merged on top of the
+   * static `CAMP_FIELD_HINTS` (traverse-schema.ts) — mirrors
+   * `TraversePipelineDeps.extraFieldHints` (traverse-pipeline.ts), the same
+   * seam the per-camp re-crawl adapter uses to plumb admin-authored
+   * `CrawlSiteHint` rows into extraction. Overlapping keys win over
+   * `CAMP_FIELD_HINTS`'s defaults; never replaces them wholesale.
+   */
+  extraFieldHints?: Record<string, string>;
 }
 
 /**
@@ -58,12 +67,15 @@ export interface TraverseExtractOptions {
 export async function runTraverseExtraction(
   opts: TraverseExtractOptions
 ): Promise<ExtractionResult> {
+  const fieldHints = opts.extraFieldHints && Object.keys(opts.extraFieldHints).length > 0
+    ? { ...CAMP_FIELD_HINTS, ...opts.extraFieldHints }
+    : CAMP_FIELD_HINTS;
   return extract({
     content: opts.content,
     contentType: opts.contentType ?? "html",
     sourceRef: opts.sourceRef,
     targetSchema: CAMP_TARGET_SCHEMA,
-    fieldHints: CAMP_FIELD_HINTS,
+    fieldHints,
     provider: opts.provider,
     maxContentChars: opts.maxContentChars,
   });
