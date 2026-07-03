@@ -8,7 +8,7 @@ import { defineProductVocabulary } from '@kontourai/survey';
 // `as const` needed at this call site.
 export const campfitVocabulary = defineProductVocabulary({
   subjectType: 'public-directory.camp',
-  surface: 'public-directory.camp-profile',
+  facet: 'public-directory.camp-profile',
   claimTypes: {
     scalarField: 'public-data.field',
     scalarFieldCandidate: 'public-data.field-candidate',

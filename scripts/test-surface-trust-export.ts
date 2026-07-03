@@ -104,7 +104,7 @@ const emptyScheduleProof = buildCampfitSurfaceTrustInput({
   generatedAt,
 });
 
-assert.equal(proof.schemaVersion, 3);
+assert.equal(proof.schemaVersion, 5);
 assert.equal(proof.source, 'campfit.surface-adapter.public-directory-proof');
 assert.equal(proof.claims.length, 4);
 
