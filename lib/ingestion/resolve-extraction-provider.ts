@@ -42,6 +42,20 @@
  * docs/cutover-report-2026-07.md. Left overridable per-provider/model via
  * this env var since a different provider may not share this behavior.
  *
+ * Revisited for traverse 0.5.0's large-page chunking (2026-07 addendum, see
+ * docs/cutover-report-2026-07.md): `maxContentChars` (unset here, so the
+ * adapter/traverse default of 32_000 applies) became the PER-CHUNK content
+ * budget, not a whole-page one — orthogonal to this module's `maxTokens`,
+ * which is still the per-CALL (i.e. per-chunk) OUTPUT budget. Chunking cuts
+ * how much a single tool-use response has to enumerate (idtech's ~23 courses
+ * split across chunks instead of one call), which is what actually recovers
+ * most of idtech's under-extraction — DEFAULT_EXTRACTION_MAX_TOKENS itself
+ * did not need to change: a live idtech re-probe under 0.5.1 still hit
+ * `stop_reason === "max_tokens"` on EVERY chunk at 2048, so the same
+ * per-call ceiling (and the same "raising it makes glm-5.2 worse, not
+ * better" quirk above) still holds — chunking works around the ceiling by
+ * shrinking what has to fit under it per call, not by raising it.
+ *
  * Only imported by LIVE scripts (scripts/scrape.ts, scripts/cutover-report.ts) —
  * never by `test:traverse-replay`, which supplies its own stub
  * `ExtractionProvider` (tests/fixtures/traverse/stub-provider.ts), so CI needs
