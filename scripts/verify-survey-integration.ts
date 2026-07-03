@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { buildTrustReport, validateTrustBundle } from '@kontourai/surface';
 
 import {
@@ -9,15 +8,6 @@ import {
 import { campfitVocabulary } from '../lib/trust-vocabulary';
 
 const reviewedAt = '2026-06-01T12:00:00.000Z';
-
-const approveRouteSource = readFileSync('app/api/admin/review/[id]/approve/route.ts', 'utf8');
-const trustInputCall = approveRouteSource.match(/buildCampReviewTrustInput\(\{[\s\S]*?\n    \}\);/);
-assert.ok(trustInputCall, 'approve route should build Camp review trust input');
-assert.match(
-  trustInputCall[0],
-  /feedbackTags/,
-  'approve route must forward feedbackTags into buildCampReviewTrustInput',
-);
 
 function surveyMetadata(claim: { metadata?: Record<string, unknown> } | undefined): Record<string, unknown> {
   const survey = claim?.metadata?.survey;

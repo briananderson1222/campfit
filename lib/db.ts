@@ -26,7 +26,11 @@ function createPool(): Pool {
     database: config.database,
     user: config.user,
     password: config.password,
-    ssl: { rejectUnauthorized: false },
+    // `ssl: false` only when the connection string opts out via
+    // `sslmode=disable` (see lib/db-config.ts) — e.g. the throwaway/CI
+    // test-DB container, which has no SSL listener. Every other case keeps
+    // today's behavior unchanged.
+    ssl: config.ssl === false ? false : { rejectUnauthorized: false },
     // Keep small — Supabase free tier has a 60-connection limit.
     // A singleton is used globally so this is the max for the whole process.
     max: 3,

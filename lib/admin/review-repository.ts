@@ -1,3 +1,5 @@
+import type { PoolClient } from 'pg';
+
 import { getPool } from '@/lib/db';
 import type { CampChangeProposal, ProposedChanges, ProposalStatus } from './types';
 import { communityScopeSql } from './community-access';
@@ -111,7 +113,33 @@ export async function getProposal(id: string): Promise<CampChangeProposal | null
   const proposal = result.rows[0] ?? null;
   if (!proposal) return null;
   proposal.fieldTimeline = await getCampFieldTimeline(proposal.campId).catch(() => ({}));
+  // node-postgres parses TIMESTAMPTZ columns into JS Date objects, not the
+  // `string`/`string | null` these fields are typed as on CampChangeProposal
+  // (createdAt, reviewedAt, crawlStartedAt, crawlCompletedAt). That mismatch
+  // was previously invisible because every caller either JSON-serializes the
+  // proposal (Date -> ISO string, transparently) or re-wraps a field in
+  // `new Date(...)`; it surfaced for createdAt specifically because
+  // lib/admin/review-apply.ts forwards it unchanged as `proposalCreatedAt`
+  // into buildCampReviewTrustInput, whose @kontourai/surface validation
+  // requires a real string and throws "Missing required string field:
+  // createdAt" otherwise. Normalize every TIMESTAMPTZ-sourced field on this
+  // row the same way (not just createdAt), so the same failure class can't
+  // resurface for a sibling field the moment a future caller forwards one of
+  // them into a similarly strict validator. Same idiom as
+  // survey-review-sessions.ts's `toIsoString`.
+  proposal.createdAt = toIsoString(proposal.createdAt);
+  proposal.reviewedAt = toIsoStringOrNull(proposal.reviewedAt);
+  proposal.crawlStartedAt = toIsoStringOrNull(proposal.crawlStartedAt);
+  proposal.crawlCompletedAt = toIsoStringOrNull(proposal.crawlCompletedAt);
   return proposal;
+}
+
+function toIsoString(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function toIsoStringOrNull(value: string | Date | null | undefined): string | null {
+  return value == null ? null : toIsoString(value);
 }
 
 export async function getPendingProposalQueue(opts: {
@@ -143,10 +171,16 @@ export async function updateProposalStatus(
   status: ProposalStatus,
   reviewedBy: string,
   notes?: string,
-  feedbackTags?: string[]
+  feedbackTags?: string[],
+  client?: PoolClient,
 ): Promise<void> {
-  const pool = getPool();
-  await pool.query(
+  // Optional trailing `client` lets a caller (e.g. lib/admin/review-apply.ts's
+  // Review Apply transaction) run this status transition on the same
+  // transaction client as the field writes, so the Proposal's status flip is
+  // atomic with the writes it authorizes — mirrors the optional-client
+  // pattern in survey-review-sessions.ts's findSurveyReviewSession.
+  const queryable = client ?? getPool();
+  await queryable.query(
     `UPDATE "CampChangeProposal"
      SET status = $1, "reviewedAt" = now(), "reviewedBy" = $2, "reviewerNotes" = $3, "feedbackTags" = $4
      WHERE id = $5`,
@@ -160,13 +194,24 @@ export async function partialApprove(
   newAppliedFields: string[],
   reviewedBy: string,
   notes?: string,
+  client?: PoolClient,
 ): Promise<void> {
-  const pool = getPool();
-  // Merge new applied fields with any previously applied ones (deduplicate)
-  await pool.query(
+  // See updateProposalStatus's comment: optional trailing `client` allows
+  // this status transition to happen inside the same Review Apply
+  // transaction as the field writes it authorizes.
+  const queryable = client ?? getPool();
+  // Merge new applied fields with any previously applied ones (deduplicate).
+  // COALESCE the array_agg itself (F14): when both the row's existing
+  // "appliedFields" and newAppliedFields are empty, unnest() over an empty
+  // array produces zero rows and array_agg over zero rows is NULL, not
+  // '{}' — which would violate the column's NOT NULL constraint (see
+  // migration 011) on the very first keepPending call that approves
+  // nothing. Falling back to '{}' keeps that a normal, empty-but-valid
+  // write instead of a crash.
+  await queryable.query(
     `UPDATE "CampChangeProposal"
      SET "appliedFields" = (
-           SELECT array_agg(DISTINCT f ORDER BY f)
+           SELECT COALESCE(array_agg(DISTINCT f ORDER BY f), '{}')
            FROM unnest(COALESCE("appliedFields", '{}') || $1::text[]) f
          ),
          "priority"     = -1,
