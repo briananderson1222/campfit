@@ -21,7 +21,10 @@
  * var name) is unchanged so no deploy config needs updating.
  */
 
-import type { TraversePipelineSourceResult } from "./traverse-pipeline";
+import type {
+  TraverseEmbeddedStateInfo,
+  TraversePipelineSourceResult,
+} from "./traverse-pipeline";
 
 export interface IngestionReportEntry {
   /** stable source key (IngestionSourceConfig.key). */
@@ -38,9 +41,24 @@ export interface IngestionReportEntry {
   errors: string[];
   /**
    * Render telemetry (see lib/ingestion/render-fetch.ts) — present only for
-   * a `render: true` source whose render completed (issue #41).
+   * a `render: true` source, or a shell-detection auto-retry, whose render
+   * completed (issue #41).
    */
   render?: { durationMs: number; usedNetworkidleFallback: boolean };
+  /** true when this (non-render) source's first attempt looked like a JS shell (kontourai/traverse#11). */
+  shellDetected?: boolean;
+  /** true when a render retry was attempted for the detected shell. */
+  renderRetried?: boolean;
+  /** true when the render retry itself failed and the first attempt's (partial) results were kept instead. */
+  renderRetryFailed?: boolean;
+  /** true when the render retry grouped MORE items than the first attempt. */
+  renderImprovedProposalCount?: boolean;
+  /**
+   * Presence/counts of the embedded-state sidecar — present only when the
+   * DOWNGRADED js-shell-suspected-embedded-state-available warning fired
+   * (a render was skipped because usable embedded state was available).
+   */
+  embeddedStateAvailable?: TraverseEmbeddedStateInfo;
 }
 
 /** Adapt a pipeline result into a report entry for summarizeReport/printReport. */
@@ -56,6 +74,11 @@ export function toIngestionReportEntry(result: TraversePipelineSourceResult): In
     itemsRouted: result.routedProposalIds.filter((id) => id !== null).length,
     errors,
     render: result.render,
+    shellDetected: result.shellEscalation?.shellDetected,
+    renderRetried: result.shellEscalation?.renderRetried,
+    renderRetryFailed: result.shellEscalation?.renderRetryFailed,
+    renderImprovedProposalCount: result.shellEscalation?.renderImprovedProposalCount,
+    embeddedStateAvailable: result.embeddedStateAvailable,
   };
 }
 
@@ -97,6 +120,16 @@ export interface IngestionSummary {
   renderedSources: number;
   /** Of `renderedSources`, how many fell back from networkidle to domcontentloaded. */
   renderNetworkidleFallbacks: number;
+  /** Number of sources whose first attempt looked like a JS shell (kontourai/traverse#11). */
+  shellDetectedSources: number;
+  /** Of `shellDetectedSources`, how many were auto-retried with a render. */
+  renderRetriedSources: number;
+  /** Of `renderRetriedSources`, how many failed (first attempt's results were kept). */
+  renderRetryFailedSources: number;
+  /** Of `renderRetriedSources`, how many improved the grouped item count. */
+  renderRetryImprovedSources: number;
+  /** Number of sources with usable embedded state available (render skipped). */
+  embeddedStateAvailableSources: number;
 }
 
 /**
@@ -123,6 +156,12 @@ export function summarizeReport(
   const renderedSources = report.filter((r) => r.render !== undefined).length;
   const renderNetworkidleFallbacks = report.filter((r) => r.render?.usedNetworkidleFallback).length;
 
+  const shellDetectedSources = report.filter((r) => r.shellDetected).length;
+  const renderRetriedSources = report.filter((r) => r.renderRetried).length;
+  const renderRetryFailedSources = report.filter((r) => r.renderRetryFailed).length;
+  const renderRetryImprovedSources = report.filter((r) => r.renderImprovedProposalCount).length;
+  const embeddedStateAvailableSources = report.filter((r) => r.embeddedStateAvailable !== undefined).length;
+
   const reasonLine = shouldExitNonZero
     ? `${failedSources}/${totalSources} sources failed (${Math.round(failureRatio * 100)}%), ` +
       `exceeding the >${Math.round(thresholdRatio * 100)}% threshold` +
@@ -142,6 +181,11 @@ export function summarizeReport(
     reasonLine,
     renderedSources,
     renderNetworkidleFallbacks,
+    shellDetectedSources,
+    renderRetriedSources,
+    renderRetryFailedSources,
+    renderRetryImprovedSources,
+    embeddedStateAvailableSources,
   };
 }
 
@@ -157,7 +201,19 @@ export function printReport(report: IngestionReportEntry[], summary: IngestionSu
           r.render.usedNetworkidleFallback ? ", networkidle→domcontentloaded fallback" : ""
         }]`
       : "";
-    console.log(`${status} ${r.source} (${r.url}): ${r.itemsFound} item(s) found, ${r.itemsRouted} routed${failedTag}${renderTag}`);
+    const shellTag = r.shellDetected
+      ? r.renderRetryFailed
+        ? " [js-shell-suspected: render retry FAILED, kept first attempt]"
+        : ` [js-shell-suspected: auto-rendered retry${r.renderImprovedProposalCount ? ", improved item count" : ""}]`
+      : "";
+    const embeddedTag = r.embeddedStateAvailable
+      ? ` [embedded state available: ${r.embeddedStateAvailable.jsonLdCount} json-ld` +
+        `${r.embeddedStateAvailable.hasNextData ? ", __NEXT_DATA__" : ""}` +
+        `${r.embeddedStateAvailable.hasInitialState ? ", hydration state" : ""}]`
+      : "";
+    console.log(
+      `${status} ${r.source} (${r.url}): ${r.itemsFound} item(s) found, ${r.itemsRouted} routed${failedTag}${renderTag}${shellTag}${embeddedTag}`
+    );
     r.errors.slice(0, 3).forEach((e) => console.log(`   ✗ ${e}`));
   }
   console.log("─".repeat(60));
@@ -166,6 +222,18 @@ export function printReport(report: IngestionReportEntry[], summary: IngestionSu
     console.log(
       `🖥️  ${summary.renderedSources} source(s) rendered via headless Chromium` +
         `${summary.renderNetworkidleFallbacks > 0 ? ` (${summary.renderNetworkidleFallbacks} used the networkidle→domcontentloaded fallback)` : ""}.`
+    );
+  }
+  if (summary.shellDetectedSources > 0) {
+    console.log(
+      `🕵️  ${summary.shellDetectedSources} source(s) looked like a JS shell; ` +
+        `${summary.renderRetriedSources} auto-retried with a render ` +
+        `(${summary.renderRetryImprovedSources} improved, ${summary.renderRetryFailedSources} failed and kept the first attempt).`
+    );
+  }
+  if (summary.embeddedStateAvailableSources > 0) {
+    console.log(
+      `📦 ${summary.embeddedStateAvailableSources} source(s) had usable embedded state available (render skipped).`
     );
   }
   console.log(`✅ Done: ${summary.totalItemsRouted} items routed to review, ${summary.totalErrors} errors`);
