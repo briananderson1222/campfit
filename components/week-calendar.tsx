@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Camp, SUMMER_WEEKS, CATEGORY_LABELS, CampCategory, primaryCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useCommunity } from "@/lib/community-context";
+import { TrustBadge } from "@/components/trust-badge";
 import { routes } from "@/lib/routes";
 
 interface WeekCalendarProps {
@@ -56,12 +57,15 @@ export function WeekCalendar({ camps, compact = false }: WeekCalendarProps) {
               <div key={camp.id} className="flex items-center gap-0 group">
                 {/* Camp name */}
                 <div className={cn("shrink-0 pr-3", compact ? "w-40" : "w-52")}>
-                  <Link
-                    href={routes.campDetail(communitySlug, camp.slug)}
-                    className="text-sm font-medium text-bark-500 hover:text-pine-600 truncate block transition-colors"
-                  >
-                    {camp.name}
-                  </Link>
+                  <div className="flex items-center gap-1">
+                    <Link
+                      href={routes.campDetail(communitySlug, camp.slug)}
+                      className="text-sm font-medium text-bark-500 hover:text-pine-600 truncate transition-colors"
+                    >
+                      {camp.name}
+                    </Link>
+                    <TrustBadge camp={camp} variant="dot" className="shrink-0" />
+                  </div>
                   {!compact && (
                     <span className="text-xs text-bark-300">
                       {CATEGORY_LABELS[primaryCategory(camp)]}

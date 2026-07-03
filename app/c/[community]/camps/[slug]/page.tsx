@@ -13,7 +13,6 @@ import {
   DollarSign,
   Users,
   ShieldCheck,
-  AlertTriangle,
   Sunset,
 } from "lucide-react";
 import { getCampBySlug, getCampSlugs } from "@/lib/camp-repository";
@@ -32,6 +31,7 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { SaveButton } from "@/components/save-button";
 import { CompareButton } from "@/components/compare-button";
 import { LinkifiedText } from "@/components/linkified-text";
+import { TrustBadge } from "@/components/trust-badge";
 import { ReportButton } from "@/components/report-button";
 import { AdminCampBar } from "@/components/admin-camp-bar";
 import { routes } from "@/lib/routes";
@@ -207,12 +207,7 @@ export default async function CommunityDetailPage(
             {CAMP_TYPE_LABELS[campTypeVal]}
           </span>
           <span className={cn("badge", status.color)}>{status.label}</span>
-          {camp.dataConfidence === "PLACEHOLDER" && (
-            <span className="badge bg-amber-50 text-amber-600 gap-1">
-              <AlertTriangle className="w-3 h-3" />
-              Unverified
-            </span>
-          )}
+          <TrustBadge camp={camp} />
         </div>
 
         <div className="flex items-start justify-between gap-4">

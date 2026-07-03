@@ -1,6 +1,62 @@
 import { getPool } from '@/lib/db';
 import { campfitVocabulary } from '@/lib/trust-vocabulary';
+import { REQUIRED_FOR_VERIFIED } from './verification';
+import { communityScopeSql } from './community-access';
 import type { FieldDiff, LLMExtractionResult, ProposedChanges } from './types';
+
+export interface VerifiedCoverageMetric {
+  /** Total camps in scope. */
+  total: number;
+  /** Camps whose every REQUIRED_FOR_VERIFIED field is attested. */
+  verified: number;
+  /** Integer percent (0–100) of camps fully verified; 0 when total is 0. */
+  pct: number;
+}
+
+/**
+ * Site-wide roll-up of the per-camp CoverageMeter: the count and % of camps
+ * whose data is fully verified — the user-acquisition gate metric (R3/AC3).
+ *
+ * A camp counts as verified iff EVERY `REQUIRED_FOR_VERIFIED` field has an
+ * attestation (`fieldSources[field].approvedAt`) — the exact `isFullyVerified()`
+ * rule (lib/admin/verification.ts), evaluated in SQL over `Camp.fieldSources`
+ * so it needs no schema migration and stays in lock-step with the badge and
+ * the approve gate. The field list is the same compile-time constant, so the
+ * metric can never drift from the definition of "verified" it reports on.
+ *
+ * Pass a moderator's community slugs to scope the figure; omit for the
+ * site-wide (admin) number.
+ */
+export async function getVerifiedCoverageMetric(
+  communitySlugs?: string[],
+): Promise<VerifiedCoverageMetric> {
+  const pool = getPool();
+  const scope = communityScopeSql(communitySlugs, 'c."communitySlug"', 1);
+
+  // REQUIRED_FOR_VERIFIED is a compile-time constant whitelist of identifiers —
+  // safe to interpolate into the JSON path. Each `#>> '{field,approvedAt}'`
+  // returns the attestation timestamp as text, or NULL when unattested.
+  const allAttested = REQUIRED_FOR_VERIFIED
+    .map((field) => `(c."fieldSources" #>> '{${field},approvedAt}') IS NOT NULL`)
+    .join(' AND ');
+
+  const { rows } = await pool.query<{ total: number; verified: number }>(
+    `SELECT
+       COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE ${allAttested})::int AS verified
+     FROM "Camp" c
+     WHERE 1=1${scope.clause}`,
+    scope.values as unknown[],
+  );
+
+  const total = Number(rows[0]?.total ?? 0);
+  const verified = Number(rows[0]?.verified ?? 0);
+  return {
+    total,
+    verified,
+    pct: total > 0 ? Math.round((verified / total) * 100) : 0,
+  };
+}
 
 export async function recordExtractionMetrics(opts: {
   runId: string;
