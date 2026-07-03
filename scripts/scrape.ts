@@ -16,6 +16,18 @@ import { BaseScraper } from "@/lib/ingestion/scraper-base";
 import { Avid4Scraper } from "@/lib/ingestion/scrapers/avid4";
 import { DenverArtMuseumScraper } from "@/lib/ingestion/scrapers/denver-arts";
 import { CampInput } from "@/lib/ingestion/adapter";
+import {
+  isTraverseIngestionEnabled,
+  isRottedSource,
+  runTraverseIngestion,
+  type TraverseProposalSink,
+  type TraverseIngestionSourceResult,
+} from "@/lib/ingestion/traverse-ingestion";
+import { createCampfitSnapshotStore } from "@/lib/ingestion/traverse-snapshot-store";
+import { resolveExtractionProvider } from "@/lib/ingestion/resolve-extraction-provider";
+import { createProposal } from "@/lib/admin/review-repository";
+import { createCrawlRun, completeCrawlRun } from "@/lib/admin/crawl-repository";
+import { DatumError } from "@kontourai/datum";
 import { resolvePgConfig } from "@/lib/db-config";
 import { loadLocalEnv } from "./load-env";
 import {
@@ -132,6 +144,38 @@ async function upsertCamp(client: Client, camp: CampInput): Promise<string | nul
   return campId;
 }
 
+// ─── Traverse ingestion anchor (Slice 2b, flag TRAVERSE_INGESTION) ──────────
+
+/**
+ * Ensure a stable per-source "anchor" Camp exists so traverse's page-level
+ * proposals have a campId to attach a CampChangeProposal to. Idempotent upsert
+ * by a deterministic slug; returns the camp id. Only reached on the flagged
+ * ingestion path (never in the default sweep).
+ */
+async function ensureAnchorCamp(
+  client: Client,
+  sourceKey: string,
+  url: string
+): Promise<string> {
+  const slug = `traverse-${sourceKey}`;
+  const res = await client.query(
+    `INSERT INTO "Camp" (
+       id, slug, name, description, notes, "campType", category, "websiteUrl",
+       "interestingDetails", city, neighborhood, address, "lunchIncluded",
+       "registrationStatus", "sourceType", "sourceUrl", "dataConfidence", "lastVerifiedAt"
+     ) VALUES (
+       gen_random_uuid()::text, $1, $2, '', NULL, 'SUMMER_DAY'::"CampType",
+       'OTHER'::"CampCategory", $3, NULL, '', '', '', false,
+       'UNKNOWN'::"RegistrationStatus", 'SCRAPER'::"SourceType", $3,
+       'VERIFIED'::"DataConfidence", NOW()
+     )
+     ON CONFLICT (slug) DO UPDATE SET "lastVerifiedAt" = NOW()
+     RETURNING id`,
+    [slug, `${sourceKey} (traverse ingestion anchor)`, url]
+  );
+  return res.rows[0].id as string;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -159,12 +203,73 @@ async function main() {
     console.log("✓ Connected to Supabase\n");
   }
 
+  // ── Flagged traverse ingestion (TRAVERSE_INGESTION) ──────────────────────
+  // When on, the selector-DEAD sources (avid4, denver-art-museum) route through
+  // schema-directed traverse into the review sink (createProposal) instead of
+  // their rotted CSS path; the legacy scraper still runs in SHADOW for count
+  // telemetry. Healthy sources are untouched. Flag OFF => this block is skipped
+  // and the sweep is byte-identical to before. Needs the DB (real sink) + a
+  // resolvable extraction provider; degrades to legacy for those sources if
+  // either is missing.
+  const routedKeys = new Set<string>();
+  let traverseResults: TraverseIngestionSourceResult[] = [];
+  if (isTraverseIngestionEnabled(process.env)) {
+    const rotted = scrapers.filter((sc) => isRottedSource(sc.sourceKey));
+    if (dryRun) {
+      console.log(`ℹ️  TRAVERSE_INGESTION set but --dry-run: traverse routes to the review sink (a write), skipped in dry-run. ${rotted.length} rotted source(s) fall through to legacy.`);
+    } else if (rotted.length > 0 && client) {
+      let provider;
+      try {
+        provider = resolveExtractionProvider().provider;
+      } catch (err) {
+        if (err instanceof DatumError) {
+          console.warn(`⚠️  TRAVERSE_INGESTION on but datum could not resolve a provider (${err.code}): ${err.message} — rotted sources fall through to legacy.`);
+        } else {
+          throw err;
+        }
+      }
+      if (provider) {
+        const store = createCampfitSnapshotStore();
+        const crawlRun = await createCrawlRun({
+          triggeredBy: "scrape:traverse-ingestion",
+          trigger: "SCHEDULED",
+          totalCamps: rotted.length,
+        });
+        const sink: TraverseProposalSink = async (record, meta) => {
+          const campId = await ensureAnchorCamp(client as Client, meta.sourceKey, meta.sourceUrl);
+          return createProposal({
+            campId,
+            crawlRunId: crawlRun.id,
+            sourceUrl: meta.sourceUrl,
+            rawExtraction: record.rawExtraction,
+            proposedChanges: record.proposedChanges,
+            overallConfidence: record.overallConfidence,
+            extractionModel: record.extractionModel,
+          });
+        };
+        traverseResults = await runTraverseIngestion(
+          rotted.map((sc) => ({ key: sc.sourceKey, url: sc.entryUrl, scraper: sc })),
+          { provider, store, sink }
+        );
+        for (const r of traverseResults) routedKeys.add(r.source);
+        const ingestionErrors = traverseResults
+          .filter((r) => r.fetchError || r.extractionError)
+          .map((r) => ({ campId: "", error: r.fetchError ?? r.extractionError ?? "", url: r.snapshotRef ?? "" }));
+        await completeCrawlRun(crawlRun.id, "COMPLETED", ingestionErrors);
+      }
+    }
+  }
+
   // Each source is isolated: a dead URL / HTTP error / parse failure for
   // one scraper is caught and recorded here, it never aborts the loop —
   // see lib/ingestion/scrape-runner.ts for the isolation + threshold logic.
   const report: ScraperReportEntry[] = [];
 
-  for (const scraper of scrapers) {
+  // Sources handled by traverse ingestion above are not re-run on the legacy
+  // path (their legacy scraper already ran in shadow inside runTraverseIngestion).
+  const legacyScrapers = scrapers.filter((sc) => !routedKeys.has(sc.sourceKey));
+
+  for (const scraper of legacyScrapers) {
     const entry = await runScraperSafe(
       scraper,
       !dryRun && client
@@ -183,6 +288,18 @@ async function main() {
   }
 
   if (client) await client.end();
+
+  if (traverseResults.length > 0) {
+    console.log("\n🧭 Traverse ingestion (flagged) — rotted sources routed to review:");
+    for (const r of traverseResults) {
+      console.log(
+        `  • ${r.source}: legacy(shadow)=${r.legacyShadowCount} camps, traverse=${r.traverseProposalCount} proposals ` +
+          `(${r.routedFieldCount} fields)${r.routedProposalId ? ` → proposal ${r.routedProposalId}` : ""}` +
+          `${r.snapshotBodyHash ? ` [snapshot ${r.snapshotBodyHash.slice(0, 12)}]` : ""}` +
+          `${r.fetchError ? ` ✗ fetch ${r.fetchError}` : ""}${r.extractionError ? ` ✗ extract ${r.extractionError}` : ""}`
+      );
+    }
+  }
 
   const thresholdRatio = resolveFailureThreshold(process.env.SCRAPE_FAILURE_THRESHOLD);
   const summary = summarizeReport(report, thresholdRatio);

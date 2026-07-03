@@ -33,6 +33,15 @@ export abstract class BaseScraper {
   abstract readonly scraperName: string;
 
   /**
+   * Stable, machine-friendly source key (e.g. "avid4", "denver-art-museum").
+   * Used to key snapshots, parity/adjudication artifacts, and the
+   * TRAVERSE_INGESTION flag's rotted-source set — kept separate from the
+   * human-readable scraperName so display text can change without breaking
+   * artifact/telemetry identity.
+   */
+  abstract readonly sourceKey: string;
+
+  /**
    * Subclasses implement this to extract CampInput[] from the page.
    * May fetch additional pages (detail pages, pagination, etc.)
    */

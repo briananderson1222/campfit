@@ -19,6 +19,7 @@ import { slugify, parseDate, parseTime, extractAgeGroups, extractPrices } from "
 
 export class Avid4Scraper extends BaseScraper {
   readonly scraperName = "Avid4 Adventure";
+  readonly sourceKey = "avid4";
   readonly entryUrl = "https://avid4.com/day-camps/colorado/";
 
   async scrape(ctx: ScrapeContext): Promise<CampInput[]> {
