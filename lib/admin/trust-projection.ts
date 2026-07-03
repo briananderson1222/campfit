@@ -372,7 +372,7 @@ function campClaim(args: {
     id: args.claimId ?? campCanonicalClaimId(args.campId, args.field),
     subjectType: campfitVocabulary.subjectType,
     subjectId: args.campId,
-    surface: campfitVocabulary.surface,
+    facet: campfitVocabulary.facet,
     claimType: args.claimType ?? campfitVocabulary.claimTypes.scalarField,
     fieldOrBehavior: args.field,
     value: args.value,
