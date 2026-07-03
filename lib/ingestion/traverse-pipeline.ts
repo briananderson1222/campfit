@@ -48,6 +48,16 @@ import {
 import { assembleItems } from "./traverse-item-grouping";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import type { IngestionSourceConfig } from "./sources";
+import { createRenderFetchLike, DEFAULT_RENDER_TIMEOUT_MS, type RenderResult } from "./render-fetch";
+
+// TODO(#41 follow-up, blocked on kontourai/traverse#11): today `render` is an
+// explicit per-source opt-in (IngestionSourceConfig.render). Once traverse's
+// JS-shell-detection warning (kontourai/traverse#11: "content looks like a
+// JS-rendered shell — render and retry") lands, this is the place to
+// auto-retry a NON-render source with rendering when that warning fires on
+// its extraction, and record the escalation on the result (alongside the
+// `render` telemetry below) rather than requiring every JS-heavy source to
+// be curated by hand up front.
 
 /**
  * The review-sink seam. Given one item's traverse proposal record + which
@@ -111,6 +121,13 @@ export interface TraversePipelineSourceResult {
   model: string | null;
   /** wall time (ms) for the fetch+extract call. */
   latencyMs: number;
+  /**
+   * Render telemetry (see lib/ingestion/render-fetch.ts) — present only
+   * when this source has `render: true` AND the render itself completed
+   * (a render that timed out surfaces on `fetchError` instead, with no
+   * telemetry, exactly like any other fetch failure).
+   */
+  render?: { durationMs: number; usedNetworkidleFallback: boolean };
 }
 
 /**
@@ -142,6 +159,26 @@ export async function runTraversePipelineForSource(
     latencyMs: 0,
   };
 
+  // `render: true` (issue #41): swap the injected FetchLike for a
+  // headless-Chromium render instead of a plain HTTP GET, and give
+  // `fetchSource` a generous outer timeoutMs + zero retries so its own
+  // AbortController/retry loop doesn't fight (or triple) renderPage()'s own
+  // hard, two-attempt timeout budget (see render-fetch.ts). Any other
+  // injected fetchOptions (e.g. a test's `sleep`/`politenessState`) are
+  // preserved; only `fetch` is overridden.
+  const renderTimeoutMs = src.renderTimeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
+  const fetchOptions: FetchSourceOptions | undefined = src.render
+    ? {
+        ...deps.fetchOptions,
+        fetch: createRenderFetchLike({
+          timeoutMs: renderTimeoutMs,
+          onRendered: (info: RenderResult) => {
+            result.render = { durationMs: info.durationMs, usedNetworkidleFallback: info.usedNetworkidleFallback };
+          },
+        }),
+      }
+    : deps.fetchOptions;
+
   const startedAt = now();
   const far = await fetchAndExtract(
     {
@@ -149,6 +186,7 @@ export async function runTraversePipelineForSource(
       url: src.url,
       contentType: "html",
       userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
+      ...(src.render ? { timeoutMs: renderTimeoutMs * 2 + 5_000, retries: 0 } : {}),
     },
     {
       targetSchema: CAMP_TARGET_SCHEMA,
@@ -157,7 +195,7 @@ export async function runTraversePipelineForSource(
       store: deps.store,
       mode: deps.mode ?? "live-with-capture",
       maxContentChars: deps.maxContentChars,
-      fetchOptions: deps.fetchOptions,
+      fetchOptions,
     }
   );
   result.latencyMs = now() - startedAt;
@@ -206,7 +244,8 @@ export async function runTraversePipelineForSource(
     `[traverse-pipeline] ${src.key}: ${result.itemCount} item(s), ${result.routedFieldCount} field(s) routed to review ` +
       `(${result.routedProposalIds.filter((id) => id !== null).length} proposal(s) created)` +
       `${result.tokensUsed !== null ? `, ${result.tokensUsed} tokens` : ""}, ${result.latencyMs}ms` +
-      `${result.snapshotBodyHash ? ` [snapshot ${result.snapshotBodyHash.slice(0, 12)}]` : ""}`
+      `${result.snapshotBodyHash ? ` [snapshot ${result.snapshotBodyHash.slice(0, 12)}]` : ""}` +
+      `${result.render ? ` [rendered in ${result.render.durationMs}ms${result.render.usedNetworkidleFallback ? ", networkidle→domcontentloaded fallback" : ""}]` : ""}`
   );
   return result;
 }

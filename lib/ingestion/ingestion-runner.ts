@@ -36,6 +36,11 @@ export interface IngestionReportEntry {
   itemsRouted: number;
   /** Error messages: source-level fetch/extraction errors. */
   errors: string[];
+  /**
+   * Render telemetry (see lib/ingestion/render-fetch.ts) — present only for
+   * a `render: true` source whose render completed (issue #41).
+   */
+  render?: { durationMs: number; usedNetworkidleFallback: boolean };
 }
 
 /** Adapt a pipeline result into a report entry for summarizeReport/printReport. */
@@ -50,6 +55,7 @@ export function toIngestionReportEntry(result: TraversePipelineSourceResult): In
     itemsFound: result.itemCount,
     itemsRouted: result.routedProposalIds.filter((id) => id !== null).length,
     errors,
+    render: result.render,
   };
 }
 
@@ -87,6 +93,10 @@ export interface IngestionSummary {
   /** True when the process should exit non-zero */
   shouldExitNonZero: boolean;
   reasonLine: string;
+  /** Number of `render: true` sources whose render completed this sweep. */
+  renderedSources: number;
+  /** Of `renderedSources`, how many fell back from networkidle to domcontentloaded. */
+  renderNetworkidleFallbacks: number;
 }
 
 /**
@@ -110,6 +120,9 @@ export function summarizeReport(
   const overThreshold = failureRatio > thresholdRatio;
   const shouldExitNonZero = zeroSucceeded || overThreshold;
 
+  const renderedSources = report.filter((r) => r.render !== undefined).length;
+  const renderNetworkidleFallbacks = report.filter((r) => r.render?.usedNetworkidleFallback).length;
+
   const reasonLine = shouldExitNonZero
     ? `${failedSources}/${totalSources} sources failed (${Math.round(failureRatio * 100)}%), ` +
       `exceeding the >${Math.round(thresholdRatio * 100)}% threshold` +
@@ -127,6 +140,8 @@ export function summarizeReport(
     totalErrors,
     shouldExitNonZero,
     reasonLine,
+    renderedSources,
+    renderNetworkidleFallbacks,
   };
 }
 
@@ -137,10 +152,21 @@ export function printReport(report: IngestionReportEntry[], summary: IngestionSu
   for (const r of report) {
     const status = !r.ok ? "❌" : r.errors.length > 0 ? "⚠️" : "✅";
     const failedTag = !r.ok ? " — SOURCE FAILED" : "";
-    console.log(`${status} ${r.source} (${r.url}): ${r.itemsFound} item(s) found, ${r.itemsRouted} routed${failedTag}`);
+    const renderTag = r.render
+      ? ` [rendered in ${r.render.durationMs}ms${
+          r.render.usedNetworkidleFallback ? ", networkidle→domcontentloaded fallback" : ""
+        }]`
+      : "";
+    console.log(`${status} ${r.source} (${r.url}): ${r.itemsFound} item(s) found, ${r.itemsRouted} routed${failedTag}${renderTag}`);
     r.errors.slice(0, 3).forEach((e) => console.log(`   ✗ ${e}`));
   }
   console.log("─".repeat(60));
   console.log(`\n${summary.reasonLine}`);
+  if (summary.renderedSources > 0) {
+    console.log(
+      `🖥️  ${summary.renderedSources} source(s) rendered via headless Chromium` +
+        `${summary.renderNetworkidleFallbacks > 0 ? ` (${summary.renderNetworkidleFallbacks} used the networkidle→domcontentloaded fallback)` : ""}.`
+    );
+  }
   console.log(`✅ Done: ${summary.totalItemsRouted} items routed to review, ${summary.totalErrors} errors`);
 }

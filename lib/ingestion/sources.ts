@@ -17,6 +17,21 @@ export interface IngestionSourceConfig {
   name: string;
   /** entry URL to fetch. */
   url: string;
+  /**
+   * When true, this source's page is fetched via a headless-Chromium render
+   * (see lib/ingestion/render-fetch.ts, issue #41) instead of a plain HTTP
+   * GET — for JS-rendered SPA sources whose plain fetch returns an empty
+   * shell. Off by default; the rendered HTML flows into the SAME
+   * fetch->extract pipeline as a plain fetch. No source enables this yet —
+   * it's a per-source curation decision made once a source is confirmed to
+   * need it (see docs/traverse-ingestion.md).
+   */
+  render?: boolean;
+  /**
+   * Hard per-attempt render timeout (ms). Only consulted when `render` is
+   * true. Defaults to render-fetch's DEFAULT_RENDER_TIMEOUT_MS (~30s).
+   */
+  renderTimeoutMs?: number;
 }
 
 export const INGESTION_SOURCES: IngestionSourceConfig[] = [
