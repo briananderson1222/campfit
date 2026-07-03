@@ -15,7 +15,7 @@ export async function generateMetadata(
     params.community.charAt(0).toUpperCase() + params.community.slice(1);
 
   return {
-    title: `Compare Camps — ${displayName} | CampFit`,
+    title: `Compare Camps — ${displayName}`,
     description: `Compare up to 3 ${displayName} kids camps side by side — pricing, schedules, age groups, and more.`,
   };
 }

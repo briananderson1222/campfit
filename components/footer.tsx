@@ -30,7 +30,7 @@ export function Footer() {
             </h3>
             <div className="flex flex-col gap-2.5">
               <FooterLink href={routes.home()}>Browse Camps</FooterLink>
-              <FooterLink href={routes.home()}>Weekly Calendar</FooterLink>
+              <FooterLink href="/calendar">Weekly Calendar</FooterLink>
               <FooterLink href="/dashboard">Saved Camps</FooterLink>
             </div>
           </div>
@@ -41,9 +41,7 @@ export function Footer() {
               Company
             </h3>
             <div className="flex flex-col gap-2.5">
-              <FooterLink href="#">About CampFit</FooterLink>
-              <FooterLink href="#">List Your Camp</FooterLink>
-              <FooterLink href="#">Privacy Policy</FooterLink>
+              <FooterLink href="/privacy">Privacy Policy</FooterLink>
             </div>
           </div>
         </div>

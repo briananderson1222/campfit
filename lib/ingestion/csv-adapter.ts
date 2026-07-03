@@ -15,6 +15,7 @@ import { parseAgeGroups, parseColumnAgeMarker } from "./age-parser";
 import { parseHours, parseEarlyDropOff, parseLatePickup, parseWeekColumns, parseWeeksRunField } from "./schedule-parser";
 import { classifyCategory, inferCategoryFromText } from "./category-classifier";
 import { parseRegistrationStatus, parseRegistrationDate } from "./registration-parser";
+import { looksLikeArtifactName, containsEditorialMarker } from "./content-guards";
 
 /**
  * Which type of CSV file is being parsed.
@@ -50,6 +51,16 @@ export class CsvIngestionAdapter implements DataIngestionAdapter {
     // Skip header/instruction rows
     if (name.toLowerCase().includes("2026 notes") || name.toLowerCase().includes("updater")) {
       return null;
+    }
+
+    // Reject scrape/spreadsheet artifact names (audit F-03), e.g.
+    // "Caresplit … - Now Grasshopper Kids, see that row." Throwing (rather than
+    // returning null) surfaces the rejection in the ingestion error report /
+    // seed error list instead of silently dropping the row.
+    if (looksLikeArtifactName(name)) {
+      throw new Error(
+        `Rejected camp: name looks like an import artifact: ${JSON.stringify(name)}`
+      );
     }
 
     const campType = FILE_TYPE_TO_CAMP_TYPE[this.fileType];
@@ -94,7 +105,13 @@ export class CsvIngestionAdapter implements DataIngestionAdapter {
     const pricing = parsePricing(rawCost, rawDiscounts);
 
     // ── Ages ──
-    const ageGroups = this.parseAges(row);
+    // Drop any age group whose label carries an editorial marker (audit F-10):
+    // "** VERIFY ** Pre-K …" reached the age-parser's raw-text fallback and
+    // shipped to a live camp card. Better to omit the age field than render the
+    // marker; the record itself still imports.
+    const ageGroups = this.parseAges(row).filter(
+      (ag) => !containsEditorialMarker(ag.label)
+    );
 
     // ── Registration ──
     const rawRegStatus = findColumn(row, [

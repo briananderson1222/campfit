@@ -15,7 +15,7 @@ export async function generateMetadata(
     params.community.charAt(0).toUpperCase() + params.community.slice(1);
 
   return {
-    title: `${displayName} Kids Camps | CampFit`,
+    title: `${displayName} Kids Camps`,
     description: `Browse the best kids camps in ${displayName}. Filter by age, activity, and weekly availability.`,
   };
 }
