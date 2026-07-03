@@ -90,10 +90,11 @@ listing.
 - **Hosting logs.** CampFit is hosted on **Vercel**. Like most web hosts, Vercel
   processes standard request data (such as IP address and browser type) to serve
   and secure the site.
-- **Analytics.** We use **Vercel Web Analytics**, a privacy-focused analytics
-  tool that measures aggregate page views and performance. Vercel Web Analytics
-  is designed to be **cookieless** and does not use cross-site tracking cookies
-  or build advertising profiles of visitors.
+- **Analytics.** We use **Vercel Web Analytics** and **Vercel Speed Insights**,
+  privacy-focused tools that measure aggregate page views and site performance
+  (Web Vitals such as loading and responsiveness). Both are designed to be
+  **cookieless** and do not use cross-site tracking cookies or build advertising
+  profiles of visitors.
 
 ### 2.8 Information we do NOT collect today
 To be transparent: our database schema contains optional fields for a phone
