@@ -5,7 +5,7 @@ import { CompareClient } from "@/components/compare-client";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Compare Camps — CampFit",
+  title: "Compare Camps",
   description:
     "Compare up to 3 Denver kids camps side by side — pricing, schedules, age groups, and more.",
 };

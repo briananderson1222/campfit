@@ -31,6 +31,7 @@ import { SaveButton } from "@/components/save-button";
 import { CompareButton } from "@/components/compare-button";
 import { LinkifiedText } from "@/components/linkified-text";
 import { resolvePgConfig } from "@/lib/db-config";
+import { truncateAtWord, joinMetaDescription } from "@/lib/seo/meta-description";
 
 export const dynamic = "force-dynamic";
 
@@ -62,17 +63,15 @@ export async function generateMetadata(
         })()
       : null;
 
-  const description = [
-    camp.description?.slice(0, 120),
+  const description = joinMetaDescription([
+    camp.description ? truncateAtWord(camp.description, 120) : null,
     ageRange && `For ${ageRange}.`,
     minPrice && `Starting at ${formatCurrency(minPrice)}.`,
     camp.neighborhood && `Located in ${camp.neighborhood}, Denver.`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  ]);
 
   return {
-    title: `${camp.name} — Denver Kids Camp | CampFit`,
+    title: `${camp.name} — Denver Kids Camp`,
     description,
     openGraph: {
       title: `${camp.name} | CampFit`,
