@@ -1,19 +1,14 @@
 import { NextResponse } from 'next/server';
-import { getProposal, updateProposalStatus, partialApprove } from '@/lib/admin/review-repository';
-import { writeChangeLogs } from '@/lib/admin/changelog-repository';
-import { recordReviewDecision } from '@/lib/admin/metrics-repository';
-import { isFullyVerified } from '@/lib/admin/verification';
-import { buildCampReviewTrustInput } from '@/lib/admin/trust-projection';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlug } from '@/lib/admin/community-access';
-import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from '@/lib/admin/survey-review-apply';
-import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import {
-  assertSurveyReviewSessionFreshForProposal,
-  getSurveyReviewSessionForProposal,
+  applyProposalReview,
+  ReviewApplyConflictError,
+  ReviewApplyProposalNotFoundError,
+  ReviewApplySessionNotFoundError,
+  SurveyReviewApplyError,
   SurveyReviewSessionStaleError,
-} from '@/lib/admin/survey-review-sessions';
+} from '@/lib/admin/review-apply';
 
 export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -21,324 +16,44 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const { approvedFields: requestedApprovedFields = [], reviewerNotes: requestedReviewerNotes, feedbackTags, overrides, keepPending = false, applyFromSurvey = false, reviewSessionId }: {
-    approvedFields?: string[];
+  const { reviewSessionId, reviewerNotes, feedbackTags, keepPending = false }: {
+    reviewSessionId?: string;
     reviewerNotes?: string;
     feedbackTags?: string[];
-    overrides?: Record<string, import('@/lib/admin/types').FieldDiff>;
-    keepPending?: boolean; // if true: apply selected fields but leave proposal in queue
-    applyFromSurvey?: boolean;
-    reviewSessionId?: string;
+    keepPending?: boolean;
   } = await request.json();
 
-  const proposal = await getProposal(params.id);
-  if (!proposal) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (proposal.status !== 'PENDING') return NextResponse.json({ error: 'Already reviewed' }, { status: 409 });
-
-  if (applyFromSurvey && overrides) {
-    return NextResponse.json({ error: 'Survey apply does not accept client-submitted field overrides.' }, { status: 400 });
+  if (!reviewSessionId || typeof reviewSessionId !== 'string') {
+    return NextResponse.json({ error: 'Review apply requires a server-created reviewSessionId.' }, { status: 400 });
   }
-  if (applyFromSurvey && (!reviewSessionId || typeof reviewSessionId !== 'string')) {
-    return NextResponse.json({ error: 'Survey apply requires a server-created reviewSessionId.' }, { status: 400 });
-  }
-
-  const unappliedProposalFields = unappliedFields(proposal);
-  if (!applyFromSurvey) {
-    const invalidLegacyFields = invalidLegacyApplyFields({
-      proposalFields: unappliedProposalFields,
-      approvedFields: requestedApprovedFields,
-      overrideFields: Object.keys(overrides ?? {}),
-    });
-    if (invalidLegacyFields.length > 0) {
-      return NextResponse.json({
-        error: `Review apply includes field(s) outside this proposal: ${invalidLegacyFields.join(', ')}`,
-      }, { status: 400 });
-    }
-  }
-
-  // Merge reviewer overrides into proposal changes (reviewer may have edited values)
-  const effectiveChanges = pickFields(
-    overrides ? { ...proposal.proposedChanges, ...overrides } : proposal.proposedChanges,
-    unappliedProposalFields,
-  );
-  const reviewedAt = new Date().toISOString();
-
-  let approvedFields = requestedApprovedFields;
-  let reviewerNotes = requestedReviewerNotes;
-  let surveyRejectedFields: string[] | undefined;
-
-  if (applyFromSurvey) {
-    try {
-      const surveySessionRecord = await getSurveyReviewSessionForProposal({
-        proposalId: proposal.id,
-        reviewSessionId: reviewSessionId!,
-      });
-      if (!surveySessionRecord) {
-        return NextResponse.json({ error: 'Survey review session was not found for this proposal.' }, { status: 404 });
-      }
-      assertSurveyReviewSessionFreshForProposal(surveySessionRecord, proposal);
-
-      const surveyEvents = await getSurveyReviewEvents({
-        proposalId: proposal.id,
-        reviewSessionId,
-      });
-      const surveyApply = deriveCampApplyFromSurveySession({
-        proposal,
-        session: surveySessionRecord.snapshot,
-        events: surveyEvents,
-        mode: keepPending ? 'partial' : 'full',
-        serverSession: {
-          sessionName: surveySessionRecord.sessionName,
-          snapshotHash: surveySessionRecord.snapshotHash,
-          updatedAt: surveySessionRecord.updatedAt,
-        },
-      });
-      approvedFields = surveyApply.approvedFields;
-      surveyRejectedFields = surveyApply.rejectedFields;
-      reviewerNotes = combineReviewerNotes(requestedReviewerNotes, surveyApply.reviewerNotes);
-    } catch (error) {
-      if (error instanceof SurveyReviewApplyError) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
-      }
-      if (error instanceof SurveyReviewSessionStaleError) {
-        return NextResponse.json({ error: error.message }, { status: 409 });
-      }
-      throw error;
-    }
-  }
-
-  const pool = getPool();
-  const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
-
-    const allFields = Object.keys(effectiveChanges);
-    const rejectedFields = surveyRejectedFields ?? allFields.filter(f => !approvedFields.includes(f));
-    buildCampReviewTrustInput({
-      proposalId: proposal.id,
-      campId: proposal.campId,
-      sourceUrl: proposal.sourceUrl,
-      proposedChanges: effectiveChanges,
-      approvedFields,
+    const result = await applyProposalReview({
+      proposalId: params.id,
+      reviewSessionId,
       reviewer: auth.access.email,
-      reviewedAt,
-      proposalCreatedAt: proposal.createdAt,
-      extractionModel: proposal.extractionModel,
-      reviewerNotes,
+      notes: reviewerNotes,
       feedbackTags,
+      keepPending,
     });
 
-    const SCALAR = [
-      'name', 'organizationName', 'description', 'campType', 'category', 'registrationStatus',
-      'registrationOpenDate', 'registrationCloseDate', 'lunchIncluded', 'address', 'neighborhood', 'city',
-      'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
-      'interestingDetails', 'state', 'zip',
-    ];
-    const RELATIONS: Record<string, string> = {
-      ageGroups: 'CampAgeGroup',
-      schedules: 'CampSchedule',
-      pricing: 'CampPricing',
-    };
-
-    type ChangeLogEntry = Parameters<typeof writeChangeLogs>[0][number];
-    const changeLogs: ChangeLogEntry[] = [];
-
-    for (const field of approvedFields) {
-      const diff = effectiveChanges[field];
-      if (!diff) continue;
-
-      if (SCALAR.includes(field)) {
-        const fieldSource = {
-          excerpt: diff.excerpt ?? null,
-          sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-          approvedAt: reviewedAt,
-        };
-        await client.query(
-          `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
-          [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
-        );
-        changeLogs.push({
-          campId: proposal.campId,
-          proposalId: proposal.id,
-          changedBy: auth.access.email,
-          fieldName: field,
-          oldValue: diff.old,
-          newValue: diff.new,
-          changeType: (diff.old === null || diff.old === '') ? 'FIELD_POPULATED' : 'UPDATE',
-        });
-      } else if (field in RELATIONS && Array.isArray(diff.new)) {
-        const table = RELATIONS[field];
-        const fieldSource = {
-          excerpt: diff.excerpt ?? null,
-          sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-          approvedAt: reviewedAt,
-        };
-
-        await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
-
-        if (field === 'ageGroups') {
-          for (const ag of diff.new as { label: string; minAge: number | null; maxAge: number | null; minGrade: number | null; maxGrade: number | null }[]) {
-            await client.query(
-              `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
-               VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6)`,
-              [proposal.campId, ag.label, ag.minAge, ag.maxAge, ag.minGrade, ag.maxGrade]
-            );
-          }
-        } else if (field === 'schedules') {
-          for (const s of diff.new as { label: string; startDate: string | null; endDate: string | null; startTime: string | null; endTime: string | null; earlyDropOff: string | null; latePickup: string | null }[]) {
-            await client.query(
-              `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate", "startTime", "endTime", "earlyDropOff", "latePickup")
-               VALUES (gen_random_uuid()::text, $1, $2, $3::date, $4::date, $5, $6, $7, $8)`,
-              [proposal.campId, s.label, s.startDate, s.endDate, s.startTime, s.endTime, s.earlyDropOff, s.latePickup]
-            );
-          }
-        } else if (field === 'pricing') {
-          for (const p of diff.new as { label: string; amount: number; unit: string; durationWeeks: number | null; ageQualifier: string | null; discountNotes: string | null }[]) {
-            await client.query(
-              `INSERT INTO "CampPricing" (id, "campId", label, amount, unit, "durationWeeks", "ageQualifier", "discountNotes")
-               VALUES (gen_random_uuid()::text, $1, $2, $3, $4::"PricingUnit", $5, $6, $7)`,
-              [proposal.campId, p.label, p.amount, p.unit, p.durationWeeks, p.ageQualifier, p.discountNotes]
-            );
-          }
-        }
-
-        if (field === 'schedules') {
-          await client.query(
-            `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
-            [JSON.stringify({ schedules: fieldSource }), proposal.campId],
-          );
-        }
-
-        changeLogs.push({
-          campId: proposal.campId,
-          proposalId: proposal.id,
-          changedBy: auth.access.email,
-          fieldName: field,
-          oldValue: diff.old,
-          newValue: diff.new,
-          changeType: 'UPDATE',
-        });
-      }
+    return NextResponse.json({
+      success: true,
+      kept: result.kept,
+      appliedFields: result.appliedFields.length,
+      ...(result.provenanceErrors.length ? { provenanceErrors: result.provenanceErrors } : {}),
+    });
+  } catch (error) {
+    if (error instanceof ReviewApplyProposalNotFoundError || error instanceof ReviewApplySessionNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: 404 });
     }
-
-    // Update lastVerifiedAt whenever any fields are approved.
-    // Auto-set VERIFIED when ALL required fields on the camp now have fieldSources coverage.
-    // This is field-coverage-based, not proposal-based — partial approvals can still
-    // eventually trigger VERIFIED once the last required field gets its citation.
-    if (approvedFields.length > 0) {
-      // Fetch the current camp state (including freshly-written fieldSources) to check coverage
-      const { rows: [updatedCamp] } = await client.query(
-        `SELECT description, "campType", category, "registrationStatus", city, "websiteUrl",
-                "organizationName", "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
-                state, zip, "registrationOpenDate", "registrationCloseDate",
-                "ageGroups", pricing, schedules, "fieldSources"
-         FROM "Camp"
-         LEFT JOIN LATERAL (
-           SELECT COALESCE(json_agg(ag), '[]'::json) AS "ageGroups"
-           FROM "CampAgeGroup" ag WHERE ag."campId" = "Camp".id
-         ) ag ON true
-         LEFT JOIN LATERAL (
-           SELECT COALESCE(json_agg(s), '[]'::json) AS schedules
-           FROM "CampSchedule" s WHERE s."campId" = "Camp".id
-         ) s ON true
-         LEFT JOIN LATERAL (
-           SELECT COALESCE(json_agg(p), '[]'::json) AS pricing
-           FROM "CampPricing" p WHERE p."campId" = "Camp".id
-         ) p ON true
-         WHERE "Camp".id = $1`,
-        [proposal.campId]
-      );
-
-      const campNowVerified = !keepPending && updatedCamp &&
-        isFullyVerified(updatedCamp, updatedCamp.fieldSources);
-
-      await client.query(
-        `UPDATE "Camp"
-         SET "lastVerifiedAt" = now(),
-             "sourceType"     = 'SCRAPER',
-             "dataConfidence" = CASE WHEN $2 THEN 'VERIFIED'::"DataConfidence" ELSE "dataConfidence" END
-         WHERE id = $1`,
-        [proposal.campId, campNowVerified ?? false]
-      );
+    if (error instanceof SurveyReviewSessionStaleError || error instanceof ReviewApplyConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
-
-    await client.query('COMMIT');
-
-    // Write logs and metrics outside transaction — failures here are non-fatal
-    try {
-      await writeChangeLogs(changeLogs);
-    } catch (logErr) {
-      console.error('writeChangeLogs failed (non-fatal):', logErr);
+    if (error instanceof SurveyReviewApplyError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    if (keepPending) {
-      // Partial approval: apply fields, keep proposal in queue at lower priority
-      try {
-        await partialApprove(params.id, approvedFields, auth.access.email, reviewerNotes);
-      } catch (err) {
-        console.error('partialApprove failed:', err);
-        return NextResponse.json({ error: String(err) }, { status: 500 });
-      }
-    } else {
-      try {
-        await updateProposalStatus(params.id, 'APPROVED', auth.access.email, reviewerNotes, feedbackTags);
-      } catch (statusErr) {
-        console.error('updateProposalStatus failed:', statusErr);
-        return NextResponse.json({ error: String(statusErr) }, { status: 500 });
-      }
-    }
-    try {
-      await recordReviewDecision({
-        proposalId: params.id,
-        runId: proposal.crawlRunId,
-        approvedFields,
-        rejectedFields,
-        proposedChanges: effectiveChanges,
-        reviewerNotes,
-        feedbackTags,
-        extractionModel: proposal.extractionModel,
-        overallConfidence: proposal.overallConfidence,
-        finalDecision: !keepPending,
-      });
-    } catch (metricsErr) {
-      console.error('recordReviewDecision failed (non-fatal):', metricsErr);
-    }
-
-    return NextResponse.json({ success: true, kept: keepPending, appliedFields: approvedFields.length });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Approve error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  } finally {
-    client.release();
+    console.error('Approve error:', error);
+    return NextResponse.json({ error: String(error) }, { status: 500 });
   }
-}
-
-function combineReviewerNotes(requestNotes?: string, surveyNotes?: string): string | undefined {
-  const notes = [requestNotes?.trim(), surveyNotes?.trim()].filter((note): note is string => Boolean(note));
-  return notes.length > 0 ? notes.join('\n') : undefined;
-}
-
-function invalidLegacyApplyFields(opts: {
-  proposalFields: readonly string[];
-  approvedFields: readonly string[];
-  overrideFields: readonly string[];
-}): string[] {
-  const proposalFields = new Set(opts.proposalFields);
-  return Array.from(new Set([...opts.approvedFields, ...opts.overrideFields]))
-    .filter((field) => !proposalFields.has(field));
-}
-
-function unappliedFields(proposal: Awaited<ReturnType<typeof getProposal>>): string[] {
-  if (!proposal) return [];
-  const alreadyApplied = new Set(proposal.appliedFields ?? []);
-  return Object.keys(proposal.proposedChanges).filter((field) => !alreadyApplied.has(field));
-}
-
-function pickFields<T>(record: Record<string, T>, fields: readonly string[]): Record<string, T> {
-  return Object.fromEntries(
-    fields
-      .filter((field) => field in record)
-      .map((field) => [field, record[field]]),
-  );
 }

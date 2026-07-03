@@ -4,6 +4,14 @@ type PgConfig = {
   database: string;
   user: string;
   password: string;
+  /**
+   * Set to `false` only when the connection string explicitly opts out of
+   * SSL via `sslmode=disable` (e.g. the throwaway/CI test-DB container,
+   * which is plain Postgres with no SSL listener). Undefined preserves
+   * today's behavior everywhere else (`ssl: { rejectUnauthorized: false }`
+   * in lib/db.ts).
+   */
+  ssl?: false;
 };
 
 function decodeSegment(value: string) {
@@ -47,18 +55,37 @@ function parseConnectionString(connectionString: string): PgConfig | null {
   const host = hostSeparator === -1 ? hostPort : hostPort.slice(0, hostSeparator);
   const port = hostSeparator === -1 ? 6543 : parseInt(hostPort.slice(hostSeparator + 1), 10);
   const database = decodeSegment(databasePart.split(/[?#]/, 1)[0] || "postgres");
+  const query = databasePart.split(/[?#]/, 2)[1] ?? "";
+  const sslDisableRequested = /(?:^|&)sslmode=disable(?:&|$)/i.test(query);
 
   if (!host || !user || !password || Number.isNaN(port)) {
     return null;
   }
 
-  return {
-    host,
-    port,
-    database,
-    user,
-    password,
-  };
+  // `sslmode=disable` is only honored for loopback hosts (the throwaway/CI
+  // test-DB container, or a developer's own machine) — never for a real
+  // remote host such as the production Supabase instance. Any real
+  // DATABASE_URL that somehow carried this flag (operator misconfiguration)
+  // keeps the default SSL-required behavior instead of silently downgrading
+  // to plaintext; a loud warning either way makes both outcomes visible in
+  // logs rather than a silent no-op or a silent downgrade.
+  if (sslDisableRequested) {
+    if (isLoopbackHost(host)) {
+      console.warn(`[db] SSL disabled for loopback connection to ${host}`);
+      return { host, port, database, user, password, ssl: false as const };
+    }
+    console.warn(
+      `[db] sslmode=disable was requested for non-loopback host "${host}"; ignoring it and keeping SSL required. ` +
+        "sslmode=disable is only honored for loopback hosts (localhost/127.0.0.1/::1)."
+    );
+  }
+
+  return { host, port, database, user, password };
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
 export function resolvePgConfig(env: NodeJS.ProcessEnv = process.env): PgConfig | null {

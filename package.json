@@ -10,6 +10,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "vitest run",
+    "test:db:reset": "tsx scripts/test-db-reset.ts",
     "lint": "npm run check:content-boundary && npm run check:decisions && npm run test:safe-url && npm run test:ingestion-runner && npm run test:render-fetch && npm run test:shell-detect-retry && npm run test:cutover-baseline && npm run test:traverse-replay && npm run test:recrawl-adapter && eslint .",
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "check:decisions": "node scripts/check-decisions.cjs check",
@@ -78,7 +80,8 @@
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.6"
   },
   "overrides": {
     "@hono/node-server": "1.19.14",

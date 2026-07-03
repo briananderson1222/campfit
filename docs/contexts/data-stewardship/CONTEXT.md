@@ -40,6 +40,10 @@ _Avoid_: Old value, existing value
 A value a **Proposal** suggests for an **Attribute**. A Proposed Value becomes accepted data only after review.
 _Avoid_: New value, replacement value
 
+**Review Apply**:
+The transactional step where a resolved **Review** makes approved **Proposed Values** the accepted data for a **Camp**, records provenance for each applied Attribute, and re-evaluates verification. A Review Apply is all-or-nothing for the Attributes it applies; a partial Review Apply leaves the **Proposal** in queue for the remaining Attributes.
+_Avoid_: Approve endpoint, merge
+
 **Attestation**:
 A human-backed statement that a **Current Value** was reviewed and considered acceptable at a point in time. An Attestation is one way CampFit creates evidence for a trust claim about an Attribute.
 _Avoid_: Manual verification, admin approval
