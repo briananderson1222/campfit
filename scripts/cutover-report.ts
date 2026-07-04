@@ -110,7 +110,10 @@ async function runAfterForSource(key: string, url: string, provider: ReturnType<
   if (far.extraction) {
     result.extractionError = far.extraction.error ?? null;
     result.warnings.push(...(far.extraction.warnings ?? []));
-    result.tokensUsed = far.extraction.raw?.tokensUsed ?? null;
+    // totalTokensUsed (traverse 0.8.0) sums every chunk's provider call —
+    // raw.tokensUsed (pre-0.8.0) was only the LAST chunk's response, an
+    // undercount on any multi-chunk page (campfit#71).
+    result.tokensUsed = far.extraction.totalTokensUsed;
     result.model = far.extraction.raw?.model ?? null;
     const items = assembleItems(far.extraction.proposals);
     result.itemCount = items.length;
@@ -304,8 +307,10 @@ async function main() {
   lines.push(``);
   lines.push(`## Notes — cost capture + provider tuning (campfit#39 criterion 5)`);
   lines.push(``);
-  lines.push(`- **Cost capture**: \`tokensUsed\` above is \`raw.tokensUsed\` from the Anthropic`);
-  lines.push(`  adapter (\`input_tokens + output_tokens\`), threaded through`);
+  lines.push(`- **Cost capture**: \`tokensUsed\` above is \`ExtractionResult.totalTokensUsed\``);
+  lines.push(`  (traverse 0.8.0) — the Anthropic adapter's \`input_tokens + output_tokens\``);
+  lines.push(`  SUMMED across every chunk's provider call for the page (not just the last`);
+  lines.push(`  chunk's, which undercounted multi-chunk pages pre-0.8.0 — campfit#71), threaded through`);
   lines.push(`  \`lib/ingestion/traverse-pipeline.ts\`'s per-source result and`);
   lines.push(`  \`lib/ingestion/traverse-extractor.ts\`'s per-item \`rawExtraction\` for audit —`);
   lines.push(`  this closes the cost half of campfit#39.`);

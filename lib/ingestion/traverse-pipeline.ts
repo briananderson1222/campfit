@@ -26,10 +26,16 @@
  *    contract): a fetch/extraction failure on one source never throws and
  *    never stops the next source in a sweep.
  *  - Cost/latency capture (closes half of campfit#39): every source result
- *    records `tokensUsed` (from the provider's raw response — the Anthropic
- *    adapter reports `input_tokens + output_tokens`) and `latencyMs` (wall
- *    time for the fetch+extract call(s) — see the shell-retry seam below),
- *    so model/provider choice is a data-backed decision (see
+ *    records `tokensUsed` and `providerCalls` — since @kontourai/traverse@0.5.0's
+ *    large-page chunking, a single source's page can issue MULTIPLE
+ *    `provider.extract()` calls (one per chunk, up to `maxChunks`), so these
+ *    are read from `ExtractionResult.totalTokensUsed`/`.providerCalls`
+ *    (0.8.0, kontourai/traverse#19) — the SUMMED/counted aggregate across
+ *    every chunk's call, always populated. Reading `raw.tokensUsed` directly
+ *    (the pre-0.8.0 approach) silently undercounted any multi-chunk page: it
+ *    is only the LAST chunk's provider response. `latencyMs` (wall time for
+ *    the fetch+extract call(s) — see the shell-retry seam below) is captured
+ *    alongside, so model/provider choice is a data-backed decision (see
  *    docs/cutover-report-2026-07.md).
  *
  * Shell-detection auto-retry (closes campfit#41 follow-up /
@@ -58,14 +64,18 @@
  *    rendered) — never more than one render per source per run.
  */
 
-import { fetchAndExtract } from "@kontourai/traverse/fetch";
+import { fetchSource, replaySource, buildSnapshotSourceRef } from "@kontourai/traverse/fetch";
 import type {
+  FetchAndExtractOptions,
   FetchAndExtractResult,
   FetchMode,
+  FetchResult,
   FetchSourceOptions,
   SnapshotStore,
+  SourceConfig,
 } from "@kontourai/traverse/fetch";
 import {
+  extract,
   SHELL_WARNING_CODE,
   SHELL_WARNING_CODE_EMBEDDED,
   type EmbeddedState,
@@ -125,6 +135,26 @@ export interface TraversePipelineDeps {
   extraFieldHints?: Record<string, string>;
   /** content-prep truncation forwarded to extract(). */
   maxContentChars?: number;
+  /**
+   * Ceiling on `provider.extract()` calls issued for ONE source's page,
+   * across every chunk `@kontourai/traverse`'s chunker splits it into
+   * (`maxChunks` defaults to 40 — see `ExtractInput.maxChunks`). Forwarded to
+   * `extract()` the same way `maxContentChars` is (an optional per-run
+   * override this caller may set) — UNLIKE `maxContentChars`, though, when
+   * this is left unset here it does NOT fall through to traverse's own
+   * unbounded default: {@link DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE} applies
+   * instead (see that constant's doc for the maxChunks=40 arithmetic
+   * justifying the default). Set explicitly to override it (or pass a huge
+   * number to effectively restore traverse's unbounded default).
+   */
+  maxProviderCalls?: number;
+  /**
+   * Ceiling on accumulated `raw.tokensUsed` for ONE source's page across
+   * every chunk. Same forwarding/default-override relationship to
+   * `maxContentChars` as {@link TraversePipelineDeps.maxProviderCalls} above
+   * — see {@link DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE}'s doc for its default.
+   */
+  maxTotalTokens?: number;
   /** log sink; defaults to console.log. */
   log?: (msg: string) => void;
   /** wall-clock reader (ms), injectable for deterministic latency tests. */
@@ -186,8 +216,25 @@ export interface TraversePipelineSourceResult {
   fetchError: string | null;
   extractionError: string | null;
   warnings: string[];
-  /** input+output tokens the provider reported for this source's single extraction call. */
+  /**
+   * `ExtractionResult.totalTokensUsed` (traverse 0.8.0) — input+output tokens
+   * SUMMED across every successful `provider.extract()` call this source's
+   * page issued (one call per chunk on a multi-chunk page; see
+   * `ExtractInput.maxChunks`, default 40). `null` only when there was no
+   * extraction at all (fetch failure — see `fetchError`). Prior to this
+   * field's adoption, this read `raw.tokensUsed` (the LAST chunk's response
+   * only), which silently undercounted any page that chunked into more than
+   * one provider call.
+   */
   tokensUsed: number | null;
+  /**
+   * `ExtractionResult.providerCalls` (traverse 0.8.0) — number of
+   * `provider.extract()` calls actually issued for this source's page
+   * (attempted, success or throw; one per chunk, capped by
+   * `maxProviderCalls` when set — see `TraversePipelineDeps.maxProviderCalls`).
+   * `0` when there was no extraction at all (fetch failure).
+   */
+  providerCalls: number;
   /** model id the provider's raw response reported. */
   model: string | null;
   /** wall time (ms) for the fetch+extract call(s) — sums both attempts when a shell retry fires. */
@@ -220,6 +267,154 @@ function mergeFieldHints(deps: TraversePipelineDeps): Record<string, string> {
   return { ...CAMP_FIELD_HINTS, ...deps.extraFieldHints };
 }
 
+/**
+ * Default ceiling on `provider.extract()` calls issued for ONE source's
+ * page, applied by {@link runFetchAndExtractAttempt} whenever a caller
+ * doesn't override `TraversePipelineDeps.maxProviderCalls`.
+ *
+ * Revised 2026-07 (code review, campfit#71 iteration 2 — see
+ * docs/cutover-report-2026-07.md). The original default here was 20 (half of
+ * `DEFAULT_MAX_CHUNKS`), chosen so the guard wasn't a no-op relative to the
+ * chunker's own hard 40-chunk cap. That reasoning was sound in isolation,
+ * but it meant introducing this cost guard silently CHANGED pipeline
+ * behavior for any source that previously chunked into 21-40 calls and ran
+ * to completion (the pre-cost-guard code had no ceiling besides `maxChunks`
+ * itself) — such a source would now truncate at 20 with no operator-visible
+ * trace. That's not this default's job: it exists as a RUNAWAY-SPEND
+ * backstop, not a behavior-changing budget cut, so by default it must never
+ * bind BELOW the ceiling that already existed before this feature
+ * (`maxChunks`, 40).
+ *
+ * `maxChunks` (`ExtractInput.maxChunks`, @kontourai/traverse's chunk.ts) is
+ * never overridden anywhere in this codebase today — `TraversePipelineDeps`
+ * has no `maxChunks` field — so it always resolves to traverse's own
+ * `DEFAULT_MAX_CHUNKS` (40), the HARD ceiling on how many chunks a single
+ * page's chunker can even produce (extras are dropped with a warning before
+ * any provider call happens). `chunks.length` can therefore never exceed 40,
+ * and this constant is set TO that same 40: the in-loop check
+ * (`providerCalls >= maxProviderCalls`, evaluated BEFORE each call) can only
+ * ever become true once 40 calls have already been issued — i.e. only after
+ * the 40-chunk hard cap has already fully run its course — so at this
+ * default, the ceiling can never actually trip for any run today. It
+ * re-activates as real, independent protection only if `maxChunks` itself is
+ * ever raised above 40 (an upstream default bump, or a future `maxChunks`
+ * seam added here). Operators who want a TIGHTER budget than the hard chunk
+ * cap (e.g. to actually cut off a pathological/junk page before it reaches
+ * 40 chunks) can still pass a lower `TraversePipelineDeps.maxProviderCalls`
+ * explicitly — this default only guarantees the un-configured case matches
+ * pre-cost-guard behavior (a pure backstop, never a silent truncation).
+ */
+export const DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE = 40;
+
+/**
+ * Default ceiling on accumulated `raw.tokensUsed` for ONE source's page,
+ * applied by {@link runFetchAndExtractAttempt} whenever a caller doesn't
+ * override `TraversePipelineDeps.maxTotalTokens`.
+ *
+ * Revised 2026-07 alongside {@link DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE}
+ * (same review, same "pure backstop" rationale) — this must be raised in
+ * lockstep so it doesn't become the FIRST thing to bind now that the
+ * call-count default no longer can. Arithmetic, using the same
+ * worst-case-per-call estimate as before: `maxContentChars` defaults to
+ * 32_000 chars (`extract.ts`'s `DEFAULT_MAX_CONTENT_CHARS`, the PER-CHUNK
+ * provider content budget) ≈ 8_000 tokens at the usual ~4-chars/token
+ * estimate, plus the Anthropic adapter's own per-call OUTPUT budget, 2048
+ * (`resolve-extraction-provider.ts`'s `DEFAULT_EXTRACTION_MAX_TOKENS`) — a
+ * single worst-case call costs roughly 8_000 + 2_048 = 10_048 tokens. A FULL
+ * 40-chunk run (the new `DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE`, and
+ * traverse's own hard `maxChunks` cap) at that worst-case-per-call estimate
+ * therefore costs roughly 40 * 10_048 = 401_920 tokens. Setting this
+ * constant any lower than that would make IT the thing that truncates a
+ * full-width 40-chunk run instead of the call-count ceiling above (defeating
+ * the point of raising that one) — so this is set to 450_000, comfortably
+ * above the 401_920 worst case (~12% headroom), while still acting as an
+ * independent secondary trip-wire if a provider's real per-call token usage
+ * runs higher than this content-budget-based estimate (e.g. a
+ * verbose/non-English page with a worse chars-per-token ratio). Tighten via
+ * `TraversePipelineDeps.maxTotalTokens` for an operator-chosen budget below
+ * this backstop.
+ */
+export const DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE = 450_000;
+
+/**
+ * Cost-guard-aware replacement for `@kontourai/traverse/fetch`'s
+ * `fetchAndExtract` (`dist/src/fetch/compose.ts`) — this module's ONLY
+ * fetch+extract composition call site ({@link runFetchAndExtractAttempt}).
+ *
+ * WHY THIS EXISTS (traverse 0.8.0 gap, confirmed 2026-07-03 against the
+ * shipped `node_modules/@kontourai/traverse/dist/src/fetch/compose.js` and
+ * `.d.ts`): `extract()`'s own `ExtractInput` accepts `maxProviderCalls`/
+ * `maxTotalTokens` (the cost guards shipped in kontourai/traverse#19, 0.8.0's
+ * README "Cost guards" section) — but `fetchAndExtract`'s
+ * `FetchAndExtractOptions` does NOT declare either field, and `compose.js`'s
+ * internal `extract({...})` call only forwards a fixed, hard-coded list of
+ * fields, silently dropping any extra property passed alongside them. There
+ * is no way to reach these ceilings through `fetchAndExtract` itself in
+ * 0.8.0 — every campfit call site uses `fetchAndExtract`, never `extract()`
+ * directly, so without this wrapper the ceilings could not be wired at all.
+ *
+ * This function is a faithful reproduction of `fetchAndExtract`'s
+ * composition (identical `mode` dispatch — `live` / `live-with-capture` /
+ * `replay` — and identical `buildSnapshotSourceRef` provenance threading),
+ * built ENTIRELY from traverse's own PUBLIC exports (`fetchSource` /
+ * `replaySource` / `buildSnapshotSourceRef` from `@kontourai/traverse/fetch`,
+ * `extract` from the `@kontourai/traverse` root) — nothing here reaches into
+ * `dist/` internals — with `maxProviderCalls`/`maxTotalTokens` added to the
+ * `extract()` call.
+ *
+ * TODO(kontourai/traverse#28, tracked locally as campfit#71): once
+ * `FetchAndExtractOptions` forwards these two fields itself upstream (the
+ * actual blocking condition — kontourai/traverse#28 is the issue that tracks
+ * when this shim can be deleted; campfit#71 will be closed once THIS PR
+ * merges, so it gives no future signal about upstream status), delete this
+ * function and pass `maxProviderCalls`/`maxTotalTokens` straight into a plain
+ * `fetchAndExtract()` call again. See the equivalence test in
+ * scripts/test-traverse-cost-guards.ts, which will keep passing right up
+ * until that upstream change lands (and is the test to lean on to confirm
+ * the deletion is safe). Exported (not just used internally) for that
+ * equivalence test.
+ */
+export async function fetchAndExtractWithCostGuards(
+  config: SourceConfig,
+  opts: FetchAndExtractOptions & { maxProviderCalls?: number; maxTotalTokens?: number }
+): Promise<FetchAndExtractResult> {
+  const mode = opts.mode ?? "live";
+  let fetchResult: FetchResult;
+  if (mode === "replay") {
+    fetchResult = opts.store
+      ? await replaySource(opts.store, config.id)
+      : { error: { kind: "invalid-config", message: "mode 'replay' requires a store" } };
+  } else {
+    fetchResult = await fetchSource(config, opts.fetchOptions ?? {});
+    if (mode === "live-with-capture" && fetchResult.snapshot && opts.store) {
+      await opts.store.put(fetchResult.snapshot);
+    }
+  }
+
+  if (!fetchResult.snapshot) {
+    return { fetch: fetchResult };
+  }
+
+  const snapshot = fetchResult.snapshot;
+  const sourceRef = buildSnapshotSourceRef(snapshot);
+  const extraction = await extract({
+    content: snapshot.body,
+    contentType: snapshot.contentType,
+    sourceRef,
+    targetSchema: opts.targetSchema,
+    provider: opts.provider,
+    fieldHints: opts.fieldHints,
+    maxContentChars: opts.maxContentChars,
+    prep: opts.prep,
+    chunkSize: opts.chunkSize,
+    chunkOverlap: opts.chunkOverlap,
+    maxChunks: opts.maxChunks,
+    maxProviderCalls: opts.maxProviderCalls,
+    maxTotalTokens: opts.maxTotalTokens,
+  });
+  return { fetch: fetchResult, extraction, sourceRef };
+}
+
 /** One fetch+extract call (a "attempt") — factored out so the shell-retry seam can run it twice. */
 async function runFetchAndExtractAttempt(
   src: IngestionSourceConfig,
@@ -229,7 +424,7 @@ async function runFetchAndExtractAttempt(
   now: () => number
 ): Promise<{ far: FetchAndExtractResult; latencyMs: number }> {
   const startedAt = now();
-  const far = await fetchAndExtract(
+  const far = await fetchAndExtractWithCostGuards(
     {
       id: src.key,
       url: src.url,
@@ -244,6 +439,14 @@ async function runFetchAndExtractAttempt(
       store: deps.store,
       mode: deps.mode ?? "live-with-capture",
       maxContentChars: deps.maxContentChars,
+      // Real, non-unbounded defaults (unlike `maxContentChars` above) — see
+      // DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE / DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE's
+      // docs for the maxChunks=40 arithmetic. Covers both the scheduled
+      // sweep (runTraversePipelineForSource) and the per-camp re-crawl
+      // (runTraverseFetchAndAssemble / traverse-recrawl-adapter.ts) — both
+      // funnel through this one attempt function.
+      maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
+      maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
       fetchOptions,
     }
   );
@@ -281,6 +484,7 @@ async function runCoreFetchAndExtract(
     extractionError: null,
     warnings: [],
     tokensUsed: null,
+    providerCalls: 0,
     model: null,
     latencyMs: 0,
   };
@@ -412,7 +616,13 @@ async function runCoreFetchAndExtract(
 
   core.extractionError = far.extraction.error ?? null;
   core.warnings.push(...(far.extraction.warnings ?? []));
-  core.tokensUsed = far.extraction.raw?.tokensUsed ?? null;
+  // totalTokensUsed/providerCalls (traverse 0.8.0) are the SUMMED/counted
+  // aggregates across every chunk's provider call — always populated,
+  // never undefined, even on a zero-call early return. Reading
+  // `raw.tokensUsed` here (pre-0.8.0) undercounted any multi-chunk page: it
+  // is only the LAST chunk's response.
+  core.tokensUsed = far.extraction.totalTokensUsed;
+  core.providerCalls = far.extraction.providerCalls;
   core.model = far.extraction.raw?.model ?? null;
   core.ok = !core.extractionError;
 

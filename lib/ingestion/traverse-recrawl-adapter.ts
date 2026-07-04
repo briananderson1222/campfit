@@ -92,6 +92,17 @@ export interface TraverseRecrawlOptions {
    */
   siteHints?: string[];
   /**
+   * Ceilings on this ONE re-crawl's fetch+extract call, forwarded to
+   * `runTraverseFetchAndAssemble`'s `TraversePipelineDeps.maxProviderCalls`/
+   * `.maxTotalTokens` (traverse-pipeline.ts) — same real, non-unbounded
+   * defaults apply when left unset (see
+   * `DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE`/
+   * `DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE`'s docs there); set explicitly only
+   * to override for one re-crawl.
+   */
+  maxProviderCalls?: number;
+  maxTotalTokens?: number;
+  /**
    * The target camp's community's known neighborhood names (e.g. from
    * `CommunityNeighborhood` rows for the camp's `communitySlug`), fetched by
    * the caller (mirrors `crawl-pipeline.ts`'s pre-Wave-2 legacy neighborhoods
@@ -155,7 +166,16 @@ export interface TraverseRecrawlResult {
   itemCount: number;
   /** traverse snapshot provenance (see traverse-snapshot-store.ts) — present whenever the fetch captured a snapshot, even on an extraction failure. */
   snapshot: { ref: string | null; bodyHash: string | null };
+  /**
+   * `ExtractionResult.totalTokensUsed` (traverse 0.8.0) — summed across
+   * every chunk's successful provider call for this camp's page. `null`
+   * only when there was no extraction at all (fetch failure). See
+   * traverse-pipeline.ts's `TraversePipelineSourceResult.tokensUsed` doc for
+   * why this is `totalTokensUsed`, not the pre-0.8.0 `raw.tokensUsed`.
+   */
   tokensUsed: number | null;
+  /** `ExtractionResult.providerCalls` (traverse 0.8.0) — calls issued for this camp's page (one per chunk); `0` on a no-extraction failure. */
+  providerCalls: number;
   latencyMs: number;
   warnings: string[];
 }
@@ -362,6 +382,8 @@ export async function runTraverseRecrawlForCamp(
     fetchOptions: opts.fetchOptions,
     extraFieldHints: buildExtraFieldHints(opts),
     maxContentChars: opts.maxContentChars,
+    maxProviderCalls: opts.maxProviderCalls,
+    maxTotalTokens: opts.maxTotalTokens,
     log: opts.log,
     now: opts.now,
   });
@@ -370,6 +392,7 @@ export async function runTraverseRecrawlForCamp(
     model: fetchResult.model ? `traverse:${fetchResult.model}` : "traverse:unknown",
     snapshot: { ref: fetchResult.snapshotRef, bodyHash: fetchResult.snapshotBodyHash },
     tokensUsed: fetchResult.tokensUsed,
+    providerCalls: fetchResult.providerCalls,
     latencyMs: fetchResult.latencyMs,
     warnings: fetchResult.warnings,
   };

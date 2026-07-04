@@ -59,6 +59,19 @@ export interface IngestionReportEntry {
    * (a render was skipped because usable embedded state was available).
    */
   embeddedStateAvailable?: TraverseEmbeddedStateInfo;
+  /**
+   * Non-fatal traverse warnings for this source's fetch/extraction
+   * (`TraversePipelineSourceResult.warnings` — fetch-level warnings plus
+   * `ExtractionResult.warnings`, e.g. a `maxProviderCalls`/`maxTotalTokens`
+   * cost-guard ceiling stop, a dropped excerpt-verification failure, or a
+   * chunker truncation note). Mirrors the `render`/`shellDetected` optional-
+   * field pattern above: present (non-empty) only when the run actually
+   * produced 1+ warnings, so a clean run's report entry stays uncluttered.
+   * Added so a ceiling-triggered truncation (previously invisible on this
+   * shape — campfit#71 code review) is now traceable wherever this report
+   * entry is printed/persisted.
+   */
+  warnings?: string[];
 }
 
 /** Adapt a pipeline result into a report entry for summarizeReport/printReport. */
@@ -79,6 +92,7 @@ export function toIngestionReportEntry(result: TraversePipelineSourceResult): In
     renderRetryFailed: result.shellEscalation?.renderRetryFailed,
     renderImprovedProposalCount: result.shellEscalation?.renderImprovedProposalCount,
     embeddedStateAvailable: result.embeddedStateAvailable,
+    warnings: result.warnings.length > 0 ? result.warnings : undefined,
   };
 }
 
