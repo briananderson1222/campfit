@@ -9,7 +9,7 @@ The trust state of a claim, such as verified, assumed, stale, disputed, supersed
 _Avoid_: Attestation status, proposal status
 
 **Verification Policy**:
-The rule that says what Evidence is sufficient for a **Claim** to be **Verified**, including freshness expectations and required evidence types.
+The rule that says what Evidence is sufficient for a **Claim** to be **Verified**, including freshness expectations and required evidence types — for example, requiring both a crawl-derived Observation and a human **Attestation** before a Camp or Session Attribute Claim can reach Verified. A Camp or Session can be **Reviewed** without being Verified when its Verification Policy is not yet satisfied.
 _Avoid_: Review state, confidence score
 
 **Verification**:
@@ -37,7 +37,7 @@ A named property of a **Subject** that a **Claim** can describe, such as registr
 _Avoid_: Field when speaking outside admin UI
 
 **Claim**:
-A statement about a **Camp**, **Provider**, or review artifact whose reliability can be evaluated from evidence and status. A **Proposal** is not itself a Claim, but it can produce candidate Claims.
+A statement about a **Camp**, **Session**, **Provider**, or review artifact whose reliability can be evaluated from evidence and status. A **Proposal** is not itself a Claim, but it can produce candidate Claims, and an **Attestation** is one way CampFit records human-backed Evidence for one.
 _Avoid_: Fact, assertion
 
 **Candidate Claim**:
@@ -101,7 +101,7 @@ A derived view of a **TrustBundle** that shows current Claim statuses, Evidence,
 _Avoid_: Parent correction, analytics report
 
 **Verification Gap**:
-The reason a **Camp**, **Session**, or **Claim** is not currently Verified, such as missing evidence, stale evidence, disputed evidence, or unresolved review. CampFit should make Verification Gaps explicit when it does not call something Verified.
+The reason a **Camp**, **Session**, or **Claim** is not currently Verified, such as missing evidence, **Stale** evidence, disputed evidence, or unresolved review. When a Session Attribute has no Session-specific evidence source yet, CampFit may explicitly model its Claim as inherited from the parent Camp's Claim rather than leaving it blank — that inheritance is itself recorded, not hidden. CampFit should make Verification Gaps explicit when it does not call something Verified.
 _Avoid_: Unverified
 
 ## Example Dialogue

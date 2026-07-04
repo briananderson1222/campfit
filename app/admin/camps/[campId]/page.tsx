@@ -7,6 +7,7 @@ import { EntityOpsPanel } from '@/components/admin/entity-ops-panel';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 import { getCampFieldTimeline } from '@/lib/admin/field-metadata';
+import { coverageFromRollup, deriveCampVerification } from '@/lib/admin/verification-authority';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,9 +71,12 @@ export default async function AdminCampDetailPage(props: { params: Promise<{ cam
   if (!camp) notFound();
 
   const domain = domainOf(camp.websiteUrl);
-  const [pendingProposals, siteHints] = await Promise.all([
+  const [pendingProposals, siteHints, coverage] = await Promise.all([
     getPendingProposals(params.campId).catch(err => { console.error('[admin/camps] getPendingProposals failed:', err); return []; }),
     getSiteHints(domain).catch(err => { console.error('[admin/camps] getSiteHints failed:', err); return []; }),
+    deriveCampVerification(params.campId)
+      .then(rollup => coverageFromRollup(rollup, camp))
+      .catch(err => { console.error('[admin/camps] deriveCampVerification failed:', err); return null; }),
   ]);
   const fieldTimeline = await getCampFieldTimeline(params.campId).catch((err) => {
     console.error('[admin/camps] getCampFieldTimeline failed:', err);
@@ -113,6 +117,7 @@ export default async function AdminCampDetailPage(props: { params: Promise<{ cam
         pendingProposals={pendingProposals}
         siteHints={siteHints}
         domain={domain}
+        coverage={coverage}
       />
 
       <EntityOpsPanel entityType="CAMP" entityId={camp.id} allowAccreditation />

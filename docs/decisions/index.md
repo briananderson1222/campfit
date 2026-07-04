@@ -11,5 +11,5 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | Topic | Status | Decision |
 | --- | --- | --- |
 | [registration-status](./registration-status.md) | needs-decision | Registration Status |
-| [verified-camp-claim-set](./verified-camp-claim-set.md) | needs-decision | Verified Camp Claim Set |
-| [verified-session-claim-set](./verified-session-claim-set.md) | needs-decision | Verified Session Claim Set |
+| [verified-camp-claim-set](./verified-camp-claim-set.md) | current | Verified Camp Claim Set |
+| [verified-session-claim-set](./verified-session-claim-set.md) | current | Verified Session Claim Set |

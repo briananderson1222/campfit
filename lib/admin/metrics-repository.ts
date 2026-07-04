@@ -1,13 +1,12 @@
 import { getPool } from '@/lib/db';
 import { campfitVocabulary } from '@/lib/trust-vocabulary';
-import { REQUIRED_FOR_VERIFIED } from './verification';
 import { communityScopeSql } from './community-access';
 import type { FieldDiff, LLMExtractionResult, ProposedChanges } from './types';
 
 export interface VerifiedCoverageMetric {
   /** Total camps in scope. */
   total: number;
-  /** Camps whose every REQUIRED_FOR_VERIFIED field is attested. */
+  /** Camps whose `dataConfidence` is `VERIFIED`. */
   verified: number;
   /** Integer percent (0–100) of camps fully verified; 0 when total is 0. */
   pct: number;
@@ -17,12 +16,34 @@ export interface VerifiedCoverageMetric {
  * Site-wide roll-up of the per-camp CoverageMeter: the count and % of camps
  * whose data is fully verified — the user-acquisition gate metric (R3/AC3).
  *
- * A camp counts as verified iff EVERY `REQUIRED_FOR_VERIFIED` field has an
- * attestation (`fieldSources[field].approvedAt`) — the exact `isFullyVerified()`
- * rule (lib/admin/verification.ts), evaluated in SQL over `Camp.fieldSources`
- * so it needs no schema migration and stays in lock-step with the badge and
- * the approve gate. The field list is the same compile-time constant, so the
- * metric can never drift from the definition of "verified" it reports on.
+ * Verification-authority cutover (docs/verification-authority.md): this used
+ * to recompute the deleted `lib/admin/verification.ts`'s `isFullyVerified`
+ * rule itself, in SQL, over `Camp.fieldSources` (every `REQUIRED_FOR_VERIFIED`
+ * field's `approvedAt`). It now just counts `Camp."dataConfidence" =
+ * 'VERIFIED'` instead of re-deriving coverage, for two reasons:
+ *
+ *   1. `dataConfidence` is now the SOLE, already-computed output of
+ *      `lib/admin/verification-authority.ts`'s `refreshCampVerificationCache`
+ *      (verification-authority.md: "a repo-wide grep for `dataConfidence" =`
+ *      outside this module returns no matches") — it is derived from the full
+ *      Claim ledger, which covers all 8 `VERIFIED_CAMP_FIELDS`
+ *      (verification-policy.ts) PLUS the `sessions-verified` rollup over every
+ *      non-archived Session's own Verified Session Claim Set
+ *      (`buildVerifiedCampClaimGroup`'s 9 requirements, all-required).
+ *      `Camp.fieldSources` has no slot for Session-level verification at all
+ *      — re-deriving "verified" from it (even with the new 8-field list)
+ *      would silently call a camp with unverified Sessions "fully verified".
+ *   2. `fieldSources` is now legacy/dual-written (kept only for the `/attest`
+ *      route's audit trail — see `entity-admin-repository.ts`'s
+ *      `recordCampAttestationEvidence` comment, "KEPT (legacy, rollback path)")
+ *      alongside the real Claim ledger, not guaranteed to reflect every write
+ *      path that can change verification, so it is no longer a trustworthy
+ *      independent "coverage" source either.
+ *
+ * This makes the metric read the EXACT SAME column `lib/trust.ts`'s
+ * `isCampVerified`/`TrustBadge`/`rankByTrust` read — "one definition of
+ * verified" (lib/trust.ts's header comment) by construction, not by keeping
+ * two independent implementations of the rule in lock-step.
  *
  * Pass a moderator's community slugs to scope the figure; omit for the
  * site-wide (admin) number.
@@ -33,17 +54,10 @@ export async function getVerifiedCoverageMetric(
   const pool = getPool();
   const scope = communityScopeSql(communitySlugs, 'c."communitySlug"', 1);
 
-  // REQUIRED_FOR_VERIFIED is a compile-time constant whitelist of identifiers —
-  // safe to interpolate into the JSON path. Each `#>> '{field,approvedAt}'`
-  // returns the attestation timestamp as text, or NULL when unattested.
-  const allAttested = REQUIRED_FOR_VERIFIED
-    .map((field) => `(c."fieldSources" #>> '{${field},approvedAt}') IS NOT NULL`)
-    .join(' AND ');
-
   const { rows } = await pool.query<{ total: number; verified: number }>(
     `SELECT
        COUNT(*)::int AS total,
-       COUNT(*) FILTER (WHERE ${allAttested})::int AS verified
+       COUNT(*) FILTER (WHERE c."dataConfidence" = 'VERIFIED')::int AS verified
      FROM "Camp" c
      WHERE 1=1${scope.clause}`,
     scope.values as unknown[],
