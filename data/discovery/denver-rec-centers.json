@@ -1,0 +1,16 @@
+{
+  "$comment": "Curated Denver-metro discovery seed (I22 / issue #52). Each entry is a rec-center, municipal parks-and-rec department, or school-district community-education provider that runs kids' camp/enrichment programs in the Denver-Aurora-Lakewood metro. This is the 'curated seed query' discovery source named in the issue's thinnest slice — deterministic and key-free so the discovery job is reproducible in CI. Live-page sources (rec-center program-listing SPAs, aggregators) are separate issues (I23/I24) and plug into the same DiscoverySource interface. The two out-of-metro entries at the end exist to demonstrate the Denver-metro boundary filter (AC1).",
+  "query": "curated Denver-metro rec-center / municipal / school-district program-provider seed v1",
+  "candidates": [
+    { "name": "Denver Parks & Recreation", "websiteUrl": "https://www.denvergov.org/Government/Agencies-Departments-Offices/Agencies-Departments-Offices-Directory/Parks-Recreation", "city": "Denver" },
+    { "name": "Apex Park and Recreation District", "websiteUrl": "https://www.apexprd.org/", "city": "Arvada" },
+    { "name": "South Suburban Parks and Recreation", "websiteUrl": "https://www.ssprd.org/", "city": "Centennial" },
+    { "name": "Foothills Park & Recreation District", "websiteUrl": "https://www.ifoothills.org/", "city": "Lakewood" },
+    { "name": "Aurora Parks, Recreation & Open Space", "websiteUrl": "https://www.auroragov.org/things_to_do/parks__trails___recreation", "city": "Aurora" },
+    { "name": "City of Westminster Recreation", "websiteUrl": "https://www.cityofwestminster.us/ThingsToDo/Recreation", "city": "Westminster" },
+    { "name": "Arvada Parks & Recreation", "websiteUrl": "https://arvadaco.gov/1077/Parks-Recreation", "city": "Arvada" },
+    { "name": "Cherry Creek School District Community Education", "websiteUrl": "https://www.cherrycreekschools.org/communityeducation", "city": "Greenwood Village" },
+    { "name": "City of Fort Collins Recreation", "websiteUrl": "https://www.fcgov.com/recreation/", "city": "Fort Collins" },
+    { "name": "Colorado Springs Parks, Recreation & Cultural Services", "websiteUrl": "https://coloradosprings.gov/parks", "city": "Colorado Springs" }
+  ]
+}
