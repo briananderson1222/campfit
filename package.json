@@ -23,6 +23,8 @@
     "seed": "tsx scripts/seed.ts",
     "scrape": "tsx scripts/scrape.ts",
     "scrape:dry": "tsx scripts/scrape.ts --dry-run",
+    "discover": "tsx scripts/discover.ts",
+    "discover:dry": "tsx scripts/discover.ts --dry-run",
     "test:access": "tsx scripts/test-access.ts",
     "test:learning": "tsx scripts/test-review-learning-signals.ts",
     "test:safe-url": "tsx scripts/test-safe-url.ts",
