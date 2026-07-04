@@ -40,6 +40,7 @@ function pipelineResult(overrides: Partial<TraversePipelineSourceResult> = {}): 
     extractionError: null,
     warnings: [],
     tokensUsed: null,
+    providerCalls: 0,
     model: null,
     latencyMs: 0,
     ...overrides,

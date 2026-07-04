@@ -58,6 +58,51 @@ export async function getVerifiedCoverageMetric(
   };
 }
 
+export interface ExtractionMetricRow {
+  name: string;
+  value: number;
+  dims: Record<string, string>;
+}
+
+/**
+ * Pure builder for the per-extraction metric rows `recordExtractionMetrics`
+ * writes to `CrawlMetric` — split out (network-free, no `getPool()` call)
+ * so tests can assert the metric-name/value shape directly without a DB.
+ *
+ * `provider_calls` (traverse 0.8.0's `ExtractionResult.providerCalls`,
+ * threaded via `LLMExtractionResult.providerCalls` — see
+ * `lib/ingestion/crawl-pipeline.ts`'s `toLegacyMetricsResult` /
+ * `lib/ingestion/traverse-pipeline.ts`) is recorded alongside `tokens_used`
+ * with the same `{ campId }` dims, following that metric's convention: one
+ * row per extraction call, campId-scoped, no siteHost dim (unlike the
+ * site-level metrics above it).
+ */
+export function buildExtractionMetricRows(opts: {
+  campId: string;
+  siteHost: string;
+  result: LLMExtractionResult;
+  changesFound: number;
+  durationMs: number;
+}): ExtractionMetricRow[] {
+  const { campId, siteHost, result, changesFound, durationMs } = opts;
+
+  const metrics: ExtractionMetricRow[] = [
+    { name: 'extraction_confidence', value: result.overallConfidence, dims: { campId, siteHost } },
+    { name: 'extraction_duration_ms', value: durationMs, dims: { campId, siteHost } },
+    { name: 'changes_found', value: changesFound, dims: { campId } },
+    { name: 'site_fetch_success', value: result.error ? 0 : 1, dims: { siteHost } },
+    { name: 'tokens_used', value: result.tokensUsed, dims: { campId } },
+    { name: 'provider_calls', value: result.providerCalls, dims: { campId } },
+  ];
+
+  // Per-field confidence
+  for (const [field, conf] of Object.entries(result.confidence)) {
+    metrics.push({ name: 'field_confidence', value: conf, dims: { campId, field, siteHost } });
+  }
+
+  return metrics;
+}
+
 export async function recordExtractionMetrics(opts: {
   runId: string;
   campId: string;
@@ -67,20 +112,8 @@ export async function recordExtractionMetrics(opts: {
   durationMs: number;
 }): Promise<void> {
   const pool = getPool();
-  const { runId, campId, siteHost, result, changesFound, durationMs } = opts;
-
-  const metrics: { name: string; value: number; dims: Record<string, string> }[] = [
-    { name: 'extraction_confidence', value: result.overallConfidence, dims: { campId, siteHost } },
-    { name: 'extraction_duration_ms', value: durationMs, dims: { campId, siteHost } },
-    { name: 'changes_found', value: changesFound, dims: { campId } },
-    { name: 'site_fetch_success', value: result.error ? 0 : 1, dims: { siteHost } },
-    { name: 'tokens_used', value: result.tokensUsed, dims: { campId } },
-  ];
-
-  // Per-field confidence
-  for (const [field, conf] of Object.entries(result.confidence)) {
-    metrics.push({ name: 'field_confidence', value: conf, dims: { campId, field, siteHost } });
-  }
+  const { runId } = opts;
+  const metrics = buildExtractionMetricRows(opts);
 
   for (const m of metrics) {
     await pool.query(

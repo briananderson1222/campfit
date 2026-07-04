@@ -105,11 +105,22 @@ async function matchOrCreateProvider(
  * legacy `LLMExtractionResult` shape — kept as-is per plan scope (the metrics
  * table/dashboard is unchanged). This adapts one `TraverseRecrawlResult` into
  * just enough of that shape for the metrics it actually reads
- * (`confidence`, `overallConfidence`, `error`, `tokensUsed`) — `extracted`/
- * `excerpts`/`rawResponse`/`extractedAt` are not read by
+ * (`confidence`, `overallConfidence`, `error`, `tokensUsed`, `providerCalls`)
+ * — `extracted`/`excerpts`/`rawResponse`/`extractedAt` are not read by
  * `recordExtractionMetrics` and are filled with inert placeholders.
+ * `tokensUsed`/`providerCalls` are traverse 0.8.0's
+ * `totalTokensUsed`/`providerCalls` (already summed/counted across every
+ * chunk's provider call by `runTraverseRecrawlForCamp` — see
+ * `TraverseRecrawlResult`'s doc), passed straight through, never re-derived
+ * here. `warnings` is likewise passed straight through (non-empty only) so a
+ * cost-guard ceiling stop is no longer silently dropped on this shape
+ * (campfit#71 code review) — no consumer of `LLMExtractionResult` reads it
+ * today, but it now rides along wherever this result is persisted/read
+ * instead of being discarded at this adapter boundary. Exported (not just
+ * used internally) so `scripts/test-traverse-cost-guards.ts` can assert this
+ * shim's shape directly, network-free.
  */
-function toLegacyMetricsResult(result: TraverseRecrawlResult): LLMExtractionResult {
+export function toLegacyMetricsResult(result: TraverseRecrawlResult): LLMExtractionResult {
   const confidence: Record<string, number> = {};
   for (const [field, diff] of Object.entries(result.proposedChanges)) {
     confidence[field] = diff.confidence;
@@ -122,8 +133,10 @@ function toLegacyMetricsResult(result: TraverseRecrawlResult): LLMExtractionResu
     rawResponse: '',
     model: result.model,
     tokensUsed: result.tokensUsed ?? 0,
+    providerCalls: result.providerCalls,
     extractedAt: new Date().toISOString(),
     ...(result.error ? { error: result.error } : {}),
+    ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
   };
 }
 
@@ -148,6 +161,7 @@ function providerUnavailableResult(error: string): TraverseRecrawlResult {
     itemCount: 0,
     snapshot: { ref: null, bodyHash: null },
     tokensUsed: null,
+    providerCalls: 0,
     latencyMs: 0,
     warnings: [],
   };

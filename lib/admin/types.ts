@@ -149,9 +149,22 @@ export interface LLMExtractionResult {
   overallConfidence: number;
   rawResponse: string;
   model: string;
+  /** traverse's `ExtractionResult.totalTokensUsed` (0.8.0) — summed across every chunk's provider call, not just the last one. */
   tokensUsed: number;
+  /** traverse's `ExtractionResult.providerCalls` (0.8.0) — calls issued across every chunk (see `metrics-repository.ts`'s `provider_calls` metric). */
+  providerCalls: number;
   extractedAt: string;
   error?: string;
+  /**
+   * Non-fatal traverse warnings (`TraverseRecrawlResult.warnings` — fetch-
+   * level warnings plus `ExtractionResult.warnings`, e.g. a
+   * `maxProviderCalls`/`maxTotalTokens` cost-guard ceiling stop). Present
+   * (non-empty) only when the run produced 1+ warnings. Added so a
+   * ceiling-triggered truncation on the re-crawl path (previously invisible
+   * on this shape — campfit#71 code review) is now traceable wherever this
+   * result is persisted/read.
+   */
+  warnings?: string[];
 }
 
 export type CrawlProgressEvent =

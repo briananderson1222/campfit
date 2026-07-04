@@ -31,6 +31,18 @@ export interface StubProviderOptions {
   warnings?: string[];
   /** If set, the provider throws — used to prove extract() never throws. */
   throwError?: string;
+  /**
+   * `raw.tokensUsed` for each `extract()` call this stub makes. A plain
+   * number reports the SAME value on every call; a function receives the
+   * 0-based index of THIS call (across every chunk a multi-chunk page's
+   * page produces) and can vary it per call — e.g. to prove a caller sums
+   * `ExtractionResult.totalTokensUsed` across chunks rather than reading
+   * only the LAST chunk's `raw.tokensUsed` (campfit#71). Omitted entirely
+   * (stays `undefined`, matching a real provider that never reports token
+   * usage) when unset — every pre-existing caller of this stub relies on
+   * that default.
+   */
+  tokensUsed?: number | ((callIndex: number) => number);
 }
 
 /**
@@ -42,9 +54,11 @@ export function createStubProvider(
   opts: StubProviderOptions = {}
 ): ExtractionProvider {
   const model = opts.model ?? "stub-model";
+  let callIndex = 0;
   return {
     name: `stub-extraction-provider:${model}`,
     async extract({ content }): Promise<ProviderExtractionOutput> {
+      const thisCallIndex = callIndex++;
       if (opts.throwError) {
         throw new Error(opts.throwError);
       }
@@ -65,9 +79,15 @@ export function createStubProvider(
           extractor: `stub-extraction-provider:${model}`,
         };
       });
+      const tokensUsed =
+        typeof opts.tokensUsed === "function" ? opts.tokensUsed(thisCallIndex) : opts.tokensUsed;
       return {
         proposals,
-        raw: { response: JSON.stringify({ specs: specs.length }), model },
+        raw: {
+          response: JSON.stringify({ specs: specs.length }),
+          model,
+          ...(tokensUsed !== undefined ? { tokensUsed } : {}),
+        },
         ...(opts.warnings ? { warnings: opts.warnings } : {}),
       };
     },
