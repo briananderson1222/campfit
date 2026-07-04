@@ -328,13 +328,20 @@ needed there since it already used `localhost`.
   `applyProposalReview` ever reached the provenance-skip logic above. The
   query now wraps the `array_agg` in `COALESCE(..., '{}')`, so an empty merge
   writes an empty-but-valid array instead of crashing. No signature change.
-- **`buildCampReviewTrustInput`'s result is still intentionally discarded.**
-  The call is relocated unchanged from the route into the module's
-  transaction, still running purely as a validation side effect (a throw
-  here still rolls back the transaction and surfaces as an unmapped 500,
-  matching pre-existing behavior). Wiring its result into an actual trust/
-  verification-authority pipeline is explicitly deferred to a follow-up
-  Verification-authority slice — not fixed here.
+- **`buildCampReviewTrustInput`'s result was intentionally discarded here —
+  now landed.** At the time this module was built, the call was relocated
+  unchanged from the route into the module's transaction, still running
+  purely as a validation side effect (a throw here still rolls back the
+  transaction and surfaces as an unmapped 500, matching pre-existing
+  behavior), with wiring its result into an actual trust/verification-
+  authority pipeline explicitly deferred to a follow-up slice. That follow-up
+  (the `verification-authority` slice) has since landed:
+  `recomputeVerification` is deleted, and `buildCampReviewTrustInput`'s
+  output now feeds `recordAppliedFieldEvidence`/`refreshCampVerificationCache`
+  for real, post-`COMMIT`, for both full and `keepPending` applies. See
+  [`docs/verification-authority.md`](./verification-authority.md) for the
+  full cutover (all 4 AC4 writer call sites, the ClaimStore persistence
+  layer, and the ops-relevant semantic finding about legacy-only evidence).
 
 ## Note: a pre-existing production bug fixed as a side effect
 

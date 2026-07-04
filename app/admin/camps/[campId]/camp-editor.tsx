@@ -8,7 +8,7 @@ import {
   Lightbulb, ShieldCheck, Building2, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { computeCoverage, REQUIRED_FOR_VERIFIED } from '@/lib/admin/verification';
+import type { CoverageResult } from '@/lib/admin/verification-authority';
 import {
   CampFieldInput,
   CampFieldValue,
@@ -67,12 +67,12 @@ interface SiteHint {
 // ── Coverage meter ────────────────────────────────────────────────────────────
 
 
-function CoverageMeter({ camp, fieldSources }: {
-  camp: Camp;
-  fieldSources: Record<string, FieldSource> | null;
+function CoverageMeter({ coverage }: {
+  coverage: CoverageResult | null;
 }) {
-  const campLike = { ...camp, ageGroups: camp.ageGroups, pricing: camp.pricing, schedules: camp.schedules };
-  const { covered, missing, unattested, pct } = computeCoverage(campLike as never, fieldSources);
+  if (!coverage) return null;
+  const { covered, missing, unattested, pct } = coverage;
+  const total = covered.length + missing.length + unattested.length;
   const isVerified = missing.length === 0 && unattested.length === 0;
   const color = isVerified ? 'bg-pine-500' : pct >= 67 ? 'bg-amber-400' : 'bg-red-400';
 
@@ -88,7 +88,7 @@ function CoverageMeter({ camp, fieldSources }: {
             : pct >= 67 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
             : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
         )}>
-          {covered.length}/{REQUIRED_FOR_VERIFIED.length} attested
+          {covered.length}/{total} attested
         </span>
       </div>
       <div className="w-full h-1.5 rounded-full bg-cream-200 dark:bg-bark-600 overflow-hidden">
@@ -508,6 +508,26 @@ function EditableField({
   );
 }
 
+// ── Read-only field (derived/system-computed values; no edit affordance) ───────
+
+function ReadOnlyField({
+  label, value, field, timeline,
+}: {
+  label: string; value: unknown; field: string; timeline?: FieldTimeline | null;
+}) {
+  return (
+    <div className="group">
+      <dt className="text-xs text-bark-300 dark:text-bark-300 font-semibold uppercase tracking-wide mb-0.5">{label}</dt>
+      <FieldTimelineNote timeline={timeline} className="mb-1 text-[11px] text-bark-300" />
+      <dd className="flex items-start gap-2">
+        <div className="min-w-0 flex-1 text-sm text-bark-600 dark:text-cream-300">
+          <CampFieldValue value={value} field={field} />
+        </div>
+      </dd>
+    </div>
+  );
+}
+
 // ── Inline attest button (for section headers) ────────────────────────────────
 
 function AttestInlineButton({ isAttested, onAttest }: { isAttested: boolean; onAttest: () => Promise<void> }) {
@@ -604,6 +624,12 @@ function CrawlButton({ campId, websiteUrl }: { campId: string; websiteUrl: strin
 function MarkVerifiedButton({ campId, initial }: { campId: string; initial: string | null }) {
   const [confidence, setConfidence] = useState(initial);
   const [saving, setSaving] = useState(false);
+  // Verification Gaps from the mark_verified response (bulkAttestCamp's derived
+  // outcome, verification-authority--deliver-plan.md Wave 4/5) — populated only
+  // after a real attempt, so we know whether a non-VERIFIED result still has
+  // requirements outstanding (e.g. an unresolved Sessions rollup) to surface to
+  // the admin instead of silently no-oping.
+  const [gaps, setGaps] = useState<string[] | null>(null);
 
   async function markVerified() {
     setSaving(true);
@@ -611,26 +637,38 @@ function MarkVerifiedButton({ campId, initial }: { campId: string; initial: stri
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'mark_verified' }),
     });
-    if (res.ok) setConfidence('VERIFIED');
+    if (res.ok) {
+      const body: { dataConfidence: string; gaps: string[] } = await res.json();
+      setConfidence(body.dataConfidence);
+      setGaps(body.gaps);
+    }
     setSaving(false);
   }
 
   const isVerified = confidence === 'VERIFIED';
+  const gapCount = gaps?.length ?? 0;
   return (
-    <button
-      onClick={isVerified ? undefined : markVerified}
-      disabled={saving || isVerified}
-      className={cn(
-        'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors',
-        isVerified
-          ? 'border-pine-300 bg-pine-50 dark:bg-pine-900/20 text-pine-600 dark:text-pine-300 cursor-default'
-          : 'border-cream-300 dark:border-bark-500 text-bark-400 hover:border-pine-300 hover:text-pine-600 hover:bg-pine-50 dark:hover:bg-pine-900/20'
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={isVerified ? undefined : markVerified}
+        disabled={saving || isVerified}
+        className={cn(
+          'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors',
+          isVerified
+            ? 'border-pine-300 bg-pine-50 dark:bg-pine-900/20 text-pine-600 dark:text-pine-300 cursor-default'
+            : 'border-cream-300 dark:border-bark-500 text-bark-400 hover:border-pine-300 hover:text-pine-600 hover:bg-pine-50 dark:hover:bg-pine-900/20'
+        )}
+        title={isVerified ? 'All key fields confirmed accurate' : 'Mark this record as fully verified (use when all key fields are confirmed from source)'}
+      >
+        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+        {isVerified ? 'Verified' : 'Mark as Verified'}
+      </button>
+      {!isVerified && gaps !== null && (
+        <p className="text-xs text-bark-300">
+          {gapCount > 0 ? `${gapCount} gap${gapCount === 1 ? '' : 's'} remain` : 'Not yet verified'}
+        </p>
       )}
-      title={isVerified ? 'All key fields confirmed accurate' : 'Mark this record as fully verified (use when all key fields are confirmed from source)'}
-    >
-      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-      {isVerified ? 'Verified' : 'Mark as Verified'}
-    </button>
+    </div>
   );
 }
 
@@ -781,10 +819,11 @@ function MultiSelectField({ campId, field, label, value, options }: {
 // ── Main editor ───────────────────────────────────────────────────────────────
 
 export function CampEditor({
-  camp, pendingProposals = [], siteHints = [], domain = '', provider = null,
+  camp, pendingProposals = [], siteHints = [], domain = '', provider = null, coverage = null,
 }: {
   camp: Camp; pendingProposals?: PendingProposal[];
   siteHints?: SiteHint[]; domain?: string; provider?: Provider | null;
+  coverage?: CoverageResult | null;
 }) {
   const [fieldSources, setFieldSources] = useState<Record<string, FieldSource> | null>(camp.fieldSources);
   const fieldTimeline = camp.fieldTimeline ?? {};
@@ -841,7 +880,7 @@ export function CampEditor({
       )}
 
       {/* Field coverage meter */}
-      <CoverageMeter camp={camp} fieldSources={fieldSources} />
+      <CoverageMeter coverage={coverage} />
 
       {/* Core info */}
       <div className="glass-panel p-5">
@@ -891,7 +930,8 @@ export function CampEditor({
             onAttest={attestProp('registrationStatus')} isAttested={isAttested('registrationStatus')} timeline={fieldTimeline.registrationStatus} />
           <EditableField campId={camp.id} field="registrationOpenDate" label="Registration Open Date" value={camp.registrationOpenDate} type="date" timeline={fieldTimeline.registrationOpenDate} />
           <EditableField campId={camp.id} field="registrationCloseDate" label="Registration Close Date" value={camp.registrationCloseDate} type="date" timeline={fieldTimeline.registrationCloseDate} />
-          <EditableField campId={camp.id} field="dataConfidence" label="Data Confidence" value={camp.dataConfidence} type="select" timeline={fieldTimeline.dataConfidence} />
+          {/* dataConfidence is derived (lib/admin/verification-authority.ts is the sole computer of it) — read-only here; MarkVerifiedButton above is the only UI action that can move it. */}
+          <ReadOnlyField label="Data Confidence" value={camp.dataConfidence} field="dataConfidence" timeline={fieldTimeline.dataConfidence} />
           <EditableField campId={camp.id} field="lunchIncluded" label="Lunch Included" value={camp.lunchIncluded} type="boolean" timeline={fieldTimeline.lunchIncluded} />
         </dl>
       </div>

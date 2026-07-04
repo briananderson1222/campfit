@@ -3,13 +3,32 @@ import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 import { writeChangeLogs } from '@/lib/admin/changelog-repository';
+import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 
-const EDITABLE_FIELDS = new Set([
+// `dataConfidence`/`lastVerifiedAt` are deliberately excluded: they are
+// derived, cache-only columns whose sole writer is
+// `lib/admin/verification-authority.ts`'s `refreshCampVerificationCache`
+// (AC1's "sole computer" invariant) — allowing either through this
+// dynamic-SET PATCH would let an admin flip `dataConfidence` to `VERIFIED`
+// with zero backing Claim/Evidence/Event and no cache refresh (security
+// review SF1). See `tests/integration/editable-fields.test.ts`.
+export const EDITABLE_FIELDS = new Set([
   'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes', 'interestingDetails',
   'campType', 'category', 'campTypes', 'categories', 'registrationStatus', 'registrationOpenDate',
-  'dataConfidence', 'lunchIncluded', 'city', 'neighborhood', 'address', 'state', 'zip',
+  'lunchIncluded', 'city', 'neighborhood', 'address', 'state', 'zip',
   'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
 ]);
+
+/** Structural guardrail (V5/SF1): fail loud if either derived column ever reappears here. */
+const FORBIDDEN_EDITABLE_FIELDS = ['dataConfidence', 'lastVerifiedAt'] as const;
+for (const forbidden of FORBIDDEN_EDITABLE_FIELDS) {
+  if (EDITABLE_FIELDS.has(forbidden)) {
+    throw new Error(
+      `EDITABLE_FIELDS must never include "${forbidden}" — it is a derived column whose sole ` +
+        `writer is refreshCampVerificationCache (see this file's EDITABLE_FIELDS comment).`,
+    );
+  }
+}
 
 export async function PATCH(req: Request, props: { params: Promise<{ campId: string }> }) {
   const params = await props.params;
@@ -61,10 +80,12 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   const { action } = await req.json().catch(() => ({})) as { action?: string };
   if (action !== 'mark_verified') return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
 
-  const pool = getPool();
-  await pool.query(
-    `UPDATE "Camp" SET "dataConfidence" = 'VERIFIED', "lastVerifiedAt" = now(), "updatedAt" = now() WHERE id = $1`,
-    [params.campId]
-  );
-  return NextResponse.json({ ok: true });
+  const result = await bulkAttestCamp(params.campId, auth.access.email);
+  return NextResponse.json({
+    ok: true,
+    verified: result.dataConfidence === 'VERIFIED',
+    dataConfidence: result.dataConfidence,
+    attestedFieldCount: result.attestedFieldCount,
+    gaps: result.gapRequirementIds,
+  });
 }

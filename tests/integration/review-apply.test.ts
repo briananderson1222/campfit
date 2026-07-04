@@ -48,6 +48,11 @@ import {
   SurveyReviewSessionStaleError,
 } from "@/lib/admin/review-apply";
 import { getProposal } from "@/lib/admin/review-repository";
+import { campCanonicalClaimId } from "@/lib/admin/trust-projection";
+import { appendEvent, appendEvidence, persistClaim } from "@/lib/admin/claim-store";
+import { SESSION_SUBJECT_TYPE } from "@/lib/admin/session-identity";
+import { sessionClaimId } from "@/lib/admin/verification-policy";
+import { campfitSessionVocabulary } from "@/lib/trust-vocabulary";
 import {
   getOrCreateSurveyReviewSessionForProposal,
   type SurveyReviewSessionRecord,
@@ -164,10 +169,16 @@ async function decide(
 
 async function queryCamp(pool: Pool, campId: string) {
   const result = await pool.query(
-    `SELECT description, "contactPhone", "fieldSources" FROM "Camp" WHERE id = $1`,
+    `SELECT description, "contactPhone", "fieldSources", "dataConfidence", "lastVerifiedAt" FROM "Camp" WHERE id = $1`,
     [campId],
   );
-  return result.rows[0] as { description: string; contactPhone: string | null; fieldSources: Record<string, unknown> | null } | undefined;
+  return result.rows[0] as {
+    description: string;
+    contactPhone: string | null;
+    fieldSources: Record<string, unknown> | null;
+    dataConfidence: string;
+    lastVerifiedAt: string | null;
+  } | undefined;
 }
 
 async function queryProposal(pool: Pool, proposalId: string) {
@@ -190,6 +201,14 @@ afterEach(async () => {
   const pool = getTestPool();
   await pool.query(`TRUNCATE "Camp" RESTART IDENTITY CASCADE;`);
   await pool.query(`TRUNCATE "CrawlMetric";`);
+  // Verification-authority cutover: applyProposalReview now persists Claim/
+  // Evidence/VerificationEvent rows via recordAppliedFieldEvidence. These
+  // carry no FK to "Camp" (subjectId is a plain TEXT column — see
+  // verification-authority.test.ts's afterEach for the same rationale), so
+  // truncating "Camp" above does not cascade into them.
+  await pool.query(
+    `TRUNCATE "SurfaceClaimDefinition", "SurfaceVerificationPolicy", "SurfaceClaimGroup" RESTART IDENTITY CASCADE;`,
+  );
 });
 
 afterAll(async () => {
@@ -235,6 +254,34 @@ describe("applyProposalReview", () => {
       description: { sourceUrl: "https://example.test/camp" },
       contactPhone: { sourceUrl: "https://example.test/camp" },
     });
+
+    // Verification-authority cutover: recomputeVerification (direct
+    // isFullyVerified/UPDATE) is retired — dataConfidence/lastVerifiedAt are
+    // now derived by refreshCampVerificationCache from the persisted Claim
+    // ledger. Only "description" is one of the 8 Verified Camp Claim Set
+    // fields (`contactPhone` is not); the other 7 required fields (campType,
+    // category, registrationStatus, city, websiteUrl, ageGroups, pricing)
+    // have no Claim at all yet, so the Camp cannot reach VERIFIED from this
+    // apply alone — the derived, non-VERIFIED (PLACEHOLDER, the column
+    // DEFAULT) outcome is itself the assertion this cutover requires,
+    // per the module's field-coverage-based (not proposal-based) semantics.
+    expect(campRow?.dataConfidence).toBe("PLACEHOLDER");
+    expect(campRow?.lastVerifiedAt).not.toBeNull();
+
+    // The applied "description" field's Review Decision is real, persisted
+    // Evidence on its canonical Claim (recordAppliedFieldEvidence ->
+    // recordEvidence), not merely a discarded validation side effect.
+    const descriptionClaimId = campCanonicalClaimId(campId, "description");
+    const claimRows = await pool.query<{ id: string }>(
+      `SELECT id FROM "SurfaceClaimDefinition" WHERE id = $1`,
+      [descriptionClaimId],
+    );
+    expect(claimRows.rows).toHaveLength(1);
+    const eventRows = await pool.query<{ status: string }>(
+      `SELECT status FROM "SurfaceVerificationEvent" WHERE "claimId" = $1`,
+      [descriptionClaimId],
+    );
+    expect(eventRows.rows).toEqual([{ status: "verified" }]);
   });
 
   it("case 2: keepPending applies fields, keeps proposal PENDING at priority -1, and merges appliedFields", async () => {
@@ -591,17 +638,13 @@ describe("applyProposalReview", () => {
     ).rejects.toBeInstanceOf(ReviewApplyConflictError);
   });
 
-  it("case 5: relation replace-all deletes prior ageGroups/schedules/pricing rows and inserts exactly the new set", async () => {
+  it("case 5: relation replace-all deletes prior ageGroups/pricing rows and inserts exactly the new set", async () => {
     const pool = getTestPool();
     const { campId, proposalId, session } = await seedReview({
       proposedChanges: {
         ageGroups: fieldDiff(
           [{ label: "Old Age Group", minAge: 5, maxAge: 8, minGrade: null, maxGrade: null }],
           [{ label: "New Age Group", minAge: 6, maxAge: 10, minGrade: null, maxGrade: null }],
-        ),
-        schedules: fieldDiff(
-          [{ label: "Old Schedule", startDate: "2026-06-01", endDate: "2026-06-05", startTime: null, endTime: null, earlyDropOff: null, latePickup: null }],
-          [{ label: "New Schedule", startDate: "2026-07-01", endDate: "2026-07-05", startTime: "09:00", endTime: "15:00", earlyDropOff: null, latePickup: null }],
         ),
         pricing: fieldDiff(
           [{ label: "Old Price", amount: 100, unit: "PER_WEEK", durationWeeks: 1, ageQualifier: null, discountNotes: null }],
@@ -615,15 +658,11 @@ describe("applyProposalReview", () => {
       [campId],
     );
     await pool.query(
-      `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate") VALUES (gen_random_uuid()::text, $1, 'Old Schedule', '2026-06-01', '2026-06-05')`,
-      [campId],
-    );
-    await pool.query(
       `INSERT INTO "CampPricing" (id, "campId", label, amount, unit) VALUES (gen_random_uuid()::text, $1, 'Old Price', 100, 'PER_WEEK')`,
       [campId],
     );
 
-    await decide(session, { ageGroups: "accept-proposed", schedules: "accept-proposed", pricing: "accept-proposed" });
+    await decide(session, { ageGroups: "accept-proposed", pricing: "accept-proposed" });
 
     const result = await applyProposalReview({
       proposalId,
@@ -633,16 +672,106 @@ describe("applyProposalReview", () => {
     });
 
     expect(result.status).toBe("APPROVED");
-    expect(result.appliedFields.slice().sort()).toEqual(["ageGroups", "pricing", "schedules"]);
+    expect(result.appliedFields.slice().sort()).toEqual(["ageGroups", "pricing"]);
 
     const ageGroups = await pool.query(`SELECT label, "minAge", "maxAge" FROM "CampAgeGroup" WHERE "campId" = $1`, [campId]);
     expect(ageGroups.rows).toEqual([{ label: "New Age Group", minAge: 6, maxAge: 10 }]);
 
-    const schedules = await pool.query(`SELECT label, "startTime", "endTime" FROM "CampSchedule" WHERE "campId" = $1`, [campId]);
-    expect(schedules.rows).toEqual([{ label: "New Schedule", startTime: "09:00", endTime: "15:00" }]);
-
     const pricing = await pool.query(`SELECT label, amount, unit FROM "CampPricing" WHERE "campId" = $1`, [campId]);
     expect(pricing.rows).toEqual([{ label: "New Price", amount: "150.00", unit: "PER_WEEK" }]);
+  });
+
+  it("case 5b: schedules keyed-upsert preserves a matched session's id across re-approval, archives (not deletes) a dropped session, and inserts a genuinely new one", async () => {
+    const pool = getTestPool();
+    const { campId, proposalId: firstProposalId, session: firstSession } = await seedReview({
+      proposedChanges: {
+        schedules: fieldDiff(
+          [],
+          [
+            { label: "Session A", startDate: "2026-07-06", endDate: "2026-07-10", startTime: "09:00", endTime: "15:00", earlyDropOff: null, latePickup: null },
+            { label: "Session B", startDate: "2026-07-13", endDate: "2026-07-17", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
+          ],
+        ),
+      },
+    });
+
+    await decide(firstSession, { schedules: "accept-proposed" });
+    const firstResult = await applyProposalReview({
+      proposalId: firstProposalId,
+      reviewSessionId: firstSession.id,
+      reviewer: REVIEWER,
+      keepPending: false,
+    });
+    expect(firstResult.appliedFields).toEqual(["schedules"]);
+
+    const afterFirst = await pool.query<{ id: string; label: string }>(
+      `SELECT id, label FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY label`,
+      [campId],
+    );
+    expect(afterFirst.rows.map((r) => r.label)).toEqual(["Session A", "Session B"]);
+    const sessionAId = afterFirst.rows.find((r) => r.label === "Session A")!.id;
+    const sessionBId = afterFirst.rows.find((r) => r.label === "Session B")!.id;
+
+    // Second Review: "Session A" re-appears unchanged (same label+dates,
+    // slightly different startTime — the natural key ignores startTime, so
+    // this must still be a match, not a rename), "Session B" is dropped, and
+    // a genuinely new "Session C" is added.
+    const secondProposalId = await (async () => {
+      const insertResult = await pool.query<{ id: string }>(
+        `INSERT INTO "CampChangeProposal" ("campId", "sourceUrl", "proposedChanges", "overallConfidence", "extractionModel", status)
+         VALUES ($1, 'https://example.test/camp', $2::jsonb, 0.9, 'test-extraction-model', 'PENDING')
+         RETURNING id`,
+        [
+          campId,
+          JSON.stringify({
+            schedules: fieldDiff(
+              [
+                { label: "Session A", startDate: "2026-07-06", endDate: "2026-07-10", startTime: "09:00", endTime: "15:00", earlyDropOff: null, latePickup: null },
+                { label: "Session B", startDate: "2026-07-13", endDate: "2026-07-17", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
+              ],
+              [
+                { label: "Session A", startDate: "2026-07-06", endDate: "2026-07-10", startTime: "10:00", endTime: "16:00", earlyDropOff: null, latePickup: null },
+                { label: "Session C", startDate: "2026-08-03", endDate: "2026-08-07", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
+              ],
+            ),
+          }),
+        ],
+      );
+      return insertResult.rows[0]!.id;
+    })();
+    const secondProposal = await getProposal(secondProposalId);
+    if (!secondProposal) throw new Error("case 5b: second proposal not found immediately after insert");
+    const secondSession = await getOrCreateSurveyReviewSessionForProposal(secondProposal, { actorId: REVIEWER });
+
+    await decide(secondSession, { schedules: "accept-proposed" });
+    const secondResult = await applyProposalReview({
+      proposalId: secondProposalId,
+      reviewSessionId: secondSession.id,
+      reviewer: REVIEWER,
+      keepPending: false,
+    });
+    expect(secondResult.appliedFields).toEqual(["schedules"]);
+
+    const allRows = await pool.query<{ id: string; label: string; archivedAt: string | null; startTime: string | null }>(
+      `SELECT id, label, "archivedAt", "startTime" FROM "CampSchedule" WHERE "campId" = $1 ORDER BY label`,
+      [campId],
+    );
+    // Session A: same id, updated startTime, not archived (matched in place).
+    const sessionARow = allRows.rows.find((r) => r.label === "Session A")!;
+    expect(sessionARow.id).toBe(sessionAId);
+    expect(sessionARow.archivedAt).toBeNull();
+    expect(sessionARow.startTime).toBe("10:00");
+
+    // Session B: same id, now archived (soft-archive, not deleted).
+    const sessionBRow = allRows.rows.find((r) => r.label === "Session B")!;
+    expect(sessionBRow.id).toBe(sessionBId);
+    expect(sessionBRow.archivedAt).not.toBeNull();
+
+    // Session C: a freshly inserted, non-archived row.
+    const sessionCRow = allRows.rows.find((r) => r.label === "Session C")!;
+    expect(sessionCRow.archivedAt).toBeNull();
+
+    expect(allRows.rows).toHaveLength(3);
   });
 
   it("case 6: a post-commit provenance failure (recordReviewDecision) is tolerated and surfaced, not thrown, and the apply is still committed", async () => {
@@ -685,5 +814,159 @@ describe("applyProposalReview", () => {
 
     const campRow = await queryCamp(pool, campId);
     expect(campRow?.description).toBe("Description that should still be committed.");
+  });
+
+  it("case 7 (V2 fix): a post-commit recordAppliedFieldEvidence/refreshCampVerificationCache failure is tolerated and surfaced via provenanceErrors, not thrown — the apply still succeeds, and changelog/metrics provenance still runs", async () => {
+    const pool = getTestPool();
+    const { campId, proposalId, session } = await seedReview({
+      campOverrides: { description: "" },
+      proposedChanges: {
+        description: fieldDiff("", "V2 fix: still committed despite a broken ClaimStore write.", { mode: "populate" }),
+      },
+    });
+
+    await decide(session, { description: "accept-proposed" });
+
+    // Force recordAppliedFieldEvidence's underlying appendEvidence call to
+    // fail post-commit, without touching lib/admin/review-apply.ts or
+    // claim-store.ts: rename "SurfaceEvidence" away for the duration of this
+    // call, then restore it (same technique as case 6's CrawlMetric rename).
+    await pool.query(`ALTER TABLE "SurfaceEvidence" RENAME TO "SurfaceEvidence_disabled_for_case7"`);
+    let result: Awaited<ReturnType<typeof applyProposalReview>>;
+    try {
+      result = await applyProposalReview({
+        proposalId,
+        reviewSessionId: session.id,
+        reviewer: REVIEWER,
+        keepPending: false,
+      });
+    } finally {
+      await pool.query(`ALTER TABLE "SurfaceEvidence_disabled_for_case7" RENAME TO "SurfaceEvidence"`);
+    }
+
+    // The apply itself is not a 500/thrown exception — it still reports APPROVED.
+    expect(result.status).toBe("APPROVED");
+    expect(result.appliedFields).toEqual(["description"]);
+
+    // recordAppliedFieldEvidence's failure is surfaced, not silently dropped
+    // (refreshCampVerificationCache's own deriveCampVerification call also
+    // reads "SurfaceEvidence" via loadClaimBundle, so it fails too — both are
+    // expected and both non-fatal).
+    const steps = result.provenanceErrors.map((e) => e.step);
+    expect(steps).toContain("recordAppliedFieldEvidence");
+    expect(steps).toContain("refreshCampVerificationCache");
+    for (const provenanceError of result.provenanceErrors) {
+      expect(provenanceError.message).toBeTruthy();
+    }
+
+    // Camp fields + proposal status already committed before the post-commit
+    // provenance step ran — unaffected by its failure.
+    const proposalRow = await queryProposal(pool, proposalId);
+    expect(proposalRow?.status).toBe("APPROVED");
+    const campRow = await queryCamp(pool, campId);
+    expect(campRow?.description).toBe("V2 fix: still committed despite a broken ClaimStore write.");
+
+    // changelog/metrics provenance (recordProvenance, unaffected by the
+    // ClaimStore-write failure above) still ran — the CampChangeLog row for
+    // this field exists.
+    const changeLogRows = await pool.query(
+      `SELECT id FROM "CampChangeLog" WHERE "campId" = $1 AND "fieldName" = 'description'`,
+      [campId],
+    );
+    expect(changeLogRows.rows).toHaveLength(1);
+  });
+
+  it("case 8 (V3 fix, AC6 end-to-end): approving a Proposal that removes a Session with a persisted Claim, via the live applyProposalReview path, yields a revoked VerificationEvent for that Session's Claim", async () => {
+    const pool = getTestPool();
+    const campId = await insertCamp(pool);
+
+    // Seed an existing, non-archived Session directly (bypassing an initial
+    // Review Apply — session-identity.ts's natural-key matching only cares
+    // about the current CampSchedule rows, not how they got there).
+    const { rows: [scheduleRow] } = await pool.query<{ id: string }>(
+      `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate")
+       VALUES (gen_random_uuid()::text, $1, 'Session A', '2026-07-06', '2026-07-10')
+       RETURNING id`,
+      [campId],
+    );
+    const scheduleId = scheduleRow!.id;
+
+    // A real, already-persisted Claim for this Session — proves the "revoked"
+    // event lands on genuine, pre-existing audit history, not a fixture.
+    const claimId = sessionClaimId(scheduleId, "dates");
+    await persistClaim(pool, {
+      id: claimId,
+      subjectType: SESSION_SUBJECT_TYPE,
+      subjectId: scheduleId,
+      facet: campfitSessionVocabulary.facet,
+      claimType: campfitSessionVocabulary.claimTypes.dates,
+      fieldOrBehavior: "dates",
+    });
+    await appendEvidence(pool, {
+      id: `${claimId}.evidence.crawl_observation`,
+      claimId,
+      evidenceType: "crawl_observation",
+      method: "observation",
+      sourceRef: "https://example.test/camp",
+      excerptOrSummary: "Session A dates sourced from the provider's own schedule listing.",
+      observedAt: new Date().toISOString(),
+      collectedBy: "campfit-crawler",
+    });
+    await appendEvent(pool, {
+      id: `${claimId}.event.verified`,
+      claimId,
+      status: "verified",
+      type: "verification",
+      actor: "campfit-crawler",
+      method: "observation",
+      evidenceIds: [`${claimId}.evidence.crawl_observation`],
+      createdAt: new Date().toISOString(),
+    });
+
+    // A Proposal whose `schedules` diff drops Session A entirely (old: one
+    // session, new: none) — the live archive path this fix wires up.
+    const proposalId = await insertProposal(pool, {
+      campId,
+      proposedChanges: {
+        schedules: fieldDiff(
+          [{ label: "Session A", startDate: "2026-07-06", endDate: "2026-07-10", startTime: null, endTime: null, earlyDropOff: null, latePickup: null }],
+          [],
+        ),
+      },
+    });
+    const proposal = await getProposal(proposalId);
+    if (!proposal) throw new Error("case 8: proposal not found immediately after insert");
+    const session = await getOrCreateSurveyReviewSessionForProposal(proposal, { actorId: REVIEWER });
+    await decide(session, { schedules: "accept-proposed" });
+
+    const result = await applyProposalReview({
+      proposalId,
+      reviewSessionId: session.id,
+      reviewer: REVIEWER,
+      keepPending: false,
+    });
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.appliedFields).toEqual(["schedules"]);
+    // The revocation succeeded — no provenanceError for it.
+    expect(result.provenanceErrors.map((e) => e.step)).not.toContain("revokeArchivedSessionClaims");
+
+    // The Session itself is archived (pre-existing coverage, case 5b).
+    const scheduleAfter = await pool.query<{ archivedAt: string | null }>(
+      `SELECT "archivedAt" FROM "CampSchedule" WHERE id = $1`,
+      [scheduleId],
+    );
+    expect(scheduleAfter.rows[0]?.archivedAt).not.toBeNull();
+
+    // The NEW assertion this fix delivers: a `revoked` VerificationEvent now
+    // exists for the archived Session's already-persisted Claim, produced by
+    // the LIVE applyProposalReview path — not by calling
+    // revokeArchivedSessionClaims directly (that's verification-authority.
+    // test.ts's unit-level coverage of the same function).
+    const revokedEvents = await pool.query<{ claimId: string; status: string; method: string }>(
+      `SELECT "claimId", status, method FROM "SurfaceVerificationEvent" WHERE "claimId" = $1 AND status = 'revoked'`,
+      [claimId],
+    );
+    expect(revokedEvents.rows).toEqual([{ claimId, status: "revoked", method: "review-apply" }]);
   });
 });

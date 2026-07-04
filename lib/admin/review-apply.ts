@@ -15,22 +15,45 @@
  *
  * `applyProposalReview` (below) is the orchestrating function; it delegates
  * to small private helpers (`deriveDecision`, `lockAndCheckProposal`,
- * `applyScalarField`, `applyRelationField`, `recomputeVerification`,
+ * `applyScalarField`, `applyRelationField`, `recordAppliedFieldEvidence`,
  * `transitionProposalStatus`, `recordProvenance`) each responsible for one
  * concern of the apply transaction, so a future change to one concern (e.g.
  * adding a new relation type) doesn't require reading/modifying the whole
  * flow.
+ *
+ * Verification-authority cutover (`.kontourai/flow-agents/verification-
+ * authority/verification-authority--deliver-plan.md`, Wave 4
+ * "`review-apply.ts` `recomputeVerification` cutover"): `buildCampReviewTrustInput`'s
+ * result — previously computed only for its `validateTrustBundle` side effect
+ * and then discarded — is now the actual source of the Evidence recorded for
+ * each applied field. Every approved field's Review Decision becomes real,
+ * persisted Evidence on that field's canonical Claim
+ * (`lib/admin/verification-authority.ts`'s `recordEvidence`, re-exported from
+ * `lib/admin/claim-store.ts`); `refreshCampVerificationCache` then re-derives
+ * `Camp.dataConfidence`/`lastVerifiedAt` from the full Claim ledger — the ONLY
+ * writer of those two columns (see `verification-authority.ts`'s header
+ * comment, AC1). This module no longer computes `isFullyVerified`/coverage
+ * itself, and no longer writes `dataConfidence` directly — `lib/admin/
+ * verification.ts` (the module that used to) is retired by this slice.
+ * `recordAppliedFieldEvidence`/`refreshCampVerificationCache` necessarily run
+ * AFTER `COMMIT` (both go through `verification-authority.ts`'s own pool-
+ * scoped calls, not this function's transaction `client`, so they need the
+ * applied fields' writes to already be visible) — a rejected field's Current
+ * Value claim is left exactly as-is: only `appliedFields` are iterated, never
+ * `decision.rejectedFields`.
  */
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+import type { ClaimDefinitionDraft, Evidence, TrustBundle, VerificationEvent } from '@kontourai/surface';
 
 import { getPool } from '@/lib/db';
 import { getProposal, updateProposalStatus, partialApprove } from './review-repository';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
-import { isFullyVerified } from './verification';
-import { buildCampReviewTrustInput } from './trust-projection';
+import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
+import { buildCampReviewTrustInput, campCanonicalClaimId } from './trust-projection';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from './survey-review-apply';
 import { getSurveyReviewEvents } from './survey-review-events';
+import { applyScheduleReconciliation, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
@@ -54,7 +77,30 @@ export interface ApplyProposalReviewOptions {
 }
 
 export interface ProvenanceError {
-  readonly step: 'writeChangeLogs' | 'recordReviewDecision';
+  readonly step:
+    | 'writeChangeLogs'
+    | 'recordReviewDecision'
+    /**
+     * V2 fix (HIGH, review-code.md): `recordAppliedFieldEvidence`/
+     * `refreshCampVerificationCache` run AFTER `COMMIT` (see this module's
+     * header comment) and were previously unguarded — a failure there used
+     * to propagate as an unhandled exception (a misleading 500 for an apply
+     * that had already durably succeeded) and silently skipped
+     * changelog/metrics provenance entirely. Both are now individually
+     * try/caught and reported here instead, exactly like the pre-existing
+     * writeChangeLogs/recordReviewDecision steps below.
+     */
+    | 'recordAppliedFieldEvidence'
+    | 'refreshCampVerificationCache'
+    /**
+     * V3 fix (HIGH, review-code.md): `revokeArchivedSessionClaims` (AC6) —
+     * appending a `revoked` VerificationEvent for an archived Session's
+     * already-persisted Claims. Also non-fatal: the Session archive itself
+     * (the `CampSchedule.archivedAt` write) already committed inside this
+     * module's transaction; a failure recording the claim-level revocation
+     * afterwards must not undo that, or block changelog/metrics provenance.
+     */
+    | 'revokeArchivedSessionClaims';
   readonly message: string;
 }
 
@@ -157,6 +203,16 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // to approve this round" apart from "had approved fields, but they were
   // all already applied" — see F13 in docs/review-apply-module.md.
   let derivedApprovedCount = 0;
+  // Captured inside the transaction (built from the under-lock-filtered
+  // `appliedFields`) but consumed AFTER `COMMIT` by `recordAppliedFieldEvidence`,
+  // below — see this module's header comment on why the evidence-recording
+  // step can't run inside this function's own transaction `client`.
+  let reviewTrustBundle: TrustBundle | undefined;
+  // V3 fix (HIGH, review-code.md): Session rows archived by this round's
+  // `schedules` reconciliation (if any) — captured inside the transaction,
+  // consumed AFTER `COMMIT` by `revokeArchivedSessionClaims` (below), same
+  // reasoning as `reviewTrustBundle` above.
+  const orphanedSessions: ExistingScheduleRow[] = [];
 
   try {
     await client.query('BEGIN');
@@ -175,10 +231,15 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     derivedApprovedCount = decision.approvedFields.length;
     appliedFields = decision.approvedFields.filter((field) => !alreadyAppliedFields.has(field));
 
-    // Validation side effect only — result intentionally unused. Relocated
-    // unchanged from the route; flagged for a follow-up Verification-
-    // authority slice (see the plan's Stop-short risks).
-    buildCampReviewTrustInput({
+    // Builds the Review Decision's Claim/Evidence/VerificationEvent shapes
+    // for every field in this round (approved and rejected alike) — kept as
+    // its own call (not inlined into recordAppliedFieldEvidence) so
+    // `validateTrustBundle`'s structural check still runs, and fails, inside
+    // this transaction exactly as it always has (a malformed Review Decision
+    // rolls back the whole apply, same as before this cutover). Its result
+    // is no longer discarded: recordAppliedFieldEvidence (below, post-COMMIT)
+    // feeds the approved subset into `recordEvidence`.
+    reviewTrustBundle = buildCampReviewTrustInput({
       proposalId: proposal.id,
       campId: proposal.campId,
       sourceUrl: proposal.sourceUrl,
@@ -199,11 +260,13 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       if (SCALAR_FIELDS.includes(field)) {
         changeLogs.push(await applyScalarField(client, proposal, reviewer, decision.reviewedAt, field, diff));
       } else if (field in RELATION_TABLES && Array.isArray(diff.new)) {
-        changeLogs.push(await applyRelationField(client, proposal, reviewer, decision.reviewedAt, field, diff));
+        const relationResult = await applyRelationField(client, proposal, reviewer, decision.reviewedAt, field, diff);
+        changeLogs.push(relationResult.changeLog);
+        if (relationResult.orphaned && relationResult.orphaned.length > 0) {
+          orphanedSessions.push(...relationResult.orphaned);
+        }
       }
     }
-
-    await recomputeVerification(client, proposal.campId, keepPending, appliedFields.length);
 
     // The Proposal's status transition happens inside this same transaction,
     // before COMMIT — see transitionProposalStatus's own comment for why
@@ -217,6 +280,65 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     throw err;
   } finally {
     client.release();
+  }
+
+  // Verification-authority cutover (see this module's header comment): the
+  // old field-coverage-based, direct-`Camp.dataConfidence`-write
+  // `recomputeVerification` is retired. Each applied field's Review Decision
+  // becomes real, persisted Evidence on its canonical Claim
+  // (`recordAppliedFieldEvidence`), then `refreshCampVerificationCache`
+  // re-derives `dataConfidence`/`lastVerifiedAt` from the full Claim ledger —
+  // the only writer of those two columns now. No-op when nothing was applied
+  // this round (mirrors the old function's `appliedFieldCount === 0` guard),
+  // including the idempotent no-op case where every derived field was
+  // already applied under the lock. Runs for both a full apply and a
+  // `keepPending` partial apply alike — the module derives the Camp's true
+  // coverage from its persisted Claims on every call, so there is no
+  // separate "defer VERIFIED until the final round" flag to thread through
+  // here anymore.
+  // V2 fix (HIGH, review-code.md): this used to be unguarded — a failure
+  // here (e.g. a transient DB error, or `recordAppliedFieldEvidence`'s own
+  // "expected a Claim/Evidence/Event, found none" defensive throw) propagated
+  // as an unhandled exception even though the Camp's fields and the
+  // Proposal's status had ALREADY durably committed above: the admin saw a
+  // misleading 500 for an apply that had actually (fully or partially)
+  // succeeded, AND changelog/metrics provenance below never ran, AND it was
+  // never reported as a provenanceError like every other failure mode this
+  // module handles. Both steps are now individually try/caught and reported
+  // via `provenanceErrors` instead — changelog/metrics (`recordProvenance`,
+  // below) still run regardless of whether these succeed.
+  const postCommitProvenanceErrors: ProvenanceError[] = [];
+  if (appliedFields.length > 0 && reviewTrustBundle) {
+    try {
+      await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, appliedFields, reviewTrustBundle);
+    } catch (err) {
+      console.error('recordAppliedFieldEvidence failed (non-fatal):', err);
+      postCommitProvenanceErrors.push({ step: 'recordAppliedFieldEvidence', message: String(err) });
+    }
+
+    try {
+      await refreshCampVerificationCache(proposal.campId);
+    } catch (err) {
+      console.error('refreshCampVerificationCache failed (non-fatal):', err);
+      postCommitProvenanceErrors.push({ step: 'refreshCampVerificationCache', message: String(err) });
+    }
+  }
+
+  // V3 fix (HIGH, review-code.md, AC6): revoke Claims for any Session this
+  // round's `schedules` reconciliation archived (`orphanedSessions`, captured
+  // inside the transaction above) — previously built, tested, and exported
+  // by `session-identity.ts`/`verification-authority.ts` but never actually
+  // called from this, the one live archive path. Non-fatal for the same
+  // reason as `recordAppliedFieldEvidence` above: the Session's own
+  // `archivedAt` write already committed; a failure recording its Claims'
+  // `revoked` VerificationEvent afterwards must not undo that.
+  if (orphanedSessions.length > 0) {
+    try {
+      await revokeArchivedSessionClaims({ orphaned: orphanedSessions, actor: reviewer, method: 'review-apply' });
+    } catch (err) {
+      console.error('revokeArchivedSessionClaims failed (non-fatal):', err);
+      postCommitProvenanceErrors.push({ step: 'revokeArchivedSessionClaims', message: String(err) });
+    }
   }
 
   // Provenance-skip discriminator (F13-corrected): skip writeChangeLogs/
@@ -247,19 +369,29 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // no rejection-tracking column (mirroring appliedFields for approvals) to
   // de-duplicate against; this is audit-only (no Camp/Proposal state
   // corruption) and accepted rather than fixed here.
-  const provenanceErrors = keepPending && derivedApprovedCount > 0 && appliedFields.length === 0
-    ? []
-    : await recordProvenance({
-        proposalId,
-        proposal,
-        appliedFields,
-        rejectedFields: decision.rejectedFields,
-        effectiveChanges: decision.effectiveChanges,
-        reviewerNotes: decision.reviewerNotes,
-        feedbackTags,
-        changeLogs,
-        keepPending,
-      });
+  // `postCommitProvenanceErrors` (recordAppliedFieldEvidence/
+  // refreshCampVerificationCache/revokeArchivedSessionClaims) are always
+  // included — they already ran (or were skipped, per their own
+  // `appliedFields.length`/`orphanedSessions.length` guards above)
+  // independently of the writeChangeLogs/recordReviewDecision
+  // duplicate-retry discriminator below, which only applies to THOSE two
+  // steps.
+  const provenanceErrors = [
+    ...postCommitProvenanceErrors,
+    ...(keepPending && derivedApprovedCount > 0 && appliedFields.length === 0
+      ? []
+      : await recordProvenance({
+          proposalId,
+          proposal,
+          appliedFields,
+          rejectedFields: decision.rejectedFields,
+          effectiveChanges: decision.effectiveChanges,
+          reviewerNotes: decision.reviewerNotes,
+          feedbackTags,
+          changeLogs,
+          keepPending,
+        })),
+  ];
 
   return {
     proposalId,
@@ -379,10 +511,28 @@ async function applyScalarField(
 }
 
 /**
- * Replace-all semantics for one of the three relation fields
- * (`ageGroups`/`schedules`/`pricing`): deletes this Camp's prior rows for
- * the relation, then inserts exactly the Review's approved set. Returns the
- * CampChangeLog entry to record for it.
+ * Applies one of the three relation fields (`ageGroups`/`schedules`/
+ * `pricing`). `ageGroups`/`pricing` keep replace-all semantics: delete this
+ * Camp's prior rows for the relation, then insert exactly the Review's
+ * approved set (decision 5 scopes the keyed-upsert change below to
+ * `schedules` only — these two are a documented, natural follow-up once a
+ * second demand for stable child-row identity shows up).
+ *
+ * `schedules` instead goes through `session-identity.ts`'s
+ * `applyScheduleReconciliation`: matches the incoming snapshot against
+ * existing, non-archived `CampSchedule` rows by natural key (trimmed-
+ * lowercase `label` + `startDate` + `endDate`) via `@kontourai/surface`'s
+ * `matchClaimSubjects`, then updates matched rows in place (id preserved),
+ * soft-archives (`archivedAt`, never `DELETE`) rows with no incoming match,
+ * and inserts rows with no existing match — see `session-identity.ts`'s
+ * header comment for the full rationale and the archived-session claim-
+ * disposition follow-up this enables in Wave 3.
+ *
+ * Returns the CampChangeLog entry to record for the field, plus (V3 fix,
+ * `schedules` only) the archived (`orphaned`) Session rows this round, so
+ * the caller can revoke their Claims post-commit
+ * (`revokeArchivedSessionClaims`) — see this module's header comment and
+ * `applyProposalReview`'s post-commit block.
  */
 async function applyRelationField(
   client: PoolClient,
@@ -391,111 +541,133 @@ async function applyRelationField(
   reviewedAt: string,
   field: string,
   diff: FieldDiff,
-): Promise<ChangeLogEntry> {
-  const table = RELATION_TABLES[field];
+): Promise<{ changeLog: ChangeLogEntry; orphaned?: readonly ExistingScheduleRow[] }> {
   const fieldSource = {
     excerpt: diff.excerpt ?? null,
     sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
     approvedAt: reviewedAt,
   };
 
-  await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
-
-  if (field === 'ageGroups') {
-    for (const ag of diff.new as { label: string; minAge: number | null; maxAge: number | null; minGrade: number | null; maxGrade: number | null }[]) {
-      await client.query(
-        `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
-         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6)`,
-        [proposal.campId, ag.label, ag.minAge, ag.maxAge, ag.minGrade, ag.maxGrade]
-      );
-    }
-  } else if (field === 'schedules') {
-    for (const s of diff.new as { label: string; startDate: string | null; endDate: string | null; startTime: string | null; endTime: string | null; earlyDropOff: string | null; latePickup: string | null }[]) {
-      await client.query(
-        `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate", "startTime", "endTime", "earlyDropOff", "latePickup")
-         VALUES (gen_random_uuid()::text, $1, $2, $3::date, $4::date, $5, $6, $7, $8)`,
-        [proposal.campId, s.label, s.startDate, s.endDate, s.startTime, s.endTime, s.earlyDropOff, s.latePickup]
-      );
-    }
-  } else if (field === 'pricing') {
-    for (const p of diff.new as { label: string; amount: number; unit: string; durationWeeks: number | null; ageQualifier: string | null; discountNotes: string | null }[]) {
-      await client.query(
-        `INSERT INTO "CampPricing" (id, "campId", label, amount, unit, "durationWeeks", "ageQualifier", "discountNotes")
-         VALUES (gen_random_uuid()::text, $1, $2, $3, $4::"PricingUnit", $5, $6, $7)`,
-        [proposal.campId, p.label, p.amount, p.unit, p.durationWeeks, p.ageQualifier, p.discountNotes]
-      );
-    }
-  }
-
+  let orphaned: readonly ExistingScheduleRow[] | undefined;
   if (field === 'schedules') {
+    const reconciliation = await applyScheduleReconciliation(client, proposal.campId, diff.new as IncomingScheduleSnapshot[]);
+    orphaned = reconciliation.orphaned;
+
     await client.query(
       `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
       [JSON.stringify({ schedules: fieldSource }), proposal.campId],
     );
+  } else {
+    const table = RELATION_TABLES[field];
+    await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
+
+    if (field === 'ageGroups') {
+      for (const ag of diff.new as { label: string; minAge: number | null; maxAge: number | null; minGrade: number | null; maxGrade: number | null }[]) {
+        await client.query(
+          `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
+           VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6)`,
+          [proposal.campId, ag.label, ag.minAge, ag.maxAge, ag.minGrade, ag.maxGrade]
+        );
+      }
+    } else if (field === 'pricing') {
+      for (const p of diff.new as { label: string; amount: number; unit: string; durationWeeks: number | null; ageQualifier: string | null; discountNotes: string | null }[]) {
+        await client.query(
+          `INSERT INTO "CampPricing" (id, "campId", label, amount, unit, "durationWeeks", "ageQualifier", "discountNotes")
+           VALUES (gen_random_uuid()::text, $1, $2, $3, $4::"PricingUnit", $5, $6, $7)`,
+          [proposal.campId, p.label, p.amount, p.unit, p.durationWeeks, p.ageQualifier, p.discountNotes]
+        );
+      }
+    }
   }
 
   return {
-    campId: proposal.campId,
-    proposalId: proposal.id,
-    changedBy: reviewer,
-    fieldName: field,
-    oldValue: diff.old,
-    newValue: diff.new,
-    changeType: 'UPDATE',
+    changeLog: {
+      campId: proposal.campId,
+      proposalId: proposal.id,
+      changedBy: reviewer,
+      fieldName: field,
+      oldValue: diff.old,
+      newValue: diff.new,
+      changeType: 'UPDATE',
+    },
+    orphaned,
   };
 }
 
 /**
- * Updates `lastVerifiedAt` and (when every required field now has
- * fieldSources coverage, and this isn't a partial Review Apply) flips
- * `dataConfidence` to VERIFIED. Field-coverage-based, not proposal-based —
- * partial approvals can still eventually trigger VERIFIED once the last
- * required field gets its citation. No-op when nothing was actually applied
- * this transaction (`appliedFieldCount === 0`) — including the idempotent
- * no-op case where every derived field was already applied under the lock.
+ * Feeds `buildCampReviewTrustInput`'s already-produced Claims/Evidence/Events
+ * for each applied (approved) field into `verification-authority.ts`'s
+ * `recordEvidence` — the Review Decision becomes real, persisted Evidence on
+ * the field's canonical Claim (`campCanonicalClaimId(campId, field)`), per
+ * this module's header comment / the verification-authority plan's Wave 4
+ * "`review-apply.ts` `recomputeVerification` cutover" task. A rejected
+ * field's Current Value claim is left exactly as-is — this function only
+ * ever iterates `appliedFields`, never `decision.rejectedFields`, so nothing
+ * is written for a rejection.
+ *
+ * `campReviewResolution` (trust-projection.ts) always emits the SELECTED
+ * observation's Claim/Evidence/Event under the field's canonical claim id —
+ * for an applied (approved) field that is always the `proposedObservation`
+ * (crawl_observation-sourced when `diff.sourceUrl` was set, matching
+ * `claim-store-backfill.ts`'s "crawl_observation for source-URL-backed
+ * approvals" mapping), with a `verified`-status VerificationEvent (survey's
+ * `to-surface.ts` `eventMethodFor('verified')` -> `'survey-review'`) — so the
+ * bundle built above is guaranteed to contain all three for every id this
+ * function looks up; the error below only guards a future change to that
+ * claim-identity convention.
+ *
+ * `evidence.id`/`event.id`, as `buildSurveyTrustBundle` mints them, are keyed
+ * off the claim id ALONE (`${claimId}.evidence.source` /
+ * `${claimId}.event.${status}` — `to-surface.ts`'s `observationToClaimRecord`
+ * always derives them from the SELECTED observation's overridden claim id,
+ * not from anything proposal-scoped), so they are NOT unique across two
+ * different Proposals approving the same field for the same Camp — and
+ * `SurfaceEvidence`/`SurfaceVerificationEvent` are deliberately append-only
+ * (no `ON CONFLICT`, migration 012 — corrections are new rows, never
+ * mutations; see `claim-store.ts`'s header comment). This function therefore
+ * re-keys both ids off `(claimId, proposalId)` before calling `recordEvidence`
+ * — the same "key every Evidence/VerificationEvent id deterministically off
+ * the row it came from" convention `claim-store-backfill.ts` already
+ * establishes (there, the legacy row; here, the approving
+ * `CampChangeProposal`) — rather than reusing the bundle's own ids verbatim.
  */
-async function recomputeVerification(
-  client: PoolClient,
+async function recordAppliedFieldEvidence(
+  pool: Pool,
   campId: string,
-  keepPending: boolean,
-  appliedFieldCount: number,
+  proposalId: string,
+  appliedFields: readonly string[],
+  reviewTrustBundle: TrustBundle,
 ): Promise<void> {
-  if (appliedFieldCount === 0) return;
+  for (const field of appliedFields) {
+    const claimId = campCanonicalClaimId(campId, field);
+    const claim = reviewTrustBundle.claims.find((candidate) => candidate.id === claimId);
+    const evidence = reviewTrustBundle.evidence.find((candidate) => candidate.claimId === claimId);
+    const event = reviewTrustBundle.events.find((candidate) => candidate.claimId === claimId);
+    if (!claim || !evidence || !event) {
+      throw new Error(
+        `recordAppliedFieldEvidence: expected buildCampReviewTrustInput's bundle to contain a ` +
+          `Claim/Evidence/Event for "${claimId}" (field "${field}"), found ` +
+          `${claim ? 'a claim' : 'NO claim'}, ${evidence ? 'evidence' : 'NO evidence'}, ${event ? 'an event' : 'NO event'}.`,
+      );
+    }
 
-  // Fetch the current camp state (including freshly-written fieldSources) to check coverage
-  const { rows: [updatedCamp] } = await client.query(
-    `SELECT description, "campType", category, "registrationStatus", city, "websiteUrl",
-            "organizationName", "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
-            state, zip, "registrationOpenDate", "registrationCloseDate",
-            "ageGroups", pricing, schedules, "fieldSources"
-     FROM "Camp"
-     LEFT JOIN LATERAL (
-       SELECT COALESCE(json_agg(ag), '[]'::json) AS "ageGroups"
-       FROM "CampAgeGroup" ag WHERE ag."campId" = "Camp".id
-     ) ag ON true
-     LEFT JOIN LATERAL (
-       SELECT COALESCE(json_agg(s), '[]'::json) AS schedules
-       FROM "CampSchedule" s WHERE s."campId" = "Camp".id
-     ) s ON true
-     LEFT JOIN LATERAL (
-       SELECT COALESCE(json_agg(p), '[]'::json) AS pricing
-       FROM "CampPricing" p WHERE p."campId" = "Camp".id
-     ) p ON true
-     WHERE "Camp".id = $1`,
-    [campId]
-  );
+    const draft: ClaimDefinitionDraft = {
+      id: claim.id,
+      subjectType: claim.subjectType,
+      subjectId: claim.subjectId,
+      facet: claim.facet,
+      claimType: claim.claimType,
+      fieldOrBehavior: claim.fieldOrBehavior,
+      impactLevel: claim.impactLevel,
+      metadata: claim.metadata,
+    };
 
-  const campNowVerified = !keepPending && updatedCamp &&
-    isFullyVerified(updatedCamp, updatedCamp.fieldSources);
+    const evidenceId = `evidence.${claimId}.review.${proposalId}`;
+    const scopedEvidence: Evidence = { ...evidence, id: evidenceId };
+    const scopedEvent: VerificationEvent = { ...event, id: `event.${claimId}.review.${proposalId}`, evidenceIds: [evidenceId] };
 
-  await client.query(
-    `UPDATE "Camp"
-     SET "lastVerifiedAt" = now(),
-         "sourceType"     = 'SCRAPER',
-         "dataConfidence" = CASE WHEN $2 THEN 'VERIFIED'::"DataConfidence" ELSE "dataConfidence" END
-     WHERE id = $1`,
-    [campId, campNowVerified ?? false]
-  );
+    await recordEvidence(pool, { claim: draft, evidence: scopedEvidence, event: scopedEvent });
+  }
 }
 
 /**

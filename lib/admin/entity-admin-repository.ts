@@ -1,4 +1,7 @@
 import { getPool } from '@/lib/db';
+import { buildCampAttestationTrustInput } from './trust-projection';
+import { recordEvidence, refreshCampVerificationCache } from './verification-authority';
+import { VERIFIED_CAMP_FIELDS } from './verification-policy';
 
 export type AdminEntityType = 'CAMP' | 'PROVIDER' | 'PERSON';
 export type AiCapability = 'READ' | 'PROPOSE' | 'WRITE';
@@ -160,6 +163,65 @@ export async function createReviewFlag(opts: {
   return rows[0];
 }
 
+/**
+ * The `VERIFIED_CAMP_FIELDS` set (`verification-policy.ts`'s Verified Camp
+ * Claim Set field vocabulary), widened to `readonly string[]` so an arbitrary
+ * `fieldKey: string` (e.g. `addFieldAttestation`'s free-form attestation
+ * target, which also accepts non-claim-set fields like `organizationName`,
+ * and indexed sub-fields like `ageGroups:0`) can be checked against it
+ * without a type error. Exact-match only: an indexed sub-field key does NOT
+ * match its parent field name, matching this task's plan wording literally
+ * ("fieldKey in VERIFIED_CAMP_CLAIM_SET").
+ */
+const VERIFIED_CAMP_CLAIM_SET_FIELDS: readonly string[] = VERIFIED_CAMP_FIELDS;
+
+/**
+ * The one place both legacy attestation stores (the `/attest` bulk route's
+ * `fieldSources` JSON patch and `addFieldAttestation`'s `FieldAttestation`
+ * row) reconcile behind `claim-store.ts`'s `recordEvidence` interface (this
+ * slice's Wave 4 decision — see `verification-authority--deliver-plan.md`'s
+ * "reconcile behind one recordEvidence interface" narrative). Builds a
+ * `TrustBundle` for the given Camp field(s) via `trust-projection.ts`'s
+ * `buildCampAttestationTrustInput` (one Claim + Evidence + Event per field,
+ * 1:1 by construction — see `@kontourai/survey`'s `buildSurveyTrustBundle`),
+ * records each triple, then refreshes `Camp.dataConfidence` once for the
+ * whole batch. Exported so `app/api/admin/camps/[campId]/attest/route.ts`
+ * (the bulk multi-field caller) and `addFieldAttestation` below (the
+ * single-field caller) share the exact same reconciliation logic instead of
+ * maintaining two copies of it.
+ */
+export async function recordCampAttestationEvidence(args: {
+  campId: string;
+  fields: string[];
+  actor: string;
+  attestedAt: string;
+  notes?: string | null;
+  values?: Record<string, unknown>;
+}): Promise<void> {
+  const pool = getPool();
+  const trustBundle = buildCampAttestationTrustInput({
+    campId: args.campId,
+    fields: args.fields,
+    actor: args.actor,
+    attestedAt: args.attestedAt,
+    notes: args.notes,
+    values: args.values,
+  });
+
+  for (const claim of trustBundle.claims) {
+    const evidence = trustBundle.evidence.find((item) => item.claimId === claim.id);
+    if (!evidence) {
+      throw new Error(
+        `recordCampAttestationEvidence: buildCampAttestationTrustInput produced claim "${claim.id}" with no matching evidence — this would indicate a bug in buildCampAttestationTrustInput's 1:1 claim/evidence construction, not a valid empty-evidence state.`,
+      );
+    }
+    const event = trustBundle.events.find((item) => item.claimId === claim.id);
+    await recordEvidence(pool, { claim, evidence, event });
+  }
+
+  await refreshCampVerificationCache(args.campId);
+}
+
 export async function addFieldAttestation(opts: {
   entityType: AdminEntityType;
   entityId: string;
@@ -175,6 +237,38 @@ export async function addFieldAttestation(opts: {
   const normalizedNotes = opts.mode === 'override'
     ? `Override attestation: ${opts.notes ?? 'Approved by admin review'}`
     : opts.notes ?? null;
+
+  // V8 fix (MEDIUM, review-code.md): the reconciled Claim/Evidence/Event
+  // write now runs BEFORE the legacy `FieldAttestation` INSERT, mirroring
+  // `/attest/route.ts`'s already-safe ordering. Previously the legacy row
+  // committed FIRST and this reconciled write ran after with no try/catch —
+  // a failure here (a transient DB error, or a same-subject concurrency
+  // conflict) surfaced to the caller as a total failure of an action that
+  // had actually already partially succeeded, and a subsequent admin retry
+  // would insert a SECOND, duplicate `FieldAttestation` row for the same
+  // value (this insert has no idempotency guard). Reordering means: if this
+  // call throws, nothing has been durably written yet, so the caller sees an
+  // honest total failure and a retry is safe.
+  if (opts.entityType === 'CAMP' && VERIFIED_CAMP_CLAIM_SET_FIELDS.includes(opts.fieldKey)) {
+    await recordCampAttestationEvidence({
+      campId: opts.entityId,
+      fields: [opts.fieldKey],
+      actor: opts.actor,
+      attestedAt: new Date().toISOString(),
+      notes: normalizedNotes,
+      values: opts.valueSnapshot === undefined ? undefined : { [opts.fieldKey]: opts.valueSnapshot },
+    });
+  }
+
+  // Dual-write reconciliation (this task's plan wording): CAMP entities
+  // attesting a Verified Camp Claim Set field ALSO record the same
+  // attestation as Claim/Evidence/Event rows (above) and refresh the cached
+  // `dataConfidence` — in addition to, never instead of, the FieldAttestation
+  // row below. PROVIDER/PERSON entities and CAMP fields outside the claim set
+  // (e.g. `organizationName`, `applicationUrl`, and indexed sub-fields like
+  // `ageGroups:0`) are unchanged: FieldAttestation-only, since neither has a
+  // Verified Claim Set this slice defines (recorded gap, not a silent drop —
+  // see this task's plan `verification-authority--deliver-plan.md` Wave 4).
   const { rows } = await pool.query(
     `INSERT INTO "FieldAttestation"
        ("entityType", "entityId", "fieldKey", "valueSnapshot", excerpt, "sourceUrl", "approvedAt", "approvedBy", "lastRecheckedAt", notes)

@@ -14,6 +14,7 @@ import {
   type AdminEntityType,
 } from '@/lib/admin/entity-admin-repository';
 import { getPool } from '@/lib/db';
+import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug, getProviderCommunitySlug } from '@/lib/admin/community-access';
@@ -56,13 +57,32 @@ function capabilityFor(action: AssistantAction) {
   return 'WRITE' as const;
 }
 
-const CAMP_UPDATE_FIELDS = new Set([
+// `dataConfidence`/`lastVerifiedAt` are deliberately excluded: they are
+// derived, cache-only columns whose sole writer is
+// `lib/admin/verification-authority.ts`'s `refreshCampVerificationCache`
+// (AC1's "sole computer" invariant) — allowing either through this
+// dynamic-SET assistant action would let an admin flip `dataConfidence` to
+// `VERIFIED` with zero backing Claim/Evidence/Event and no cache refresh
+// (V13, mirroring V5/security review SF1 in the sibling PATCH route). See
+// `tests/integration/editable-fields.test.ts`.
+export const CAMP_UPDATE_FIELDS = new Set([
   'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes',
   'interestingDetails', 'campType', 'category', 'campTypes', 'categories',
-  'registrationStatus', 'registrationOpenDate', 'dataConfidence', 'lunchIncluded',
+  'registrationStatus', 'registrationOpenDate', 'lunchIncluded',
   'city', 'neighborhood', 'address', 'state', 'zip', 'applicationUrl',
   'contactEmail', 'contactPhone', 'socialLinks',
 ]);
+
+/** Structural guardrail (V13/V5): fail loud if either derived column ever reappears here. */
+const FORBIDDEN_CAMP_UPDATE_FIELDS = ['dataConfidence', 'lastVerifiedAt'] as const;
+for (const forbidden of FORBIDDEN_CAMP_UPDATE_FIELDS) {
+  if (CAMP_UPDATE_FIELDS.has(forbidden)) {
+    throw new Error(
+      `CAMP_UPDATE_FIELDS must never include "${forbidden}" — it is a derived column whose sole ` +
+        `writer is refreshCampVerificationCache (see this file's CAMP_UPDATE_FIELDS comment).`,
+    );
+  }
+}
 
 const PROVIDER_UPDATE_FIELDS = new Set([
   'name', 'websiteUrl', 'logoUrl', 'address', 'city', 'neighborhood',
@@ -244,12 +264,15 @@ export async function POST(request: Request) {
         reply = 'Updated provider fields.';
         break;
       }
-      case 'mark_camp_verified':
+      case 'mark_camp_verified': {
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
-        await getPool().query(`UPDATE "Camp" SET "dataConfidence" = 'VERIFIED', "lastVerifiedAt" = now(), "updatedAt" = now() WHERE id = $1`, [entityId]);
+        const bulkResult = await bulkAttestCamp(entityId, auth.access.email);
         output = await getEntitySnapshot('CAMP', entityId);
-        reply = 'Marked this camp as verified.';
+        reply = bulkResult.dataConfidence === 'VERIFIED'
+          ? 'Marked this camp as verified.'
+          : `Attested ${bulkResult.attestedFieldCount} required fields; ${bulkResult.gapRequirementIds.length} still need data before this camp can show as verified.`;
         break;
+      }
       case 'trigger_camp_crawl':
         if (entityType !== 'CAMP' || !entityId) return NextResponse.json({ error: 'CAMP entityId required' }, { status: 400 });
         output = await startCampCrawl(entityId, auth.access.email);

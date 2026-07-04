@@ -19,6 +19,8 @@
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "crawl": "tsx scripts/run-crawl.ts",
     "backfill:providers": "tsx scripts/backfill-providers.ts",
+    "backfill:claim-store": "tsx scripts/backfill-claim-store.ts",
+    "backfill:claim-store:dry": "tsx scripts/backfill-claim-store.ts --dry-run",
     "harvest": "tsx scripts/harvest-aggregator.ts",
     "seed": "tsx scripts/seed.ts",
     "scrape": "tsx scripts/scrape.ts",
@@ -49,7 +51,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "@kontourai/datum": "^0.3.0",
-    "@kontourai/surface": "^2.0.0",
+    "@kontourai/surface": "^2.3.0",
     "@kontourai/survey": "^1.5.0",
     "@kontourai/traverse": "^0.8.0",
     "@prisma/client": "^7.8.0",

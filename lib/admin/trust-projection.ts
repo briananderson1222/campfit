@@ -395,7 +395,15 @@ function campCandidateClaimId(campId: string, field: string, proposalId: string,
   return `camp.${campId}.field.${field}.proposal.${proposalId}.${role}.claim`;
 }
 
-function campCanonicalClaimId(campId: string, field: string): string {
+/**
+ * The canonical Claim id for a Camp Attribute's Current Claim (docs/contexts/
+ * trust-review-provenance/CONTEXT.md: "Current Claim" / "Attribute").
+ * Exported so other modules that mint Claims/ClaimGroup requirements against
+ * the SAME Camp field (e.g. `lib/admin/verification-policy.ts`'s Verified
+ * Camp Claim Set) reuse this exact convention instead of inventing a second
+ * claim-identity scheme for the same Attribute.
+ */
+export function campCanonicalClaimId(campId: string, field: string): string {
   return `camp.${campId}.field.${field}`;
 }
 

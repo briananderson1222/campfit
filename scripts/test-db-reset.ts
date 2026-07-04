@@ -45,6 +45,7 @@ const SCHEMA_FILES = [
   "prisma/migrations/009_survey_review_events.sql",
   "prisma/migrations/010_survey_review_sessions.sql",
   "prisma/migrations/011_proposal_applied_fields.sql",
+  "prisma/migrations/012_claim_store_and_session_identity.sql",
 ];
 
 /**
