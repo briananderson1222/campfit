@@ -78,9 +78,24 @@ export default async function AdminCampsPage(
               {camps.length} camps · sorted by missing fields then oldest verified · click Crawl to refresh a camp
             </p>
           </div>
-          <Link href={archived === 'archived' ? '/admin/camps' : '/admin/camps?archived=1'} className="btn-secondary text-sm">
-            {archived === 'archived' ? 'View Active' : 'View Archived'}
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href={archived === 'archived' ? '/admin/camps' : '/admin/camps?archived=1'} className="btn-secondary text-sm">
+              {archived === 'archived' ? 'View Active' : 'View Archived'}
+            </Link>
+            {/* Reaching this page already required admin or moderator-of-some-
+                community access (see `requireAdminAccess` above); `/admin/camps/new`
+                now scopes its own provider dropdown to the caller's communities
+                (or all of them for admins) instead of hardcoding a single
+                community, so it's safe to show this link regardless of how
+                many communities the caller moderates. */}
+            <Link
+              href="/admin/camps/new"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-pine-600 hover:bg-pine-700 text-cream-100 text-sm font-semibold rounded-xl transition-colors"
+            >
+              <span className="text-lg leading-none">+</span>
+              New Camp
+            </Link>
+          </div>
         </div>
       </div>
 

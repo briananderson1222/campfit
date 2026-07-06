@@ -1,0 +1,313 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "onboarding-hardening-lane-a-gates.flow-agents-workflow.build-tsc-lint-full-suite-green-post-fix-disclosure-scoping-auth-ordering-fault-injection-verified-delegate-runs-session-local-summary",
+      "subjectType": "workflow-check",
+      "subjectId": "onboarding-hardening/lane-a-gates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "build/tsc/lint/full-suite green post-fix; disclosure scoping + auth ordering fault-injection verified (delegate runs, session-local summary)",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "onboarding-hardening-ac4-browser.flow-agents-workflow.ac4-browser-walkthrough-not-verified-locally-env-points-at-shared-remote-supabase-mutation-refused-and-lacks-llm-keys-6-step-human-click-path-documented-in-pr-session-artifact",
+      "subjectType": "workflow-check",
+      "subjectId": "onboarding-hardening/ac4-browser",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "AC4 browser walkthrough NOT_VERIFIED locally: env points at shared remote Supabase (mutation refused) and lacks LLM keys; 6-step human click-path documented in PR + session artifact",
+      "value": "not_verified",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "onboarding-hardening-ac1.flow-agents-workflow.r1-invalid-websiteurl-crawlrooturl-on-manual-provider-create-is-rejected-client-side-inline-field-error-and-server-side-400-with-actionable-message-on-post-api-admin-providers",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "onboarding-hardening/AC1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R1: Invalid websiteUrl/crawlRootUrl on manual provider create is rejected client-side (inline field error) and server-side (400 with actionable message) on POST /api/admin/providers.",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "onboarding-hardening-ac2.flow-agents-workflow.r2-duplicate-domain-manual-provider-create-is-blocked-409-with-a-link-to-the-existing-provider-using-the-same-domain-check-as-onboard-url",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "onboarding-hardening/AC2",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R2: Duplicate-domain manual provider create is blocked (409) with a link to the existing provider, using the same domain check as onboard-url.",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "onboarding-hardening-ac3.flow-agents-workflow.r3-post-api-admin-camps-exists-with-the-same-validation-discipline-url-validity-required-providerid-linkage-and-a-camps-new-admin-form-uses-it",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "onboarding-hardening/AC3",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R3: POST /api/admin/camps exists with the same validation discipline (URL validity, required providerId linkage) and a camps/new admin form uses it.",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "onboarding-hardening-ac4.flow-agents-workflow.r4-post-create-guided-path-offers-run-first-crawl-now-and-links-resulting-review-items-from-the-provider-page",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "onboarding-hardening/AC4",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R4: Post-create guided path offers 'run first crawl now' and links resulting review items from the provider page.",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "onboarding-hardening-ac5.flow-agents-workflow.r5-onboard-url-returns-and-the-crawl-modal-ui-shows-created-vs-skipped-existing-breakdown",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "onboarding-hardening/AC5",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R5: onboard-url returns and the crawl-modal UI shows created vs skipped-existing breakdown.",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "onboarding-hardening-review.flow-agents-workflow.iteration-1-re-review-approved-both-highs-cross-tenant-409-disclosure-untested-camps-route-3-mediums-resolved-bypass-angles-ruled-out-no-new-issues-docstring-accuracy-note-fixed-post-verification-comment-only-disclosed-superseded-review-2026-07-06t23-40-38z-2026-07-06t23-40-11z",
+      "subjectType": "workflow-critique",
+      "subjectId": "onboarding-hardening/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Iteration 1 re-review APPROVED: both HIGHs (cross-tenant 409 disclosure, untested camps route) + 3 MEDIUMs resolved; bypass angles ruled out; no new issues. Docstring accuracy note fixed post-verification (comment-only, disclosed).",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-06T23:40:11Z",
+        "superseded_by": "review@2026-07-06T23:40:38Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "onboarding-hardening-review.flow-agents-workflow.iteration-1-re-review-approved-both-highs-3-mediums-resolved-bypass-angles-ruled-out-no-new-issues-docstring-accuracy-fixed-post-verification-comment-only-disclosed",
+      "subjectType": "workflow-critique",
+      "subjectId": "onboarding-hardening/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Iteration 1 re-review APPROVED: both HIGHs + 3 MEDIUMs resolved; bypass angles ruled out; no new issues. Docstring accuracy fixed post-verification (comment-only, disclosed).",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:40:39Z",
+      "updatedAt": "2026-07-06T23:40:39Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-06T23:40:38Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:onboarding-hardening-lane-a-gates.flow-agents-workflow.build-tsc-lint-full-suite-green-post-fix-disclosure-scoping-auth-ordering-fault-injection-verified-delegate-runs-session-local-summary",
+      "claimId": "onboarding-hardening-lane-a-gates.flow-agents-workflow.build-tsc-lint-full-suite-green-post-fix-disclosure-scoping-auth-ordering-fault-injection-verified-delegate-runs-session-local-summary",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "onboarding-hardening/evidence.json",
+      "excerptOrSummary": "build/tsc/lint/full-suite green post-fix; disclosure scoping + auth ordering fault-injection verified (delegate runs, session-local summary)",
+      "observedAt": "2026-07-06T23:40:39Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:onboarding-hardening-ac4-browser.flow-agents-workflow.ac4-browser-walkthrough-not-verified-locally-env-points-at-shared-remote-supabase-mutation-refused-and-lacks-llm-keys-6-step-human-click-path-documented-in-pr-session-artifact",
+      "claimId": "onboarding-hardening-ac4-browser.flow-agents-workflow.ac4-browser-walkthrough-not-verified-locally-env-points-at-shared-remote-supabase-mutation-refused-and-lacks-llm-keys-6-step-human-click-path-documented-in-pr-session-artifact",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "onboarding-hardening/evidence.json",
+      "excerptOrSummary": "AC4 browser walkthrough NOT_VERIFIED locally: env points at shared remote Supabase (mutation refused) and lacks LLM keys; 6-step human click-path documented in PR + session artifact",
+      "observedAt": "2026-07-06T23:40:39Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:onboarding-hardening-lane-a-gates.flow-agents-workflow.build-tsc-lint-full-suite-green-post-fix-disclosure-scoping-auth-ordering-fault-injection-verified-delegate-runs-session-local-summary",
+      "claimId": "onboarding-hardening-lane-a-gates.flow-agents-workflow.build-tsc-lint-full-suite-green-post-fix-disclosure-scoping-auth-ordering-fault-injection-verified-delegate-runs-session-local-summary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:onboarding-hardening-lane-a-gates.flow-agents-workflow.build-tsc-lint-full-suite-green-post-fix-disclosure-scoping-auth-ordering-fault-injection-verified-delegate-runs-session-local-summary"
+      ],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    },
+    {
+      "id": "evt:onboarding-hardening-ac1.flow-agents-workflow.r1-invalid-websiteurl-crawlrooturl-on-manual-provider-create-is-rejected-client-side-inline-field-error-and-server-side-400-with-actionable-message-on-post-api-admin-providers",
+      "claimId": "onboarding-hardening-ac1.flow-agents-workflow.r1-invalid-websiteurl-crawlrooturl-on-manual-provider-create-is-rejected-client-side-inline-field-error-and-server-side-400-with-actionable-message-on-post-api-admin-providers",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    },
+    {
+      "id": "evt:onboarding-hardening-ac2.flow-agents-workflow.r2-duplicate-domain-manual-provider-create-is-blocked-409-with-a-link-to-the-existing-provider-using-the-same-domain-check-as-onboard-url",
+      "claimId": "onboarding-hardening-ac2.flow-agents-workflow.r2-duplicate-domain-manual-provider-create-is-blocked-409-with-a-link-to-the-existing-provider-using-the-same-domain-check-as-onboard-url",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    },
+    {
+      "id": "evt:onboarding-hardening-ac3.flow-agents-workflow.r3-post-api-admin-camps-exists-with-the-same-validation-discipline-url-validity-required-providerid-linkage-and-a-camps-new-admin-form-uses-it",
+      "claimId": "onboarding-hardening-ac3.flow-agents-workflow.r3-post-api-admin-camps-exists-with-the-same-validation-discipline-url-validity-required-providerid-linkage-and-a-camps-new-admin-form-uses-it",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    },
+    {
+      "id": "evt:onboarding-hardening-ac4.flow-agents-workflow.r4-post-create-guided-path-offers-run-first-crawl-now-and-links-resulting-review-items-from-the-provider-page",
+      "claimId": "onboarding-hardening-ac4.flow-agents-workflow.r4-post-create-guided-path-offers-run-first-crawl-now-and-links-resulting-review-items-from-the-provider-page",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    },
+    {
+      "id": "evt:onboarding-hardening-ac5.flow-agents-workflow.r5-onboard-url-returns-and-the-crawl-modal-ui-shows-created-vs-skipped-existing-breakdown",
+      "claimId": "onboarding-hardening-ac5.flow-agents-workflow.r5-onboard-url-returns-and-the-crawl-modal-ui-shows-created-vs-skipped-existing-breakdown",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    },
+    {
+      "id": "evt:onboarding-hardening-review.flow-agents-workflow.iteration-1-re-review-approved-both-highs-3-mediums-resolved-bypass-angles-ruled-out-no-new-issues-docstring-accuracy-fixed-post-verification-comment-only-disclosed",
+      "claimId": "onboarding-hardening-review.flow-agents-workflow.iteration-1-re-review-approved-both-highs-3-mediums-resolved-bypass-angles-ruled-out-no-new-issues-docstring-accuracy-fixed-post-verification-comment-only-disclosed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T23:40:39Z",
+      "verifiedAt": "2026-07-06T23:40:39Z"
+    }
+  ]
+}

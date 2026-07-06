@@ -3,15 +3,12 @@ import { getPool } from '@/lib/db';
 import { discoverCampsFromUrl, filterNewDiscoveries } from '@/lib/ingestion/llm-discovery';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { parseDomain } from '@/lib/admin/onboarding-validation';
 
 export const maxDuration = 300;
 
 function toSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
-function parseDomain(url: string): string | null {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
 }
 
 function domainToName(domain: string): string {
@@ -50,6 +47,7 @@ export async function POST(req: Request) {
     `SELECT id, name FROM "Provider" WHERE domain = $1 LIMIT 1`, [domain]
   );
 
+  const providerCreated = existing.length === 0;
   let providerId: string;
   if (existing.length > 0) {
     providerId = existing[0].id;
@@ -78,9 +76,29 @@ export async function POST(req: Request) {
   const existingNames = existingCamps.map(r => r.name);
   const newStubs = filterNewDiscoveries(discovery.stubs, existingNames);
 
+  // R5/AC5 (campfit#90): every discovered program already existing is an
+  // informational outcome, not an error — 200 with created:0 and the full
+  // skipped-names breakdown, no crawl triggered. All other error branches
+  // above (missing/invalid url, discovery failure, no stubs found) are
+  // unchanged and keep their existing status codes.
   if (newStubs.length === 0) {
-    return NextResponse.json({ error: 'All discovered programs already exist in the database.' }, { status: 422 });
+    const skippedNames = discovery.stubs.map(s => s.name);
+    return NextResponse.json({
+      providerId,
+      providerCreated,
+      discovered: discovery.stubs.length,
+      created: 0,
+      createdNames: [],
+      skipped: skippedNames.length,
+      skippedNames,
+    });
   }
+
+  // Names filtered out by filterNewDiscoveries, for the created/skipped
+  // breakdown (R5/AC5) — computed by reference, since filterNewDiscoveries
+  // returns a subset of the same stub objects.
+  const newStubsSet = new Set(newStubs);
+  const skippedNames = discovery.stubs.filter(s => !newStubsSet.has(s)).map(s => s.name);
 
   // Insert new camp stubs
   const newCampIds: string[] = [];
@@ -124,7 +142,16 @@ export async function POST(req: Request) {
       runIdPromise,
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out waiting for run to start')), 5000)),
     ]);
-    return NextResponse.json({ runId, providerId, discovered: newStubs.length, creating: newCampIds.length });
+    return NextResponse.json({
+      runId,
+      providerId,
+      providerCreated,
+      discovered: discovery.stubs.length,
+      created: newStubs.length,
+      createdNames: newStubs.map(s => s.name),
+      skipped: skippedNames.length,
+      skippedNames,
+    });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
