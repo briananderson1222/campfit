@@ -64,15 +64,12 @@
  *    rendered) — never more than one render per source per run.
  */
 
-import { fetchSource, replaySource, buildSnapshotSourceRef } from "@kontourai/traverse/fetch";
+import { fetchAndExtract } from "@kontourai/traverse/fetch";
 import type {
-  FetchAndExtractOptions,
   FetchAndExtractResult,
   FetchMode,
-  FetchResult,
   FetchSourceOptions,
   SnapshotStore,
-  SourceConfig,
 } from "@kontourai/traverse/fetch";
 import {
   extract,
@@ -336,85 +333,6 @@ export const DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE = 40;
  */
 export const DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE = 450_000;
 
-/**
- * Cost-guard-aware replacement for `@kontourai/traverse/fetch`'s
- * `fetchAndExtract` (`dist/src/fetch/compose.ts`) — this module's ONLY
- * fetch+extract composition call site ({@link runFetchAndExtractAttempt}).
- *
- * WHY THIS EXISTS (traverse 0.8.0 gap, confirmed 2026-07-03 against the
- * shipped `node_modules/@kontourai/traverse/dist/src/fetch/compose.js` and
- * `.d.ts`): `extract()`'s own `ExtractInput` accepts `maxProviderCalls`/
- * `maxTotalTokens` (the cost guards shipped in kontourai/traverse#19, 0.8.0's
- * README "Cost guards" section) — but `fetchAndExtract`'s
- * `FetchAndExtractOptions` does NOT declare either field, and `compose.js`'s
- * internal `extract({...})` call only forwards a fixed, hard-coded list of
- * fields, silently dropping any extra property passed alongside them. There
- * is no way to reach these ceilings through `fetchAndExtract` itself in
- * 0.8.0 — every campfit call site uses `fetchAndExtract`, never `extract()`
- * directly, so without this wrapper the ceilings could not be wired at all.
- *
- * This function is a faithful reproduction of `fetchAndExtract`'s
- * composition (identical `mode` dispatch — `live` / `live-with-capture` /
- * `replay` — and identical `buildSnapshotSourceRef` provenance threading),
- * built ENTIRELY from traverse's own PUBLIC exports (`fetchSource` /
- * `replaySource` / `buildSnapshotSourceRef` from `@kontourai/traverse/fetch`,
- * `extract` from the `@kontourai/traverse` root) — nothing here reaches into
- * `dist/` internals — with `maxProviderCalls`/`maxTotalTokens` added to the
- * `extract()` call.
- *
- * TODO(kontourai/traverse#28, tracked locally as campfit#71): once
- * `FetchAndExtractOptions` forwards these two fields itself upstream (the
- * actual blocking condition — kontourai/traverse#28 is the issue that tracks
- * when this shim can be deleted; campfit#71 will be closed once THIS PR
- * merges, so it gives no future signal about upstream status), delete this
- * function and pass `maxProviderCalls`/`maxTotalTokens` straight into a plain
- * `fetchAndExtract()` call again. See the equivalence test in
- * scripts/test-traverse-cost-guards.ts, which will keep passing right up
- * until that upstream change lands (and is the test to lean on to confirm
- * the deletion is safe). Exported (not just used internally) for that
- * equivalence test.
- */
-export async function fetchAndExtractWithCostGuards(
-  config: SourceConfig,
-  opts: FetchAndExtractOptions & { maxProviderCalls?: number; maxTotalTokens?: number }
-): Promise<FetchAndExtractResult> {
-  const mode = opts.mode ?? "live";
-  let fetchResult: FetchResult;
-  if (mode === "replay") {
-    fetchResult = opts.store
-      ? await replaySource(opts.store, config.id)
-      : { error: { kind: "invalid-config", message: "mode 'replay' requires a store" } };
-  } else {
-    fetchResult = await fetchSource(config, opts.fetchOptions ?? {});
-    if (mode === "live-with-capture" && fetchResult.snapshot && opts.store) {
-      await opts.store.put(fetchResult.snapshot);
-    }
-  }
-
-  if (!fetchResult.snapshot) {
-    return { fetch: fetchResult };
-  }
-
-  const snapshot = fetchResult.snapshot;
-  const sourceRef = buildSnapshotSourceRef(snapshot);
-  const extraction = await extract({
-    content: snapshot.body,
-    contentType: snapshot.contentType,
-    sourceRef,
-    targetSchema: opts.targetSchema,
-    provider: opts.provider,
-    fieldHints: opts.fieldHints,
-    maxContentChars: opts.maxContentChars,
-    prep: opts.prep,
-    chunkSize: opts.chunkSize,
-    chunkOverlap: opts.chunkOverlap,
-    maxChunks: opts.maxChunks,
-    maxProviderCalls: opts.maxProviderCalls,
-    maxTotalTokens: opts.maxTotalTokens,
-  });
-  return { fetch: fetchResult, extraction, sourceRef };
-}
-
 /** One fetch+extract call (a "attempt") — factored out so the shell-retry seam can run it twice. */
 async function runFetchAndExtractAttempt(
   src: IngestionSourceConfig,
@@ -424,7 +342,7 @@ async function runFetchAndExtractAttempt(
   now: () => number
 ): Promise<{ far: FetchAndExtractResult; latencyMs: number }> {
   const startedAt = now();
-  const far = await fetchAndExtractWithCostGuards(
+  const far = await fetchAndExtract(
     {
       id: src.key,
       url: src.url,

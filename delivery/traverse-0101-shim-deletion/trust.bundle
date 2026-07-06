@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "traverse-0101-shim-deletion-lane-b-gates.flow-agents-workflow.build-lint-cost-guard-script-green-independent-runs-vitest-deferred-to-pr-ci-by-convention",
+      "subjectType": "workflow-check",
+      "subjectId": "traverse-0101-shim-deletion/lane-b-gates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "build+lint+cost-guard script green (independent runs); vitest deferred to PR CI by convention",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-dep-bumped.flow-agents-workflow.kontourai-traverse-0-10-1-in-package-json-lockfile",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "traverse-0101-shim-deletion/dep-bumped",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "@kontourai/traverse ^0.10.1 in package.json/lockfile",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-shim-deleted.flow-agents-workflow.fetchandextractwithcostguards-removed-zero-references-remain",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "traverse-0101-shim-deletion/shim-deleted",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "fetchAndExtractWithCostGuards removed; zero references remain",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-call-sites-public.flow-agents-workflow.former-shim-call-sites-use-public-fetchandextract-with-maxprovidercalls-maxtotaltokens-passed-through-options",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "traverse-0101-shim-deletion/call-sites-public",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "former shim call sites use public fetchAndExtract with maxProviderCalls/maxTotalTokens passed through options",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-suite-green.flow-agents-workflow.campfit-typecheck-build-tests-green",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "traverse-0101-shim-deletion/suite-green",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "campfit typecheck/build/tests green",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-review.flow-agents-workflow.approve-0-blocking-1-low-cosmetic-shim-fixture-naming-accepted-guard-values-byte-identical-revalidate-delta-confirmed-inert-0-10-1-api-compat-grepped-repo-wide-superseded-review-2026-07-06t22-54-29z-2026-07-06t22-53-55z",
+      "subjectType": "workflow-critique",
+      "subjectId": "traverse-0101-shim-deletion/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "APPROVE: 0 blocking; 1 LOW cosmetic (-shim fixture naming, accepted). Guard values byte-identical; revalidate delta confirmed inert; 0.10.1 API compat grepped repo-wide.",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-06T22:53:55Z",
+        "superseded_by": "review@2026-07-06T22:54:29Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-review.flow-agents-workflow.approve-0-blocking-1-low-cosmetic-shim-fixture-naming-accepted-guards-byte-identical-revalidate-delta-inert-0-10-1-api-compat-verified-superseded-review-2026-07-06t22-54-45z-2026-07-06t22-54-29z",
+      "subjectType": "workflow-critique",
+      "subjectId": "traverse-0101-shim-deletion/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "APPROVE: 0 blocking; 1 LOW cosmetic (-shim fixture naming, accepted). Guards byte-identical; revalidate delta inert; 0.10.1 API compat verified.",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-06T22:54:29Z",
+        "superseded_by": "review@2026-07-06T22:54:45Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "traverse-0101-shim-deletion-review.flow-agents-workflow.approve-0-blocking-1-low-cosmetic-accepted-guards-byte-identical-revalidate-delta-inert-0-10-1-api-compat-verified",
+      "subjectType": "workflow-critique",
+      "subjectId": "traverse-0101-shim-deletion/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "APPROVE: 0 blocking; 1 LOW cosmetic accepted. Guards byte-identical; revalidate delta inert; 0.10.1 API compat verified.",
+      "value": "pass",
+      "createdAt": "2026-07-06T22:54:45Z",
+      "updatedAt": "2026-07-06T22:54:45Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-06T22:54:45Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:traverse-0101-shim-deletion-lane-b-gates.flow-agents-workflow.build-lint-cost-guard-script-green-independent-runs-vitest-deferred-to-pr-ci-by-convention",
+      "claimId": "traverse-0101-shim-deletion-lane-b-gates.flow-agents-workflow.build-lint-cost-guard-script-green-independent-runs-vitest-deferred-to-pr-ci-by-convention",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "traverse-0101-shim-deletion/evidence.json",
+      "excerptOrSummary": "build+lint+cost-guard script green (independent runs); vitest deferred to PR CI by convention",
+      "observedAt": "2026-07-06T22:54:45Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:traverse-0101-shim-deletion-lane-b-gates.flow-agents-workflow.build-lint-cost-guard-script-green-independent-runs-vitest-deferred-to-pr-ci-by-convention",
+      "claimId": "traverse-0101-shim-deletion-lane-b-gates.flow-agents-workflow.build-lint-cost-guard-script-green-independent-runs-vitest-deferred-to-pr-ci-by-convention",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:traverse-0101-shim-deletion-lane-b-gates.flow-agents-workflow.build-lint-cost-guard-script-green-independent-runs-vitest-deferred-to-pr-ci-by-convention"
+      ],
+      "createdAt": "2026-07-06T22:54:45Z",
+      "verifiedAt": "2026-07-06T22:54:45Z"
+    },
+    {
+      "id": "evt:traverse-0101-shim-deletion-dep-bumped.flow-agents-workflow.kontourai-traverse-0-10-1-in-package-json-lockfile",
+      "claimId": "traverse-0101-shim-deletion-dep-bumped.flow-agents-workflow.kontourai-traverse-0-10-1-in-package-json-lockfile",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T22:54:45Z",
+      "verifiedAt": "2026-07-06T22:54:45Z"
+    },
+    {
+      "id": "evt:traverse-0101-shim-deletion-shim-deleted.flow-agents-workflow.fetchandextractwithcostguards-removed-zero-references-remain",
+      "claimId": "traverse-0101-shim-deletion-shim-deleted.flow-agents-workflow.fetchandextractwithcostguards-removed-zero-references-remain",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T22:54:45Z",
+      "verifiedAt": "2026-07-06T22:54:45Z"
+    },
+    {
+      "id": "evt:traverse-0101-shim-deletion-call-sites-public.flow-agents-workflow.former-shim-call-sites-use-public-fetchandextract-with-maxprovidercalls-maxtotaltokens-passed-through-options",
+      "claimId": "traverse-0101-shim-deletion-call-sites-public.flow-agents-workflow.former-shim-call-sites-use-public-fetchandextract-with-maxprovidercalls-maxtotaltokens-passed-through-options",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T22:54:45Z",
+      "verifiedAt": "2026-07-06T22:54:45Z"
+    },
+    {
+      "id": "evt:traverse-0101-shim-deletion-suite-green.flow-agents-workflow.campfit-typecheck-build-tests-green",
+      "claimId": "traverse-0101-shim-deletion-suite-green.flow-agents-workflow.campfit-typecheck-build-tests-green",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T22:54:45Z",
+      "verifiedAt": "2026-07-06T22:54:45Z"
+    },
+    {
+      "id": "evt:traverse-0101-shim-deletion-review.flow-agents-workflow.approve-0-blocking-1-low-cosmetic-accepted-guards-byte-identical-revalidate-delta-inert-0-10-1-api-compat-verified",
+      "claimId": "traverse-0101-shim-deletion-review.flow-agents-workflow.approve-0-blocking-1-low-cosmetic-accepted-guards-byte-identical-revalidate-delta-inert-0-10-1-api-compat-verified",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-06T22:54:45Z",
+      "verifiedAt": "2026-07-06T22:54:45Z"
+    }
+  ]
+}

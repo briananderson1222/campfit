@@ -1,13 +1,15 @@
 /**
  * test-traverse-cost-guards.ts — network-free coverage for the traverse
- * 0.8.0 adoption (campfit#71): the `totalTokensUsed` undercount fix,
+ * cost-guard adoption (campfit#71): the `totalTokensUsed` undercount fix,
  * `providerCalls` metric threading, the `maxProviderCalls`/`maxTotalTokens`
  * spend ceilings wired at the shared fetch+extract call
- * (`lib/ingestion/traverse-pipeline.ts`'s `fetchAndExtractWithCostGuards`),
- * and the warnings-surfacing fix from the campfit#71 code review (iteration
- * 2). No network, no API key — same stub-provider/in-memory-snapshot-store/
- * injected-fetch convention as scripts/test-traverse-replay.ts and
- * scripts/test-recrawl-adapter.ts.
+ * (`lib/ingestion/traverse-pipeline.ts`'s `runFetchAndExtractAttempt`, which
+ * calls the public `fetchAndExtract` from `@kontourai/traverse/fetch`
+ * directly — traverse 0.10.1 forwards `maxProviderCalls`/`maxTotalTokens`
+ * natively, kontourai/traverse#28), and the warnings-surfacing fix from the
+ * campfit#71 code review (iteration 2). No network, no API key — same
+ * stub-provider/in-memory-snapshot-store/injected-fetch convention as
+ * scripts/test-traverse-replay.ts and scripts/test-recrawl-adapter.ts.
  *
  * Asserts:
  *  1. `tokensUsed` is the SUM of every chunk's provider call
@@ -34,24 +36,16 @@
  *     exactly 40 via the chunker's OWN `maxChunks` truncation, never via an
  *     independent `maxProviderCalls`-ceiling stop — closing the code
  *     review's HIGH finding that the OLD default (20) silently truncated
- *     any 21-40-call page. A second, lower-level check (via the exported
- *     `fetchAndExtractWithCostGuards` shim directly, with `maxChunks`
- *     artificially raised) proves the constant's value is nonetheless a
- *     real, correctly-set ceiling that WOULD engage if `maxChunks` were
- *     ever raised above it.
+ *     any 21-40-call page. A second, lower-level check (via the public
+ *     `fetchAndExtract` directly, with `maxChunks` artificially raised)
+ *     proves the constant's value is nonetheless a real, correctly-set
+ *     ceiling that WOULD engage if `maxChunks` were ever raised above it.
  *  5. `maxTotalTokens: <low>` (with a stub whose `tokensUsed` is set per
  *     call) stops extraction early with traverse's token-ceiling warning —
  *     the code review's MEDIUM finding that this ceiling shared
  *     `maxProviderCalls`'s code path but had NO direct test of its own.
  *     Also proves the RAISED {@link DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE}
  *     (450_000) does not bind an ordinary run.
- *  6. Shim-vs-upstream equivalence: the same stubbed fixture run through
- *     BOTH the local `fetchAndExtractWithCostGuards` (no ceilings set) and
- *     the real `fetchAndExtract` from `@kontourai/traverse/fetch` produces
- *     the same result (excluding the one genuinely non-deterministic,
- *     non-injectable field, `extraction.extractedAt`) — a tripwire against
- *     future upstream `fetchAndExtract` composition drift the shim doesn't
- *     mirror (the code review's other MEDIUM finding).
  */
 
 import assert from "node:assert/strict";
@@ -59,11 +53,9 @@ import {
   createInMemorySnapshotStore,
   fetchAndExtract,
   type FetchLike,
-  type SourceConfig,
 } from "@kontourai/traverse/fetch";
 import {
   runTraversePipelineForSource,
-  fetchAndExtractWithCostGuards,
   DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
   DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
 } from "../lib/ingestion/traverse-pipeline";
@@ -331,9 +323,9 @@ async function testCeilingHitStopsEarlyAndWarningSurfaces() {
 // verifiable: (a) end-to-end through the real campfit-facing seam
 // (`TraversePipelineDeps` has no `maxChunks` field, so this codebase can
 // never observe the ceiling firing on its own below 40 — proving it truly
-// never binds a normal run), and (b) a lower-level check, via the exported
-// `fetchAndExtractWithCostGuards` shim directly (which — unlike
-// `TraversePipelineDeps` — DOES accept `maxChunks`), that the
+// never binds a normal run), and (b) a lower-level check, via the public
+// `fetchAndExtract` directly (which — unlike `TraversePipelineDeps` —
+// DOES accept `maxChunks`), that the
 // DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE value itself is a real, correctly-
 // set ceiling that WOULD engage as independent protection if `maxChunks`
 // were ever raised above it. ─────────────────────────────────────────────
@@ -382,14 +374,15 @@ async function testDefaultProviderCallCeilingIsAPureBackstop() {
   );
 
   // (b) Lower-level check that DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE's value
-  // is a real, correctly-set ceiling — call the shim directly (bypassing
-  // TraversePipelineDeps entirely) with an ARTIFICIALLY raised `maxChunks`
-  // (something `TraversePipelineDeps` never does, but `fetchAndExtractWithCostGuards`'s
-  // own `FetchAndExtractOptions` supports) so the page can chunk into MORE
-  // than the default ceiling — proving the ceiling WOULD engage as
-  // independent protection if `maxChunks` itself were ever raised.
+  // is a real, correctly-set ceiling — call the public `fetchAndExtract`
+  // directly (bypassing TraversePipelineDeps entirely) with an ARTIFICIALLY
+  // raised `maxChunks` (something `TraversePipelineDeps` never does, but
+  // `fetchAndExtract`'s own `FetchAndExtractOptions` supports) so the page
+  // can chunk into MORE than the default ceiling — proving the ceiling
+  // WOULD engage as independent protection if `maxChunks` itself were ever
+  // raised.
   const raisedMaxChunks = DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE + 10;
-  const shimResult = await fetchAndExtractWithCostGuards(
+  const directResult = await fetchAndExtract(
     { id: "cost-guard-default-ceiling-shim", url: "https://cost-guard.test/default-ceiling-shim" },
     {
       targetSchema: CAMP_TARGET_SCHEMA,
@@ -402,14 +395,14 @@ async function testDefaultProviderCallCeilingIsAPureBackstop() {
       fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
     }
   );
-  assert.ok(shimResult.extraction, "sanity: the shim must have extracted something to check providerCalls/warnings on");
+  assert.ok(directResult.extraction, "sanity: the direct fetchAndExtract call must have extracted something to check providerCalls/warnings on");
   assert.equal(
-    shimResult.extraction!.providerCalls,
+    directResult.extraction!.providerCalls,
     DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
     `with maxChunks artificially raised to ${raisedMaxChunks}, DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE (${DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE}) must independently stop the run at exactly that many calls`
   );
   assert.ok(
-    shimResult.extraction!.warnings?.some((w) => w.includes(`maxProviderCalls (${DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE}) reached`)),
+    directResult.extraction!.warnings?.some((w) => w.includes(`maxProviderCalls (${DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE}) reached`)),
     "the maxProviderCalls-ceiling warning must fire once maxChunks is raised above the default — proving the ceiling is real, correctly-valued protection, not accidentally disabled"
   );
 
@@ -495,71 +488,6 @@ async function testMaxTotalTokensCeiling() {
   );
 }
 
-// ─── 6. Shim-vs-upstream equivalence: fetchAndExtractWithCostGuards vs the
-// real @kontourai/traverse/fetch fetchAndExtract, same fixture, no ceilings
-// set — a tripwire for future upstream composition drift the local shim
-// wouldn't otherwise be checked against (code review MEDIUM fix) ─────────
-
-async function testShimMatchesUpstreamFetchAndExtract() {
-  const html = buildLargeSingleBlockHtml(15_000);
-  // Injected deterministic clock/now so the two independent fetches produce
-  // byte-identical `Snapshot.fetchedAt`/`sourceRef` — the only genuinely
-  // non-deterministic field left after that is `ExtractionResult.extractedAt`
-  // (extract()'s own `new Date().toISOString()` call, with no injectable
-  // clock), which is stripped before comparing below.
-  const deterministicClock = () => "2026-07-03T00:00:00.000Z";
-  const buildConfig = (): SourceConfig => ({
-    id: "cost-guard-equivalence",
-    url: "https://cost-guard.test/equivalence",
-    userAgent: "campfit-cost-guard-equivalence-test/1.0",
-  });
-  const buildProvider = () =>
-    createStubProvider(
-      [{ fieldPath: "items[].name", candidateValue: "Cost Guard Camp", needle: "Mountain adventure day camp" }],
-      { model: "cost-guard-stub-equivalence", tokensUsed: 42 }
-    );
-  const buildOpts = () => ({
-    targetSchema: CAMP_TARGET_SCHEMA,
-    fieldHints: CAMP_FIELD_HINTS,
-    provider: buildProvider(),
-    store: createInMemorySnapshotStore(),
-    mode: "live-with-capture" as const,
-    fetchOptions: {
-      fetch: makeFixtureFetch(html),
-      sleep: async () => {},
-      now: () => 0,
-      clock: deterministicClock,
-    },
-  });
-
-  const shimResult = await fetchAndExtractWithCostGuards(buildConfig(), buildOpts());
-  const upstreamResult = await fetchAndExtract(buildConfig(), buildOpts());
-
-  // Strip the one field that can legitimately differ between two
-  // independent calls (no injectable clock inside extract() itself) before
-  // comparing — everything else (fetch outcome, snapshot, sourceRef,
-  // extraction proposals/warnings/providerCalls/totalTokensUsed/raw) must be
-  // byte-identical between the shim and real upstream fetchAndExtract, since
-  // neither call sets maxProviderCalls/maxTotalTokens here (the only fields
-  // the shim adds beyond upstream's own FetchAndExtractOptions).
-  function stripNonDeterministicFields(result: typeof shimResult) {
-    const clone = JSON.parse(JSON.stringify(result));
-    if (clone.extraction) delete clone.extraction.extractedAt;
-    return clone;
-  }
-
-  assert.deepEqual(
-    stripNonDeterministicFields(shimResult),
-    stripNonDeterministicFields(upstreamResult),
-    "fetchAndExtractWithCostGuards must produce a result structurally identical to the real @kontourai/traverse/fetch fetchAndExtract (excluding extraction.extractedAt) when no cost-guard ceilings are set"
-  );
-  assert.ok(upstreamResult.extraction, "sanity: the fixture must actually produce an extraction on both sides");
-
-  console.log(
-    "✓ fetchAndExtractWithCostGuards matches the real @kontourai/traverse/fetch fetchAndExtract byte-for-byte (excluding extractedAt) with no ceilings set — a tripwire for future upstream composition drift"
-  );
-}
-
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -568,7 +496,6 @@ async function main() {
   await testCeilingHitStopsEarlyAndWarningSurfaces();
   await testDefaultProviderCallCeilingIsAPureBackstop();
   await testMaxTotalTokensCeiling();
-  await testShimMatchesUpstreamFetchAndExtract();
   console.log("\ntraverse cost-guard adoption (campfit#71) verification passed");
 }
 
