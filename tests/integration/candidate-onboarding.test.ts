@@ -1,0 +1,163 @@
+/**
+ * tests/integration/candidate-onboarding.test.ts — campfit#93 Wave 2 Task
+ * 2.1 acceptance suite for `onboardProviderCandidate` (R4/AC4's hardened
+ * onboarding path).
+ *
+ * Coverage:
+ *   (a) no existing domain match -> creates a real Provider row via
+ *       campfit#90's hardened path (slug generated, domain populated via
+ *       `parseDomain`), `providerCreated: true`.
+ *   (b) an existing domain match (a Provider with the same domain inserted
+ *       AFTER the candidate was enqueued) -> returns the EXISTING provider,
+ *       no duplicate row, `providerCreated: false`.
+ *   (c) a second call against the same (now-APPROVED) candidate id throws
+ *       `CandidateNotPendingError`.
+ *   (d) structural assertion that exactly one `Provider` row exists after
+ *       two same-domain onboards (never a raw second `INSERT INTO
+ *       "Provider"` outside `createProvider`/the existing-match branch).
+ *
+ * Seeds a `ProviderCandidate` row directly via `enqueueCandidate` — no
+ * `AggregatorSource` dependency, matching the plan's "seeding a
+ * ProviderCandidate row directly" acceptance framing (onboarding is
+ * candidate-shaped, not aggregator-shaped).
+ *
+ * F1 defense-in-depth: all seed/truncate/assert SQL goes through
+ * `./test-db`'s `getTestPool()`, and `beforeAll` awaits
+ * `assertTestDatabase()` before anything destructive runs (see
+ * `provider-discovery.test.ts` for the established precedent).
+ */
+import { randomUUID } from "node:crypto";
+import type { Pool } from "pg";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  CandidateNotPendingError,
+  enqueueCandidate,
+  ensureProviderCandidateSchema,
+  getCandidate,
+} from "@/lib/ingestion/discovery/candidate-repository";
+import { onboardProviderCandidate } from "@/lib/ingestion/discovery/candidate-onboarding";
+
+import { assertTestDatabase, closeTestPool, getTestPool } from "./test-db";
+
+const ONBOARDED_BY = "moderator@campfit.test";
+
+let pool: Pool;
+
+beforeAll(async () => {
+  await assertTestDatabase();
+  pool = getTestPool();
+  await ensureProviderCandidateSchema(pool);
+});
+
+afterEach(async () => {
+  await pool.query(`TRUNCATE "ProviderCandidate", "Provider" CASCADE`);
+});
+
+afterAll(async () => {
+  await closeTestPool();
+});
+
+async function providerCount(): Promise<number> {
+  const { rows } = await pool.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM "Provider"`);
+  return Number(rows[0].count);
+}
+
+async function insertProvider(input: { name: string; domain: string | null }): Promise<{ id: string; slug: string }> {
+  const { rows } = await pool.query<{ id: string; slug: string }>(
+    `INSERT INTO "Provider" (name, slug, domain, "communitySlug")
+     VALUES ($1, $2, $3, 'denver') RETURNING id, slug`,
+    [input.name, `prov-${randomUUID()}`, input.domain],
+  );
+  return rows[0];
+}
+
+async function seedCandidate(overrides: { name?: string; websiteUrl?: string | null } = {}) {
+  return enqueueCandidate(
+    {
+      name: overrides.name ?? "Sunbeam Adventure Camp",
+      websiteUrl: overrides.websiteUrl ?? "https://sunbeam-camp.example",
+      city: "Denver",
+      communitySlug: "denver",
+      sourceKey: "aggregator:test-agg",
+      sourceLabel: "Test Aggregator",
+      discoveryQuery: "https://test-agg.example/directory",
+      retrievedAt: new Date("2026-07-06T12:00:00.000Z"),
+    },
+    pool,
+  );
+}
+
+describe("onboardProviderCandidate", () => {
+  it("(a) creates a real Provider via the hardened path when no domain match exists", async () => {
+    const candidate = await seedCandidate();
+
+    const result = await onboardProviderCandidate(candidate.id, { onboardedBy: ONBOARDED_BY }, pool);
+
+    expect(result.providerCreated).toBe(true);
+    expect(result.providerId).toBeTruthy();
+    expect(result.providerSlug).toBeTruthy();
+
+    const { rows: providerRows } = await pool.query(
+      `SELECT name, domain, slug, notes FROM "Provider" WHERE id = $1`,
+      [result.providerId],
+    );
+    expect(providerRows.length).toBe(1);
+    expect(providerRows[0].name).toBe("Sunbeam Adventure Camp");
+    expect(providerRows[0].domain).toBe("sunbeam-camp.example");
+    expect(providerRows[0].notes).toContain("Onboarded from aggregator candidate");
+    expect(providerRows[0].notes).toContain("Sunbeam Adventure Camp");
+    expect(providerRows[0].notes).toContain("Test Aggregator");
+
+    const updated = await getCandidate(candidate.id, pool);
+    expect(updated?.status).toBe("APPROVED");
+    expect(updated?.approvedProviderId).toBe(result.providerId);
+    expect(updated?.reviewedBy).toBe(ONBOARDED_BY);
+  });
+
+  it("(b) returns the EXISTING provider when a matching-domain Provider appeared after enqueue", async () => {
+    const candidate = await seedCandidate({ websiteUrl: "https://already-onboarded.example/programs" });
+
+    // Simulates a Provider with the same domain being created (e.g. via the
+    // manual admin create route) AFTER the candidate was queued but BEFORE
+    // it is onboarded.
+    const existing = await insertProvider({ name: "Already Onboarded Camp", domain: "already-onboarded.example" });
+
+    const result = await onboardProviderCandidate(candidate.id, { onboardedBy: ONBOARDED_BY }, pool);
+
+    expect(result.providerCreated).toBe(false);
+    expect(result.providerId).toBe(existing.id);
+    expect(result.providerSlug).toBe(existing.slug);
+    expect(await providerCount()).toBe(1);
+
+    const updated = await getCandidate(candidate.id, pool);
+    expect(updated?.status).toBe("APPROVED");
+    expect(updated?.approvedProviderId).toBe(existing.id);
+  });
+
+  it("(c) throws CandidateNotPendingError on a second onboard of the same candidate", async () => {
+    const candidate = await seedCandidate();
+    await onboardProviderCandidate(candidate.id, { onboardedBy: ONBOARDED_BY }, pool);
+
+    await expect(
+      onboardProviderCandidate(candidate.id, { onboardedBy: ONBOARDED_BY }, pool),
+    ).rejects.toBeInstanceOf(CandidateNotPendingError);
+
+    // No second Provider was created by the rejected retry.
+    expect(await providerCount()).toBe(1);
+  });
+
+  it("(d) exactly one Provider row exists after two same-domain candidates onboard", async () => {
+    const first = await seedCandidate({ name: "Twin Peaks Camp A", websiteUrl: "https://twin-peaks.example/a" });
+    const second = await seedCandidate({ name: "Twin Peaks Camp B", websiteUrl: "https://twin-peaks.example/b" });
+
+    const firstResult = await onboardProviderCandidate(first.id, { onboardedBy: ONBOARDED_BY }, pool);
+    expect(firstResult.providerCreated).toBe(true);
+
+    const secondResult = await onboardProviderCandidate(second.id, { onboardedBy: ONBOARDED_BY }, pool);
+    expect(secondResult.providerCreated).toBe(false);
+    expect(secondResult.providerId).toBe(firstResult.providerId);
+
+    expect(await providerCount()).toBe(1);
+  });
+});

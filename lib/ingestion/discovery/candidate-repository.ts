@@ -21,6 +21,15 @@
  *   - `approveProviderCandidate` is the ONLY path that creates a Provider, and
  *     it is an explicit, human-initiated action guarded by a row lock + status
  *     check so a candidate can be promoted at most once.
+ *
+ * campfit#93 additive extension: `locale`/`aggregatorSourceId`/
+ * `provenanceExcerpt`/`provenanceLocator`/`snapshotSourceRef` (all nullable,
+ * optional on `EnqueueCandidateInput`) let the NEW aggregator-discovery lane
+ * (`lib/ingestion/aggregator/**`) enqueue into this SAME queue instead of
+ * forking a parallel candidate table. Existing callers (e.g.
+ * `denver-rec-centers` via `runDiscovery`) are unaffected — they simply never
+ * pass these optional fields, which are then written as NULL. Canonical DDL
+ * for these columns lives in prisma/migrations/017_aggregator_discovery.sql.
  */
 import type { Pool, PoolClient } from "pg";
 
@@ -63,6 +72,14 @@ export const PROVIDER_CANDIDATE_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS "ProviderCandidate_domain_idx" ON "ProviderCandidate"(domain);
   CREATE INDEX IF NOT EXISTS "ProviderCandidate_normalizedName_idx" ON "ProviderCandidate"("normalizedName");
   CREATE INDEX IF NOT EXISTS "ProviderCandidate_community_idx" ON "ProviderCandidate"("communitySlug", status);
+
+  -- campfit#93 additive extension (mirrors prisma/migrations/017_aggregator_discovery.sql):
+  ALTER TABLE "ProviderCandidate" ADD COLUMN IF NOT EXISTS "locale" TEXT;
+  ALTER TABLE "ProviderCandidate" ADD COLUMN IF NOT EXISTS "aggregatorSourceId" TEXT;
+  ALTER TABLE "ProviderCandidate" ADD COLUMN IF NOT EXISTS "provenanceExcerpt" TEXT;
+  ALTER TABLE "ProviderCandidate" ADD COLUMN IF NOT EXISTS "provenanceLocator" TEXT;
+  ALTER TABLE "ProviderCandidate" ADD COLUMN IF NOT EXISTS "snapshotSourceRef" TEXT;
+  CREATE INDEX IF NOT EXISTS "ProviderCandidate_aggregatorSourceId_idx" ON "ProviderCandidate"("aggregatorSourceId");
 `;
 
 export async function ensureProviderCandidateSchema(pool: Pool = getPool()): Promise<void> {
@@ -93,6 +110,12 @@ export interface ProviderCandidateRow {
   reviewedBy: string | null;
   reviewerNotes: string | null;
   createdAt: Date;
+  /** campfit#93: aggregator-sourced candidates only (null for curated-source candidates). */
+  locale: string | null;
+  aggregatorSourceId: string | null;
+  provenanceExcerpt: string | null;
+  provenanceLocator: string | null;
+  snapshotSourceRef: string | null;
 }
 
 export interface EnqueueCandidateInput {
@@ -109,6 +132,12 @@ export interface EnqueueCandidateInput {
   possibleDuplicateOfProviderId?: string | null;
   possibleDuplicateOfName?: string | null;
   duplicateReason?: string | null;
+  /** campfit#93: set only by the aggregator-discovery lane. */
+  locale?: string | null;
+  aggregatorSourceId?: string | null;
+  provenanceExcerpt?: string | null;
+  provenanceLocator?: string | null;
+  snapshotSourceRef?: string | null;
 }
 
 // ── Dedupe key loaders ───────────────────────────────────────────────────────
@@ -154,8 +183,9 @@ export async function enqueueCandidate(
        (name, "normalizedName", "websiteUrl", domain, city, neighborhood,
         "communitySlug", status,
         "possibleDuplicateOfProviderId", "possibleDuplicateOfName", "duplicateReason",
-        "sourceKey", "sourceLabel", "discoveryQuery", "retrievedAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',$8,$9,$10,$11,$12,$13,$14)
+        "sourceKey", "sourceLabel", "discoveryQuery", "retrievedAt",
+        "locale", "aggregatorSourceId", "provenanceExcerpt", "provenanceLocator", "snapshotSourceRef")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING *`,
     [
       input.name,
@@ -172,6 +202,11 @@ export async function enqueueCandidate(
       input.sourceLabel,
       input.discoveryQuery,
       input.retrievedAt,
+      input.locale ?? null,
+      input.aggregatorSourceId ?? null,
+      input.provenanceExcerpt ?? null,
+      input.provenanceLocator ?? null,
+      input.snapshotSourceRef ?? null,
     ],
   );
   return rows[0];
