@@ -117,7 +117,7 @@ function stubSourceResult(
         rawExtraction: { via: 'stub-source-result' },
         warnings: [],
       },
-      { sourceKey: src.key, sourceUrl: src.url, snapshotRef: 'traverse-snapshot:stub' }
+      { sourceKey: src.key, sourceUrl: src.url, snapshotRef: 'traverse-snapshot:stub', snapshotBodyHash: 'stub-body-hash' }
     );
     return {
       source: src.key,

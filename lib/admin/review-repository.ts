@@ -13,6 +13,16 @@ export async function createProposal(opts: {
   proposedChanges: ProposedChanges;
   overallConfidence: number;
   extractionModel: string;
+  /**
+   * Snapshot provenance (migration 015_proposal_snapshot_ref.sql — both
+   * columns already exist, nullable). Optional and additive: absent (or
+   * explicitly `null`, e.g. when the underlying traverse fetch never
+   * captured a snapshot) stays `null` on the row rather than a fabricated
+   * value. Populated by both `runCrawlPipeline` strategies as of
+   * campfit#97 — see crawl-pipeline.ts's two `createProposal` call sites.
+   */
+  snapshotRef?: string | null;
+  snapshotBodyHash?: string | null;
 }): Promise<string> {
   const pool = getPool();
 
@@ -28,11 +38,12 @@ export async function createProposal(opts: {
 
   const result = await pool.query(
     `INSERT INTO "CampChangeProposal"
-       ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel")
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+       ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel", "snapshotRef", "snapshotBodyHash")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
     [opts.campId, opts.crawlRunId, opts.sourceUrl,
      JSON.stringify(opts.rawExtraction), JSON.stringify(opts.proposedChanges),
-     opts.overallConfidence, opts.extractionModel]
+     opts.overallConfidence, opts.extractionModel,
+     opts.snapshotRef ?? null, opts.snapshotBodyHash ?? null]
   );
   return result.rows[0].id;
 }
