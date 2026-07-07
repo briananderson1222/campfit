@@ -146,6 +146,17 @@ export interface Provider {
   lastVerifiedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * When true, this provider's page requires headless-Chromium rendering to
+   * extract real content (campfit#53, spa-ingestion) — threaded into the
+   * camp-strategy recrawl path (traverse-recrawl-adapter.ts ->
+   * traverse-pipeline.ts's IngestionSourceConfig.render). Only the GitHub
+   * Actions sweep script (scripts/scrape.ts) configures a real renderImpl;
+   * every Vercel-route recrawl of a requiresRender provider fails closed with
+   * a typed invalid-config FetchError instead of silently serving an
+   * empty-shell fetch. Defaults to false (migration 019).
+   */
+  requiresRender: boolean;
 }
 
 export interface ReviewFlag {

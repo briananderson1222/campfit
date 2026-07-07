@@ -222,6 +222,8 @@ type CreateProviderInput = {
   notes?: string | null;
   crawlRootUrl?: string | null;
   communitySlug?: string;
+  /** campfit#53 — see lib/types.ts's Provider.requiresRender doc. */
+  requiresRender?: boolean;
 };
 
 /**
@@ -277,7 +279,8 @@ type UpdateProviderInput = Partial<Omit<CreateProviderInput, 'communitySlug'>>;
 
 export async function updateProvider(id: string, input: UpdateProviderInput): Promise<Provider | null> {
   const allowed = ['name', 'websiteUrl', 'logoUrl', 'address', 'city', 'neighborhood',
-                   'contactEmail', 'contactPhone', 'notes', 'crawlRootUrl', 'applicationUrl', 'socialLinks'] as const;
+                   'contactEmail', 'contactPhone', 'notes', 'crawlRootUrl', 'applicationUrl', 'socialLinks',
+                   'requiresRender'] as const;
   const updates = Object.entries(input).filter(([k]) => (allowed as readonly string[]).includes(k));
   if (updates.length === 0) return null;
 
