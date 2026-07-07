@@ -173,12 +173,22 @@ async function ensureAnchorCamp(
  * source page that grouped zero items, or a provider-init failure. Replaces
  * the pre-convergence `campId: ""` placeholder (`scripts/scrape.ts`/
  * `app/api/admin/scrape/route.ts`'s prior inline `errorLog` mapping) — never
- * blank, always traceable back to the source key that produced it. Whether/
- * how this becomes JOINABLE to `getUncrawlableCamps`'s query (or an
- * alternate "unassigned source failures" surface) is campfit#85 Wave 5's
- * decision to make and document; this convention only guarantees the
- * identifier itself is real and well-defined, per AC5/the Decommission
- * Checklist's row 3.
+ * blank, always traceable back to the source key that produced it.
+ *
+ * campfit#85 Wave 5 decision (recorded here, not just in the deliver
+ * artifact): this identifier is INTENTIONALLY never made joinable to a real
+ * `Camp` row — manufacturing a placeholder `Camp` for a source that failed
+ * before any item existed would violate `scripts/scrape.ts`'s pre-existing
+ * "don't create camps you're not going to route items to" discipline (the
+ * plan's option (a)). Instead this is option (b): `getUncrawlableCamps`
+ * (`lib/admin/crawl-failure-repository.ts`) keeps its existing `JOIN "Camp"`
+ * unchanged (a `source:<sourceKey>` value simply never matches any Camp row,
+ * by design) and a SEPARATE, explicitly-labeled query —
+ * `getUnassignedSourceFailures`, same file — surfaces exactly this family of
+ * errorLog entries instead, so a source-sweep failure is documented and
+ * queryable, never silently dropped the way the pre-convergence `campId: ""`
+ * placeholder made it (verified by
+ * `tests/integration/crawl-orchestrator-run-records.test.ts`).
  */
 function sourceFailureCampId(sourceKey: string): string {
   return `source:${sourceKey}`;
