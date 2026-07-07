@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CrawlModal } from '@/app/admin/crawl-modal';
+import { SchedulePanel } from './schedule-panel';
 import type { CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
 
 function durationLabel(startedAt: string, completedAt: string | null, isRunning = false): string {
@@ -363,6 +364,8 @@ export default function AdminCrawlsPage() {
           <RefreshCw className="w-3.5 h-3.5" /> Refresh
         </button>
       </div>
+
+      <SchedulePanel />
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 text-bark-300 py-16">
