@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import { getPendingProposals, getUnverifiedCamps, getPendingReports } from '@/lib/admin/review-repository';
+import { getRankedReviewQueue, getUnverifiedCamps, getPendingReports } from '@/lib/admin/review-repository';
 import { cn } from '@/lib/utils';
 import { ChevronRight, AlertTriangle, Clock, Flag } from 'lucide-react';
 import { ReportActions } from './report-actions';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { BatchAcceptPanel } from './batch-accept-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,15 +87,18 @@ export default async function ReviewQueuePage(
   const limit = 25;
   const offset = (page - 1) * limit;
 
-  const [{ proposals, total: proposalTotal }, { camps: unverifiedCamps, total: unverifiedTotal }, { reports, total: reportTotal }] =
+  const [{ batchReady, needsReview, total: proposalTotal, rankedCount }, { camps: unverifiedCamps, total: unverifiedTotal }, { reports, total: reportTotal }] =
     await Promise.all([
-      getPendingProposals({
-        limit,
-        offset,
+      getRankedReviewQueue({
+        // Ranked-queue pagination is per-lane, not one combined page (see
+        // getRankedReviewQueue's own header comment) — the shared
+        // page/offset control below only applies to the unverified/reports
+        // tabs; the proposals tab renders each lane's full (safety-capped)
+        // set instead.
         campId,
         providerId,
         communitySlugs: auth.access.isAdmin ? undefined : auth.access.communities,
-      }).catch(() => ({ proposals: [], total: 0 })),
+      }).catch(() => ({ batchReady: [], needsReview: [], total: 0, rankedCount: 0 })),
       getUnverifiedCamps({
         limit,
         offset,
@@ -110,7 +114,9 @@ export default async function ReviewQueuePage(
   const activeTotal = tab === 'unverified' ? unverifiedTotal
     : tab === 'reports' ? reportTotal
     : proposalTotal;
-  const totalPages = Math.ceil(activeTotal / limit);
+  // The proposals tab's two lanes are not paginated by this shared control
+  // (see the fetch comment above) — only unverified/reports show it.
+  const totalPages = tab === 'proposals' ? 1 : Math.ceil(activeTotal / limit);
 
   return (
     <div>
@@ -118,7 +124,10 @@ export default async function ReviewQueuePage(
         <div>
           <h1 className="font-display text-3xl font-extrabold text-bark-700">Review Queue</h1>
           <p className="text-bark-400 text-sm mt-1">
-            {proposalTotal} pending proposal{proposalTotal !== 1 ? 's' : ''} ·{' '}
+            {proposalTotal} pending proposal{proposalTotal !== 1 ? 's' : ''}
+            {rankedCount < proposalTotal && (
+              <span className="text-amber-600"> (showing {rankedCount} of {proposalTotal} — ranked queue is capped)</span>
+            )} ·{' '}
             {unverifiedTotal} unverified camp{unverifiedTotal !== 1 ? 's' : ''} ·{' '}
             {reportTotal} user report{reportTotal !== 1 ? 's' : ''}
           </p>
@@ -172,51 +181,75 @@ export default async function ReviewQueuePage(
       </div>
 
       {tab === 'proposals' && (
-        proposals.length === 0 ? (
+        batchReady.length === 0 && needsReview.length === 0 ? (
           <div className="glass-panel p-16 text-center">
             <p className="text-bark-300 text-lg">No pending proposals</p>
             <p className="text-bark-200 text-sm mt-2">Run a crawl to generate proposals for review</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {proposals.map(proposal => {
-              const changeCount = Object.keys(proposal.proposedChanges).length;
-              const conf = proposal.overallConfidence;
-              return (
-                <Link
-                  key={proposal.id}
-                  href={buildDetailHref(proposal.id, { page, campId, providerId })}
-                  className="glass-panel p-5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
-                >
-                  <ConfidenceBadge value={conf} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors truncate">
-                        {proposal.campName}
-                      </h3>
-                      <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
-                    </div>
-                    <p className="text-xs text-bark-400 mb-2">
-                      {changeCount} field{changeCount !== 1 ? 's' : ''} changed
-                      {proposal.crawlCompletedAt && (
-                        <span> · Crawled {new Date(proposal.crawlCompletedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>
-                      )}
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {prioritizedFields(Object.keys(proposal.proposedChanges)).slice(0, 5).map(field => (
-                        <span key={field} className="px-2 py-0.5 rounded-full bg-cream-100 text-bark-500 text-xs">
-                          {field}
-                        </span>
-                      ))}
-                      {changeCount > 5 && (
-                        <span className="text-xs text-bark-300">+{changeCount - 5} more</span>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-bark-300 shrink-0 group-hover:text-pine-500 transition-colors" />
-                </Link>
-              );
-            })}
+          <div className="space-y-8">
+            <section>
+              <h2 className="font-display font-bold text-bark-700 mb-3 flex items-center gap-2">
+                Batch-ready
+                <span className="text-sm font-normal text-bark-400">
+                  ({batchReady.length}) — exact-corroborated field claims, highest confidence first
+                </span>
+              </h2>
+              <BatchAcceptPanel proposals={batchReady} />
+            </section>
+
+            <section>
+              <h2 className="font-display font-bold text-bark-700 mb-3 flex items-center gap-2">
+                Needs individual review
+                <span className="text-sm font-normal text-bark-400">
+                  ({needsReview.length}) — lowest confidence first
+                </span>
+              </h2>
+              {needsReview.length === 0 ? (
+                <div className="glass-panel p-10 text-center text-bark-300 text-sm">Nothing needs individual review right now.</div>
+              ) : (
+                <div className="space-y-3">
+                  {needsReview.map(proposal => {
+                    const changeCount = Object.keys(proposal.proposedChanges).length;
+                    const conf = proposal.overallConfidence;
+                    return (
+                      <Link
+                        key={proposal.id}
+                        href={buildDetailHref(proposal.id, { page, campId, providerId })}
+                        className="glass-panel p-5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
+                      >
+                        <ConfidenceBadge value={conf} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors truncate">
+                              {proposal.campName}
+                            </h3>
+                            <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
+                          </div>
+                          <p className="text-xs text-bark-400 mb-2">
+                            {changeCount} field{changeCount !== 1 ? 's' : ''} changed
+                            {proposal.crawlCompletedAt && (
+                              <span> · Crawled {new Date(proposal.crawlCompletedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>
+                            )}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {prioritizedFields(Object.keys(proposal.proposedChanges)).slice(0, 5).map(field => (
+                              <span key={field} className="px-2 py-0.5 rounded-full bg-cream-100 text-bark-500 text-xs">
+                                {field}
+                              </span>
+                            ))}
+                            {changeCount > 5 && (
+                              <span className="text-xs text-bark-300">+{changeCount - 5} more</span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-bark-300 shrink-0 group-hover:text-pine-500 transition-colors" />
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           </div>
         )
       )}

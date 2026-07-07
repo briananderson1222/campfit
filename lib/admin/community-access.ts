@@ -28,6 +28,33 @@ export async function getProposalCommunitySlug(proposalId: string): Promise<stri
   return rows[0]?.communitySlug ?? null;
 }
 
+/**
+ * Bulk variant of `getProposalCommunitySlug` (review L5, campfit#51) — ONE
+ * `ANY($1::text[])` query for every distinct proposalId, instead of one
+ * query per proposalId in a loop. Mirrors this same batch-accept route's
+ * OWN pre-existing `campIdsForProposals` bulk-lookup pattern
+ * (`app/api/admin/review/batch-accept/route.ts`), applied to the
+ * per-selection community-scope re-check specifically (the #93-lesson gate
+ * that used to run once per distinct proposalId). A proposalId absent from
+ * the result map (nonexistent id, or a Camp row with no `communitySlug`)
+ * is simply missing from the map — callers treat that the same as `null`
+ * (excluded), identical to `getProposalCommunitySlug`'s own not-found
+ * behavior.
+ */
+export async function getProposalCommunitySlugs(proposalIds: string[]): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (proposalIds.length === 0) return map;
+  const { rows } = await getPool().query<{ id: string; communitySlug: string | null }>(
+    `SELECT p.id, c."communitySlug"
+     FROM "CampChangeProposal" p
+     JOIN "Camp" c ON c.id = p."campId"
+     WHERE p.id = ANY($1::text[])`,
+    [proposalIds],
+  );
+  for (const row of rows) map.set(row.id, row.communitySlug);
+  return map;
+}
+
 export async function getProposalCommunityScope(proposalId: string): Promise<{ communitySlug: string | null } | null> {
   const { rows } = await getPool().query<{ communitySlug: string | null }>(
     `SELECT c."communitySlug"

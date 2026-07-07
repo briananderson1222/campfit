@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "review-queue-ranking-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-388-388-4-4-fault-injections-load-bearing-audit-rows-reconstruct-who-when-which-why",
+      "subjectType": "workflow-check",
+      "subjectId": "review-queue-ranking/branch-verify",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "tool-verifier full-branch run (session-local, delegate-executed): 388/388; 4/4 fault injections load-bearing; audit rows reconstruct who/when/which/why.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-queue-ranking-ac1-ranked-two-lane-queue.flow-agents-workflow.ac1-r1-with-mixed-fixture-claims-the-queue-orders-items-by-confidence-and-visibly-separates-batch-eligible-exact-corroborated-claims-from-claims-needing-individual-review-demonstrated-by-automated-test-or-recorded-walkthrough",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-queue-ranking/ac1-ranked-two-lane-queue",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC1 (R1): with mixed fixture claims, the queue orders items by confidence and visibly separates batch-eligible exact-corroborated claims from claims needing individual review, demonstrated by automated test or recorded walkthrough.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-queue-ranking-ac2-batch-eligibility-enforced-at-action-layer.flow-agents-workflow.ac2-r2-a-claim-with-any-non-exact-corroboration-cannot-be-included-in-a-batch-accept-enforced-and-tested-at-the-action-layer-server-apply-not-just-the-ui",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-queue-ranking/ac2-batch-eligibility-enforced-at-action-layer",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC2 (R2): a claim with any non-exact corroboration cannot be included in a batch accept; enforced and tested at the action layer (server/apply), not just the UI.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-queue-ranking-ac3-audit-trail-reconstructs-full-action.flow-agents-workflow.ac3-r3-after-a-batch-accept-the-audit-trail-reconstructs-the-full-action-actor-time-claims-evidence-via-query-verified-on-seeded-data",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-queue-ranking/ac3-audit-trail-reconstructs-full-action",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3 (R3): after a batch accept, the audit trail reconstructs the full action (actor, time, claims, evidence) via query; verified on seeded data.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-queue-ranking-ac4-no-silent-promotion-path.flow-agents-workflow.ac4-r4-code-behavior-audit-shows-every-path-to-verified-state-requires-human-action-or-an-audited-batch-action-a-test-proves-no-background-implicit-promotion-occurs",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-queue-ranking/ac4-no-silent-promotion-path",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC4 (R4): code/behavior audit shows every path to verified state requires human action or an audited batch action; a test proves no background/implicit promotion occurs.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-queue-ranking-ac5-throughput-measured-before-after.flow-agents-workflow.ac5-r5-measured-reviews-hour-on-the-real-backlog-recorded-before-and-after-showing-improvement",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-queue-ranking/ac5-throughput-measured-before-after",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC5 (R5): measured reviews/hour on the real backlog recorded before and after, showing improvement.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-queue-ranking-review.flow-agents-workflow.iter0-changes-requested-h1-null-run-corroboration-gaming-h2-cap-drops-riskiest-m3-m4-l5-iter1-approve-0-new-findings-all-fixed-re-gated-review-code-md-this-dir",
+      "subjectType": "workflow-critique",
+      "subjectId": "review-queue-ranking/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "iter0 CHANGES_REQUESTED (H1 null-run corroboration gaming, H2 cap drops riskiest, M3/M4/L5); iter1 APPROVE 0 new findings. All fixed + re-gated. review-code.md this dir.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:18:16Z",
+      "updatedAt": "2026-07-07T14:18:16Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T14:18:16Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:review-queue-ranking-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-388-388-4-4-fault-injections-load-bearing-audit-rows-reconstruct-who-when-which-why",
+      "claimId": "review-queue-ranking-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-388-388-4-4-fault-injections-load-bearing-audit-rows-reconstruct-who-when-which-why",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "review-queue-ranking/evidence.json",
+      "excerptOrSummary": "tool-verifier full-branch run (session-local, delegate-executed): 388/388; 4/4 fault injections load-bearing; audit rows reconstruct who/when/which/why.",
+      "observedAt": "2026-07-07T14:18:16Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:review-queue-ranking-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-388-388-4-4-fault-injections-load-bearing-audit-rows-reconstruct-who-when-which-why",
+      "claimId": "review-queue-ranking-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-388-388-4-4-fault-injections-load-bearing-audit-rows-reconstruct-who-when-which-why",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:review-queue-ranking-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-388-388-4-4-fault-injections-load-bearing-audit-rows-reconstruct-who-when-which-why"
+      ],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    },
+    {
+      "id": "evt:review-queue-ranking-ac1-ranked-two-lane-queue.flow-agents-workflow.ac1-r1-with-mixed-fixture-claims-the-queue-orders-items-by-confidence-and-visibly-separates-batch-eligible-exact-corroborated-claims-from-claims-needing-individual-review-demonstrated-by-automated-test-or-recorded-walkthrough",
+      "claimId": "review-queue-ranking-ac1-ranked-two-lane-queue.flow-agents-workflow.ac1-r1-with-mixed-fixture-claims-the-queue-orders-items-by-confidence-and-visibly-separates-batch-eligible-exact-corroborated-claims-from-claims-needing-individual-review-demonstrated-by-automated-test-or-recorded-walkthrough",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    },
+    {
+      "id": "evt:review-queue-ranking-ac2-batch-eligibility-enforced-at-action-layer.flow-agents-workflow.ac2-r2-a-claim-with-any-non-exact-corroboration-cannot-be-included-in-a-batch-accept-enforced-and-tested-at-the-action-layer-server-apply-not-just-the-ui",
+      "claimId": "review-queue-ranking-ac2-batch-eligibility-enforced-at-action-layer.flow-agents-workflow.ac2-r2-a-claim-with-any-non-exact-corroboration-cannot-be-included-in-a-batch-accept-enforced-and-tested-at-the-action-layer-server-apply-not-just-the-ui",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    },
+    {
+      "id": "evt:review-queue-ranking-ac3-audit-trail-reconstructs-full-action.flow-agents-workflow.ac3-r3-after-a-batch-accept-the-audit-trail-reconstructs-the-full-action-actor-time-claims-evidence-via-query-verified-on-seeded-data",
+      "claimId": "review-queue-ranking-ac3-audit-trail-reconstructs-full-action.flow-agents-workflow.ac3-r3-after-a-batch-accept-the-audit-trail-reconstructs-the-full-action-actor-time-claims-evidence-via-query-verified-on-seeded-data",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    },
+    {
+      "id": "evt:review-queue-ranking-ac4-no-silent-promotion-path.flow-agents-workflow.ac4-r4-code-behavior-audit-shows-every-path-to-verified-state-requires-human-action-or-an-audited-batch-action-a-test-proves-no-background-implicit-promotion-occurs",
+      "claimId": "review-queue-ranking-ac4-no-silent-promotion-path.flow-agents-workflow.ac4-r4-code-behavior-audit-shows-every-path-to-verified-state-requires-human-action-or-an-audited-batch-action-a-test-proves-no-background-implicit-promotion-occurs",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    },
+    {
+      "id": "evt:review-queue-ranking-ac5-throughput-measured-before-after.flow-agents-workflow.ac5-r5-measured-reviews-hour-on-the-real-backlog-recorded-before-and-after-showing-improvement",
+      "claimId": "review-queue-ranking-ac5-throughput-measured-before-after.flow-agents-workflow.ac5-r5-measured-reviews-hour-on-the-real-backlog-recorded-before-and-after-showing-improvement",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    },
+    {
+      "id": "evt:review-queue-ranking-review.flow-agents-workflow.iter0-changes-requested-h1-null-run-corroboration-gaming-h2-cap-drops-riskiest-m3-m4-l5-iter1-approve-0-new-findings-all-fixed-re-gated-review-code-md-this-dir",
+      "claimId": "review-queue-ranking-review.flow-agents-workflow.iter0-changes-requested-h1-null-run-corroboration-gaming-h2-cap-drops-riskiest-m3-m4-l5-iter1-approve-0-new-findings-all-fixed-re-gated-review-code-md-this-dir",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:18:16Z",
+      "verifiedAt": "2026-07-07T14:18:16Z"
+    }
+  ]
+}

@@ -47,6 +47,9 @@ import type { ClaimDefinitionDraft, Evidence, TrustBundle, VerificationEvent } f
 
 import { getPool } from '@/lib/db';
 import { getProposal, updateProposalStatus, partialApprove } from './review-repository';
+import { CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from './proposal-fields';
+import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
+import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
 import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
@@ -151,18 +154,13 @@ export class ReviewApplyConflictError extends Error {
   }
 }
 
-const SCALAR_FIELDS = [
-  'name', 'organizationName', 'description', 'campType', 'category', 'registrationStatus',
-  'registrationOpenDate', 'registrationCloseDate', 'lunchIncluded', 'address', 'neighborhood', 'city',
-  'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
-  'interestingDetails', 'state', 'zip',
-];
-
-const RELATION_TABLES: Record<string, string> = {
-  ageGroups: 'CampAgeGroup',
-  schedules: 'CampSchedule',
-  pricing: 'CampPricing',
-};
+// SCALAR_FIELDS/RELATION_TABLES extracted to ./proposal-fields.ts (campfit#51,
+// Wave 1 Task 1.1) so lib/admin/claim-corroboration.ts and
+// lib/admin/review-repository.ts import the SAME list rather than
+// duplicating it — a pure refactor, no behavior change. Local aliases kept so
+// the rest of this module's body (below) is untouched.
+const SCALAR_FIELDS = CAMP_SCALAR_FIELDS;
+const RELATION_TABLES = CAMP_RELATION_TABLES;
 
 type ChangeLogEntry = Parameters<typeof writeChangeLogs>[0][number];
 
@@ -403,6 +401,281 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     provenanceErrors,
   };
 }
+
+
+export interface BatchAcceptSelection {
+  readonly proposalId: string;
+  readonly field: string;
+}
+
+export interface BatchAcceptOutcome {
+  readonly proposalId: string;
+  readonly field: string;
+  readonly status: 'applied' | 'excluded_not_pending' | 'excluded_not_corroborated' | 'error';
+  readonly message?: string;
+}
+
+/**
+ * Batch-accept for exact-corroborated Candidate Claims (campfit#51, Wave 2
+ * Task 2.2, R2/R3/R4). Reuses the SAME transactional/evidence/verification-
+ * cache primitives `applyProposalReview` already calls
+ * (`lockAndCheckProposal`, `applyScalarField`, `transitionProposalStatus`,
+ * `buildCampReviewTrustInput`, `recordAppliedFieldEvidence`,
+ * `refreshCampVerificationCache`, `writeChangeLogs`, `recordReviewDecision`)
+ * — NOT the Survey-session-gated `deriveDecision`, which has no meaning for
+ * a rule-driven batch action with no interactive session. Bypassing these
+ * primitives would silently break `Camp.dataConfidence` (see this module's
+ * header comment and `verification-authority.ts`'s "sole writer" framing);
+ * `tests/integration/verification-authority-callers.test.ts` (Wave 4) is the
+ * standing structural guard against that regressing later.
+ *
+ * Selections are grouped by `proposalId`; each proposal's valid, corroborated
+ * fields are applied inside ONE transaction (mirroring
+ * `applyProposalReview`'s own transaction shape) — a failure applying one
+ * proposal's group does not abort the rest of the batch (mirrors the
+ * aggregator-discovery onboard route's own per-item isolation discipline).
+ *
+ * Corroboration is RE-DERIVED here, server-side, against the caller-supplied
+ * `historyByCamp` (never trusted from a client-supplied "already
+ * corroborated" flag) — any selected field whose corroboration does not
+ * resolve `exact: true` right now is excluded
+ * (`excluded_not_corroborated`), never applied, regardless of what the UI
+ * displayed when the selection was made.
+ *
+ * A partially-corroborated Proposal (some fields batch-eligible, some not)
+ * is never fully approved by this function: it transitions to `APPROVED`
+ * only when EVERY currently-unapplied field was included and applied this
+ * round; otherwise it stays `PENDING` via the existing `partialApprove`
+ * path, identical semantics to an interactive partial accept.
+ *
+ * Does NOT itself write the audit row — the caller (the batch-accept route,
+ * Wave 3) owns calling `recordBatchAcceptAudit` once with this function's
+ * full result, keeping this function pool/transaction-only with no audit-
+ * table dependency, matching `applyProposalReview`'s own "pure Node/pg, no
+ * HTTP dependency" discipline.
+ */
+export async function applyBatchAcceptedClaims(
+  pool: Pool,
+  opts: {
+    selections: BatchAcceptSelection[];
+    actor: string;
+    historyByCamp: Map<string, ProposalHistoryRow[]>;
+  },
+): Promise<{ outcomes: BatchAcceptOutcome[]; claims: BatchAcceptClaimRecord[] }> {
+  const { selections, actor, historyByCamp } = opts;
+
+  const byProposal = new Map<string, string[]>();
+  for (const selection of selections) {
+    const fields = byProposal.get(selection.proposalId);
+    if (fields) {
+      if (!fields.includes(selection.field)) fields.push(selection.field);
+    } else {
+      byProposal.set(selection.proposalId, [selection.field]);
+    }
+  }
+
+  const outcomes: BatchAcceptOutcome[] = [];
+  const claims: BatchAcceptClaimRecord[] = [];
+
+  for (const [proposalId, requestedFields] of byProposal) {
+    const proposal = await getProposal(proposalId);
+
+    if (!proposal || proposal.status !== 'PENDING') {
+      for (const field of requestedFields) {
+        outcomes.push({ proposalId, field, status: 'excluded_not_pending', message: proposal ? 'Proposal is no longer PENDING.' : 'Proposal was not found.' });
+      }
+      continue;
+    }
+
+    // Validate each requested field against this proposal's own shape
+    // (scalar field, actually present in proposedChanges) BEFORE
+    // re-deriving corroboration — a field that isn't even a candidate on
+    // this proposal has nothing to corroborate.
+    const validFields: string[] = [];
+    for (const field of requestedFields) {
+      if (!CAMP_SCALAR_FIELDS.includes(field) || !(field in proposal.proposedChanges)) {
+        outcomes.push({ proposalId, field, status: 'excluded_not_pending', message: 'Field is not a pending scalar Candidate Claim on this proposal.' });
+        continue;
+      }
+      validFields.push(field);
+    }
+
+    // Re-derive corroboration server-side for every valid selected field —
+    // never trusts a caller-supplied "already corroborated" claim (R2/AC2).
+    const history = historyByCamp.get(proposal.campId) ?? [];
+    const corroboratedFields: string[] = [];
+    for (const field of validFields) {
+      const corroboration = deriveFieldCorroboration({
+        targetProposalId: proposal.id,
+        targetCrawlRunId: proposal.crawlRunId,
+        field,
+        history,
+      });
+      if (!corroboration.exact) {
+        outcomes.push({ proposalId, field, status: 'excluded_not_corroborated', message: 'No exact-corroborating observation from a different crawl run was found.' });
+        continue;
+      }
+      corroboratedFields.push(field);
+    }
+
+    if (corroboratedFields.length === 0) continue;
+
+    try {
+      const result = await applyBatchAcceptedFieldsForProposal(pool, {
+        proposal,
+        fields: corroboratedFields,
+        actor,
+        history,
+      });
+      outcomes.push(...result.outcomes);
+      claims.push(...result.claims);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      for (const field of corroboratedFields) {
+        outcomes.push({ proposalId, field, status: 'error', message });
+      }
+    }
+  }
+
+  return { outcomes, claims };
+}
+
+/**
+ * Applies one Proposal's already-validated, already-corroborated field
+ * selections inside a single transaction, then (post-commit, non-fatal)
+ * records Evidence/verification-cache/changelog/metrics provenance exactly
+ * as `applyProposalReview` does for an interactive apply. Split out of
+ * `applyBatchAcceptedClaims` so that function's per-proposal loop stays
+ * readable; not exported (batch-internal only).
+ */
+async function applyBatchAcceptedFieldsForProposal(
+  pool: Pool,
+  opts: {
+    proposal: CampChangeProposal;
+    fields: string[];
+    actor: string;
+    history: readonly ProposalHistoryRow[];
+  },
+): Promise<{ outcomes: BatchAcceptOutcome[]; claims: BatchAcceptClaimRecord[] }> {
+  const { proposal, fields, actor, history } = opts;
+  const reviewedAt = new Date().toISOString();
+  const client = await pool.connect();
+
+  const changeLogs: ChangeLogEntry[] = [];
+  let newlyAppliedFields: string[] = [];
+  let alreadyAppliedFields: Set<string> = new Set();
+  let keepPending = false;
+
+  try {
+    await client.query('BEGIN');
+
+    // Authoritative re-check under FOR UPDATE — same race guard
+    // applyProposalReview relies on (see lockAndCheckProposal's own
+    // comment).
+    alreadyAppliedFields = await lockAndCheckProposal(client, proposal.id);
+    newlyAppliedFields = fields.filter((field) => !alreadyAppliedFields.has(field));
+
+    for (const field of newlyAppliedFields) {
+      const diff = proposal.proposedChanges[field];
+      if (!diff) continue;
+      changeLogs.push(await applyScalarField(client, proposal, actor, reviewedAt, field, diff));
+    }
+
+    const unappliedProposalFields = Object.keys(proposal.proposedChanges).filter((field) => !alreadyAppliedFields.has(field));
+    const stillUnapplied = unappliedProposalFields.filter((field) => !newlyAppliedFields.includes(field));
+    keepPending = stillUnapplied.length > 0;
+
+    await transitionProposalStatus(client, proposal.id, keepPending, newlyAppliedFields, actor, BATCH_ACCEPT_REVIEWER_NOTES, undefined);
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  const outcomes: BatchAcceptOutcome[] = fields.map((field) => ({ proposalId: proposal.id, field, status: 'applied' as const }));
+
+  // No new field was actually written this round (every requested field was
+  // already applied under the lock, e.g. a duplicate/idempotent retry) —
+  // nothing new to record as Evidence/changelog/audit-claim provenance.
+  if (newlyAppliedFields.length === 0) {
+    return { outcomes, claims: [] };
+  }
+
+  const narrowedChanges = pickFields(proposal.proposedChanges, newlyAppliedFields);
+  const reviewTrustBundle = buildCampReviewTrustInput({
+    proposalId: proposal.id,
+    campId: proposal.campId,
+    sourceUrl: proposal.sourceUrl,
+    proposedChanges: narrowedChanges,
+    // Every field in narrowedChanges is approved — this batch action never
+    // rejects a field; a not-yet-selected/not-yet-corroborated field simply
+    // stays out of narrowedChanges entirely (still PENDING for individual
+    // review), rather than being marked 'rejected' here.
+    approvedFields: newlyAppliedFields,
+    reviewer: actor,
+    reviewedAt,
+    proposalCreatedAt: proposal.createdAt,
+    extractionModel: proposal.extractionModel,
+    reviewerNotes: BATCH_ACCEPT_REVIEWER_NOTES,
+  });
+
+  try {
+    await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle);
+    await refreshCampVerificationCache(proposal.campId);
+  } catch (err) {
+    console.error('applyBatchAcceptedClaims: recordAppliedFieldEvidence/refreshCampVerificationCache failed (non-fatal):', err);
+  }
+
+  try {
+    await writeChangeLogs(changeLogs);
+  } catch (err) {
+    console.error('applyBatchAcceptedClaims: writeChangeLogs failed (non-fatal):', err);
+  }
+
+  try {
+    await recordReviewDecision({
+      proposalId: proposal.id,
+      runId: proposal.crawlRunId,
+      approvedFields: newlyAppliedFields,
+      rejectedFields: [],
+      proposedChanges: narrowedChanges,
+      reviewerNotes: BATCH_ACCEPT_REVIEWER_NOTES,
+      extractionModel: proposal.extractionModel,
+      overallConfidence: proposal.overallConfidence,
+      finalDecision: !keepPending,
+    });
+  } catch (err) {
+    console.error('applyBatchAcceptedClaims: recordReviewDecision failed (non-fatal):', err);
+  }
+
+  const claims: BatchAcceptClaimRecord[] = newlyAppliedFields.map((field) => {
+    const diff = proposal.proposedChanges[field]!;
+    const corroboration = deriveFieldCorroboration({
+      targetProposalId: proposal.id,
+      targetCrawlRunId: proposal.crawlRunId,
+      field,
+      history,
+    });
+    return {
+      proposalId: proposal.id,
+      campId: proposal.campId,
+      field,
+      oldValue: diff.old,
+      newValue: diff.new,
+      corroboratingProposalIds: corroboration.corroboratingProposalIds,
+      corroboratingSourceUrls: corroboration.corroboratingSourceUrls,
+      sameSourceUrl: corroboration.sameSourceUrl,
+      overallConfidenceAtAccept: proposal.overallConfidence,
+    };
+  });
+
+  return { outcomes, claims };
+}
+
+const BATCH_ACCEPT_REVIEWER_NOTES = 'Batch-accepted via exact-corroboration rule.';
 
 /**
  * Loads the Survey review session bound to this Proposal, derives the
