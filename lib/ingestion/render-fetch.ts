@@ -158,14 +158,6 @@ export async function renderPage(
 export interface CreateCampfitRenderImplOptions {
   /** Hard per-attempt render timeout — see `renderPage()`. Defaults to DEFAULT_RENDER_TIMEOUT_MS. */
   timeoutMs?: number;
-  /**
-   * Invoked once per successful render with its telemetry, so a caller
-   * (traverse-pipeline.ts) can surface render duration / fallback use on the
-   * source's result without threading a return value through traverse's
-   * `RenderImpl` contract itself (a `RenderImpl` must return a
-   * `RenderResult`, not a render-specific telemetry shape).
-   */
-  onRendered?: (info: CampfitRenderTelemetry) => void;
 }
 
 /**
@@ -196,6 +188,16 @@ export interface CreateCampfitRenderImplOptions {
  * fixed regardless of what a caller's `SourceConfig.userAgent` happens to be
  * for the (irrelevant, since headers/UA are inert on a rendered fetch per
  * decision 7) wire-fetch path.
+ *
+ * Warnings: when `renderPage()` had to fall back from `networkidle` to
+ * `domcontentloaded` (`CampfitRenderTelemetry.usedNetworkidleFallback`), the
+ * returned `RenderResult.warnings` carries a
+ * `"render: networkidle fallback used after networkidle timeout (<ms>)"`
+ * entry — traverse merges `RenderResult.warnings` into `FetchResult.warnings`
+ * (see `@kontourai/traverse/fetch`'s `RenderResult` doc), so this is how the
+ * fallback signal reaches `TraversePipelineSourceResult.warnings` (see
+ * traverse-pipeline.ts). Absent (not an empty array) on a render that never
+ * needed the fallback.
  */
 export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {}): RenderImpl {
   const fallbackTimeoutMs = opts.timeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
@@ -203,8 +205,11 @@ export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {
   return async (url, renderOpts): Promise<RenderResult> => {
     const timeoutMs = renderOpts?.timeoutMs ?? fallbackTimeoutMs;
     const result = await renderPage(url, timeoutMs);
-    opts.onRendered?.(result);
 
-    return { html: result.html };
+    const warnings = result.usedNetworkidleFallback
+      ? [`render: networkidle fallback used after networkidle timeout (${timeoutMs}ms)`]
+      : undefined;
+
+    return { html: result.html, warnings };
   };
 }

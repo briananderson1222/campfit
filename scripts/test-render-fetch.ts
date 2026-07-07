@@ -15,6 +15,10 @@
  *     when a pending request never resolves (a long-poll-style page that
  *     never goes fully idle) — `usedNetworkidleFallback` is true and the
  *     already-parsed DOM content is still returned.
+ *  2b. `createCampfitRenderImpl()`'s built `RenderImpl` surfaces that same
+ *     fallback as a `RenderResult.warnings` entry (traverse merges it into
+ *     `FetchResult.warnings`) — and carries no such warning when the
+ *     fallback never fired (review fix, campfit#53 fix pass).
  *  3. End-to-end pipeline wiring: an `IngestionSourceConfig` with
  *     `render: true` run through `runTraversePipelineForSource` extracts a
  *     field from content that only exists AFTER client-side hydration —
@@ -175,6 +179,39 @@ async function testNetworkidleFallback(baseUrl: string) {
   console.log("✓ renderPage() falls back to domcontentloaded when networkidle never resolves, and still returns content");
 }
 
+// ─── 2b. createCampfitRenderImpl surfaces the fallback as RenderResult.warnings ──
+//
+// Review finding (campfit#53 fix pass, MEDIUM): the networkidle->
+// domcontentloaded fallback signal must reach `RenderResult.warnings` (which
+// traverse merges into `FetchResult.warnings` — see
+// node_modules/@kontourai/traverse/dist/src/fetch/types.d.ts's `RenderResult`
+// doc) so it is not silently dropped end-to-end.
+
+async function testRenderImplSurfacesFallbackWarning(baseUrl: string) {
+  const renderImpl = createCampfitRenderImpl();
+
+  const fallbackResult = await renderImpl(`${baseUrl}/hang-page`, {
+    userAgent: "unused-by-campfit-renderer",
+    timeoutMs: 800,
+  });
+  assert.ok(
+    fallbackResult.warnings?.some((w) => w.includes("networkidle fallback")),
+    `expected a networkidle-fallback warning, got warnings=${JSON.stringify(fallbackResult.warnings)}`
+  );
+
+  const normalResult = await renderImpl(`${baseUrl}/spa-page`, {
+    userAgent: "unused-by-campfit-renderer",
+    timeoutMs: DEFAULT_RENDER_TIMEOUT_MS,
+  });
+  assert.equal(
+    normalResult.warnings,
+    undefined,
+    "a render that never needed the fallback must carry no fallback warning"
+  );
+
+  console.log("✓ createCampfitRenderImpl() surfaces the networkidle-fallback signal as RenderResult.warnings (and omits it otherwise)");
+}
+
 // ─── 3. End-to-end: render flows into the traverse pipeline unchanged ───
 
 async function testRenderFlowsIntoTraversePipeline(baseUrl: string) {
@@ -276,6 +313,7 @@ async function main() {
   try {
     await testRenderSeesHydratedContentPlainFetchMisses(baseUrl);
     await testNetworkidleFallback(baseUrl);
+    await testRenderImplSurfacesFallbackWarning(baseUrl);
     await testRenderFlowsIntoTraversePipeline(baseUrl);
     await testRenderTimeoutIsolatesFailureAndSweepContinues(baseUrl);
   } finally {
