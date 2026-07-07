@@ -25,7 +25,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, FileText, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, FileText, Loader2, MonitorPlay } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCampDateTime } from '@/lib/date-format';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
@@ -40,6 +40,15 @@ export interface ResolvedSnapshot {
   truncated: boolean;
   /** The snapshot's real, untruncated body length, regardless of `truncated`. */
   totalLength: number;
+  /**
+   * campfit#53 (spa-ingestion, AC3): traverse's own honest `Snapshot.rendered`
+   * marker — true only when this snapshot's bytes came from a
+   * headless-Chromium render, never a plain fetch. Drives the "Rendered"
+   * badge below; both the true AND false/absent cases have explicit test
+   * coverage (a badge that always/never renders would fail AC3's honesty
+   * requirement — see the plan's stop-short risk).
+   */
+  rendered?: boolean;
 }
 
 export type SnapshotDrilldownState =
@@ -125,6 +134,12 @@ export function SnapshotDrilldown({
         <div className="mt-2 rounded-lg bg-pine-50/60 border border-pine-200/50 px-2.5 py-2 space-y-1.5 admin-surface" data-testid="snapshot-drilldown-panel">
           <SnapshotSourceLink url={state.snapshot.url} />
           <p className="text-[11px] text-bark-300">Fetched {formatCampDateTime(state.snapshot.fetchedAt)}</p>
+          {shouldShowRenderedBadge(state.snapshot) && (
+            <p className="flex items-center gap-1 text-[11px] text-pine-600" data-testid="snapshot-drilldown-rendered-badge">
+              <MonitorPlay className="w-3 h-3" />
+              Rendered (headless browser)
+            </p>
+          )}
           {formatSnapshotTruncationNotice(state.snapshot) && (
             <p className="text-[11px] text-amber-600" data-testid="snapshot-drilldown-truncated">
               {formatSnapshotTruncationNotice(state.snapshot)}
@@ -159,6 +174,21 @@ export function SnapshotDrilldown({
 export function formatSnapshotTruncationNotice(snapshot: ResolvedSnapshot): string | null {
   if (!snapshot.truncated) return null;
   return `Truncated (showing ${snapshot.body.length.toLocaleString('en-US')} of ${snapshot.totalLength.toLocaleString('en-US')} characters)`;
+}
+
+/**
+ * Whether the "Rendered (headless browser)" badge should show for this
+ * resolved snapshot (campfit#53 spa-ingestion, AC3). Extracted as its own
+ * pure, exported predicate — same reasoning as
+ * {@link formatSnapshotTruncationNotice} above — so BOTH the true and
+ * false/absent cases are directly unit-testable without a DOM/jsdom
+ * environment (this repo's Vitest config has neither): a badge that always
+ * or never shows would technically "add a badge" while failing AC3's
+ * honesty requirement, so this predicate (not just the JSX it feeds) is the
+ * regression-proof surface.
+ */
+export function shouldShowRenderedBadge(snapshot: ResolvedSnapshot): boolean {
+  return snapshot.rendered === true;
 }
 
 /**

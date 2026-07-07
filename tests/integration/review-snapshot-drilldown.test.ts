@@ -29,6 +29,16 @@
  * `totalLength` survive the panel's own parsing, not just the route's raw
  * JSON), and `formatSnapshotTruncationNotice` — the pure message-formatting
  * helper the panel renders — is unit-tested directly against both shapes.
+ *
+ * campfit#53 (spa-ingestion, AC3) follow-up: the same real-route round trip
+ * is exercised for traverse's `Snapshot.rendered` marker — a rendered
+ * snapshot resolves as `rendered: true` (badge shows), a plain-fetched one
+ * resolves as `rendered: false` (badge absent) — plus a direct unit test of
+ * `shouldShowRenderedBadge`, the pure predicate the panel's JSX defers to,
+ * against every shape a real client response could carry. Both the true AND
+ * false/absent cases are covered explicitly, per the plan's stop-short risk
+ * that a badge which always/never renders would technically "add a badge"
+ * while failing AC3's honesty requirement.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
@@ -58,7 +68,12 @@ vi.mock('@/lib/admin/access', () => ({
 }));
 
 import { GET } from '@/app/api/admin/review/[id]/snapshot/route';
-import { SnapshotDrilldown, parseSnapshotResponse, formatSnapshotTruncationNotice } from '@/components/admin/snapshot-drilldown';
+import {
+  SnapshotDrilldown,
+  parseSnapshotResponse,
+  formatSnapshotTruncationNotice,
+  shouldShowRenderedBadge,
+} from '@/components/admin/snapshot-drilldown';
 
 function getRequest(id: string): Request {
   return new Request(`http://localhost/api/admin/review/${id}/snapshot`);
@@ -200,5 +215,54 @@ describe('parseSnapshotResponse (AC2 panel half, real route round trip)', () => 
     if (state.status === 'error') {
       expect(state.message).toBe('no_snapshot_ref');
     }
+  });
+});
+
+describe('Snapshot.rendered / the "Rendered" badge (campfit#53 spa-ingestion, AC3)', () => {
+  it('a snapshot captured via the render seam (Snapshot.rendered: true) round-trips as rendered: true through the real route', async () => {
+    const snapshot = fixtureSnapshot({ rendered: true });
+    const store = createCampfitSnapshotStore();
+    await store.put(snapshot);
+
+    const campId = await insertCamp(pool);
+    const proposalId = await insertProposal(pool, campId, {
+      snapshotRef: buildSnapshotSourceRef(snapshot),
+    });
+
+    const res = await GET(getRequest(proposalId), { params: Promise.resolve({ id: proposalId }) });
+    const state = await parseSnapshotResponse(res);
+
+    expect(state.status).toBe('loaded');
+    if (state.status === 'loaded') {
+      expect(state.snapshot.rendered).toBe(true);
+      expect(shouldShowRenderedBadge(state.snapshot)).toBe(true);
+    }
+  });
+
+  it('a plain-fetched snapshot (no Snapshot.rendered field) round-trips as rendered: false, and the badge does not show', async () => {
+    const snapshot = fixtureSnapshot();
+    expect(snapshot.rendered).toBeUndefined();
+    const store = createCampfitSnapshotStore();
+    await store.put(snapshot);
+
+    const campId = await insertCamp(pool);
+    const proposalId = await insertProposal(pool, campId, {
+      snapshotRef: buildSnapshotSourceRef(snapshot),
+    });
+
+    const res = await GET(getRequest(proposalId), { params: Promise.resolve({ id: proposalId }) });
+    const state = await parseSnapshotResponse(res);
+
+    expect(state.status).toBe('loaded');
+    if (state.status === 'loaded') {
+      expect(state.snapshot.rendered).toBe(false);
+      expect(shouldShowRenderedBadge(state.snapshot)).toBe(false);
+    }
+  });
+
+  it('shouldShowRenderedBadge is false for every absent/false shape a real client could receive (never a false positive)', () => {
+    expect(shouldShowRenderedBadge({ url: 'https://x', fetchedAt: '2026-01-01', bodyHash: 'h', body: '', truncated: false, totalLength: 0 })).toBe(false);
+    expect(shouldShowRenderedBadge({ url: 'https://x', fetchedAt: '2026-01-01', bodyHash: 'h', body: '', truncated: false, totalLength: 0, rendered: false })).toBe(false);
+    expect(shouldShowRenderedBadge({ url: 'https://x', fetchedAt: '2026-01-01', bodyHash: 'h', body: '', truncated: false, totalLength: 0, rendered: true })).toBe(true);
   });
 });

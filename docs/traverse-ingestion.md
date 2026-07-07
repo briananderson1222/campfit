@@ -80,6 +80,22 @@ npm run scrape:dry                # extract only, no DB write
 npx tsx scripts/scrape.ts --source avid4   # single source
 ```
 
+## Rendered (SPA / JS-rendered) provider pages
+
+Some provider pages are client-rendered SPAs whose plain fetch returns an
+empty shell. `IngestionSourceConfig.render: true` (`lib/ingestion/sources.ts`)
+opts a curated sweep source into `@kontourai/traverse@0.13.0`'s native
+rendered-fetch seam; `Provider.requiresRender` (migration 019) does the same
+for a provider-triggered per-camp recrawl. Full rationale — the
+Vercel-vs-GitHub-Actions execution split, why the seam fails closed on every
+Vercel route today, and the operator activation steps for a real SPA
+provider — lives in
+[`docs/decisions/spa-rendered-provider-pages.md`](./decisions/spa-rendered-provider-pages.md).
+An operator flips `requiresRender` on a `Provider` row from that provider's
+admin editor page (`app/admin/providers/[providerId]/provider-editor.tsx`,
+"Requires Render" toggle); a curated source's `render: true` is a code-level
+edit to `lib/ingestion/sources.ts` itself.
+
 ## Tests
 
 - `npm run test:traverse-replay` — REPLAY-mode, stub provider, no network/key:
@@ -93,6 +109,12 @@ npx tsx scripts/scrape.ts --source avid4   # single source
   the (now-deleted) legacy scrapers produced live on 2026-07-03.
 - `npm run cutover:report` — LIVE (not CI), re-runs the AFTER half of the
   cutover comparison and regenerates `docs/cutover-report-2026-07.md`.
+- `npm run test:render-fetch` / `npm run test:shell-detect-retry` — real
+  headless-Chromium proof (local fixture server, no network/DB) that a
+  rendered fetch recovers content a plain fetch misses, honestly marks
+  `Snapshot.rendered: true`, and that the shell-detection auto-retry skips
+  (never issues a doomed attempt) when no renderer is configured — see
+  `docs/decisions/spa-rendered-provider-pages.md`.
 
 ## What was NOT kept
 

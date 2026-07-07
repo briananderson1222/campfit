@@ -19,17 +19,30 @@ export interface IngestionSourceConfig {
   url: string;
   /**
    * When true, this source's page is fetched via a headless-Chromium render
-   * (see lib/ingestion/render-fetch.ts, issue #41) instead of a plain HTTP
-   * GET — for JS-rendered SPA sources whose plain fetch returns an empty
-   * shell. Off by default; the rendered HTML flows into the SAME
-   * fetch->extract pipeline as a plain fetch. No source enables this yet —
-   * it's a per-source curation decision made once a source is confirmed to
-   * need it (see docs/traverse-ingestion.md).
+   * instead of a plain HTTP GET — for JS-rendered SPA sources whose plain
+   * fetch returns an empty shell. Traverse 0.13.0's native rendered-fetch
+   * seam (`SourceConfig.render` + `FetchSourceOptions.renderImpl` — issue
+   * #41, campfit#53 spa-ingestion; see
+   * docs/decisions/spa-rendered-provider-pages.md): this flag alone does
+   * NOT render anything — the caller must ALSO configure
+   * `TraversePipelineDeps.fetchOptions.renderImpl`
+   * (`lib/ingestion/render-fetch.ts`'s `createCampfitRenderImpl()`, wired
+   * only into `scripts/scrape.ts`'s GitHub Actions execution context, the
+   * only place a headless browser can launch today). Off by default; the
+   * rendered HTML flows into the SAME fetch->extract pipeline as a plain
+   * fetch, honestly marked `Snapshot.rendered: true`. No source enables this
+   * yet — it's a per-source curation decision made once a source is
+   * confirmed to need it (see docs/traverse-ingestion.md). For a
+   * provider-triggered per-camp recrawl instead of a curated sweep source,
+   * see `Provider.requiresRender` (migration 019) in
+   * `lib/ingestion/traverse-recrawl-adapter.ts`.
    */
   render?: boolean;
   /**
    * Hard per-attempt render timeout (ms). Only consulted when `render` is
-   * true. Defaults to render-fetch's DEFAULT_RENDER_TIMEOUT_MS (~30s).
+   * true — becomes `SourceConfig.timeoutMs`, which traverse forwards
+   * verbatim as the `timeoutMs` hint passed to `renderImpl`. Defaults to
+   * `lib/ingestion/render-fetch.ts`'s `DEFAULT_RENDER_TIMEOUT_MS` (~30s).
    */
   renderTimeoutMs?: number;
 }
