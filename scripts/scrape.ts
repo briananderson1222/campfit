@@ -1,6 +1,7 @@
 /**
  * scrape.ts — Ingestion sweep runner (full traverse cutover, owner
- * directive 2026-07).
+ * directive 2026-07; converged onto the shared crawl-orchestration seam,
+ * campfit#85 WS11 Slice 4 Wave 4).
  *
  * Runs every configured source (lib/ingestion/sources.ts) through the
  * traverse pipeline (lib/ingestion/traverse-pipeline.ts): fetch with
@@ -9,25 +10,41 @@
  * scraper registry, no more TRAVERSE_INGESTION flag, and no more legacy
  * shadow run — traverse is the only ingestion pipeline.
  *
+ * Live-mode `CrawlRun` bookkeeping (creation, live progress/campLog/
+ * errorLog writes, final status derivation) goes through the ONE shared
+ * orchestration seam, `runCrawlPipeline({ sources, ... })`
+ * (lib/ingestion/crawl-pipeline.ts) — the same tracker the camp-path
+ * re-crawl routes use (see that file's doc). This script no longer hand-
+ * rolls its own `createCrawlRun`/`completeCrawlRun` pair, its own
+ * `ensureAnchorCamp` anchor-camp upsert, or an unjoinable `campId: ""`
+ * errorLog placeholder — all of that now lives once, in the shared seam
+ * (`ensureAnchorCamp`/`sourceFailureCampId` in crawl-pipeline.ts).
+ *
+ * `--dry-run` intentionally stays OFF the seam: `runCrawlPipeline`'s
+ * `sources` strategy always creates a real `CrawlRun` row (it has no dry-run
+ * concept of its own), so a dry run — no DB write, no `CrawlRun`, extract-
+ * only — still calls `traverse-pipeline.ts`'s lower-level
+ * `runTraversePipeline` directly, exactly as before.
+ *
  * Usage:
  *   npx tsx scripts/scrape.ts                    # Run all sources
  *   npx tsx scripts/scrape.ts --dry-run           # Extract but don't write to DB
  *   npx tsx scripts/scrape.ts --source avid4      # Run a single source
  */
 
-import { Client } from "pg";
+import type { Pool } from "pg";
 import { INGESTION_SOURCES } from "@/lib/ingestion/sources";
 import { slugify } from "@/lib/ingestion/slug";
 import {
   runTraversePipeline,
   type TraverseProposalSink,
+  type TraversePipelineSourceResult,
 } from "@/lib/ingestion/traverse-pipeline";
 import { createCampfitSnapshotStore } from "@/lib/ingestion/traverse-snapshot-store";
 import { resolveExtractionProvider } from "@/lib/ingestion/resolve-extraction-provider";
-import { createProposal } from "@/lib/admin/review-repository";
-import { createCrawlRun, completeCrawlRun } from "@/lib/admin/crawl-repository";
+import { runCrawlPipeline } from "@/lib/ingestion/crawl-pipeline";
+import { getPool } from "@/lib/db";
 import { DatumError } from "@kontourai/datum";
-import { resolvePgConfig } from "@/lib/db-config";
 import { loadLocalEnv } from "./load-env";
 import {
   toIngestionReportEntry,
@@ -39,78 +56,32 @@ import { closeRenderBrowser } from "@/lib/ingestion/render-fetch";
 
 loadLocalEnv();
 
-// ─── DB connection ────────────────────────────────────────────────────────
-
-function getClient(): Client {
-  const config = resolvePgConfig();
-  if (!config) {
-    throw new Error("Missing database env vars for scrape script");
-  }
-
-  return new Client({
-    host: config.host,
-    port: config.port,
-    database: config.database,
-    user: config.user,
-    password: config.password,
-    ssl: { rejectUnauthorized: false },
-  });
-}
-
-// ─── Per-item anchor camp ─────────────────────────────────────────────────
+// ─── Per-item current-value lookup (live mode only) ───────────────────────
+//
+// Anchor-camp creation/reuse (`ensureAnchorCamp`) and proposal persistence
+// now live inside `runCrawlPipeline`'s `sources` strategy
+// (lib/ingestion/crawl-pipeline.ts) — this script only still needs to
+// supply the scalar-diffing `currentByItemNames` resolver, which reads
+// (never writes) an existing Camp's current field values by
+// `slugify(itemName)`, mirroring the anchor camp's own slug convention.
 
 const CURRENT_VALUE_COLUMNS =
   `name, description, category, "registrationStatus", "applicationUrl", "websiteUrl", city, neighborhood, address`;
 
 /** Look up an existing Camp's current field values by `slugify(itemName)`, if any. */
-async function lookupCurrentBySlug(client: Client, itemName: string): Promise<Record<string, unknown> | null> {
+async function lookupCurrentBySlug(pool: Pool, itemName: string): Promise<Record<string, unknown> | null> {
   const slug = slugify(itemName);
   if (!slug) return null;
-  const { rows } = await client.query(
+  const { rows } = await pool.query(
     `SELECT id, ${CURRENT_VALUE_COLUMNS} FROM "Camp" WHERE slug = $1`,
     [slug]
   );
   return rows[0] ?? null;
 }
 
-/**
- * Ensure a stable Camp row exists for one traverse-extracted item so its
- * proposals have a campId to attach a CampChangeProposal to. Idempotent
- * upsert keyed by `slugify(itemName)` — the same slug convention the legacy
- * scrapers used, so an item that already exists as a Camp (from a prior
- * source, e.g. CSV seed data) reuses that row rather than creating a
- * duplicate.
- */
-async function ensureAnchorCamp(
-  client: Client,
-  itemName: string,
-  sourceUrl: string
-): Promise<string> {
-  const slug = slugify(itemName) || `item-${Date.now()}`;
-
-  const existing = await client.query(`SELECT id FROM "Camp" WHERE slug = $1`, [slug]);
-  if (existing.rows.length > 0) return existing.rows[0].id as string;
-
-  const inserted = await client.query(
-    `INSERT INTO "Camp" (
-       id, slug, name, description, notes, "campType", category, "websiteUrl",
-       "interestingDetails", city, neighborhood, address, "lunchIncluded",
-       "registrationStatus", "sourceType", "sourceUrl", "dataConfidence", "lastVerifiedAt"
-     ) VALUES (
-       gen_random_uuid()::text, $1, $2, '', NULL, 'SUMMER_DAY'::"CampType",
-       'OTHER'::"CampCategory", $3, NULL, '', '', '', false,
-       'UNKNOWN'::"RegistrationStatus", 'SCRAPER'::"SourceType", $3,
-       'PLACEHOLDER'::"DataConfidence", NOW()
-     )
-     RETURNING id`,
-    [slug, itemName, sourceUrl]
-  );
-  return inserted.rows[0].id as string;
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────
 
-async function main() {
+export async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const onlySource = args.includes("--source")
@@ -128,6 +99,13 @@ async function main() {
     process.exit(1);
   }
 
+  // Resolved once up front (both dry-run and live) so a missing/invalid
+  // extraction provider fails fast with a helpful message, before any DB
+  // touch — `runCrawlPipeline`'s `sources` strategy also resolves its own
+  // provider internally for the live path (a process-level resource, same
+  // convention as the camp strategy), but that resolution failing mid-run
+  // would otherwise surface as a generic per-source `CrawlRun` failure
+  // instead of this script's existing fail-fast UX.
   let provider;
   try {
     provider = resolveExtractionProvider().provider;
@@ -141,63 +119,53 @@ async function main() {
   }
   console.log(`Provider: ${provider.name}\n`);
 
-  let client: Client | null = null;
-  if (!dryRun) {
-    client = getClient();
-    await client.connect();
-    console.log("✓ Connected to Supabase\n");
-  }
+  let results: TraversePipelineSourceResult[];
 
-  const store = createCampfitSnapshotStore();
+  if (dryRun) {
+    // No DB, no CrawlRun — matches the pre-existing dry-run/no-op contract.
+    // Bypasses the shared seam entirely: `runCrawlPipeline`'s `sources`
+    // strategy always creates a real `CrawlRun` row, which a dry run must
+    // never do.
+    const store = createCampfitSnapshotStore();
+    const noopSink: TraverseProposalSink = async () => null;
 
-  let crawlRunId: string | null = null;
-  if (!dryRun) {
-    const crawlRun = await createCrawlRun({
+    results = await runTraversePipeline(sources, {
+      provider,
+      store,
+      sink: noopSink,
+      mode: "live-with-capture",
+      currentByItemNames: () => new Map<string, Record<string, unknown>>(),
+    });
+  } else {
+    // Live sweep — converged onto the shared orchestration seam
+    // (campfit#85 Wave 4): `runCrawlPipeline` owns CrawlRun creation, the
+    // per-item anchor-camp/proposal sink, and live progress/campLog/
+    // errorLog writes through the same tracker the camp-path re-crawl
+    // routes use. `onSourceResult` collects the same
+    // `TraversePipelineSourceResult[]` this script always printed a report
+    // from, since `runCrawlPipeline` itself returns only the `CrawlRun`.
+    const pool = getPool();
+    const collected: TraversePipelineSourceResult[] = [];
+
+    await runCrawlPipeline({
+      sources,
       triggeredBy: "scrape:traverse-pipeline",
       trigger: "SCHEDULED",
-      totalCamps: sources.length,
+      currentByItemNames: async (_sourceKey, itemNames) => {
+        const out = new Map<string, Record<string, unknown>>();
+        for (const name of itemNames) {
+          const current = await lookupCurrentBySlug(pool, name);
+          if (current) out.set(name, current);
+        }
+        return out;
+      },
+      onSourceResult: (result) => {
+        collected.push(result);
+      },
     });
-    crawlRunId = crawlRun.id;
+
+    results = collected;
   }
-
-  const sink: TraverseProposalSink = async (record, meta) => {
-    if (dryRun || !client || !crawlRunId) return null;
-    const campId = await ensureAnchorCamp(client, record.itemName, meta.sourceUrl);
-    return createProposal({
-      campId,
-      crawlRunId,
-      sourceUrl: meta.sourceUrl,
-      rawExtraction: record.rawExtraction,
-      proposedChanges: record.proposedChanges,
-      overallConfidence: record.overallConfidence,
-      extractionModel: record.extractionModel,
-    });
-  };
-
-  const results = await runTraversePipeline(sources, {
-    provider,
-    store,
-    sink,
-    mode: "live-with-capture",
-    currentByItemNames: async (_sourceKey, itemNames) => {
-      const out = new Map<string, Record<string, unknown>>();
-      if (dryRun || !client) return out;
-      for (const name of itemNames) {
-        const current = await lookupCurrentBySlug(client, name);
-        if (current) out.set(name, current);
-      }
-      return out;
-    },
-  });
-
-  if (client && crawlRunId) {
-    const errorLog = results
-      .filter((r) => r.fetchError || r.extractionError)
-      .map((r) => ({ campId: "", error: r.fetchError ?? r.extractionError ?? "", url: r.url }));
-    await completeCrawlRun(crawlRunId, "COMPLETED", errorLog);
-  }
-
-  if (client) await client.end();
 
   // Closes the shared headless-Chromium instance if any `render: true`
   // source launched one this sweep (see lib/ingestion/render-fetch.ts) — a
@@ -216,7 +184,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// Only auto-run when executed directly as a script (`npx tsx
+// scripts/scrape.ts`) — guarded so a test can import `main` and drive it
+// with mocked module boundaries without an unwanted real run firing at
+// import time (mirrors Node's `require.main === module` idiom for ESM).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}

@@ -46,7 +46,7 @@ import { discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
 import type { CrawlProgressEvent, CrawlRun, LLMExtractionResult } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 import { runTraversePipelineForSource } from './traverse-pipeline';
-import type { TraverseProposalSink, TraversePipelineDeps } from './traverse-pipeline';
+import type { TraverseProposalSink, TraversePipelineDeps, TraversePipelineSourceResult } from './traverse-pipeline';
 import type { IngestionSourceConfig } from './sources';
 import { slugify } from './slug';
 
@@ -335,6 +335,24 @@ export interface CrawlOptions {
    * camp strategy.
    */
   currentByItemNames?: TraversePipelineDeps['currentByItemNames'];
+  /**
+   * Optional per-source raw-result observer for the `sources` strategy
+   * (campfit#85 Wave 4) — invoked once per source immediately after
+   * `traverse-pipeline.ts`'s `runTraversePipelineForSource` resolves (before
+   * this function evaluates that result for the shared tracker). Exists so a
+   * caller that needs the full `TraversePipelineSourceResult` shape (e.g.
+   * `scripts/scrape.ts`'s pre-existing per-source ingestion report —
+   * `toIngestionReportEntry`/`summarizeReport`/`printReport` in
+   * `lib/ingestion/ingestion-runner.ts` — or `app/api/admin/scrape/route.ts`'s
+   * response body) can still build one without `runCrawlPipeline` itself
+   * returning the raw array (its return type stays `Promise<CrawlRun>` for
+   * both strategies — see the file doc's "one seam" framing). Ignored by the
+   * camp strategy. NOT invoked for a source skipped because the whole
+   * sweep's extraction provider never resolved (`providerInitError`) — there
+   * is no `TraversePipelineSourceResult` to hand back in that case (see the
+   * `recordUnhandledError` call in that branch below instead).
+   */
+  onSourceResult?: (result: TraversePipelineSourceResult) => void | Promise<void>;
 }
 
 export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun> {
@@ -743,6 +761,12 @@ async function runSourceSweepStrategy(
         mode: 'live-with-capture',
         currentByItemNames: options.currentByItemNames,
       });
+
+      // Hand the raw per-source result to the optional observer BEFORE
+      // this function evaluates it for tracker bookkeeping below — see
+      // CrawlOptions.onSourceResult's doc for why this exists (Wave 4
+      // callers rebuilding their own ingestion report).
+      await options.onSourceResult?.(result);
 
       if (!result.ok) {
         // Whole-source fetch/extraction failure — no item was ever grouped,
