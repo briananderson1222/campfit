@@ -22,6 +22,9 @@ import {
   parseGradeInput,
 } from '@/components/admin/camp-field-controls';
 import { FieldTimelineNote } from '@/components/admin/field-timeline';
+import { FieldFormatBadge } from '@/components/admin/field-format-badge';
+import { checkFieldFormat } from '@/lib/admin/review-format-validation';
+import { FieldProvenanceMarker, hasProvenance } from '@/components/admin/field-provenance-marker';
 import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
@@ -542,6 +545,7 @@ export function ReviewPanel({
                       )}>
                         {isPopulate ? 'new data' : 'update'}
                       </span>
+                      <FieldFormatBadge state={checkFieldFormat(field, diff.new)} />
                     </div>
                     <FieldTimelineNote timeline={fieldTimeline[field]} className={cn('mb-2 text-[11px] text-bark-300', adminTheme.textMuted)} />
 
@@ -598,8 +602,8 @@ export function ReviewPanel({
                       </div>
                     </div>
 
-                    {/* Excerpt + source link */}
-                    {(diff.excerpt || diff.sourceUrl) && (
+                    {/* Excerpt + source link, else an explicit "no provenance" marker (R3, campfit#91) */}
+                    {hasProvenance(diff) ? (
                       <div className="mt-3 flex items-start gap-2 bg-amber-50/60 border border-amber-200/60 rounded-lg px-3 py-2 dark:bg-amber-500/15 dark:border-amber-300/30">
                         <Quote className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
@@ -609,6 +613,8 @@ export function ReviewPanel({
                           {diff.sourceUrl && <AdminSourceLink url={diff.sourceUrl} maxLength={70} className="mt-1" />}
                         </div>
                       </div>
+                    ) : (
+                      <FieldProvenanceMarker />
                     )}
 
                     {isExpandable && !isEditingProposed && (

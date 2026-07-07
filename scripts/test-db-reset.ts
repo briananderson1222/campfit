@@ -46,6 +46,11 @@ const SCHEMA_FILES = [
   "prisma/migrations/010_survey_review_sessions.sql",
   "prisma/migrations/011_proposal_applied_fields.sql",
   "prisma/migrations/012_claim_store_and_session_identity.sql",
+  // NOTE: 013_provider_candidates.sql is pre-existing drift (not added to this
+  // list) — see review-provenance-validation plan's Stop-short risks; not
+  // this task's to fix. 015 (not 014) is deliberate: see the migration
+  // file's header comment for the cross-worktree numbering coordination.
+  "prisma/migrations/015_proposal_snapshot_ref.sql",
 ];
 
 /**
