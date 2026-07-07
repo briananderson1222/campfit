@@ -29,40 +29,33 @@ export function CrawlRunnerButton() {
       if (!res.ok) throw new Error('Failed to start crawl');
       const { runId } = await res.json();
 
-      const eventSource = new EventSource(`/api/admin/crawl/${runId}/status`);
+      // JSON polling — the one crawl-progress transport (campfit#92),
+      // matching crawl-modal.tsx's poll loop exactly: poll every ~3s,
+      // stop on a terminal status, and clear after a 310s safety net.
+      const poll = setInterval(async () => {
+        const r = await fetch(`/api/admin/crawl/${runId}/status-json`).catch(() => null);
+        if (!r) return;
+        const data = await r.json().catch(() => null);
+        if (!data) return;
 
-      eventSource.onmessage = (e) => {
-        const event = JSON.parse(e.data);
-        // SSE status route emits: 'progress' | 'completed' | 'failed'
-        // These carry totalCamps, processedCamps, errorCount, newProposals
-        if (event.type === 'progress') {
-          setProgress({
-            total: event.totalCamps ?? 0,
-            processed: event.processedCamps ?? 0,
-            proposals: event.newProposals ?? 0,
-            errors: event.errorCount ?? 0,
-          });
-        } else if (event.type === 'completed') {
-          setProgress({
-            total: event.totalCamps ?? 0,
-            processed: event.processedCamps ?? 0,
-            proposals: event.newProposals ?? 0,
-            errors: event.errorCount ?? 0,
-          });
+        setProgress({
+          total: data.totalCamps ?? 0,
+          processed: data.processedCamps ?? 0,
+          proposals: data.newProposals ?? 0,
+          errors: data.errorCount ?? 0,
+        });
+
+        if (data.status === 'COMPLETED') {
+          clearInterval(poll);
           setState('done');
-          eventSource.close();
-        } else if (event.type === 'failed') {
+        } else if (data.status === 'FAILED') {
+          clearInterval(poll);
           setState('error');
-          setErrorMsg(event.error ?? 'Crawl failed');
-          eventSource.close();
+          setErrorMsg('Crawl failed');
         }
-      };
+      }, 3000);
 
-      eventSource.onerror = () => {
-        setState('error');
-        setErrorMsg('Connection lost');
-        eventSource.close();
-      };
+      setTimeout(() => clearInterval(poll), 310_000);
     } catch (err) {
       setState('error');
       setErrorMsg(err instanceof Error ? err.message : 'Unknown error');

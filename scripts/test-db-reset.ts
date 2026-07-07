@@ -51,6 +51,11 @@ const SCHEMA_FILES = [
   // dir); not this task's to fix.
   "prisma/migrations/014_crawl_run_camp_log.sql",
   "prisma/migrations/015_proposal_snapshot_ref.sql",
+  // 016_crawl_schedule.sql (campfit#92) is appended correctly here — it does
+  // NOT fix 013_provider_candidates.sql's pre-existing drift above (still
+  // tracked separately in campfit#98); only this plan's own new migration is
+  // wired in.
+  "prisma/migrations/016_crawl_schedule.sql",
 ];
 
 /**

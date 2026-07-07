@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { resolveCrawlCandidates, type CrawlCandidatePriority } from '@/lib/admin/crawl-priority';
 
 export type CrawlPriority = 'stale' | 'missing' | 'coming_soon' | 'never_crawled' | 'all' | 'specific';
 
@@ -108,58 +109,18 @@ export async function GET(req: Request) {
     });
   }
 
-  // Base: only camps with a crawlable URL
-  let whereClause = `"websiteUrl" IS NOT NULL AND "websiteUrl" != ''`;
-  const params: unknown[] = [];
-
-  if (community) {
-    params.push(community);
-    whereClause += ` AND "communitySlug" = $${params.length}`;
-  } else if (scopedCommunities) {
-    params.push(scopedCommunities);
-    whereClause += ` AND "communitySlug" = ANY($${params.length}::text[])`;
-  }
-
-  // Priority-specific filters
-  if (priority === 'never_crawled') {
-    whereClause += ` AND "lastVerifiedAt" IS NULL`;
-  } else if (priority === 'coming_soon') {
-    whereClause += ` AND "registrationStatus" = 'COMING_SOON'`;
-  } else if (priority === 'missing') {
-    whereClause += ` AND (description = '' OR description IS NULL OR neighborhood = '' OR neighborhood IS NULL OR "registrationStatus" = 'UNKNOWN')`;
-  }
-
-  const result = await pool.query(`
-    SELECT
-      id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
-      "lastVerifiedAt",
-      (CASE WHEN description = '' OR description IS NULL THEN 1 ELSE 0 END +
-       CASE WHEN neighborhood = '' OR neighborhood IS NULL THEN 1 ELSE 0 END +
-       CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
-      (
-        -- Staleness score: days since last verified (max 180 pts)
-        LEAST(180, COALESCE(
-          EXTRACT(DAY FROM (NOW() - "lastVerifiedAt"))::int,
-          180
-        )) +
-        -- Missing fields (30 pts each, max 90)
-        (CASE WHEN description = '' OR description IS NULL THEN 1 ELSE 0 END +
-         CASE WHEN neighborhood = '' OR neighborhood IS NULL THEN 1 ELSE 0 END +
-         CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) * 30 +
-        -- Confidence bonus
-        CASE "dataConfidence"
-          WHEN 'PLACEHOLDER' THEN 50
-          WHEN 'STALE' THEN 25
-          ELSE 0
-        END +
-        -- Coming soon bonus (time-sensitive)
-        CASE WHEN "registrationStatus" = 'COMING_SOON' THEN 40 ELSE 0 END
-      ) AS "priorityScore"
-    FROM "Camp"
-    WHERE ${whereClause}
-    ORDER BY "priorityScore" DESC, "lastVerifiedAt" ASC NULLS FIRST
-    LIMIT $${params.length + 1}
-  `, [...params, limit]);
+  // Base: priority-driven resolution (stale/missing/coming_soon/never_crawled/
+  // all/specific-without-q — the latter behaves like 'all', matching
+  // pre-extraction behavior where it fell through every priority-specific
+  // branch below unmatched). Extracted to `resolveCrawlCandidates`
+  // (lib/admin/crawl-priority.ts) — same SQL, same ordering, same output
+  // shape as before this refactor; also called directly by the scheduled
+  // cron route (campfit#92) so the two callers share one implementation.
+  const candidates = await resolveCrawlCandidates({
+    priority: priority as CrawlCandidatePriority,
+    limit,
+    communitySlug: community ?? scopedCommunities,
+  });
 
   // Total crawlable camps count
   const countResult = await pool.query(
@@ -173,7 +134,7 @@ export async function GET(req: Request) {
   );
 
   return NextResponse.json({
-    camps: result.rows as CrawlPreviewCamp[],
+    camps: candidates as CrawlPreviewCamp[],
     totalCrawlable: countResult.rows[0].total,
   });
 }
