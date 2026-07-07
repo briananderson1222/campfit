@@ -61,6 +61,14 @@ export interface OnboardCandidateResult {
  * Thrown when `opts.expectedAggregatorSourceId` is given and does not match
  * the locked candidate row's own `aggregatorSourceId` — the repository-level
  * half of campfit#93 H1's authorization-boundary fix.
+ *
+ * Review fix (campfit#93 iter2 L): the message deliberately names only the
+ * candidate id and the EXPECTED aggregator id (already known to the caller
+ * from the URL) — never `actualAggregatorSourceId` (the OTHER aggregator's
+ * id, still preserved as a structured field below for any caller that wants
+ * it). If this error ever became route-reachable via a generic catch (see
+ * the onboard route's own `err.message` passthrough), a foreign aggregator's
+ * id must not leak into the response body.
  */
 export class CandidateAggregatorMismatchError extends Error {
   constructor(
@@ -69,7 +77,7 @@ export class CandidateAggregatorMismatchError extends Error {
     public readonly actualAggregatorSourceId: string | null,
   ) {
     super(
-      `Candidate ${candidateId} belongs to aggregator ${actualAggregatorSourceId ?? "(none)"}, not ${expectedAggregatorSourceId}; refusing to onboard.`,
+      `Candidate ${candidateId} does not belong to aggregator ${expectedAggregatorSourceId}; refusing to onboard.`,
     );
     this.name = "CandidateAggregatorMismatchError";
   }

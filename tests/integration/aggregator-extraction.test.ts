@@ -333,3 +333,112 @@ describe("AC2 — candidate discovery with provenance", () => {
     expect(skippedOutcome?.detail).toContain("riverside.example");
   });
 });
+// ── M fix — structural skipped-self filter ──────────────────────────────────
+
+describe("M fix — skipped-self structural backstop", () => {
+  const SELF_SOURCE_URL = "https://selftest.example/list";
+
+  const SELF_TEST_HTML = `
+<!doctype html>
+<html>
+  <head><title>Self Test Directory</title></head>
+  <body>
+    <main>
+      <article class="card">
+        <h2>External Family Camp</h2>
+        <p>Serving families in Denver, CO.</p>
+        <a href="https://external-camp.example">Visit site</a>
+      </article>
+      <article class="card">
+        <h2>Aggregator's Own Listing</h2>
+        <p>Serving families in Denver, CO.</p>
+        <a href="https://selftest.example/own-listing">Visit site</a>
+      </article>
+      <article class="card">
+        <h2>Aggregator's WWW-Variant Listing</h2>
+        <p>Serving families in Denver, CO.</p>
+        <a href="https://www.selftest.example/promo">Visit site</a>
+      </article>
+    </main>
+  </body>
+</html>`;
+
+  const SELF_TEST_CANDIDATES = [
+    { name: "External Family Camp", websiteUrl: "https://external-camp.example" },
+    { name: "Aggregator's Own Listing", websiteUrl: "https://selftest.example/own-listing" },
+    { name: "Aggregator's WWW-Variant Listing", websiteUrl: "https://www.selftest.example/promo" },
+  ];
+
+  function selfTestFetch(calls: string[]): FetchLike {
+    return async (fetchUrl: string) => {
+      calls.push(fetchUrl);
+      if (fetchUrl.endsWith("/robots.txt")) {
+        return {
+          status: 200,
+          headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/plain" : null) },
+          text: async () => "User-agent: *\nDisallow:",
+        };
+      }
+      if (fetchUrl === SELF_SOURCE_URL) {
+        return {
+          status: 200,
+          headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+          text: async () => SELF_TEST_HTML,
+        };
+      }
+      return { status: 404, headers: { get: () => null }, text: async () => "not found" };
+    };
+  }
+
+  function selfTestStubSpecs(): StubProposalSpec[] {
+    const specs: StubProposalSpec[] = [];
+    SELF_TEST_CANDIDATES.forEach((candidate, i) => {
+      specs.push({ fieldPath: `items[${i}].name`, candidateValue: candidate.name, needle: candidate.name });
+      specs.push({
+        fieldPath: `items[${i}].websiteUrl`,
+        candidateValue: candidate.websiteUrl,
+        needle: candidate.websiteUrl,
+      });
+    });
+    return specs;
+  }
+
+  it("drops candidates whose websiteUrl domain (bare or www-variant) matches the aggregator's own domain, while an external-domain candidate still enqueues", async () => {
+    const source = await createAggregatorSource(
+      { name: "Self Test Aggregator", url: SELF_SOURCE_URL, communitySlug: "denver", maxPages: 1, maxDepth: 0 },
+      pool,
+    );
+    await recordTosDecision(source.id, { decision: "APPROVED", reviewedBy: REVIEWER }, pool);
+
+    const calls: string[] = [];
+    const deps: AggregatorDiscoveryDeps = {
+      provider: createStubProvider(selfTestStubSpecs(), { model: "stub-self-test" }),
+      store: createInMemorySnapshotStore(),
+      mode: "live-with-capture",
+      fetchOptions: { fetch: selfTestFetch(calls), sleep: async () => {} },
+      log: () => {},
+    };
+
+    const summary = await runAggregatorDiscovery(source.id, { performedBy: REVIEWER }, deps, pool);
+
+    // The two self-domain cards (bare + www-variant) are both dropped by the
+    // structural backstop, never reaching classification/enqueue.
+    expect(summary.skippedSelf).toBe(2);
+    expect(summary.enqueuedNew).toBe(1);
+
+    const skippedOutcomes = summary.outcomes.filter((o) => o.disposition === "skipped-self");
+    expect(skippedOutcomes).toHaveLength(2);
+    expect(skippedOutcomes.map((o) => o.name).sort()).toEqual(
+      ["Aggregator's Own Listing", "Aggregator's WWW-Variant Listing"].sort(),
+    );
+
+    // Absence assertion, not just the counter: no ProviderCandidate row for
+    // either self-domain card, while the external candidate IS queued.
+    const queued = await getPendingCandidates("denver", pool);
+    const queuedNames = queued.map((c) => c.name);
+    expect(queuedNames).toContain("External Family Camp");
+    expect(queuedNames).not.toContain("Aggregator's Own Listing");
+    expect(queuedNames).not.toContain("Aggregator's WWW-Variant Listing");
+    expect(queued).toHaveLength(1);
+  });
+});

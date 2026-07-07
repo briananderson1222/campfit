@@ -50,10 +50,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 
-const { requireAdminAccessMock, runAggregatorDiscoveryMock, resolveExtractionProviderMock } = vi.hoisted(() => ({
+const {
+  requireAdminAccessMock,
+  runAggregatorDiscoveryMock,
+  resolveExtractionProviderMock,
+  onboardProviderCandidateMock,
+} = vi.hoisted(() => ({
   requireAdminAccessMock: vi.fn(),
   runAggregatorDiscoveryMock: vi.fn(),
   resolveExtractionProviderMock: vi.fn(),
+  onboardProviderCandidateMock: vi.fn(),
 }));
 
 vi.mock('@/lib/admin/access', async (importOriginal) => {
@@ -75,6 +81,27 @@ vi.mock('@/lib/ingestion/aggregator/aggregator-extraction', async (importOrigina
 vi.mock('@/lib/ingestion/resolve-extraction-provider', () => ({
   resolveExtractionProvider: resolveExtractionProviderMock,
 }));
+
+// campfit#93 review iter2 (finding 3): `onboardProviderCandidate` is mocked
+// here ONLY so the "isolates the route layer" test below (H1, part (b)) can
+// assert the onboard route's own pre-check rejects a cross-aggregator
+// candidateId BEFORE this call boundary is ever reached — proving the
+// ROUTE's guard specifically, independent of `onboardProviderCandidate`'s
+// own `expectedAggregatorSourceId` repository-level guard (which has its
+// own direct-call coverage in candidate-onboarding.test.ts). Every OTHER
+// test in this suite needs the real onboarding behavior (real Provider
+// rows, real dedupe-by-domain), so the mock's implementation is wired
+// through to the actual function below and only ever reset via
+// `mockClear()` (never `mockReset()`), which clears call history but keeps
+// that pass-through implementation intact.
+vi.mock('@/lib/ingestion/discovery/candidate-onboarding', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ingestion/discovery/candidate-onboarding')>();
+  onboardProviderCandidateMock.mockImplementation(actual.onboardProviderCandidate);
+  return {
+    ...actual,
+    onboardProviderCandidate: onboardProviderCandidateMock,
+  };
+});
 
 import { evaluateAdminAccess } from '@/lib/admin/access';
 import { POST as discoverPOST } from '@/app/api/admin/aggregators/[id]/discover/route';
@@ -135,6 +162,11 @@ beforeEach(() => {
     model: 'stub-model',
     maxTokens: 1,
   });
+
+  // `mockClear()`, not `mockReset()` — every other test in this suite relies
+  // on the pass-through-to-actual implementation wired up in the `vi.mock`
+  // factory above; only call history needs to start fresh per test.
+  onboardProviderCandidateMock.mockClear();
 });
 
 afterEach(async () => {
@@ -428,9 +460,18 @@ describe('AC4 — POST /api/admin/aggregators/[id]/candidates/onboard', () => {
 
   // H1 — authz boundary: a candidateId in the request body must belong to
   // the URL's aggregatorSourceId, regardless of what the requester is
-  // authorized to act on. These are NOT fault-injection tests (no mocked
-  // failure) — they exercise the real cross-aggregator guard added in
-  // app/api/admin/aggregators/[id]/candidates/onboard/route.ts.
+  // authorized to act on.
+  //
+  // Review fix (campfit#93 iter2, finding 3): the two tests below exercise
+  // the real end-to-end cross-aggregator guard (both the route's own
+  // pre-check AND `onboardProviderCandidate`'s `expectedAggregatorSourceId`
+  // repository-level guard fire in series here) — they pass even if the
+  // ROUTE's pre-check alone were deleted, because the repository-level
+  // guard also rejects the mismatch. They do NOT, on their own, isolate
+  // which layer is doing the rejecting. The THIRD test in this describe
+  // block (part (c)) isolates the route layer specifically, via a mocked
+  // `onboardProviderCandidate` call boundary — it only passes if the ROUTE
+  // itself rejects the mismatch before ever reaching that boundary.
   describe('H1 — cross-aggregator candidateId rejection', () => {
     it('rejects a candidate belonging to a DIFFERENT aggregator with a per-candidate error and creates NO Provider row', async () => {
       const id = await registerAggregator({ tosDecision: 'APPROVED' });
@@ -509,6 +550,43 @@ describe('AC4 — POST /api/admin/aggregators/[id]/candidates/onboard', () => {
 
       // Exactly one Provider was created — for the same-aggregator candidate only.
       expect(await providerCount()).toBe(1);
+    });
+
+    it('(c) isolates the ROUTE layer: rejects a cross-aggregator candidateId BEFORE ever invoking onboardProviderCandidate', async () => {
+      const id = await registerAggregator({ tosDecision: 'APPROVED' });
+      const otherId = await registerAggregator({ tosDecision: 'APPROVED' });
+
+      const crossCandidate = await enqueueCandidate(
+        {
+          name: 'Route-Isolation Cross Aggregator Camp', websiteUrl: 'https://route-isolation-cross.example',
+          city: null, communitySlug: 'denver', sourceKey: `aggregator:${otherId}`, sourceLabel: 'Other Aggregator',
+          discoveryQuery: null, retrievedAt: new Date(), aggregatorSourceId: otherId,
+        },
+        pool,
+      );
+
+      const res = await onboardPOST(
+        postRequest(`http://localhost/api/admin/aggregators/${id}/candidates/onboard`, {
+          candidateIds: [crossCandidate.id],
+        }),
+        paramsFor(id),
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.results[0].status).toBe('error');
+
+      // The load-bearing assertion: the mocked onboarding-call boundary was
+      // NEVER reached. If the route's own pre-check were removed, this
+      // mismatched candidateId would fall through to
+      // `onboardProviderCandidate` (which would either also reject it via
+      // its OWN `expectedAggregatorSourceId` guard, or — if that guard were
+      // ALSO absent — onboard it outright); either way the mock would be
+      // called at least once. Zero calls proves the ROUTE layer is the one
+      // doing the rejecting here, independent of the repository-level guard.
+      expect(onboardProviderCandidateMock).not.toHaveBeenCalled();
+
+      expect(await providerCount()).toBe(0);
     });
   });
 });
