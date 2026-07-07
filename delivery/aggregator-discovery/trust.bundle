@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "aggregator-discovery-iter2-delta-verify.flow-agents-workflow.tool-verifier-delta-run-session-local-delegate-executed-40-files-335-tests-green-fault-injections-on-skip-self-branch-and-route-pre-check-each-produced-the-expected-single-test-failure-byte-identical-restores-md5-empty-git-diff",
+      "subjectType": "workflow-check",
+      "subjectId": "aggregator-discovery/iter2-delta-verify",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "tool-verifier delta run (session-local, delegate-executed): 40 files / 335 tests green; fault injections on skip-self branch and route pre-check each produced the expected single test failure; byte-identical restores (md5 + empty git diff).",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "aggregator-discovery-ac1-tos-gate-structural.flow-agents-workflow.ac1-r1-fetch-is-impossible-without-a-recorded-tos-decision-enforced-at-both-the-aggregator-discovery-repository-layer-runaggregatordiscovery-re-checks-a-fresh-aggregatorsource-row-and-the-route-layer-post-api-admin-aggregators-id-discover-never-ui-only",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "aggregator-discovery/ac1-tos-gate-structural",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC1 (R1): fetch is impossible without a recorded ToS decision, enforced at both the aggregator-discovery repository layer (runAggregatorDiscovery re-checks a fresh AggregatorSource row) and the route layer (POST /api/admin/aggregators/[id]/discover), never UI-only.",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "aggregator-discovery-ac2-real-aggregator-candidates.flow-agents-workflow.ac2-r2-one-real-tos-cleared-aggregator-yields-5-plausible-candidates-with-provenance-excerpt-locator-snapshot-sourceref",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "aggregator-discovery/ac2-real-aggregator-candidates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC2 (R2): one real (ToS-cleared) aggregator yields >=5 plausible candidates with provenance (excerpt/locator/snapshot sourceRef).",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "aggregator-discovery-ac3-curation-dedupe-onboard.flow-agents-workflow.ac3-r3-curation-screen-dedupes-candidates-against-existing-providers-and-supports-multi-select-onboarding",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "aggregator-discovery/ac3-curation-dedupe-onboard",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3 (R3): curation screen dedupes candidates against existing providers and supports multi-select onboarding.",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "aggregator-discovery-ac4-onboard-hardened-path.flow-agents-workflow.ac4-r4-onboarded-candidates-reach-first-crawl-review-via-campfit-90-s-hardened-onboarding-path-createprovider-findproviderbydomain-not-a-parallel-create",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "aggregator-discovery/ac4-onboard-hardened-path",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC4 (R4): onboarded candidates reach first-crawl/review via campfit#90's hardened onboarding path (createProvider/findProviderByDomain), not a parallel create.",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "aggregator-discovery-review.flow-agents-workflow.iter0-changes-requested-h1-authz-boundary-h2-atomicity-m-self-domain-iter1-approve-w-m-skip-self-untested-l-id-leak-iter2-approve-1-low-accepted-findings-in-review-code-md-review-code-iter1-md-review-code-iter2-md-superseded-review-2026-07-07t06-44-18z-2026-07-07t06-43-32z",
+      "subjectType": "workflow-critique",
+      "subjectId": "aggregator-discovery/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "iter0 CHANGES_REQUESTED (H1 authz boundary, H2 atomicity, M self-domain); iter1 APPROVE w/ M skip-self-untested + L id-leak; iter2 APPROVE (1 LOW accepted). Findings in review-code.md / review-code-iter1.md / review-code-iter2.md.",
+      "value": "approve",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T06:43:32Z",
+        "superseded_by": "review@2026-07-07T06:44:18Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "aggregator-discovery-review.flow-agents-workflow.3-review-iterations-iter0-changes-requested-h1-onboard-route-authz-boundary-h2-non-atomic-onboarding-m-self-domain-skip-iter1-approve-with-m-skip-self-untested-l-foreign-id-in-error-message-iter2-approve-1-low-mock-style-note-accepted-all-high-medium-findings-fixed-and-re-gated-full-findings-review-code-md-review-code-iter1-md-review-code-iter2-md-in-this-dir",
+      "subjectType": "workflow-critique",
+      "subjectId": "aggregator-discovery/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "3 review iterations: iter0 CHANGES_REQUESTED (H1 onboard-route authz boundary, H2 non-atomic onboarding, M self-domain skip); iter1 APPROVE with M skip-self-untested + L foreign-ID-in-error-message; iter2 APPROVE (1 LOW mock-style note, accepted). All HIGH/MEDIUM findings fixed and re-gated. Full findings: review-code.md, review-code-iter1.md, review-code-iter2.md in this dir.",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:44:18Z",
+      "updatedAt": "2026-07-07T06:44:18Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T06:44:18Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:aggregator-discovery-iter2-delta-verify.flow-agents-workflow.tool-verifier-delta-run-session-local-delegate-executed-40-files-335-tests-green-fault-injections-on-skip-self-branch-and-route-pre-check-each-produced-the-expected-single-test-failure-byte-identical-restores-md5-empty-git-diff",
+      "claimId": "aggregator-discovery-iter2-delta-verify.flow-agents-workflow.tool-verifier-delta-run-session-local-delegate-executed-40-files-335-tests-green-fault-injections-on-skip-self-branch-and-route-pre-check-each-produced-the-expected-single-test-failure-byte-identical-restores-md5-empty-git-diff",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "aggregator-discovery/evidence.json",
+      "excerptOrSummary": "tool-verifier delta run (session-local, delegate-executed): 40 files / 335 tests green; fault injections on skip-self branch and route pre-check each produced the expected single test failure; byte-identical restores (md5 + empty git diff).",
+      "observedAt": "2026-07-07T06:44:18Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:aggregator-discovery-iter2-delta-verify.flow-agents-workflow.tool-verifier-delta-run-session-local-delegate-executed-40-files-335-tests-green-fault-injections-on-skip-self-branch-and-route-pre-check-each-produced-the-expected-single-test-failure-byte-identical-restores-md5-empty-git-diff",
+      "claimId": "aggregator-discovery-iter2-delta-verify.flow-agents-workflow.tool-verifier-delta-run-session-local-delegate-executed-40-files-335-tests-green-fault-injections-on-skip-self-branch-and-route-pre-check-each-produced-the-expected-single-test-failure-byte-identical-restores-md5-empty-git-diff",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:aggregator-discovery-iter2-delta-verify.flow-agents-workflow.tool-verifier-delta-run-session-local-delegate-executed-40-files-335-tests-green-fault-injections-on-skip-self-branch-and-route-pre-check-each-produced-the-expected-single-test-failure-byte-identical-restores-md5-empty-git-diff"
+      ],
+      "createdAt": "2026-07-07T06:44:18Z",
+      "verifiedAt": "2026-07-07T06:44:18Z"
+    },
+    {
+      "id": "evt:aggregator-discovery-ac1-tos-gate-structural.flow-agents-workflow.ac1-r1-fetch-is-impossible-without-a-recorded-tos-decision-enforced-at-both-the-aggregator-discovery-repository-layer-runaggregatordiscovery-re-checks-a-fresh-aggregatorsource-row-and-the-route-layer-post-api-admin-aggregators-id-discover-never-ui-only",
+      "claimId": "aggregator-discovery-ac1-tos-gate-structural.flow-agents-workflow.ac1-r1-fetch-is-impossible-without-a-recorded-tos-decision-enforced-at-both-the-aggregator-discovery-repository-layer-runaggregatordiscovery-re-checks-a-fresh-aggregatorsource-row-and-the-route-layer-post-api-admin-aggregators-id-discover-never-ui-only",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:44:18Z",
+      "verifiedAt": "2026-07-07T06:44:18Z"
+    },
+    {
+      "id": "evt:aggregator-discovery-ac2-real-aggregator-candidates.flow-agents-workflow.ac2-r2-one-real-tos-cleared-aggregator-yields-5-plausible-candidates-with-provenance-excerpt-locator-snapshot-sourceref",
+      "claimId": "aggregator-discovery-ac2-real-aggregator-candidates.flow-agents-workflow.ac2-r2-one-real-tos-cleared-aggregator-yields-5-plausible-candidates-with-provenance-excerpt-locator-snapshot-sourceref",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:44:18Z",
+      "verifiedAt": "2026-07-07T06:44:18Z"
+    },
+    {
+      "id": "evt:aggregator-discovery-ac3-curation-dedupe-onboard.flow-agents-workflow.ac3-r3-curation-screen-dedupes-candidates-against-existing-providers-and-supports-multi-select-onboarding",
+      "claimId": "aggregator-discovery-ac3-curation-dedupe-onboard.flow-agents-workflow.ac3-r3-curation-screen-dedupes-candidates-against-existing-providers-and-supports-multi-select-onboarding",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:44:18Z",
+      "verifiedAt": "2026-07-07T06:44:18Z"
+    },
+    {
+      "id": "evt:aggregator-discovery-ac4-onboard-hardened-path.flow-agents-workflow.ac4-r4-onboarded-candidates-reach-first-crawl-review-via-campfit-90-s-hardened-onboarding-path-createprovider-findproviderbydomain-not-a-parallel-create",
+      "claimId": "aggregator-discovery-ac4-onboard-hardened-path.flow-agents-workflow.ac4-r4-onboarded-candidates-reach-first-crawl-review-via-campfit-90-s-hardened-onboarding-path-createprovider-findproviderbydomain-not-a-parallel-create",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:44:18Z",
+      "verifiedAt": "2026-07-07T06:44:18Z"
+    },
+    {
+      "id": "evt:aggregator-discovery-review.flow-agents-workflow.3-review-iterations-iter0-changes-requested-h1-onboard-route-authz-boundary-h2-non-atomic-onboarding-m-self-domain-skip-iter1-approve-with-m-skip-self-untested-l-foreign-id-in-error-message-iter2-approve-1-low-mock-style-note-accepted-all-high-medium-findings-fixed-and-re-gated-full-findings-review-code-md-review-code-iter1-md-review-code-iter2-md-in-this-dir",
+      "claimId": "aggregator-discovery-review.flow-agents-workflow.3-review-iterations-iter0-changes-requested-h1-onboard-route-authz-boundary-h2-non-atomic-onboarding-m-self-domain-skip-iter1-approve-with-m-skip-self-untested-l-foreign-id-in-error-message-iter2-approve-1-low-mock-style-note-accepted-all-high-medium-findings-fixed-and-re-gated-full-findings-review-code-md-review-code-iter1-md-review-code-iter2-md-in-this-dir",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:44:18Z",
+      "verifiedAt": "2026-07-07T06:44:18Z"
+    }
+  ]
+}
