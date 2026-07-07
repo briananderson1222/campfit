@@ -1,3 +1,4 @@
+import type { Pool, PoolClient } from 'pg';
 import { getPool } from '@/lib/db';
 import type { Provider, ProviderWithStats } from '@/lib/types';
 import { communityScopeSql } from './community-access';
@@ -7,6 +8,18 @@ import { parseDomain } from './onboarding-validation';
 function db() {
   return getPool();
 }
+
+/**
+ * Either a bare `Pool` or an already-checked-out `PoolClient` — both expose
+ * `.query()`. Lets `findProviderByDomain`/`createProvider` join an existing
+ * transaction (e.g. `onboardProviderCandidate`'s candidate-row lock) instead
+ * of always issuing their own implicit-transaction statement against the
+ * shared pool singleton. Additive: every existing call site (this file's own
+ * exports, `POST /api/admin/providers`) keeps working unchanged because the
+ * parameter defaults to `getPool()`. Mirrors `lib/admin/claim-store.ts`'s own
+ * `Queryable` precedent.
+ */
+type Queryable = Pool | PoolClient;
 
 /** All providers with rollup stats, ordered by name. */
 export async function getProviders(
@@ -225,19 +238,26 @@ type CreateProviderInput = {
  */
 export async function findProviderByDomain(
   domain: string,
+  executor: Queryable = getPool(),
 ): Promise<{ id: string; name: string; slug: string; communitySlug: string } | null> {
-  const { rows } = await db().query<{ id: string; name: string; slug: string; communitySlug: string }>(
+  const { rows } = await executor.query<{ id: string; name: string; slug: string; communitySlug: string }>(
     `SELECT id, name, slug, "communitySlug" FROM "Provider" WHERE domain = $1 AND "archivedAt" IS NULL LIMIT 1`,
     [domain],
   );
   return rows[0] ?? null;
 }
 
-export async function createProvider(input: CreateProviderInput): Promise<Provider> {
-  const slug = await makeUniqueSlug(input.name);
+/**
+ * `executor` defaults to the shared pool singleton (zero behavior change for
+ * existing callers, e.g. `POST /api/admin/providers`) but may be an
+ * already-checked-out `PoolClient` so the insert joins a caller's own
+ * transaction (see `onboardProviderCandidate`, campfit#93 H2).
+ */
+export async function createProvider(input: CreateProviderInput, executor: Queryable = getPool()): Promise<Provider> {
+  const slug = await makeUniqueSlug(input.name, executor);
   const domain = parseDomain(input.websiteUrl);
 
-  const { rows } = await db().query<Provider>(`
+  const { rows } = await executor.query<Provider>(`
     INSERT INTO "Provider"
       (name, slug, "websiteUrl", domain, address, city, neighborhood,
        "contactEmail", "contactPhone", notes, "crawlRootUrl", "communitySlug")
@@ -279,12 +299,12 @@ export async function updateProvider(id: string, input: UpdateProviderInput): Pr
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function makeUniqueSlug(name: string): Promise<string> {
+async function makeUniqueSlug(name: string, executor: Queryable = getPool()): Promise<string> {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   let slug = base;
   let attempt = 2;
   while (true) {
-    const { rows } = await db().query('SELECT 1 FROM "Provider" WHERE slug = $1', [slug]);
+    const { rows } = await executor.query('SELECT 1 FROM "Provider" WHERE slug = $1', [slug]);
     if (rows.length === 0) return slug;
     slug = `${base}-${attempt++}`;
   }

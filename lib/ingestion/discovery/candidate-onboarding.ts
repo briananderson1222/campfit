@@ -17,7 +17,12 @@
  * candidate row is locked (`FOR UPDATE`) and re-verified `PENDING` inside the
  * same transaction, so a candidate can be onboarded at most once (a second
  * call throws the EXISTING `CandidateNotPendingError`, reused as-is — no new
- * error type for the same failure mode).
+ * error type for the same failure mode). Post-review fix (campfit#93 H2):
+ * `findProviderByDomain`/`createProvider` are now called with THIS function's
+ * own locked `client` (see `lib/admin/provider-repository.ts`'s additive
+ * `executor` parameter) so the Provider write genuinely joins the
+ * candidate-row transaction — a mid-flight failure between the two rolls
+ * BOTH back, leaving no orphaned Provider.
  */
 import type { Pool } from "pg";
 
@@ -32,6 +37,17 @@ import {
 
 export interface OnboardCandidateOptions {
   onboardedBy: string;
+  /**
+   * campfit#93 H1 defense-in-depth: when provided, the locked candidate row's
+   * `aggregatorSourceId` must match exactly, or the whole onboard is rejected
+   * (`CandidateAggregatorMismatchError`) before any Provider is created. The
+   * route (`app/api/admin/aggregators/[id]/candidates/onboard/route.ts`) is
+   * the primary enforcement layer (it rejects a mismatch before ever calling
+   * this function); this guard exists so the same rule holds even if a
+   * future caller forgets that check — mirrors the ToS gate's own
+   * route-level + repository-level dual-layer pattern.
+   */
+  expectedAggregatorSourceId?: string;
 }
 
 export interface OnboardCandidateResult {
@@ -39,6 +55,24 @@ export interface OnboardCandidateResult {
   providerSlug: string;
   /** `false` when onboarding matched an existing Provider instead of creating one. */
   providerCreated: boolean;
+}
+
+/**
+ * Thrown when `opts.expectedAggregatorSourceId` is given and does not match
+ * the locked candidate row's own `aggregatorSourceId` — the repository-level
+ * half of campfit#93 H1's authorization-boundary fix.
+ */
+export class CandidateAggregatorMismatchError extends Error {
+  constructor(
+    public readonly candidateId: string,
+    public readonly expectedAggregatorSourceId: string,
+    public readonly actualAggregatorSourceId: string | null,
+  ) {
+    super(
+      `Candidate ${candidateId} belongs to aggregator ${actualAggregatorSourceId ?? "(none)"}, not ${expectedAggregatorSourceId}; refusing to onboard.`,
+    );
+    this.name = "CandidateAggregatorMismatchError";
+  }
 }
 
 /**
@@ -67,19 +101,31 @@ export async function onboardProviderCandidate(
     if (!candidate) {
       throw new Error(`Candidate ${candidateId} not found`);
     }
+    if (
+      opts.expectedAggregatorSourceId !== undefined &&
+      candidate.aggregatorSourceId !== opts.expectedAggregatorSourceId
+    ) {
+      throw new CandidateAggregatorMismatchError(
+        candidateId,
+        opts.expectedAggregatorSourceId,
+        candidate.aggregatorSourceId,
+      );
+    }
     if (candidate.status !== "PENDING") {
       throw new CandidateNotPendingError(candidate.status);
     }
 
     // `findProviderByDomain`/`createProvider` (lib/admin/provider-repository.ts,
-    // campfit#90) always run against the shared `getPool()` singleton — they
-    // take no pool/client override — so they cannot join this function's own
-    // candidate-row transaction. That mirrors how `POST /api/admin/providers`
-    // already calls them (a single implicit-transaction statement each), and
-    // keeps this function from having to fork/modify the hardened #90 path
-    // just to thread a client through it.
+    // campfit#90) accept an additive `executor` override (campfit#93 H2) —
+    // passing THIS function's own locked `client` here makes the Provider
+    // write join the SAME transaction as the candidate-row lock, so a
+    // mid-flight failure (crash, timeout, dropped connection) between
+    // `createProvider` succeeding and this transaction's `COMMIT` rolls the
+    // Provider insert back too. No orphaned duplicate Provider is possible,
+    // even for a domain-less candidate that a retry could not otherwise
+    // dedupe against.
     const domain = parseDomain(candidate.websiteUrl);
-    const existing = domain ? await findProviderByDomain(domain) : null;
+    const existing = domain ? await findProviderByDomain(domain, client) : null;
 
     let providerId: string;
     let providerSlug: string;
@@ -98,7 +144,7 @@ export async function onboardProviderCandidate(
         notes: `Onboarded from aggregator candidate "${candidate.name}" (source: ${candidate.sourceLabel}).`,
         crawlRootUrl: candidate.websiteUrl,
         communitySlug: candidate.communitySlug,
-      });
+      }, client);
       providerId = provider.id;
       providerSlug = provider.slug;
       providerCreated = true;

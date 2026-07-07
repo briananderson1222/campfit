@@ -36,7 +36,10 @@ import {
   ensureProviderCandidateSchema,
   getCandidate,
 } from "@/lib/ingestion/discovery/candidate-repository";
-import { onboardProviderCandidate } from "@/lib/ingestion/discovery/candidate-onboarding";
+import {
+  CandidateAggregatorMismatchError,
+  onboardProviderCandidate,
+} from "@/lib/ingestion/discovery/candidate-onboarding";
 
 import { assertTestDatabase, closeTestPool, getTestPool } from "./test-db";
 
@@ -72,7 +75,11 @@ async function insertProvider(input: { name: string; domain: string | null }): P
   return rows[0];
 }
 
-async function seedCandidate(overrides: { name?: string; websiteUrl?: string | null } = {}) {
+async function seedCandidate(overrides: {
+  name?: string;
+  websiteUrl?: string | null;
+  aggregatorSourceId?: string | null;
+} = {}) {
   return enqueueCandidate(
     {
       name: overrides.name ?? "Sunbeam Adventure Camp",
@@ -83,6 +90,7 @@ async function seedCandidate(overrides: { name?: string; websiteUrl?: string | n
       sourceLabel: "Test Aggregator",
       discoveryQuery: "https://test-agg.example/directory",
       retrievedAt: new Date("2026-07-06T12:00:00.000Z"),
+      aggregatorSourceId: overrides.aggregatorSourceId,
     },
     pool,
   );
@@ -159,5 +167,92 @@ describe("onboardProviderCandidate", () => {
     expect(secondResult.providerId).toBe(firstResult.providerId);
 
     expect(await providerCount()).toBe(1);
+  });
+
+  // H1 defense-in-depth: `expectedAggregatorSourceId` is the repository-level
+  // half of campfit#93's authorization-boundary fix. The route
+  // (app/api/admin/aggregators/[id]/candidates/onboard/route.ts) is the
+  // primary enforcement layer and is exercised separately in
+  // tests/integration/aggregator-discover-onboard-routes.test.ts's own "H1 —
+  // cross-aggregator candidateId rejection" suite; these tests prove the
+  // function itself refuses a mismatch even when called directly.
+  describe("H1 defense-in-depth — expectedAggregatorSourceId guard", () => {
+    it("(e) throws CandidateAggregatorMismatchError when expectedAggregatorSourceId does not match the candidate's own aggregatorSourceId, creating NO Provider row", async () => {
+      const candidate = await seedCandidate({ aggregatorSourceId: "aggregator-a" });
+
+      await expect(
+        onboardProviderCandidate(
+          candidate.id,
+          { onboardedBy: ONBOARDED_BY, expectedAggregatorSourceId: "aggregator-b" },
+          pool,
+        ),
+      ).rejects.toBeInstanceOf(CandidateAggregatorMismatchError);
+
+      expect(await providerCount()).toBe(0);
+      const reloaded = await getCandidate(candidate.id, pool);
+      expect(reloaded?.status).toBe("PENDING");
+      expect(reloaded?.approvedProviderId).toBeNull();
+    });
+
+    it("(f) succeeds when expectedAggregatorSourceId matches the candidate's own aggregatorSourceId", async () => {
+      const candidate = await seedCandidate({ aggregatorSourceId: "aggregator-a" });
+
+      const result = await onboardProviderCandidate(
+        candidate.id,
+        { onboardedBy: ONBOARDED_BY, expectedAggregatorSourceId: "aggregator-a" },
+        pool,
+      );
+
+      expect(result.providerCreated).toBe(true);
+      const reloaded = await getCandidate(candidate.id, pool);
+      expect(reloaded?.status).toBe("APPROVED");
+    });
+  });
+
+  // H2 — atomicity: `findProviderByDomain`/`createProvider`
+  // (lib/admin/provider-repository.ts) now accept an additive `executor`
+  // override so the Provider write joins THIS function's own candidate-row
+  // transaction. Fault-injection note: `faultyPool` below is a thin wrapper
+  // around the real test pool whose `.connect()` returns a client that
+  // intercepts only the `INSERT INTO "Provider"` statement and rejects it —
+  // every other statement (BEGIN/SELECT...FOR UPDATE/ROLLBACK) passes
+  // through to the REAL connection untouched, so a real Postgres ROLLBACK is
+  // what is actually being asserted on below, not a mocked one.
+  describe("H2 atomicity — fault-injection", () => {
+    it("(g) fault-injection: a createProvider failure mid-transaction rolls back fully — no orphaned Provider row, candidate stays PENDING", async () => {
+      const candidate = await seedCandidate({
+        name: "Fault Injection Camp",
+        websiteUrl: "https://fault-injection.example",
+      });
+
+      const faultyPool = {
+        connect: async () => {
+          const client = await pool.connect();
+          const originalQuery = client.query.bind(client);
+          const originalRelease = client.release.bind(client);
+          return {
+            query: (...args: unknown[]) => {
+              const text = typeof args[0] === "string" ? args[0] : undefined;
+              if (text?.includes('INSERT INTO "Provider"')) {
+                return Promise.reject(new Error("INJECTED createProvider failure (test fault injection)"));
+              }
+              return (originalQuery as (...a: unknown[]) => unknown)(...args);
+            },
+            release: (...args: unknown[]) => (originalRelease as (...a: unknown[]) => void)(...args),
+          };
+        },
+      } as unknown as Pool;
+
+      await expect(
+        onboardProviderCandidate(candidate.id, { onboardedBy: ONBOARDED_BY }, faultyPool),
+      ).rejects.toThrow("INJECTED createProvider failure");
+
+      // Full rollback against the REAL connection: no orphaned Provider row...
+      expect(await providerCount()).toBe(0);
+      // ...and the candidate row rolled back to PENDING, not left mid-flight APPROVED.
+      const reloaded = await getCandidate(candidate.id, pool);
+      expect(reloaded?.status).toBe("PENDING");
+      expect(reloaded?.approvedProviderId).toBeNull();
+    });
   });
 });

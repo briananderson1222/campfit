@@ -13,6 +13,21 @@
  * results are always `status: 'created' | 'existing' | 'error'`; the route
  * itself always returns 200 (the batch envelope carries partial failure,
  * not the HTTP status) unless the request itself is malformed.
+ *
+ * Post-review fix (campfit#93 H1): the route's own `requireAdminAccess`
+ * check only proves the requester may act on THIS aggregator
+ * (`params.id`)/its community — it says nothing about which
+ * `ProviderCandidate` rows the request body names. Every `candidateId` is
+ * therefore looked up (`getCandidate`) and checked
+ * `candidate.aggregatorSourceId === params.id` BEFORE
+ * `onboardProviderCandidate` is ever called; a mismatch (or a candidate that
+ * doesn't exist) comes back as a per-candidate `status: 'error'` result,
+ * exactly like the pre-existing not-found handling, WITHOUT onboarding the
+ * rest of the batch being aborted. `expectedAggregatorSourceId` is also
+ * threaded into `onboardProviderCandidate` itself as a repository-level
+ * defense-in-depth guard (see that function's own header comment) — the
+ * same route-level + repository-level dual-layer discipline the ToS gate
+ * (AC1) already uses.
  */
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
@@ -22,7 +37,7 @@ import {
   ensureAggregatorSourceSchema,
   getAggregatorSource,
 } from '@/lib/ingestion/aggregator/aggregator-repository';
-import { ensureProviderCandidateSchema } from '@/lib/ingestion/discovery/candidate-repository';
+import { ensureProviderCandidateSchema, getCandidate } from '@/lib/ingestion/discovery/candidate-repository';
 import { onboardProviderCandidate } from '@/lib/ingestion/discovery/candidate-onboarding';
 
 interface OnboardResultRow {
@@ -58,7 +73,25 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
   const results: OnboardResultRow[] = [];
   for (const candidateId of candidateIds) {
     try {
-      const result = await onboardProviderCandidate(candidateId, { onboardedBy: auth.access.email }, pool);
+      // H1: verify the candidate actually belongs to THIS aggregator before
+      // ever calling onboardProviderCandidate — the route's own auth check
+      // only authorizes the requester against `params.id`'s community, not
+      // against an arbitrary candidateId in the request body.
+      const candidate = await getCandidate(candidateId, pool);
+      if (!candidate) {
+        throw new Error(`Candidate ${candidateId} not found`);
+      }
+      if (candidate.aggregatorSourceId !== params.id) {
+        throw new Error(
+          `Candidate ${candidateId} does not belong to aggregator ${params.id}; forbidden`,
+        );
+      }
+
+      const result = await onboardProviderCandidate(
+        candidateId,
+        { onboardedBy: auth.access.email, expectedAggregatorSourceId: params.id },
+        pool,
+      );
       results.push({
         candidateId,
         status: result.providerCreated ? 'created' : 'existing',

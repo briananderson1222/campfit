@@ -90,7 +90,18 @@ export interface AggregatorDiscoveryDeps {
   now?: () => number;
 }
 
-export type AggregatorDiscoveryDisposition = "enqueued-new" | "enqueued-near-duplicate" | "skipped-duplicate";
+export type AggregatorDiscoveryDisposition =
+  | "enqueued-new"
+  | "enqueued-near-duplicate"
+  | "skipped-duplicate"
+  /**
+   * campfit#93 M fix: a structural (not prompt-only) backstop that drops any
+   * item whose `websiteUrl` domain equals the aggregator's OWN domain —
+   * catches the aggregator's own branding/listing slipping through if the
+   * extraction provider doesn't fully honor `aggregator-schema.ts`'s
+   * "never propose the aggregator itself" field hint.
+   */
+  | "skipped-self";
 
 export interface AggregatorDiscoveryOutcome {
   /** the source item index on its page (see `groupAggregatorCandidates`). */
@@ -119,6 +130,8 @@ export interface AggregatorDiscoverySummary {
   enqueuedNew: number;
   enqueuedNearDuplicate: number;
   skippedDuplicate: number;
+  /** count of items dropped by the structural self-branding backstop (see `"skipped-self"`). */
+  skippedSelf: number;
   pageErrors: AggregatorDiscoveryPageError[];
   crawlWarnings: string[];
   truncated: boolean;
@@ -190,6 +203,14 @@ export async function runAggregatorDiscovery(
   const providers = await listProviderDedupeTargets(source.communitySlug, pool);
   const queued = await listPendingCandidateDedupeTargets(source.communitySlug, pool);
 
+  // Structural (code-level) backstop for the "never propose the aggregator's
+  // own branding as a candidate" guard (campfit#93 M fix): the prompt-only
+  // field hint (aggregator-schema.ts) cannot be relied on to hold against a
+  // real, non-deterministic extraction backend, so any item whose
+  // `websiteUrl` domain equals the aggregator's own domain is dropped here,
+  // in code, regardless of what the extraction provider proposed.
+  const sourceDomain = normalizeDomain(source.url);
+
   const summary: AggregatorDiscoverySummary = {
     aggregatorSourceId: source.id,
     communitySlug: source.communitySlug,
@@ -198,6 +219,7 @@ export async function runAggregatorDiscovery(
     enqueuedNew: 0,
     enqueuedNearDuplicate: 0,
     skippedDuplicate: 0,
+    skippedSelf: 0,
     pageErrors: [],
     crawlWarnings: manifest.warnings,
     truncated: manifest.truncated,
@@ -243,6 +265,24 @@ export async function runAggregatorDiscovery(
 
       const websiteUrl = item.websiteUrl?.value ?? null;
       const domain = normalizeDomain(websiteUrl);
+
+      // M fix: structural self-branding backstop — drop before dedupe
+      // classification even runs, so the aggregator's own listing can never
+      // reach the candidate queue no matter what the extraction provider
+      // proposed.
+      if (sourceDomain && domain === sourceDomain) {
+        summary.skippedSelf++;
+        summary.outcomes.push({
+          itemIndex: item.itemIndex,
+          pageUrl: page.url,
+          name: item.name.value,
+          websiteUrl,
+          disposition: "skipped-self",
+          detail: `matches aggregator's own domain (${sourceDomain})`,
+        });
+        continue;
+      }
+
       const verdict = classifyCandidate({ name: item.name.value, domain }, providers, queued);
 
       if (verdict.kind === "exact-duplicate") {
@@ -304,7 +344,7 @@ export async function runAggregatorDiscovery(
     `[aggregator-extraction] ${source.id}: ${summary.discoveredPages} page(s), ` +
       `${summary.discoveredCandidates} candidate(s) discovered, ${summary.enqueuedNew} new, ` +
       `${summary.enqueuedNearDuplicate} near-duplicate, ${summary.skippedDuplicate} skipped-duplicate, ` +
-      `${summary.pageErrors.length} page error(s)`,
+      `${summary.skippedSelf} skipped-self, ${summary.pageErrors.length} page error(s)`,
   );
 
   return summary;

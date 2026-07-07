@@ -425,4 +425,90 @@ describe('AC4 — POST /api/admin/aggregators/[id]/candidates/onboard', () => {
     );
     expect(res.status).toBe(404);
   });
+
+  // H1 — authz boundary: a candidateId in the request body must belong to
+  // the URL's aggregatorSourceId, regardless of what the requester is
+  // authorized to act on. These are NOT fault-injection tests (no mocked
+  // failure) — they exercise the real cross-aggregator guard added in
+  // app/api/admin/aggregators/[id]/candidates/onboard/route.ts.
+  describe('H1 — cross-aggregator candidateId rejection', () => {
+    it('rejects a candidate belonging to a DIFFERENT aggregator with a per-candidate error and creates NO Provider row', async () => {
+      const id = await registerAggregator({ tosDecision: 'APPROVED' });
+      const otherId = await registerAggregator({ tosDecision: 'APPROVED' });
+
+      const crossCandidate = await enqueueCandidate(
+        {
+          name: 'Cross Aggregator Camp', websiteUrl: 'https://cross-aggregator.example', city: null,
+          communitySlug: 'denver', sourceKey: `aggregator:${otherId}`, sourceLabel: 'Other Aggregator',
+          discoveryQuery: null, retrievedAt: new Date(), aggregatorSourceId: otherId,
+        },
+        pool,
+      );
+
+      const res = await onboardPOST(
+        postRequest(`http://localhost/api/admin/aggregators/${id}/candidates/onboard`, {
+          candidateIds: [crossCandidate.id],
+        }),
+        paramsFor(id),
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.results).toHaveLength(1);
+      expect(data.results[0].status).toBe('error');
+      expect(data.results[0].error).toBeTruthy();
+      expect(data.results[0].providerId).toBeUndefined();
+
+      // No Provider row was created for the rejected cross-aggregator candidate.
+      expect(await providerCount()).toBe(0);
+
+      // The candidate row itself was never touched (still PENDING).
+      const { rows } = await pool.query(`SELECT status FROM "ProviderCandidate" WHERE id = $1`, [crossCandidate.id]);
+      expect(rows[0].status).toBe('PENDING');
+    });
+
+    it('handles a mixed batch: a same-aggregator candidate onboards while a cross-aggregator candidate in the SAME request is rejected', async () => {
+      const id = await registerAggregator({ tosDecision: 'APPROVED' });
+      const otherId = await registerAggregator({ tosDecision: 'APPROVED' });
+
+      const sameAggCandidate = await enqueueCandidate(
+        {
+          name: 'Same Aggregator Camp', websiteUrl: 'https://same-aggregator.example', city: null,
+          communitySlug: 'denver', sourceKey: `aggregator:${id}`, sourceLabel: 'Discover Route Aggregator',
+          discoveryQuery: null, retrievedAt: new Date(), aggregatorSourceId: id,
+        },
+        pool,
+      );
+      const crossCandidate = await enqueueCandidate(
+        {
+          name: 'Cross Aggregator Camp Two', websiteUrl: 'https://cross-aggregator-two.example', city: null,
+          communitySlug: 'denver', sourceKey: `aggregator:${otherId}`, sourceLabel: 'Other Aggregator',
+          discoveryQuery: null, retrievedAt: new Date(), aggregatorSourceId: otherId,
+        },
+        pool,
+      );
+
+      const res = await onboardPOST(
+        postRequest(`http://localhost/api/admin/aggregators/${id}/candidates/onboard`, {
+          candidateIds: [sameAggCandidate.id, crossCandidate.id],
+        }),
+        paramsFor(id),
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.results).toHaveLength(2);
+
+      const sameResult = data.results.find((r: { candidateId: string }) => r.candidateId === sameAggCandidate.id);
+      expect(sameResult.status).toBe('created');
+      expect(sameResult.providerId).toBeTruthy();
+
+      const crossResult = data.results.find((r: { candidateId: string }) => r.candidateId === crossCandidate.id);
+      expect(crossResult.status).toBe('error');
+      expect(crossResult.error).toBeTruthy();
+
+      // Exactly one Provider was created — for the same-aggregator candidate only.
+      expect(await providerCount()).toBe(1);
+    });
+  });
 });
