@@ -47,6 +47,7 @@ import type { ClaimDefinitionDraft, Evidence, TrustBundle, VerificationEvent } f
 
 import { getPool } from '@/lib/db';
 import { getProposal, updateProposalStatus, partialApprove } from './review-repository';
+import { CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from './proposal-fields';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
 import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
@@ -151,18 +152,13 @@ export class ReviewApplyConflictError extends Error {
   }
 }
 
-const SCALAR_FIELDS = [
-  'name', 'organizationName', 'description', 'campType', 'category', 'registrationStatus',
-  'registrationOpenDate', 'registrationCloseDate', 'lunchIncluded', 'address', 'neighborhood', 'city',
-  'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
-  'interestingDetails', 'state', 'zip',
-];
-
-const RELATION_TABLES: Record<string, string> = {
-  ageGroups: 'CampAgeGroup',
-  schedules: 'CampSchedule',
-  pricing: 'CampPricing',
-};
+// SCALAR_FIELDS/RELATION_TABLES extracted to ./proposal-fields.ts (campfit#51,
+// Wave 1 Task 1.1) so lib/admin/claim-corroboration.ts and
+// lib/admin/review-repository.ts import the SAME list rather than
+// duplicating it — a pure refactor, no behavior change. Local aliases kept so
+// the rest of this module's body (below) is untouched.
+const SCALAR_FIELDS = CAMP_SCALAR_FIELDS;
+const RELATION_TABLES = CAMP_RELATION_TABLES;
 
 type ChangeLogEntry = Parameters<typeof writeChangeLogs>[0][number];
 

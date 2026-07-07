@@ -67,6 +67,13 @@ const SCHEMA_FILES = [
   // through `ensureAggregatorSourceSchema()`/`ensureProviderCandidateSchema()`
   // (idempotent DDL) instead — see 017_aggregator_discovery.sql's own header
   // comment. Tracked under the same campfit#98.
+  //
+  // 018_review_batch_accept_audit.sql (campfit#51) is, by contrast, SAFE to
+  // wire in directly: unlike 013/017, it creates a brand-new, self-contained
+  // "ReviewBatchAcceptAudit" table with NO `ALTER` on any unwired table — it
+  // adds no new #98 drift, so it is appended below rather than routed through
+  // an idempotent-DDL helper.
+  "prisma/migrations/018_review_batch_accept_audit.sql",
 ];
 
 /**
