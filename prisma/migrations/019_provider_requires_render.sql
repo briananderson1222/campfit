@@ -1,0 +1,31 @@
+-- 019_provider_requires_render.sql — Provider.requiresRender (campfit#53,
+-- spa-ingestion, AC6).
+--
+-- ADDITIVE ONLY. A single `ALTER TABLE "Provider" ADD COLUMN` on a table
+-- that is ALREADY created by 002_provider_and_field_sources.sql, which IS
+-- wired into scripts/test-db-reset.ts's SCHEMA_FILES — so this migration is
+-- SAFE to wire in directly (mirrors 018_review_batch_accept_audit.sql's "safe
+-- to wire" precedent), unlike 013_provider_candidates.sql/
+-- 017_aggregator_discovery.sql, which ALTER a table (`ProviderCandidate`)
+-- that SCHEMA_FILES never actually creates (tracked separately under
+-- campfit#98, "derive SCHEMA_FILES from the migrations dir"). This migration
+-- adds no new #98 drift.
+--
+-- A boolean, not an enum: traverse's own SourceConfig.render contract
+-- (@kontourai/traverse/fetch) is itself a boolean, and there is no second
+-- render strategy today — an enum here would be speculative. Scoped to
+-- Provider only: AggregatorSource.requiresRender is explicitly OUT of scope
+-- for this migration (aggregator discovery has no GH-Actions/CLI execution
+-- path that could make a render flag safe/fail-closed there — see the
+-- spa-ingestion plan's Data model decision).
+--
+-- Threading: this flag is read by lib/ingestion/crawl-pipeline.ts's
+-- camp-strategy call site (joined via Camp.providerId) and passed through
+-- traverse-recrawl-adapter.ts's TraverseRecrawlOptions.requiresRender into
+-- the IngestionSourceConfig.render traverse-pipeline.ts consumes. On any
+-- execution context with no FetchSourceOptions.renderImpl configured (every
+-- Vercel route today), a requiresRender:true provider's recrawl fails
+-- closed with a typed invalid-config FetchError — never a crash, never a
+-- silently-served empty-shell fetch.
+
+ALTER TABLE "Provider" ADD COLUMN IF NOT EXISTS "requiresRender" BOOLEAN NOT NULL DEFAULT false;

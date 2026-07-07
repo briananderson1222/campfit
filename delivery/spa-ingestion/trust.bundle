@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "spa-ingestion-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-395-395-3-4-fault-injections-caught-by-tests-4th-disclosed-as-tripwire-gap-105",
+      "subjectType": "workflow-check",
+      "subjectId": "spa-ingestion/branch-verify",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "tool-verifier full-branch run (session-local, delegate-executed): 395/395, 3/4 fault injections caught by tests, 4th disclosed as tripwire gap (#105).",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac1.flow-agents-workflow.running-the-render-step-against-the-chosen-spa-provider-page-yields-html-containing-content-absent-from-the-raw-non-rendered-fetch-demonstrated-by-command-output-comparing-both-issue-r1-ac1",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Running the render step against the chosen SPA provider page yields HTML containing content absent from the raw (non-rendered) fetch, demonstrated by command output comparing both (issue R1/AC1).",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac2.flow-agents-workflow.extracted-claims-from-the-spa-provider-appear-in-the-review-queue-via-the-standard-pipeline-with-run-logs-as-evidence-issue-r2-ac2",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC2",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Extracted claims from the SPA provider appear in the review queue via the standard pipeline, with run logs as evidence (issue R2/AC2).",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac3.flow-agents-workflow.spot-checked-claims-from-this-path-show-render-step-provenance-fields-populated-snapshot-rendered-true-a-claim-from-a-non-rendered-source-shows-none-issue-r3-ac3",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC3",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Spot-checked claims from this path show render-step provenance fields populated (Snapshot.rendered: true); a claim from a non-rendered source shows none (issue R3/AC3).",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac4.flow-agents-workflow.code-review-behavior-evidence-confirms-no-bot-evasion-mechanisms-ua-spoofing-to-evade-blocks-captcha-solving-etc-blocked-fetches-produce-logged-errors-not-workarounds-issue-r4-ac4",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC4",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Code review/behavior evidence confirms no bot-evasion mechanisms (UA spoofing to evade blocks, CAPTCHA solving, etc.); blocked fetches produce logged errors, not workarounds (issue R4/AC4).",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac5.flow-agents-workflow.kontourai-traverse-bumped-0-11-0-0-13-0-the-intervening-0-12-0-bodybytes-and-0-13-0-rendered-fetch-seam-changes-are-both-additive-with-no-campfit-call-site-broken",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC5",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "@kontourai/traverse bumped ^0.11.0 -> ^0.13.0; the intervening 0.12.0 (bodyBytes) and 0.13.0 (rendered-fetch seam) changes are both additive with no campfit call site broken.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac6.flow-agents-workflow.provider-requiresrender-migration-019-is-threaded-end-to-end-into-the-camp-strategy-recrawl-path-on-any-execution-context-with-no-renderimpl-configured-every-vercel-route-today-a-requiresrender-true-provider-s-recrawl-fails-closed-with-a-typed-invalid-config-fetcherror-on-the-result-never-a-crash-never-a-silently-served-empty-shell-fetch-presented-as-success",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC6",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Provider.requiresRender (migration 019) is threaded end-to-end into the camp-strategy recrawl path; on any execution context with no renderImpl configured (every Vercel route today), a requiresRender:true provider's recrawl fails closed with a typed invalid-config FetchError on the result -- never a crash, never a silently-served empty-shell fetch presented as success.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-ac7.flow-agents-workflow.lib-ingestion-traverse-pipeline-ts-no-longer-imports-render-fetch-ts-playwright-test-at-module-scope-closes-the-pre-existing-landmine-where-every-vercel-route-s-bundle-transitively-reachable-through-crawl-pipeline-ts-already-pulled-in-playwright",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "spa-ingestion/AC7",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "lib/ingestion/traverse-pipeline.ts no longer imports render-fetch.ts/@playwright/test at module scope -- closes the pre-existing landmine where every Vercel route's bundle transitively reachable through crawl-pipeline.ts already pulled in Playwright.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "spa-ingestion-review.flow-agents-workflow.iter0-approve-1-m-warnings-drop-false-doc-comment-1-l-dead-option-iter1-delta-approve-0-new-all-fixed-and-re-gated-review-code-md-this-dir",
+      "subjectType": "workflow-critique",
+      "subjectId": "spa-ingestion/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "iter0 APPROVE (1 M warnings-drop + false doc comment, 1 L dead option); iter1 delta APPROVE (0 new). All fixed and re-gated. review-code.md this dir.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:51:25Z",
+      "updatedAt": "2026-07-07T15:51:25Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T15:51:25Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:spa-ingestion-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-395-395-3-4-fault-injections-caught-by-tests-4th-disclosed-as-tripwire-gap-105",
+      "claimId": "spa-ingestion-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-395-395-3-4-fault-injections-caught-by-tests-4th-disclosed-as-tripwire-gap-105",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "spa-ingestion/evidence.json",
+      "excerptOrSummary": "tool-verifier full-branch run (session-local, delegate-executed): 395/395, 3/4 fault injections caught by tests, 4th disclosed as tripwire gap (#105).",
+      "observedAt": "2026-07-07T15:51:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:spa-ingestion-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-395-395-3-4-fault-injections-caught-by-tests-4th-disclosed-as-tripwire-gap-105",
+      "claimId": "spa-ingestion-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-395-395-3-4-fault-injections-caught-by-tests-4th-disclosed-as-tripwire-gap-105",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:spa-ingestion-branch-verify.flow-agents-workflow.tool-verifier-full-branch-run-session-local-delegate-executed-395-395-3-4-fault-injections-caught-by-tests-4th-disclosed-as-tripwire-gap-105"
+      ],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac1.flow-agents-workflow.running-the-render-step-against-the-chosen-spa-provider-page-yields-html-containing-content-absent-from-the-raw-non-rendered-fetch-demonstrated-by-command-output-comparing-both-issue-r1-ac1",
+      "claimId": "spa-ingestion-ac1.flow-agents-workflow.running-the-render-step-against-the-chosen-spa-provider-page-yields-html-containing-content-absent-from-the-raw-non-rendered-fetch-demonstrated-by-command-output-comparing-both-issue-r1-ac1",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac2.flow-agents-workflow.extracted-claims-from-the-spa-provider-appear-in-the-review-queue-via-the-standard-pipeline-with-run-logs-as-evidence-issue-r2-ac2",
+      "claimId": "spa-ingestion-ac2.flow-agents-workflow.extracted-claims-from-the-spa-provider-appear-in-the-review-queue-via-the-standard-pipeline-with-run-logs-as-evidence-issue-r2-ac2",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac3.flow-agents-workflow.spot-checked-claims-from-this-path-show-render-step-provenance-fields-populated-snapshot-rendered-true-a-claim-from-a-non-rendered-source-shows-none-issue-r3-ac3",
+      "claimId": "spa-ingestion-ac3.flow-agents-workflow.spot-checked-claims-from-this-path-show-render-step-provenance-fields-populated-snapshot-rendered-true-a-claim-from-a-non-rendered-source-shows-none-issue-r3-ac3",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac4.flow-agents-workflow.code-review-behavior-evidence-confirms-no-bot-evasion-mechanisms-ua-spoofing-to-evade-blocks-captcha-solving-etc-blocked-fetches-produce-logged-errors-not-workarounds-issue-r4-ac4",
+      "claimId": "spa-ingestion-ac4.flow-agents-workflow.code-review-behavior-evidence-confirms-no-bot-evasion-mechanisms-ua-spoofing-to-evade-blocks-captcha-solving-etc-blocked-fetches-produce-logged-errors-not-workarounds-issue-r4-ac4",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac5.flow-agents-workflow.kontourai-traverse-bumped-0-11-0-0-13-0-the-intervening-0-12-0-bodybytes-and-0-13-0-rendered-fetch-seam-changes-are-both-additive-with-no-campfit-call-site-broken",
+      "claimId": "spa-ingestion-ac5.flow-agents-workflow.kontourai-traverse-bumped-0-11-0-0-13-0-the-intervening-0-12-0-bodybytes-and-0-13-0-rendered-fetch-seam-changes-are-both-additive-with-no-campfit-call-site-broken",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac6.flow-agents-workflow.provider-requiresrender-migration-019-is-threaded-end-to-end-into-the-camp-strategy-recrawl-path-on-any-execution-context-with-no-renderimpl-configured-every-vercel-route-today-a-requiresrender-true-provider-s-recrawl-fails-closed-with-a-typed-invalid-config-fetcherror-on-the-result-never-a-crash-never-a-silently-served-empty-shell-fetch-presented-as-success",
+      "claimId": "spa-ingestion-ac6.flow-agents-workflow.provider-requiresrender-migration-019-is-threaded-end-to-end-into-the-camp-strategy-recrawl-path-on-any-execution-context-with-no-renderimpl-configured-every-vercel-route-today-a-requiresrender-true-provider-s-recrawl-fails-closed-with-a-typed-invalid-config-fetcherror-on-the-result-never-a-crash-never-a-silently-served-empty-shell-fetch-presented-as-success",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-ac7.flow-agents-workflow.lib-ingestion-traverse-pipeline-ts-no-longer-imports-render-fetch-ts-playwright-test-at-module-scope-closes-the-pre-existing-landmine-where-every-vercel-route-s-bundle-transitively-reachable-through-crawl-pipeline-ts-already-pulled-in-playwright",
+      "claimId": "spa-ingestion-ac7.flow-agents-workflow.lib-ingestion-traverse-pipeline-ts-no-longer-imports-render-fetch-ts-playwright-test-at-module-scope-closes-the-pre-existing-landmine-where-every-vercel-route-s-bundle-transitively-reachable-through-crawl-pipeline-ts-already-pulled-in-playwright",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    },
+    {
+      "id": "evt:spa-ingestion-review.flow-agents-workflow.iter0-approve-1-m-warnings-drop-false-doc-comment-1-l-dead-option-iter1-delta-approve-0-new-all-fixed-and-re-gated-review-code-md-this-dir",
+      "claimId": "spa-ingestion-review.flow-agents-workflow.iter0-approve-1-m-warnings-drop-false-doc-comment-1-l-dead-option-iter1-delta-approve-0-new-all-fixed-and-re-gated-review-code-md-this-dir",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:51:25Z",
+      "verifiedAt": "2026-07-07T15:51:25Z"
+    }
+  ]
+}

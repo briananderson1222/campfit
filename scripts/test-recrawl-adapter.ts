@@ -523,6 +523,37 @@ async function testOnboardUrlTrailingRecrawlPopulatesPlaceholderCamp() {
   console.log("✓ crawl/onboard-url's trailing re-crawl of a newly-created placeholder camp populates cleanly with no suppression history");
 }
 
+// ─── 11. AC6 (campfit#53 spa-ingestion): requiresRender fails closed ─────
+//
+// A Vercel-route recrawl (this adapter's ONLY execution context — see its
+// file doc) of a Provider.requiresRender:true camp must surface a typed
+// invalid-config FetchError, never a crash and never a silently-accepted
+// empty-shell "success". No `fetchOptions.renderImpl` is configured here,
+// mirroring every real Vercel route's `TraversePipelineDeps`/`CrawlOptions`
+// today (crawl-pipeline.ts never sets one for the camp strategy).
+
+async function testRequiresRenderFailsClosedWithNoRenderer() {
+  const result = await runTraverseRecrawlForCamp({
+    campId: "camp-requires-render-1",
+    websiteUrl: "https://spa-provider.example/camp",
+    campName: "SPA Provider Camp",
+    current: makeCamp({ id: "camp-requires-render-1" }),
+    requiresRender: true,
+    provider: createStubProvider([], { model: "stub-requires-render" }),
+    store: createInMemorySnapshotStore(),
+    mode: "live-with-capture",
+    // Deliberately NO fetchOptions.renderImpl — mirrors every Vercel route.
+    log: () => {},
+  });
+
+  assert.equal(result.ok, false, "a requiresRender camp recrawled with no renderImpl configured must fail (never a silent success)");
+  assert.ok(result.error?.startsWith("invalid-config:"), `expected a typed invalid-config error, got: ${result.error}`);
+  assert.equal(result.itemCount, 0, "no items were ever grouped — the fetch itself never happened");
+  assert.equal(Object.keys(result.proposedChanges).length, 0, "no changes are ever proposed from a failed, unrendered fetch");
+
+  console.log("✓ AC6: Provider.requiresRender with no renderImpl configured fails closed with a typed invalid-config error, never a crash or silent empty-shell success");
+}
+
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -535,6 +566,7 @@ async function main() {
   await testAllFiveCallSitesInvokeSharedPipeline();
   await testCampIdsSweepIsolatesFailures();
   await testOnboardUrlTrailingRecrawlPopulatesPlaceholderCamp();
+  await testRequiresRenderFailsClosedWithNoRenderer();
   console.log("\ntraverse recrawl adapter verification passed");
 }
 

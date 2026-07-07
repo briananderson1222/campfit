@@ -74,6 +74,11 @@ const SCHEMA_FILES = [
   // adds no new #98 drift, so it is appended below rather than routed through
   // an idempotent-DDL helper.
   "prisma/migrations/018_review_batch_accept_audit.sql",
+  // 019_provider_requires_render.sql (campfit#53, spa-ingestion) is, by the
+  // SAME 018 precedent, safe to wire in directly: it's a single self-contained
+  // `ALTER TABLE "Provider" ADD COLUMN` on a table 002 already creates (and
+  // which IS in this list) — no new #98 drift.
+  "prisma/migrations/019_provider_requires_render.sql",
 ];
 
 /**

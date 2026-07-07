@@ -25,6 +25,8 @@ interface Provider {
   applicationUrl?: string | null;
   socialLinks?: Record<string, string> | null;
   fieldTimeline?: Record<string, FieldTimeline>;
+  /** campfit#53 — gates the GH Actions sweep's headless-Chromium render for this provider's camp-strategy recrawl; a no-op for on-demand Vercel recrawls (see the toggle's own helper copy). */
+  requiresRender?: boolean;
 }
 
 interface SiteHint {
@@ -93,6 +95,51 @@ function EditableField({
           </div>
         )}
         {helper && !editing && <p className="text-xs text-bark-200 mt-0.5">{helper}</p>}
+      </dd>
+    </div>
+  );
+}
+
+// ── Requires-render toggle (campfit#53) ───────────────────────────────────────
+//
+// A plain boolean toggle (not `EditableField`'s inline-text idiom) — mirrors
+// `schedule-panel.tsx`'s enabled/disabled ToggleLeft/ToggleRight button.
+// PATCHes `requiresRender` directly via the same whitelisted-field route
+// every other provider field already uses (`provider-repository.ts`'s
+// `updateProvider`), so no new API route is needed.
+function RequiresRenderToggle({ providerId, initial }: { providerId: string; initial: boolean }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  async function toggle() {
+    const next = !value;
+    setSaving(true);
+    const res = await fetch(`/api/admin/providers/${providerId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requiresRender: next }),
+    }).catch(() => null);
+    setSaving(false);
+    if (res?.ok) setValue(next);
+  }
+
+  return (
+    <div className="group flex gap-3 py-2.5 border-b border-cream-200/50 dark:border-bark-600/30 last:border-0">
+      <dt className="text-xs text-bark-300 uppercase tracking-wide w-36 shrink-0 pt-1">Requires Render</dt>
+      <dd className="flex-1 min-w-0">
+        <button
+          onClick={toggle}
+          disabled={saving}
+          title={value ? 'Disable rendered fetch' : 'Enable rendered fetch'}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-bark-600 dark:text-cream-300 disabled:opacity-50"
+        >
+          {value ? <ToggleRight className="w-4 h-4 text-pine-500" /> : <ToggleLeft className="w-4 h-4 text-bark-300" />}
+          {value ? 'Rendered (headless browser)' : 'Plain fetch'}
+        </button>
+        <p className="text-xs text-bark-200 mt-0.5">
+          Only affects the weekly GitHub Actions sweep — on-demand crawls from this dashboard never render; a
+          requires-render provider recrawled from here fails closed with a clear error instead of silently
+          serving an empty page.
+        </p>
       </dd>
     </div>
   );
@@ -315,6 +362,7 @@ export function ProviderEditor({ provider, siteHints, campCount = 0 }: { provide
           <EditableField providerId={provider.id} field="websiteUrl" label="Website" value={provider.websiteUrl} type="url" timeline={timeline.websiteUrl} />
           <EditableField providerId={provider.id} field="crawlRootUrl" label="Crawl Root URL" value={provider.crawlRootUrl} type="url"
             helper="Entry point for discovery — leave blank to use Website URL" timeline={timeline.crawlRootUrl} />
+          <RequiresRenderToggle providerId={provider.id} initial={provider.requiresRender ?? false} />
           <EditableField providerId={provider.id} field="logoUrl" label="Logo URL" value={provider.logoUrl} type="url" timeline={timeline.logoUrl} />
           <EditableField providerId={provider.id} field="address" label="Address" value={provider.address} timeline={timeline.address} />
           <EditableField providerId={provider.id} field="city" label="City" value={provider.city} timeline={timeline.city} />

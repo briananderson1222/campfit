@@ -18,6 +18,18 @@
  * `runAggregatorDiscovery`'s own "never trust a stale check" discipline one
  * level up (no live provider resolution work happens on the unapproved
  * path either).
+ *
+ * campfit#53 (spa-ingestion) non-goal note: `runAggregatorDiscovery`
+ * (`aggregator-extraction.ts`)'s underlying `crawlSource` call has NO
+ * `render`/`renderImpl` wiring at all, and this route is Vercel-only (no
+ * GitHub Actions/CLI execution path exists for aggregator discovery the way
+ * `scripts/scrape.ts` exists for the curated sources or
+ * `traverse-recrawl-adapter.ts` exists for per-camp recrawls) — so there is
+ * no way to make a render seam here fail closed the way `Provider.requiresRender`
+ * does elsewhere. Adding one would recreate exactly the "flag exists,
+ * dead/dangerous" risk this migration was warned about. Deliberately
+ * deferred, not silently missing: `AggregatorSource.requiresRender` does
+ * not exist.
  */
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';

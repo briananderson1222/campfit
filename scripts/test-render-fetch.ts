@@ -15,12 +15,17 @@
  *     when a pending request never resolves (a long-poll-style page that
  *     never goes fully idle) — `usedNetworkidleFallback` is true and the
  *     already-parsed DOM content is still returned.
+ *  2b. `createCampfitRenderImpl()`'s built `RenderImpl` surfaces that same
+ *     fallback as a `RenderResult.warnings` entry (traverse merges it into
+ *     `FetchResult.warnings`) — and carries no such warning when the
+ *     fallback never fired (review fix, campfit#53 fix pass).
  *  3. End-to-end pipeline wiring: an `IngestionSourceConfig` with
  *     `render: true` run through `runTraversePipelineForSource` extracts a
  *     field from content that only exists AFTER client-side hydration —
  *     proving the rendered HTML flows into the EXACT SAME fetch->extract
  *     pipeline a plain-fetch source uses today (same snapshot capture, same
- *     schema-directed extraction), with render telemetry on the result.
+ *     schema-directed extraction), with traverse's own honest Snapshot.rendered
+ *     marker on the result (campfit#53 spa-ingestion, AC3).
  *  4. Per-source isolation at the pipeline level: a `render: true` source
  *     whose target never responds at all times out and fails ONLY that
  *     source (`ok: false`, no throw) — a healthy source (rendered or not)
@@ -38,7 +43,7 @@
 import assert from "node:assert/strict";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import { renderPage, closeRenderBrowser, DEFAULT_RENDER_TIMEOUT_MS } from "../lib/ingestion/render-fetch";
+import { renderPage, closeRenderBrowser, createCampfitRenderImpl, DEFAULT_RENDER_TIMEOUT_MS } from "../lib/ingestion/render-fetch";
 import {
   runTraversePipelineForSource,
   runTraversePipeline,
@@ -174,6 +179,39 @@ async function testNetworkidleFallback(baseUrl: string) {
   console.log("✓ renderPage() falls back to domcontentloaded when networkidle never resolves, and still returns content");
 }
 
+// ─── 2b. createCampfitRenderImpl surfaces the fallback as RenderResult.warnings ──
+//
+// Review finding (campfit#53 fix pass, MEDIUM): the networkidle->
+// domcontentloaded fallback signal must reach `RenderResult.warnings` (which
+// traverse merges into `FetchResult.warnings` — see
+// node_modules/@kontourai/traverse/dist/src/fetch/types.d.ts's `RenderResult`
+// doc) so it is not silently dropped end-to-end.
+
+async function testRenderImplSurfacesFallbackWarning(baseUrl: string) {
+  const renderImpl = createCampfitRenderImpl();
+
+  const fallbackResult = await renderImpl(`${baseUrl}/hang-page`, {
+    userAgent: "unused-by-campfit-renderer",
+    timeoutMs: 800,
+  });
+  assert.ok(
+    fallbackResult.warnings?.some((w) => w.includes("networkidle fallback")),
+    `expected a networkidle-fallback warning, got warnings=${JSON.stringify(fallbackResult.warnings)}`
+  );
+
+  const normalResult = await renderImpl(`${baseUrl}/spa-page`, {
+    userAgent: "unused-by-campfit-renderer",
+    timeoutMs: DEFAULT_RENDER_TIMEOUT_MS,
+  });
+  assert.equal(
+    normalResult.warnings,
+    undefined,
+    "a render that never needed the fallback must carry no fallback warning"
+  );
+
+  console.log("✓ createCampfitRenderImpl() surfaces the networkidle-fallback signal as RenderResult.warnings (and omits it otherwise)");
+}
+
 // ─── 3. End-to-end: render flows into the traverse pipeline unchanged ───
 
 async function testRenderFlowsIntoTraversePipeline(baseUrl: string) {
@@ -200,16 +238,20 @@ async function testRenderFlowsIntoTraversePipeline(baseUrl: string) {
     sink,
     mode: "live-with-capture",
     log: () => {},
+    fetchOptions: { renderImpl: createCampfitRenderImpl() },
   });
 
   assert.equal(result.ok, true, `expected ok=true, got fetchError=${result.fetchError} extractionError=${result.extractionError}`);
   assert.equal(result.itemCount, 1, "the stub proposal (built from hydrated content) must survive extraction");
   assert.deepEqual(routed, [HYDRATED_MARKER], "the item routed to the sink must be the client-side-hydrated value");
-  assert.ok(result.render, "a render: true source's result must carry render telemetry");
-  assert.equal(result.render!.usedNetworkidleFallback, false);
+  // AC3 (campfit#53 spa-ingestion): traverse's own honest, presence-is-the-marker
+  // `Snapshot.rendered` field must be true for a source actually rendered via
+  // the native renderImpl seam — this is the regression proof that the
+  // pre-0.13.0 FetchLike-swap hack's provenance-honesty gap is now closed.
+  assert.equal(result.rendered, true, "a render: true source's result must honestly reflect Snapshot.rendered");
   assert.ok(result.snapshotBodyHash, "the rendered HTML must still be captured to the snapshot store like any other fetch");
 
-  console.log("✓ render: true flows the rendered HTML into the SAME fetch->extract->route pipeline, with render telemetry on the result");
+  console.log("✓ render: true flows the rendered HTML into the SAME fetch->extract->route pipeline, with Snapshot.rendered: true on the result (AC3)");
 }
 
 // ─── 4. Per-source isolation: a render timeout fails only that source ──
@@ -247,6 +289,7 @@ async function testRenderTimeoutIsolatesFailureAndSweepContinues(baseUrl: string
     sink,
     mode: "live-with-capture",
     log: () => {},
+    fetchOptions: { renderImpl: createCampfitRenderImpl() },
   });
 
   assert.equal(results.length, 2, "both sources should have been attempted despite the render timeout");
@@ -254,7 +297,7 @@ async function testRenderTimeoutIsolatesFailureAndSweepContinues(baseUrl: string
   assert.equal(results[0].ok, false, "a render timeout must fail only that source");
   assert.equal(results[0].itemCount, 0);
   assert.ok(results[0].fetchError, "the render timeout must surface as a fetch error, exactly like any other fetch failure");
-  assert.equal(results[0].render, undefined, "no render telemetry when the render itself never completed");
+  assert.equal(results[0].rendered, undefined, "no rendered marker when the render itself never completed");
 
   assert.equal(results[1].ok, true, "the source after a render timeout must still run — reusing the same shared browser");
   assert.equal(results[1].itemCount, 1);
@@ -270,6 +313,7 @@ async function main() {
   try {
     await testRenderSeesHydratedContentPlainFetchMisses(baseUrl);
     await testNetworkidleFallback(baseUrl);
+    await testRenderImplSurfacesFallbackWarning(baseUrl);
     await testRenderFlowsIntoTraversePipeline(baseUrl);
     await testRenderTimeoutIsolatesFailureAndSweepContinues(baseUrl);
   } finally {

@@ -26,6 +26,22 @@
  * only — still calls `traverse-pipeline.ts`'s lower-level
  * `runTraversePipeline` directly, exactly as before.
  *
+ * Rendered-fetch wiring (campfit#53, spa-ingestion, AC1/AC2/AC7): this
+ * script is the ONLY place in the whole codebase that constructs the real
+ * Playwright `RenderImpl` (`lib/ingestion/render-fetch.ts`'s
+ * `createCampfitRenderImpl`) and passes it as `fetchOptions.renderImpl` —
+ * both the dry-run path (direct `runTraversePipeline` call) and the live
+ * path (`runCrawlPipeline`'s new `CrawlOptions.fetchOptions` passthrough)
+ * wire it in. This matches the feasibility finding: only
+ * `.github/workflows/scrape.yml`'s GitHub Actions execution context
+ * provisions headless Chromium (`npx playwright install --with-deps
+ * chromium`) — every Vercel-route caller of the shared pipeline
+ * deliberately leaves `renderImpl` unset (see those routes' own comments),
+ * so a `render: true`/`requiresRender: true` source recrawled from a
+ * Vercel route fails closed with traverse's typed `invalid-config`
+ * `FetchError` instead of silently launching (or failing to launch) a
+ * browser in an environment that can't support one.
+ *
  * Usage:
  *   npx tsx scripts/scrape.ts                    # Run all sources
  *   npx tsx scripts/scrape.ts --dry-run           # Extract but don't write to DB
@@ -52,7 +68,7 @@ import {
   printReport,
   resolveFailureThreshold,
 } from "@/lib/ingestion/ingestion-runner";
-import { closeRenderBrowser } from "@/lib/ingestion/render-fetch";
+import { closeRenderBrowser, createCampfitRenderImpl } from "@/lib/ingestion/render-fetch";
 
 loadLocalEnv();
 
@@ -135,6 +151,7 @@ export async function main() {
       sink: noopSink,
       mode: "live-with-capture",
       currentByItemNames: () => new Map<string, Record<string, unknown>>(),
+      fetchOptions: { renderImpl: createCampfitRenderImpl() },
     });
   } else {
     // Live sweep — converged onto the shared orchestration seam
@@ -162,6 +179,14 @@ export async function main() {
       onSourceResult: (result) => {
         collected.push(result);
       },
+      // The GitHub Actions sweep is the only execution context where a
+      // headless Chromium browser can actually launch (see the file doc) —
+      // this is the one wiring point for the real renderImpl. Constructing
+      // it unconditionally (even when no configured source has render:true
+      // yet) is safe/cheap: renderPage()/the browser are lazily launched on
+      // first actual render call (see render-fetch.ts's file doc), so a
+      // sweep with zero rendered sources never launches a browser at all.
+      fetchOptions: { renderImpl: createCampfitRenderImpl() },
     });
 
     results = collected;

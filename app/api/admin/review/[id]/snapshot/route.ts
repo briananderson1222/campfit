@@ -81,6 +81,15 @@ export async function GET(_request: Request, props: { params: Promise<{ id: stri
       body,
       truncated,
       totalLength,
+      // campfit#53 (spa-ingestion, AC3): traverse's own honest,
+      // presence-is-the-marker `Snapshot.rendered` field (native
+      // rendered-fetch seam, @kontourai/traverse@0.13.0) — `true` only when
+      // this snapshot's bytes actually came from a headless-Chromium
+      // render, never inferred/guessed. Coalesced to `false` (not left
+      // undefined) so the client's rendered-badge check is a plain boolean,
+      // matching this route's existing `truncated`-style always-present
+      // field convention.
+      rendered: snapshot.rendered ?? false,
     },
   });
 }

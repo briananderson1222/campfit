@@ -34,11 +34,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Provisions headless Chromium for any source with `render: true` (see
-      # lib/ingestion/render-fetch.ts, issue #41). No source uses it yet —
-      # this keeps the capability functional the moment one does, without a
-      # follow-up workflow change. Cheap (~20-30s) relative to this job's
-      # weekly cadence.
+      # Provisions headless Chromium for any lib/ingestion/sources.ts entry
+      # with `render: true` (traverse 0.13.0's native rendered-fetch seam,
+      # campfit#53 spa-ingestion — see docs/decisions/spa-rendered-provider-pages.md).
+      # This is the ONLY process in the whole codebase that constructs the
+      # real Playwright renderImpl (scripts/scrape.ts) — every Vercel-route
+      # crawl trigger (including a Provider.requiresRender:true camp's
+      # on-demand recrawl) deliberately leaves it unset and fails closed
+      # instead, since only this GitHub Actions execution context can launch
+      # a browser. No curated source enables `render: true` yet — this keeps
+      # the capability functional the moment one does, without a follow-up
+      # workflow change. Cheap (~20-30s) relative to this job's weekly
+      # cadence.
       - name: "Install Playwright browser (for render: true sources)"
         run: npx playwright install --with-deps chromium
 
