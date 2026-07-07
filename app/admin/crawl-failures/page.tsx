@@ -1,6 +1,7 @@
 import { requireAdminAccess } from '@/lib/admin/access';
-import { getUncrawlableCamps } from '@/lib/admin/crawl-failure-repository';
+import { getUncrawlableCamps, getUnassignedSourceFailures } from '@/lib/admin/crawl-failure-repository';
 import { CrawlFailuresTable } from './crawl-failures-table';
+import { UnassignedSourceFailuresTable } from './unassigned-source-failures-table';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,13 @@ export default async function CrawlFailuresPage() {
     limit: 250,
   }).catch(() => []);
 
+  // Unassigned source failures (campfit#85 code-review finding M3) — no
+  // community scoping exists for this surface yet: `source:<sourceKey>`
+  // rows have no Camp/communitySlug to scope by (sweep sources aren't
+  // community-scoped today), so this always shows admin + moderator alike,
+  // matching `getUnassignedSourceFailures`'s own unscoped signature.
+  const unassignedSourceFailures = await getUnassignedSourceFailures({ limit: 100 }).catch(() => []);
+
   return (
     <div className="space-y-6">
       <div>
@@ -23,6 +31,8 @@ export default async function CrawlFailuresPage() {
       </div>
 
       <CrawlFailuresTable rows={rows} />
+
+      <UnassignedSourceFailuresTable rows={unassignedSourceFailures} />
     </div>
   );
 }

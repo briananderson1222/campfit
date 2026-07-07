@@ -139,7 +139,7 @@ describe('POST /api/admin/scrape', () => {
       await expect(deps.sink({}, {})).resolves.toBeNull();
     });
 
-    it('surfaces a DatumError provider-resolution failure as a 500, unaffected by convergence', async () => {
+    it('surfaces a DatumError provider-resolution failure as a 500, unaffected by convergence — INTENTIONALLY diverges from the dryRun=false provider-init-failure test below (see that test\'s own doc, and the deliver artifact\'s "Reconciliation note (Wave 4 reports)" section, orchestrator-convergence--deliver.md: dry-run keeps this route-level 500 preflight; live mode now surfaces the identical failure as a FAILED run + HTTP 200 instead — a reviewed, deliberate contract decision, not an accidental side effect of the seam convergence, campfit#85 review finding H2)', async () => {
       resolveExtractionProvider.mockImplementation(() => {
         throw new DatumError('MISSING_ENV', 'ZAI_API_KEY is not set');
       });
@@ -150,6 +150,58 @@ describe('POST /api/admin/scrape', () => {
       expect(data.error).toMatch(/Could not resolve an extraction provider/);
       expect(runCrawlPipeline).not.toHaveBeenCalled();
       expect(runTraversePipeline).not.toHaveBeenCalled();
+    });
+
+    it('dryRun=false: a live-mode provider-init failure resolves as a FAILED run + HTTP 200 (never a 500), with the failure visible on the returned run — deliberate 500→200 contract divergence from the dryRun=true preflight above, per campfit#85 review finding H2 / the deliver artifact\'s Wave 4 reconciliation note', async () => {
+      // Mirrors runCrawlPipeline's real `providerInitError` branch
+      // (crawl-pipeline.ts's runSourceSweepStrategy): the run resolves
+      // (never throws) with status FAILED and a source-level errorLog
+      // entry — `onSourceResult` is never invoked for a source skipped
+      // because the run-level provider never resolved (see
+      // `CrawlOptions.onSourceResult`'s own doc), so `results` stays empty
+      // here even though the run itself failed.
+      runCrawlPipeline.mockResolvedValue({
+        id: 'run-789',
+        startedAt: '2026-07-06T00:00:00.000Z',
+        completedAt: '2026-07-06T00:00:01.000Z',
+        status: 'FAILED',
+        totalCamps: 1,
+        processedCamps: 1,
+        errorCount: 1,
+        newProposals: 0,
+        trigger: 'MANUAL',
+        triggeredBy: 'admin-api:scrape',
+        campIds: null,
+        errorLog: [
+          {
+            campId: 'source:avid4',
+            error: 'traverse-recrawl:provider-unavailable: ZAI_API_KEY is not set',
+            url: 'https://avid4.com/day-camps/colorado/',
+          },
+        ],
+        campLog: [],
+      });
+
+      const res = await POST(postRequest({ source: 'avid4', dryRun: false }));
+
+      // The key H2 assertion: this is a 200, not a 500 — same underlying
+      // provider-config failure the dryRun=true test above 500s on.
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.runId).toBe('run-789');
+      expect(data.status).toBe('FAILED');
+      // Not silently dropped: the failure is a real, joinable-to-source
+      // identifier on the run this route returns (never a blank campId) —
+      // callers polling /api/admin/crawl/[runId]/status(-json) or reading
+      // getUnassignedSourceFailures() can see it even though this route's
+      // own response body doesn't inline errorLog itself.
+      expect(runCrawlPipeline).toHaveBeenCalledTimes(1);
+      const resolvedRun = await runCrawlPipeline.mock.results[0].value;
+      expect(resolvedRun.status).toBe('FAILED');
+      expect(resolvedRun.errorLog).toEqual([
+        expect.objectContaining({ campId: 'source:avid4' }),
+      ]);
+      expect(data.results).toEqual([]);
     });
   });
 
