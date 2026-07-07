@@ -5,7 +5,7 @@ import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
 import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
 import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
-import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
+import { startRun } from './crawl-run-tracker';
 import { createProposal } from '@/lib/admin/review-repository';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
@@ -227,7 +227,6 @@ export interface CrawlOptions {
 
 export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun> {
   const pool = getPool();
-  const emit = options.onProgress ?? (() => {});
 
   // Resolve campIds from providerIds if provided
   let resolvedCampIds = options.campIds;
@@ -283,15 +282,20 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     pricing: [] as Camp['pricing'],
   }));
 
-  // Create crawl run record
-  const run = await createCrawlRun({
+  // Create + track the crawl run record through the shared tracker (campfit#85
+  // Wave 2 extraction — see crawl-run-tracker.ts's file doc for the seam this
+  // is part of). `tracker.emit` is the resolved `options.onProgress` (or a
+  // no-op), exposed for events (like `camp_processing` below) that aren't
+  // tied to a persisted campLog entry.
+  const tracker = await startRun({
     triggeredBy: options.triggeredBy,
-    trigger: options.trigger ?? 'MANUAL',
+    trigger: options.trigger,
     campIds: options.campIds,
     totalCamps: camps.length,
+    onProgress: options.onProgress,
   });
-
-  await emit({ type: 'started', runId: run.id, totalCamps: camps.length });
+  const emit = tracker.emit;
+  const runId = tracker.run.id;
 
   // Resolve the traverse extraction provider + snapshot store ONCE for the
   // whole run (a datum-resolved provider is a process-level resource, not a
@@ -310,10 +314,11 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
   }
   warnModelOverrideIgnored(options.model);
 
-  let processedCamps = 0;
-  let errorCount = 0;
-  let newProposals = 0;
-  const errorLog: { campId: string; error: string; url: string }[] = [];
+  // Local count of items processed (camp-path only) — used solely for the
+  // discovery-added-camps `totalCamps` fixup below (the tracker owns its own
+  // internal processedCamps/errorCount/newProposals counters for progress
+  // persistence/final-status derivation).
+  let itemsProcessed = 0;
 
   // Group camps by domain for politeness (same domain → sequential)
   const domainMap = new Map<string, typeof camps>();
@@ -431,36 +436,32 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
 
           if (!result.ok) {
             const error = result.error ?? 'traverse-recrawl: unknown extraction failure';
-            errorCount++;
-            errorLog.push({ campId: camp.id, error, url: camp.websiteUrl });
-            await appendCrawlError(run.id, { campId: camp.id, error, url: camp.websiteUrl });
-            await appendCrawlLog(run.id, {
+            await tracker.recordItemOutcome({
+              status: 'error',
               campId: camp.id, campName: camp.name, url: camp.websiteUrl,
-              status: 'error', model: displayModel,
-              proposals: 0, fieldsChanged: [], error,
-              durationMs, processedAt: new Date().toISOString(),
+              model: displayModel, durationMs, error,
             });
-            await emit({ type: 'camp_error', campId: camp.id, campName: camp.name, error });
 
             // Still record failure metric (shape-adapted — see toLegacyMetricsResult)
             const siteHost = getSiteHost(camp.websiteUrl);
-            await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound: 0, durationMs });
+            await recordExtractionMetrics({ runId, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound: 0, durationMs });
           } else {
             const proposedChanges = result.proposedChanges;
             const changesFound = Object.keys(proposedChanges).length;
 
             let proposalId: string | null = null;
+            let newProposalsDelta: 0 | 1 = 0;
             if (changesFound > 0) {
               proposalId = await createProposal({
                 campId: camp.id,
-                crawlRunId: run.id,
+                crawlRunId: runId,
                 sourceUrl: camp.websiteUrl,
                 rawExtraction: result.rawExtraction,
                 proposedChanges,
                 overallConfidence: result.overallConfidence,
                 extractionModel: result.model,
               });
-              newProposals++;
+              newProposalsDelta = 1;
             }
 
             // Provider matching — ensure camp is linked to a Provider by domain
@@ -478,30 +479,26 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
 
             // Record metrics (shape-adapted — see toLegacyMetricsResult)
             const siteHost = getSiteHost(camp.websiteUrl);
-            await recordExtractionMetrics({ runId: run.id, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound, durationMs });
+            await recordExtractionMetrics({ runId, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound, durationMs });
 
-            await appendCrawlLog(run.id, {
-              campId: camp.id, campName: camp.name, url: camp.websiteUrl,
+            await tracker.recordItemOutcome({
               status: changesFound > 0 ? 'ok' : 'no_changes',
+              campId: camp.id, campName: camp.name, url: camp.websiteUrl,
               model: displayModel,
-              proposals: changesFound > 0 ? 1 : 0,
               fieldsChanged: Object.keys(proposedChanges),
-              durationMs, processedAt: new Date().toISOString(),
+              durationMs,
               ...(providerAction ? { providerAction } : {}),
+              proposalId,
+              confidence: result.overallConfidence,
+              newProposalsDelta,
             });
-
-            await emit({ type: 'camp_done', campId: camp.id, proposalId, confidence: result.overallConfidence, changesFound });
           }
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
-          errorCount++;
-          errorLog.push({ campId: camp.id, error, url: camp.websiteUrl });
-          await emit({ type: 'camp_error', campId: camp.id, campName: camp.name, error });
+          await tracker.recordUnhandledError({ campId: camp.id, campName: camp.name, url: camp.websiteUrl, error });
         }
 
-        processedCamps++;
-        // Fire-and-forget progress update — order doesn't matter in parallel mode
-        void updateCrawlRunProgress(run.id, { processedCamps, errorCount, newProposals });
+        itemsProcessed++;
 
         // Rate limit — be polite to each domain
         if (di < domainCamps.length - 1) await delay(2000);
@@ -512,17 +509,11 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
   await Promise.all(domainTasks);
 
   // If discovery added new camps, processedCamps > original totalCamps — fix the DB record
-  if (processedCamps > camps.length) {
-    await updateCrawlRunProgress(run.id, { totalCamps: processedCamps });
+  if (itemsProcessed > camps.length) {
+    await tracker.setTotalCamps(itemsProcessed);
   }
 
-  const finalStatus = errorCount === processedCamps && processedCamps > 0 ? 'FAILED' : 'COMPLETED';
-  await completeCrawlRun(run.id, finalStatus, errorLog);
-
-  const finalRun = { ...run, status: finalStatus as 'COMPLETED' | 'FAILED', processedCamps, errorCount, newProposals };
-  await emit({ type: 'completed', runId: run.id, stats: { processedCamps, errorCount, newProposals } });
-
-  return finalRun as CrawlRun;
+  return tracker.finish();
 }
 
 function getSiteHost(url: string): string {
