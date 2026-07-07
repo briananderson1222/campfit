@@ -67,6 +67,16 @@ export interface CampChangeProposal {
   // partial-approval state
   priority: number;             // 0 = fresh, -1 = partially reviewed (sinks in queue)
   appliedFields: string[];      // fields already applied in previous partial approvals
+  // Snapshot provenance (additive, nullable — migration 015_proposal_snapshot_ref.sql).
+  // Populated only for proposals created after a follow-up ingestion-lane
+  // change wires `TraverseRecrawlResult.snapshot.ref`/`meta.snapshotRef`
+  // through `scripts/scrape.ts`/`crawl-pipeline.ts`'s `createProposal(...)`
+  // call (explicitly out of scope for campfit#91's review-provenance-
+  // validation slice — see that plan's R2 Stop-short risks). `snapshotRef`
+  // is a `traverse-snapshot:<sourceId>?url=...&sha256=...&fetchedAt=...`
+  // string parseable by `@kontourai/traverse/fetch`'s `parseSnapshotSourceRef`.
+  snapshotRef?: string | null;
+  snapshotBodyHash?: string | null;
   // joined from Camp
   campName?: string;
   campSlug?: string;
