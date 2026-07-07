@@ -200,6 +200,41 @@ describe('getRankedReviewQueue', () => {
     expect(ids.indexOf(proposal1)).toBeLessThan(ids.indexOf(proposal2));
   });
 
+  it('(f) REVIEW H2: with an injected small safetyCap, needsReview retains the LOWEST-confidence rows and total stays honest (none silently lost)', async () => {
+    const pool = getTestPool();
+    // 8 distinct, uncorroborated (single-proposal-per-camp) proposals with
+    // confidences spanning the full range — all land in needsReview.
+    // safetyCap: 5 forces both the old bug (confidence-DESC-only fetch would
+    // return the *highest* 5, silently dropping the lowest 3 that
+    // needsReview most needs) and this fix's guarantee (the lowest 5 must
+    // survive into needsReview; the honest total must still say 8).
+    const confidences = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+    const proposalIdByConfidence = new Map<number, string>();
+    for (const confidence of confidences) {
+      const run = await insertCrawlRun(pool);
+      const camp = await insertCamp(pool, { name: `Camp ${confidence}` });
+      const proposalId = await insertProposal(pool, {
+        campId: camp,
+        proposedChanges: diff(`value-${confidence}`),
+        overallConfidence: confidence,
+        crawlRunId: run,
+      });
+      proposalIdByConfidence.set(confidence, proposalId);
+    }
+
+    const { batchReady, needsReview, total, rankedCount } = await getRankedReviewQueue({ safetyCap: 5 });
+
+    expect(batchReady).toEqual([]);
+    expect(total).toBe(8); // honest — not truncated to the cap
+    expect(rankedCount).toBe(5); // working set IS bounded by the cap
+
+    // The lane must contain the 5 LOWEST-confidence rows (0.1..0.5), sorted
+    // ascending — never the 5 highest, and never missing the true lowest.
+    const expectedIds = [0.1, 0.2, 0.3, 0.4, 0.5].map((c) => proposalIdByConfidence.get(c)!);
+    expect(needsReview.map((p) => p.id)).toEqual(expectedIds);
+    expect(needsReview.map((p) => p.overallConfidence)).toEqual([0.1, 0.2, 0.3, 0.4, 0.5]);
+  });
+
   it('(e) community scoping excludes out-of-scope camps\' proposals from both lanes', async () => {
     const pool = getTestPool();
     const run1 = await insertCrawlRun(pool);

@@ -131,14 +131,27 @@ export async function getPendingProposals(opts: {
 }
 
 /**
- * Safety ceiling on the ranked queue's full-pending-set fetch — mirrors the
- * existing, already-accepted 500-row cap in `getPendingProposalQueue` below
- * (same class of documented limitation, not new debt). The ranked queue
- * needs the FULL pending set (both lanes) rather than one page at a time
- * (see `getRankedReviewQueue`'s own comment for why), so its ceiling is
- * somewhat higher.
+ * Safety ceiling on the ranked queue's per-lane retrieval (campfit#51 review
+ * H2 fix) — mirrors the existing, already-accepted 500-row cap in
+ * `getPendingProposalQueue` below (same class of documented limitation, not
+ * new debt). The ranked queue needs the FULL pending set (both lanes)
+ * rather than one page at a time (see `getRankedReviewQueue`'s own comment
+ * for why), so its ceiling is somewhat higher.
+ *
+ * REVIEW H2 FIX (was: a single confidence-DESC-ordered query capped at this
+ * value BEFORE the lane split): that ordering meant a backlog with more
+ * than this many PENDING proposals silently DROPPED the lowest-confidence
+ * rows from the fetch entirely — inverting the `needsReview` lane's whole
+ * purpose (surfacing the riskiest/lowest-confidence proposals first) by
+ * making it impossible for the truly lowest-confidence rows to ever be
+ * fetched once the backlog outgrew the cap. Fixed by running the
+ * cap PER LANE, with each lane's OWN ordering, in `getRankedReviewQueue`
+ * (one confidence-DESC-capped query, one confidence-ASC-capped query, then
+ * merged before lane-splitting) — see that function's own comment.
+ * Exported so a test can override it via `getRankedReviewQueue`'s
+ * `safetyCap` param without seeding 1000+ rows.
  */
-const RANKED_QUEUE_SAFETY_CAP = 1000;
+export const RANKED_QUEUE_SAFETY_CAP = 1000;
 
 /**
  * Bounded per-camp history depth for corroboration derivation
@@ -215,6 +228,30 @@ export interface RankedProposal extends CampChangeProposal {
  *    overallConfidence ASC` — riskiest/lowest-confidence surfaced first, so
  *    limited reviewer attention lands on what most needs scrutiny.
  *
+ * REVIEW H2 FIX — lane-aware capping: fetches the retrieval set via TWO
+ * queries against the same PENDING/scope filter — one ordered
+ * `overallConfidence DESC LIMIT safetyCap` (the batch-ready lane's own
+ * ordering), one ordered `overallConfidence ASC LIMIT safetyCap` (the
+ * needs-review lane's own ordering) — and merges them (de-duplicated by
+ * id) BEFORE deriving corroboration/splitting into lanes. This guarantees
+ * both ends of the confidence distribution are always represented in the
+ * working set: a backlog bigger than `safetyCap` can no longer make the
+ * TRUE lowest-confidence PENDING proposals invisible to `needsReview`
+ * (the old single confidence-DESC-ordered query silently dropped exactly
+ * those rows once the backlog exceeded the cap — see `RANKED_QUEUE_SAFETY_CAP`'s
+ * own comment). Each final, lane-sorted array is ALSO explicitly re-sliced
+ * to `safetyCap` (defense in depth — the two source queries already bound
+ * the merged set to at most `2 * safetyCap` distinct rows, so a single lane
+ * exceeding `safetyCap` after the split would be unusual but is still
+ * capped rather than assumed away).
+ *
+ * `total` is the HONEST count of every PENDING proposal matching the
+ * filter (a plain `COUNT(*)`, unbounded by `safetyCap`) — NOT the size of
+ * the (possibly-capped) working set actually ranked. `rankedCount` is that
+ * working-set size (`batchReady.length + needsReview.length` before
+ * `limit`/`offset` pagination), so a caller can render an honest "showing X
+ * of Y" signal whenever `rankedCount < total` (see `page.tsx`).
+ *
  * `limit`/`offset` are applied to EACH lane independently in JS — an
  * explicit, named simplification since the two lanes are visually separate
  * sections in the UI, not one combined list (pagination is per-lane, not a
@@ -238,18 +275,47 @@ export async function getRankedReviewQueue(opts: {
    */
   campId?: string;
   providerId?: string;
-}): Promise<{ batchReady: RankedProposal[]; needsReview: RankedProposal[]; total: number }> {
+  /**
+   * Override for `RANKED_QUEUE_SAFETY_CAP` (review H2 fix) — a test can
+   * lower this to prove lane-aware capping without seeding 1000+ rows.
+   * Defaults to the real safety constant in production use.
+   */
+  safetyCap?: number;
+}): Promise<{ batchReady: RankedProposal[]; needsReview: RankedProposal[]; total: number; rankedCount: number }> {
   const pool = getPool();
-  const { limit, offset = 0 } = opts;
+  const { limit, offset = 0, safetyCap = RANKED_QUEUE_SAFETY_CAP } = opts;
   const { whereClause, filterValues, communityScopeClause } = buildPendingProposalsBaseQuery(opts);
+  const capParamIndex = filterValues.length + 1;
 
-  const { rows } = await pool.query<CampChangeProposal>(
-    `${PENDING_PROPOSALS_SELECT}
-     WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}
-     ORDER BY p.priority DESC, p."overallConfidence" DESC
-     LIMIT $${filterValues.length + 1}`,
-    [...filterValues, RANKED_QUEUE_SAFETY_CAP],
-  );
+  const [highConfidenceResult, lowConfidenceResult, countResult] = await Promise.all([
+    pool.query<CampChangeProposal>(
+      `${PENDING_PROPOSALS_SELECT}
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}
+       ORDER BY p.priority DESC, p."overallConfidence" DESC
+       LIMIT $${capParamIndex}`,
+      [...filterValues, safetyCap],
+    ),
+    pool.query<CampChangeProposal>(
+      `${PENDING_PROPOSALS_SELECT}
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}
+       ORDER BY p.priority DESC, p."overallConfidence" ASC
+       LIMIT $${capParamIndex}`,
+      [...filterValues, safetyCap],
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*)
+       FROM "CampChangeProposal" p
+       JOIN "Camp" c ON c.id = p."campId"
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}`,
+      filterValues,
+    ),
+  ]);
+
+  const rowsById = new Map<string, CampChangeProposal>();
+  for (const row of [...highConfidenceResult.rows, ...lowConfidenceResult.rows]) {
+    rowsById.set(row.id, row);
+  }
+  const rows = Array.from(rowsById.values());
 
   const campIds = Array.from(new Set(rows.map((row) => row.campId)));
   const historyByCamp = await getCampProposalHistoryBatch(pool, campIds);
@@ -274,17 +340,20 @@ export async function getRankedReviewQueue(opts: {
 
   const batchReady = ranked
     .filter((proposal) => proposal.batchEligibleFieldCount > 0)
-    .sort((a, b) => (b.priority - a.priority) || (b.overallConfidence - a.overallConfidence));
+    .sort((a, b) => (b.priority - a.priority) || (b.overallConfidence - a.overallConfidence))
+    .slice(0, safetyCap);
   const needsReview = ranked
     .filter((proposal) => proposal.batchEligibleFieldCount === 0)
-    .sort((a, b) => (b.priority - a.priority) || (a.overallConfidence - b.overallConfidence));
+    .sort((a, b) => (b.priority - a.priority) || (a.overallConfidence - b.overallConfidence))
+    .slice(0, safetyCap);
 
   const paginate = (list: RankedProposal[]) => (limit === undefined ? list : list.slice(offset, offset + limit));
 
   return {
     batchReady: paginate(batchReady),
     needsReview: paginate(needsReview),
-    total: ranked.length,
+    total: parseInt(countResult.rows[0]!.count, 10),
+    rankedCount: batchReady.length + needsReview.length,
   };
 }
 

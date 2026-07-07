@@ -151,4 +151,59 @@ describe('deriveFieldCorroboration', () => {
     });
     expect(result.exact).toBe(false);
   });
+
+  // Review H1 (null crawlRunId must never corroborate): entity-admin-repository.ts's
+  // createCampProposal (admin-assistant path) always inserts crawlRunId: NULL,
+  // so two non-independent assistant-authored proposals for the same
+  // field/value must NOT be able to fake corroboration of each other just
+  // because null !== null was never being compared for equality.
+  it('(g) two null-crawlRunId proposals with the identical value are NOT corroborated', () => {
+    const target = row({ id: 'target', field: 'city', value: 'Austin', crawlRunId: null });
+    const otherNullRun = row({ id: 'other', field: 'city', value: 'Austin', crawlRunId: null });
+    const result = deriveFieldCorroboration({
+      targetProposalId: 'target',
+      targetCrawlRunId: null,
+      field: 'city',
+      history: [target, otherNullRun],
+    });
+    expect(result.exact).toBe(false);
+    expect(result.corroboratingProposalIds).toEqual([]);
+  });
+
+  it('(h) a null-crawlRunId proposal and a non-null-crawlRunId proposal with the identical value are NOT corroborated (either direction)', () => {
+    const nullTarget = row({ id: 'target', field: 'city', value: 'Austin', crawlRunId: null });
+    const nonNullOther = row({ id: 'other', field: 'city', value: 'Austin', crawlRunId: 'run-1' });
+    const nullSideResult = deriveFieldCorroboration({
+      targetProposalId: 'target',
+      targetCrawlRunId: null,
+      field: 'city',
+      history: [nullTarget, nonNullOther],
+    });
+    expect(nullSideResult.exact).toBe(false);
+
+    // Flip which side is the target: a non-null-run target must also not be
+    // "corroborated" by a null-run row proposing the same value.
+    const nonNullTarget = row({ id: 'target2', field: 'city', value: 'Austin', crawlRunId: 'run-1' });
+    const nullOther = row({ id: 'other2', field: 'city', value: 'Austin', crawlRunId: null });
+    const nonNullSideResult = deriveFieldCorroboration({
+      targetProposalId: 'target2',
+      targetCrawlRunId: 'run-1',
+      field: 'city',
+      history: [nonNullTarget, nullOther],
+    });
+    expect(nonNullSideResult.exact).toBe(false);
+  });
+
+  it('(i) two DISTINCT non-null crawlRunIds with the identical value ARE corroborated (existing behavior preserved)', () => {
+    const target = row({ id: 'target', field: 'city', value: 'Austin', crawlRunId: 'run-1' });
+    const other = row({ id: 'other', field: 'city', value: 'Austin', crawlRunId: 'run-2' });
+    const result = deriveFieldCorroboration({
+      targetProposalId: 'target',
+      targetCrawlRunId: 'run-1',
+      field: 'city',
+      history: [target, other],
+    });
+    expect(result.exact).toBe(true);
+    expect(result.corroboratingProposalIds).toEqual(['other']);
+  });
 });

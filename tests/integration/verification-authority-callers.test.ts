@@ -54,6 +54,16 @@
  *   `app/api/admin/crawl-schedule/**` and `app/api/cron/crawl/route.ts` /
  *   `app/api/cron/notify/route.ts` (the #92 scheduled-crawl surface): zero
  *   matches for either name — confirmed directly, not assumed.
+ *
+ * REVIEW M3 FIX: the file-level allowlist (`ALLOWED_CALLER_FILES`) only
+ * catches a NEW FILE calling either target — a new FUNCTION added inside an
+ * already-allowed file would pass it silently. Below, the SAME
+ * function-level granularity `review-apply.ts` already got (the second
+ * `it` block) is extended to `entity-admin-repository.ts` and
+ * `bulk-attestation.ts`, pinning the exact allowed function name in each —
+ * so a new function anywhere in those files that calls either target fails
+ * loudly, matching this header's "closed allowlist" claim in practice, not
+ * just at the file level.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -176,6 +186,41 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
     // delegates to applyBatchAcceptedFieldsForProposal per proposal group —
     // see that function's own header comment).
     expect(enclosingFunctions).toEqual(new Set(['applyProposalReview', 'recordAppliedFieldEvidence', 'applyBatchAcceptedFieldsForProposal']));
+  });
+
+  /**
+   * Review M3 (tripwire granularity): the file-level allowlist above stops
+   * a FIFTH FILE from calling either target, but says nothing about a NEW
+   * FUNCTION inside an already-allowed file quietly starting to call one —
+   * that would pass the file-level check silently. Pin the exact enclosing
+   * function name(s) per allowed file (mirroring the review-apply.ts
+   * assertion just above), so a new function added to `entity-admin-repository.ts`
+   * or `bulk-attestation.ts` that calls `recordEvidence`/
+   * `refreshCampVerificationCache` fails this test loudly instead of
+   * silently joining the caller set.
+   */
+  it.each([
+    ['lib/admin/entity-admin-repository.ts', ['recordCampAttestationEvidence']],
+    ['lib/admin/bulk-attestation.ts', ['bulkAttestCamp']],
+  ] as const)('%s\'s call sites resolve to exactly %j', (relativePath, expectedFunctions) => {
+    const filePath = path.join(repoRoot, relativePath);
+    const fileLines = fs.readFileSync(filePath, 'utf8').split('\n');
+
+    const callLineIndexes: number[] = [];
+    fileLines.forEach((lineText, index) => {
+      const trimmed = lineText.trim();
+      if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) return;
+      if (TARGET_CALLS.some((target) => lineText.includes(target)) && !DEFINITION_LINE_PATTERNS.some((p) => p.test(lineText))) {
+        callLineIndexes.push(index);
+      }
+    });
+    expect(callLineIndexes.length).toBeGreaterThan(0);
+
+    const enclosingFunctions = new Set(
+      callLineIndexes.map((index) => enclosingFunctionName(fileLines, index)),
+    );
+
+    expect(enclosingFunctions).toEqual(new Set(expectedFunctions));
   });
 
   it('the #92 scheduled-crawl cron surface never calls either (documented manual grep, re-verified programmatically)', () => {

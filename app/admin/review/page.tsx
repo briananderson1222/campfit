@@ -87,7 +87,7 @@ export default async function ReviewQueuePage(
   const limit = 25;
   const offset = (page - 1) * limit;
 
-  const [{ batchReady, needsReview, total: proposalTotal }, { camps: unverifiedCamps, total: unverifiedTotal }, { reports, total: reportTotal }] =
+  const [{ batchReady, needsReview, total: proposalTotal, rankedCount }, { camps: unverifiedCamps, total: unverifiedTotal }, { reports, total: reportTotal }] =
     await Promise.all([
       getRankedReviewQueue({
         // Ranked-queue pagination is per-lane, not one combined page (see
@@ -98,7 +98,7 @@ export default async function ReviewQueuePage(
         campId,
         providerId,
         communitySlugs: auth.access.isAdmin ? undefined : auth.access.communities,
-      }).catch(() => ({ batchReady: [], needsReview: [], total: 0 })),
+      }).catch(() => ({ batchReady: [], needsReview: [], total: 0, rankedCount: 0 })),
       getUnverifiedCamps({
         limit,
         offset,
@@ -124,7 +124,10 @@ export default async function ReviewQueuePage(
         <div>
           <h1 className="font-display text-3xl font-extrabold text-bark-700">Review Queue</h1>
           <p className="text-bark-400 text-sm mt-1">
-            {proposalTotal} pending proposal{proposalTotal !== 1 ? 's' : ''} ·{' '}
+            {proposalTotal} pending proposal{proposalTotal !== 1 ? 's' : ''}
+            {rankedCount < proposalTotal && (
+              <span className="text-amber-600"> (showing {rankedCount} of {proposalTotal} — ranked queue is capped)</span>
+            )} ·{' '}
             {unverifiedTotal} unverified camp{unverifiedTotal !== 1 ? 's' : ''} ·{' '}
             {reportTotal} user report{reportTotal !== 1 ? 's' : ''}
           </p>

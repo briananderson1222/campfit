@@ -164,7 +164,7 @@ describe('POST /api/admin/review/batch-accept', () => {
     expect(audit!.excluded.some((e: { proposalId: string; reason: string }) => e.proposalId === proposalB && e.reason === 'out_of_scope')).toBe(true);
   });
 
-  it('(b) a selection whose field is not corroborated comes back excluded_not_corroborated (route-level end-to-end)', async () => {
+  it('(b) a selection whose field is not corroborated comes back excluded_not_corroborated (route-level end-to-end), and STILL gets an audit row (REVIEW M4)', async () => {
     mockAsAdmin();
     const campId = await insertCamp(pool, { city: '' });
     const runId = await insertCrawlRun(pool);
@@ -176,8 +176,44 @@ describe('POST /api/admin/review/batch-accept', () => {
     const body = await res.json();
     expect(body.results).toEqual([{ proposalId, field: 'city', status: 'excluded_not_corroborated', message: expect.any(String) }]);
     expect(await queryCampField(pool, campId, 'city')).toBe('');
-    // Nothing applied -> no audit row.
-    expect(body.auditId).toBeNull();
+
+    // REVIEW M4 FIX: nothing applied, but this is a 100%-excluded batch —
+    // an audit row must still be written (forensic trace of the attempt),
+    // with acceptedCount (claims.length) 0 and the exclusion recorded.
+    expect(body.auditId).not.toBeNull();
+    const audit = await getBatchAcceptAudit(body.auditId, pool);
+    expect(audit!.appliedCount).toBe(0);
+    expect(audit!.claims).toEqual([]);
+    expect(audit!.excluded).toEqual([
+      { proposalId, field: 'city', reason: 'not_corroborated', message: expect.any(String) },
+    ]);
+  });
+
+  it('(b2) REVIEW M4: a fully-out-of-scope batch (every selection excluded_scope) still gets a 200 with a per-selection result AND an audit row (acceptedCount 0, exclusions recorded) — a forensic trace of the scope-violation attempt', async () => {
+    mockAsModerator('denver');
+
+    const campB = await insertCamp(pool, { communitySlug: 'boulder', city: '' });
+    const runB = await insertCrawlRun(pool);
+    const proposalB = await insertProposal(pool, { campId: campB, field: 'city', value: 'Golden', crawlRunId: runB });
+    await seedCorroboratingHistory(pool, campB, 'city', 'Golden');
+
+    const res = await POST(postRequest({ selections: [{ proposalId: proposalB, field: 'city' }] }));
+
+    // Response shape unchanged from before this fix: 200, one excluded_scope result.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.results).toEqual([
+      { proposalId: proposalB, field: 'city', status: 'excluded_scope', message: expect.any(String) },
+    ]);
+    expect(await queryCampField(pool, campB, 'city')).toBe('');
+
+    expect(body.auditId).not.toBeNull();
+    const audit = await getBatchAcceptAudit(body.auditId, pool);
+    expect(audit!.appliedCount).toBe(0);
+    expect(audit!.claims).toEqual([]);
+    expect(audit!.excluded).toEqual([
+      { proposalId: proposalB, field: 'city', reason: 'out_of_scope', message: expect.any(String) },
+    ]);
   });
 
   it('(c) a non-admin/non-moderator request returns 401/403 with zero DB writes', async () => {
