@@ -131,7 +131,7 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
       await emit({ type: 'camp_done', campId: outcome.campId, proposalId: outcome.proposalId, confidence: outcome.confidence, changesFound });
     }
     processedCamps++;
-    void updateCrawlRunProgress(run.id, { processedCamps, errorCount, newProposals });
+    await updateCrawlRunProgress(run.id, { processedCamps, errorCount, newProposals });
   }
 
   async function recordUnhandledError(entry: { campId: string; campName: string; url: string; error: string }): Promise<void> {
@@ -139,7 +139,7 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
     errorLog.push({ campId: entry.campId, error: entry.error, url: entry.url });
     await emit({ type: 'camp_error', campId: entry.campId, campName: entry.campName, error: entry.error });
     processedCamps++;
-    void updateCrawlRunProgress(run.id, { processedCamps, errorCount, newProposals });
+    await updateCrawlRunProgress(run.id, { processedCamps, errorCount, newProposals });
   }
 
   async function setTotalCamps(totalCamps: number): Promise<void> {
