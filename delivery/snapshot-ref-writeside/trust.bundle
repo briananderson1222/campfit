@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "snapshot-ref-writeside-lane-97-gates.flow-agents-workflow.tsc-eslint-full-suite-green-dual-fault-injection-proofs-both-call-sites-via-delegate-runs-session-local-summary",
+      "subjectType": "workflow-check",
+      "subjectId": "snapshot-ref-writeside/lane-97-gates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "tsc/eslint/full-suite green; dual fault-injection proofs (both call sites) via delegate runs, session-local summary",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:01:19Z",
+      "updatedAt": "2026-07-07T03:01:19Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "snapshot-ref-writeside-97-ac1-refs-populated.flow-agents-workflow.both-runcrawlpipeline-strategies-camp-re-crawl-path-and-source-sweep-path-write-a-resolvable-non-null-snapshotref-snapshotbodyhash-onto-the-campchangeproposal-row-they-create-whenever-the-underlying-traverse-fetch-captured-a-snapshot-absent-stays-null-when-no-snapshot-was-captured",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "snapshot-ref-writeside/97-ac1-refs-populated",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Both runCrawlPipeline strategies (camp re-crawl path and source-sweep path) write a resolvable, non-null snapshotRef/snapshotBodyHash onto the CampChangeProposal row they create whenever the underlying traverse fetch captured a snapshot; absent stays null when no snapshot was captured.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:01:19Z",
+      "updatedAt": "2026-07-07T03:01:19Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "snapshot-ref-writeside-97-ac2-real-drilldown.flow-agents-workflow.91-s-get-api-admin-review-id-snapshot-route-returns-200-with-the-exact-stored-snapshot-body-url-for-a-real-pipeline-created-proposal-not-a-hand-inserted-fixture-row",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "snapshot-ref-writeside/97-ac2-real-drilldown",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "#91's GET /api/admin/review/[id]/snapshot route returns 200 with the exact stored snapshot body/url for a REAL, pipeline-created proposal (not a hand-inserted fixture row).",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:01:19Z",
+      "updatedAt": "2026-07-07T03:01:19Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "snapshot-ref-writeside-97-ac3-suite-green.flow-agents-workflow.full-test-suite-and-build-stay-green-with-no-regressions",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "snapshot-ref-writeside/97-ac3-suite-green",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Full test suite and build stay green with no regressions.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:01:19Z",
+      "updatedAt": "2026-07-07T03:01:19Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "snapshot-ref-writeside-review.flow-agents-workflow.iteration-1-approved-high-untouched-test-type-break-fixed-tsc-clean-camp-path-coverage-gap-closed-with-fault-injection-proven-assertion-learning-tsc-noemit-is-the-only-tests-type-gate-in-campfit",
+      "subjectType": "workflow-critique",
+      "subjectId": "snapshot-ref-writeside/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Iteration 1 APPROVED: HIGH (untouched-test type break) fixed, tsc clean; camp-path coverage gap closed with fault-injection-proven assertion. Learning: tsc --noEmit is the only tests/** type gate in campfit.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:01:19Z",
+      "updatedAt": "2026-07-07T03:01:19Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T03:01:19Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:snapshot-ref-writeside-lane-97-gates.flow-agents-workflow.tsc-eslint-full-suite-green-dual-fault-injection-proofs-both-call-sites-via-delegate-runs-session-local-summary",
+      "claimId": "snapshot-ref-writeside-lane-97-gates.flow-agents-workflow.tsc-eslint-full-suite-green-dual-fault-injection-proofs-both-call-sites-via-delegate-runs-session-local-summary",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "snapshot-ref-writeside/evidence.json",
+      "excerptOrSummary": "tsc/eslint/full-suite green; dual fault-injection proofs (both call sites) via delegate runs, session-local summary",
+      "observedAt": "2026-07-07T03:01:19Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:snapshot-ref-writeside-lane-97-gates.flow-agents-workflow.tsc-eslint-full-suite-green-dual-fault-injection-proofs-both-call-sites-via-delegate-runs-session-local-summary",
+      "claimId": "snapshot-ref-writeside-lane-97-gates.flow-agents-workflow.tsc-eslint-full-suite-green-dual-fault-injection-proofs-both-call-sites-via-delegate-runs-session-local-summary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:snapshot-ref-writeside-lane-97-gates.flow-agents-workflow.tsc-eslint-full-suite-green-dual-fault-injection-proofs-both-call-sites-via-delegate-runs-session-local-summary"
+      ],
+      "createdAt": "2026-07-07T03:01:19Z",
+      "verifiedAt": "2026-07-07T03:01:19Z"
+    },
+    {
+      "id": "evt:snapshot-ref-writeside-97-ac1-refs-populated.flow-agents-workflow.both-runcrawlpipeline-strategies-camp-re-crawl-path-and-source-sweep-path-write-a-resolvable-non-null-snapshotref-snapshotbodyhash-onto-the-campchangeproposal-row-they-create-whenever-the-underlying-traverse-fetch-captured-a-snapshot-absent-stays-null-when-no-snapshot-was-captured",
+      "claimId": "snapshot-ref-writeside-97-ac1-refs-populated.flow-agents-workflow.both-runcrawlpipeline-strategies-camp-re-crawl-path-and-source-sweep-path-write-a-resolvable-non-null-snapshotref-snapshotbodyhash-onto-the-campchangeproposal-row-they-create-whenever-the-underlying-traverse-fetch-captured-a-snapshot-absent-stays-null-when-no-snapshot-was-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:01:19Z",
+      "verifiedAt": "2026-07-07T03:01:19Z"
+    },
+    {
+      "id": "evt:snapshot-ref-writeside-97-ac2-real-drilldown.flow-agents-workflow.91-s-get-api-admin-review-id-snapshot-route-returns-200-with-the-exact-stored-snapshot-body-url-for-a-real-pipeline-created-proposal-not-a-hand-inserted-fixture-row",
+      "claimId": "snapshot-ref-writeside-97-ac2-real-drilldown.flow-agents-workflow.91-s-get-api-admin-review-id-snapshot-route-returns-200-with-the-exact-stored-snapshot-body-url-for-a-real-pipeline-created-proposal-not-a-hand-inserted-fixture-row",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:01:19Z",
+      "verifiedAt": "2026-07-07T03:01:19Z"
+    },
+    {
+      "id": "evt:snapshot-ref-writeside-97-ac3-suite-green.flow-agents-workflow.full-test-suite-and-build-stay-green-with-no-regressions",
+      "claimId": "snapshot-ref-writeside-97-ac3-suite-green.flow-agents-workflow.full-test-suite-and-build-stay-green-with-no-regressions",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:01:19Z",
+      "verifiedAt": "2026-07-07T03:01:19Z"
+    },
+    {
+      "id": "evt:snapshot-ref-writeside-review.flow-agents-workflow.iteration-1-approved-high-untouched-test-type-break-fixed-tsc-clean-camp-path-coverage-gap-closed-with-fault-injection-proven-assertion-learning-tsc-noemit-is-the-only-tests-type-gate-in-campfit",
+      "claimId": "snapshot-ref-writeside-review.flow-agents-workflow.iteration-1-approved-high-untouched-test-type-break-fixed-tsc-clean-camp-path-coverage-gap-closed-with-fault-injection-proven-assertion-learning-tsc-noemit-is-the-only-tests-type-gate-in-campfit",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:01:19Z",
+      "verifiedAt": "2026-07-07T03:01:19Z"
+    }
+  ]
+}

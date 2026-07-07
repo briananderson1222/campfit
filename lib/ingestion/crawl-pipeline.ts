@@ -609,6 +609,8 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                 proposedChanges,
                 overallConfidence: result.overallConfidence,
                 extractionModel: result.model,
+                snapshotRef: result.snapshot.ref,
+                snapshotBodyHash: result.snapshot.bodyHash,
               });
               newProposalsDelta = 1;
             }
@@ -748,6 +750,8 @@ async function runSourceSweepStrategy(
           proposedChanges: record.proposedChanges,
           overallConfidence: record.overallConfidence,
           extractionModel: record.extractionModel,
+          snapshotRef: meta.snapshotRef,
+          snapshotBodyHash: meta.snapshotBodyHash,
         });
         const changesFound = Object.keys(record.proposedChanges).length;
         await tracker.recordItemOutcome({

@@ -172,7 +172,7 @@ function stubSourceOutcome(
         rawExtraction: { via: 'stub-source-result' },
         warnings: [],
       },
-      { sourceKey: src.key, sourceUrl: src.url, snapshotRef: 'traverse-snapshot:stub' },
+      { sourceKey: src.key, sourceUrl: src.url, snapshotRef: 'traverse-snapshot:stub', snapshotBodyHash: 'stub-body-hash' },
     );
     return {
       source: src.key, url: src.url, ok: true, itemCount: 1,
@@ -304,6 +304,22 @@ describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () =
     expect(stored!.processedCamps).toBe(2);
     expect(stored!.errorCount).toBe(1);
     expect(stored!.status).toBe('COMPLETED');
+
+    // campfit#97 camp-path coverage: the ok camp's CampChangeProposal row
+    // carries the snapshotRef/snapshotBodyHash forwarded from
+    // TraverseRecrawlResult.snapshot (stubbed above via okRecrawlResult()'s
+    // `snapshot: { ref: 'traverse-snapshot:stub', bodyHash: 'stub-hash' }`)
+    // — proves crawl-pipeline.ts's camp call site actually forwards
+    // result.snapshot.{ref,bodyHash} into createProposal(), not just that
+    // the sources-strategy call site does (a silent revert of the camp
+    // call site's forwarding would leave this test suite green otherwise).
+    const proposalRow = await pool.query<{ snapshotRef: string | null; snapshotBodyHash: string | null }>(
+      `SELECT "snapshotRef", "snapshotBodyHash" FROM "CampChangeProposal" WHERE "campId" = $1`,
+      [okCampId],
+    );
+    expect(proposalRow.rows).toHaveLength(1);
+    expect(proposalRow.rows[0]!.snapshotRef).toBe('traverse-snapshot:stub');
+    expect(proposalRow.rows[0]!.snapshotBodyHash).toBe('stub-hash');
 
     // The failing camp's errorLog entry is visible via getUncrawlableCamps
     // (the pre-existing camp-path surface) — camp-path failures were never

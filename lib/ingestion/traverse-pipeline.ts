@@ -97,7 +97,7 @@ import { createRenderFetchLike, DEFAULT_RENDER_TIMEOUT_MS, type RenderResult } f
  */
 export type TraverseProposalSink = (
   record: TraverseItemProposalRecord,
-  meta: { sourceKey: string; sourceUrl: string; snapshotRef: string | null }
+  meta: { sourceKey: string; sourceUrl: string; snapshotRef: string | null; snapshotBodyHash: string | null }
 ) => Promise<string | null>;
 
 export interface TraversePipelineDeps {
@@ -589,6 +589,7 @@ export async function runTraversePipelineForSource(
       sourceKey: src.key,
       sourceUrl: record.sourceUrl,
       snapshotRef: result.snapshotRef,
+      snapshotBodyHash: result.snapshotBodyHash,
     });
     result.routedProposalIds.push(proposalId);
   }

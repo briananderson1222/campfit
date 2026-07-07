@@ -9,16 +9,15 @@
  * (`app/api/admin/review/[id]/approve/route.ts`):
  * `getProposalCommunitySlug` -> `requireAdminAccess` -> `getProposal`.
  *
- * NOTE (recorded, not a bug): every REAL proposal today has `snapshotRef:
- * null` — the ref is computed at multiple traverse pipeline layers
- * (`TraverseRecrawlResult.snapshot.ref`, `TraversePipelineSourceResult
- * .snapshotRef`, `TraverseProposalSink`'s `meta.snapshotRef`) but is dropped
- * before persistence today. Wiring `scripts/scrape.ts`'s sink and
- * `lib/ingestion/crawl-pipeline.ts`'s `createProposal(...)` call to forward
- * it onto new proposals is an explicit fast-follow for the ingestion lane
- * (out of scope here — see the plan's Cross-lane note). This route is
- * fixture-complete (see `tests/integration/review-snapshot-route.test.ts`)
- * but not yet real-data-complete until that follow-up lands.
+ * NOTE: `snapshotRef` is populated at proposal-creation time by both
+ * `runCrawlPipeline` strategies (camp re-crawl and source sweep) —
+ * `lib/ingestion/crawl-pipeline.ts`'s two `createProposal(...)` call sites
+ * (campfit#97, the write-side fast-follow this note used to point at). A
+ * proposal only has `snapshotRef: null` when the underlying traverse fetch
+ * never captured a snapshot (e.g. a fetch/extraction failure), not because
+ * the value is dropped before persistence. Fixture coverage:
+ * `tests/integration/review-snapshot-route.test.ts`; real pipeline-created
+ * round-trip coverage: `tests/integration/crawl-pipeline-snapshot-ref-writeside.test.ts`.
  */
 import { NextResponse } from 'next/server';
 
