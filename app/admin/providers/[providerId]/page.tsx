@@ -9,6 +9,7 @@ import type { CampCategory, RegistrationStatus, DataConfidence } from '@/lib/typ
 import { ProviderEditor } from './provider-editor';
 import { EntityOpsPanel } from '@/components/admin/entity-ops-panel';
 import { ProviderProposalActions } from './provider-proposals-actions';
+import { FirstCrawlOffer } from './first-crawl-offer';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProviderCommunitySlug } from '@/lib/admin/community-access';
 import { getProviderFieldTimeline } from '@/lib/admin/field-metadata';
@@ -89,7 +90,7 @@ function StatusBadge({ value }: { value: RegistrationStatus }) {
 export default async function ProviderDetailPage(
   props: {
     params: Promise<{ providerId: string }>;
-    searchParams: Promise<{ archived?: string }>;
+    searchParams: Promise<{ archived?: string; created?: string }>;
   }
 ) {
   const searchParams = await props.searchParams;
@@ -107,6 +108,14 @@ export default async function ProviderDetailPage(
   ]);
 
   if (!provider) notFound();
+
+  // Guided first-crawl offer (campfit#90 R4/AC4) — shown right after create
+  // (?created=1, Wave 2 Task A's redirect) and stays discoverable afterward
+  // for any zero-camp provider, so navigating away before crawling doesn't
+  // permanently lose the offer. Requires a crawlable URL (crawlRootUrl or
+  // websiteUrl) — matches the backend crawl route's own discover-mode guard.
+  const crawlUrl = provider.crawlRootUrl || provider.websiteUrl;
+  const shouldOfferFirstCrawl = ((provider.campCount ?? 0) === 0 || searchParams.created === '1') && !!crawlUrl;
 
   // Fetch crawl site hints + provider proposals
   const pool = getPool();
@@ -183,6 +192,9 @@ export default async function ProviderDetailPage(
           </Link>
         </div>
       </div>
+
+      {/* ── Guided first-crawl offer (campfit#90 R4/AC4) ── */}
+      {shouldOfferFirstCrawl && <FirstCrawlOffer providerId={provider.id} />}
 
       {/* ── Rollup stats ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -277,13 +289,12 @@ export default async function ProviderDetailPage(
             {archived === 'archived' ? 'Archived Camps' : 'Camps'}
             <span className="ml-2 text-sm font-normal text-bark-400">({camps.length})</span>
           </h2>
-          <button
-            disabled
-            className="px-3 py-1.5 rounded-lg border border-cream-300 text-xs text-bark-400 hover:bg-cream-200 transition-colors"
-            title="Coming soon"
+          <Link
+            href={`/admin/camps/new?providerId=${provider.id}`}
+            className="px-3 py-1.5 rounded-lg border border-cream-300 text-xs text-bark-500 hover:bg-cream-200 transition-colors"
           >
             + Add camp
-          </button>
+          </Link>
         </div>
 
         {camps.length === 0 ? (

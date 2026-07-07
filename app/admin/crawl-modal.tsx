@@ -13,6 +13,17 @@ import type { LLMModel } from '@/app/api/admin/crawl/models/route';
 type RunState = 'idle' | 'running' | 'done' | 'error';
 type ModalPriority = CrawlPriority | 'onboard_url';
 
+// Onboard-url created/skipped breakdown (campfit#90 R5/AC5) — mirrors
+// `/api/admin/crawl/onboard-url`'s success response shape exactly.
+type OnboardUrlOutcome = {
+  providerCreated: boolean;
+  discovered: number;
+  created: number;
+  createdNames: string[];
+  skipped: number;
+  skippedNames: string[];
+};
+
 const PRIORITY_OPTIONS: { value: ModalPriority; label: string; description: string; icon: React.ReactNode }[] = [
   { value: 'all',          label: 'Highest Priority', description: 'Combined score: staleness + missing fields + time-sensitive', icon: <Zap className="w-4 h-4" /> },
   { value: 'stale',        label: 'Most Stale',       description: 'Not verified recently, scored by days since last crawl',    icon: <Clock className="w-4 h-4" /> },
@@ -119,6 +130,11 @@ export function CrawlModal({
   const [runProgress, setRunProgress] = useState<{ processed: number; total: number; proposals: number; errors: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // onboard-url created/skipped breakdown (campfit#90 R5/AC5) — captured from
+  // the initial onboard-url response, rendered in the "done" panel alongside
+  // the crawl-progress summary.
+  const [onboardOutcome, setOnboardOutcome] = useState<OnboardUrlOutcome | null>(null);
+
   // Load models once on open
   useEffect(() => {
     if (!open || models.length > 0) return;
@@ -204,15 +220,34 @@ export function CrawlModal({
           setErrorMsg(data.error ?? 'Failed to onboard site');
           return;
         }
-        const { runId, creating } = data as { runId: string; creating: number };
-        setRunProgress({ processed: 0, total: creating, proposals: 0, errors: 0 });
+        const { runId, providerCreated, discovered, created, createdNames, skipped, skippedNames } = data as {
+          runId?: string;
+          providerCreated: boolean;
+          discovered: number;
+          created: number;
+          createdNames: string[];
+          skipped: number;
+          skippedNames: string[];
+        };
+        setOnboardOutcome({ providerCreated, discovered, created, createdNames, skipped, skippedNames });
+
+        // All discovered programs already existed — no crawl was triggered
+        // (200, not an error); go straight to the "done" state so the
+        // breakdown renders instead of routing through runState === 'error'.
+        if (!runId) {
+          setRunProgress({ processed: 0, total: 0, proposals: 0, errors: 0 });
+          setRunState('done');
+          return;
+        }
+
+        setRunProgress({ processed: 0, total: created, proposals: 0, errors: 0 });
 
         const poll = setInterval(async () => {
           const r = await fetch(`/api/admin/crawl/${runId}/status-json`).catch(() => null);
           if (!r) return;
           const d = await r.json().catch(() => null);
           if (!d) return;
-          setRunProgress({ processed: d.processedCamps ?? 0, total: d.totalCamps ?? creating, proposals: d.newProposals ?? 0, errors: d.errorCount ?? 0 });
+          setRunProgress({ processed: d.processedCamps ?? 0, total: d.totalCamps ?? created, proposals: d.newProposals ?? 0, errors: d.errorCount ?? 0 });
           if (d.status === 'COMPLETED') { clearInterval(poll); setRunState('done'); }
           else if (d.status === 'FAILED') { clearInterval(poll); setRunState('error'); setErrorMsg('Crawl failed'); }
         }, 3000);
@@ -263,6 +298,7 @@ export function CrawlModal({
     setPreview(null);
     setSearchQuery('');
     setOnboardUrl('');
+    setOnboardOutcome(null);
     if (!isRetry) {
       setSelectedCampIds(new Set());
       setSearchResults([]);
@@ -322,8 +358,35 @@ export function CrawlModal({
             {runState === 'done' && (
               <div className="px-6 py-10 text-center">
                 <CheckCircle className="w-10 h-10 text-pine-500 mx-auto mb-4" />
-                <p className="font-bold text-bark-700 text-lg">Crawl complete</p>
-                <p className="text-bark-400 mt-1">{runProgress?.processed} camps · {runProgress?.proposals} proposals · {runProgress?.errors} errors</p>
+                {onboardOutcome ? (
+                  <>
+                    <p className="font-bold text-bark-700 text-lg">
+                      {onboardOutcome.created > 0 ? 'Site onboarded' : 'Nothing new to add'}
+                    </p>
+                    <p className="text-bark-400 mt-1">
+                      {onboardOutcome.created} new program{onboardOutcome.created !== 1 ? 's' : ''} created
+                      {onboardOutcome.skipped > 0 && ` · ${onboardOutcome.skipped} already existed`}
+                    </p>
+                    {onboardOutcome.providerCreated && (
+                      <p className="text-xs text-pine-600 mt-1">New provider created for this domain</p>
+                    )}
+                    {onboardOutcome.skipped > 0 && (
+                      <p className="text-xs text-bark-300 mt-2 px-6">
+                        Already in the database: {onboardOutcome.skippedNames.join(', ')}
+                      </p>
+                    )}
+                    {onboardOutcome.created > 0 && (
+                      <p className="text-bark-400 mt-2 text-sm">
+                        {runProgress?.processed} camps crawled · {runProgress?.proposals} proposals · {runProgress?.errors} errors
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold text-bark-700 text-lg">Crawl complete</p>
+                    <p className="text-bark-400 mt-1">{runProgress?.processed} camps · {runProgress?.proposals} proposals · {runProgress?.errors} errors</p>
+                  </>
+                )}
                 <div className="flex gap-3 justify-center mt-6">
                   <button onClick={reset} className="btn-secondary gap-2 text-sm"><RefreshCw className="w-3.5 h-3.5" /> Run Another</button>
                   <Link href="/admin/review" className="btn-primary text-sm">Review Proposals →</Link>

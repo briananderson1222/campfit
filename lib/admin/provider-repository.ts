@@ -2,6 +2,7 @@ import { getPool } from '@/lib/db';
 import type { Provider, ProviderWithStats } from '@/lib/types';
 import { communityScopeSql } from './community-access';
 import type { ProviderChangeProposal } from './types';
+import { parseDomain } from './onboarding-validation';
 
 function db() {
   return getPool();
@@ -210,6 +211,28 @@ type CreateProviderInput = {
   communitySlug?: string;
 };
 
+/**
+ * Finds a non-archived Provider whose normalized domain matches `domain`
+ * (see `parseDomain`) — used by `POST /api/admin/providers` to block
+ * duplicate-domain manual creates (campfit#90 R2/AC2), mirroring
+ * `onboard-url/route.ts`'s existing `SELECT id, name FROM "Provider" WHERE
+ * domain = $1` dedupe lookup. Deliberately global (no community scoping) —
+ * a domain match must block creation regardless of which community the
+ * existing provider lives in. `communitySlug` is returned so the route can
+ * decide whether the requester is allowed to see *which* provider matched
+ * (see the route's 409 handling) without ever changing whether the match
+ * blocks the create.
+ */
+export async function findProviderByDomain(
+  domain: string,
+): Promise<{ id: string; name: string; slug: string; communitySlug: string } | null> {
+  const { rows } = await db().query<{ id: string; name: string; slug: string; communitySlug: string }>(
+    `SELECT id, name, slug, "communitySlug" FROM "Provider" WHERE domain = $1 AND "archivedAt" IS NULL LIMIT 1`,
+    [domain],
+  );
+  return rows[0] ?? null;
+}
+
 export async function createProvider(input: CreateProviderInput): Promise<Provider> {
   const slug = await makeUniqueSlug(input.name);
   const domain = parseDomain(input.websiteUrl);
@@ -267,7 +290,3 @@ async function makeUniqueSlug(name: string): Promise<string> {
   }
 }
 
-function parseDomain(url?: string | null): string | null {
-  if (!url) return null;
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
-}
