@@ -237,6 +237,36 @@ export async function getCandidate(
   return rows[0] ?? null;
 }
 
+/**
+ * campfit#93 (Wave 4, Task 4.1): candidates scoped to one `AggregatorSource`,
+ * for the curation-panel candidates route. Deliberately a NEW sibling to
+ * `getPendingCandidates` (not a parameterization of it) — that function's
+ * existing two-positional-arg call sites (`getPendingCandidates(slug, pool)`)
+ * are unaffected by this addition.
+ */
+export async function getCandidatesForAggregator(
+  aggregatorSourceId: string,
+  status: "PENDING" | "APPROVED" | "REJECTED" | "ALL" = "PENDING",
+  pool: Pool = getPool(),
+): Promise<ProviderCandidateRow[]> {
+  if (status === "ALL") {
+    const { rows } = await pool.query<ProviderCandidateRow>(
+      `SELECT * FROM "ProviderCandidate"
+       WHERE "aggregatorSourceId" = $1
+       ORDER BY "createdAt" DESC`,
+      [aggregatorSourceId],
+    );
+    return rows;
+  }
+  const { rows } = await pool.query<ProviderCandidateRow>(
+    `SELECT * FROM "ProviderCandidate"
+     WHERE "aggregatorSourceId" = $1 AND status = $2
+     ORDER BY "createdAt" DESC`,
+    [aggregatorSourceId, status],
+  );
+  return rows;
+}
+
 export class CandidateNotPendingError extends Error {
   constructor(public readonly status: string) {
     super(`Candidate is not PENDING (status: ${status}); refusing to act on it.`);

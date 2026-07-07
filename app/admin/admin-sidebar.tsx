@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ClipboardList, History, Database,
   ExternalLink, Menu, X, Users, LogOut, Building2, ShieldCheck, GitBranch,
-  AlertTriangle,
+  AlertTriangle, Globe2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -39,6 +39,7 @@ export function AdminSidebar({ userEmail, pendingCount, pendingProviderCount, is
     { href: "/admin/crawls", icon: <History className="w-4 h-4" />, label: "Crawl Monitor" },
     { href: "/admin/crawl-failures", icon: <AlertTriangle className="w-4 h-4" />, label: "Uncrawlable Camps" },
     { href: "/admin/providers", icon: <Building2 className="w-4 h-4" />, label: "Providers" },
+    { href: "/admin/aggregators", icon: <Globe2 className="w-4 h-4" />, label: "Aggregators" },
     { href: "/admin/camps", icon: <Database className="w-4 h-4" />, label: "Camp Data" },
     { href: "/admin/people", icon: <Users className="w-4 h-4" />, label: "People" },
     { href: "/admin/trust", icon: <ShieldCheck className="w-4 h-4" />, label: "Trust Ops" },
