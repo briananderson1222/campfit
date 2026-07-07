@@ -224,6 +224,20 @@ export async function getRankedReviewQueue(opts: {
   limit?: number;
   offset?: number;
   communitySlugs?: string[];
+  /**
+   * Deviation from the plan's literally-declared signature (Wave 2 Task
+   * 2.1 named only `limit`/`offset`/`communitySlugs`): `campId`/`providerId`
+   * are threaded through here too, reusing
+   * `buildPendingProposalsBaseQuery`'s existing support for both, so
+   * `page.tsx`'s existing `?campId=`/`?providerId=` filtered links (from
+   * `camp-editor.tsx`, `camps-table.tsx`, `first-crawl-offer.tsx`,
+   * providers' detail page) keep working once the proposals tab switches to
+   * this function — dropping them would silently regress those existing
+   * filtered views back to an unfiltered full queue. Flagged here rather
+   * than silently added with no trace.
+   */
+  campId?: string;
+  providerId?: string;
 }): Promise<{ batchReady: RankedProposal[]; needsReview: RankedProposal[]; total: number }> {
   const pool = getPool();
   const { limit, offset = 0 } = opts;
