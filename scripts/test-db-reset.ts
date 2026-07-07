@@ -56,6 +56,17 @@ const SCHEMA_FILES = [
   // tracked separately in campfit#98); only this plan's own new migration is
   // wired in.
   "prisma/migrations/016_crawl_schedule.sql",
+  // NOTE: 017_aggregator_discovery.sql (campfit#93) is ALSO intentionally not
+  // added to this list, for the same reason 013_provider_candidates.sql above
+  // isn't: it ALTERs "ProviderCandidate", a table that (per the note above)
+  // this SCHEMA_FILES list never actually creates via a run of
+  // resetTestDatabase() — 013 itself is missing from this array. A migration
+  // that ALTERs a table this list doesn't create could not be safely wired in
+  // here without first fixing #98. Schema provisioning for the new
+  // "AggregatorSource" table and the additive ProviderCandidate columns goes
+  // through `ensureAggregatorSourceSchema()`/`ensureProviderCandidateSchema()`
+  // (idempotent DDL) instead — see 017_aggregator_discovery.sql's own header
+  // comment. Tracked under the same campfit#98.
 ];
 
 /**

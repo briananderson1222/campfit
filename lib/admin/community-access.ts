@@ -103,3 +103,20 @@ export function communityScopeSql(
     values: [communitySlugs],
   };
 }
+
+/**
+ * campfit#93 (Wave 3/4): community scope for an `AggregatorSource` row, the
+ * same pre-auth "look up the community this id belongs to" pattern every
+ * other `get*CommunitySlug` helper in this file establishes — so a caller
+ * never leaks whether an id exists to an unauthorized requester (auth runs
+ * against the resolved slug BEFORE the route re-fetches the full row for a
+ * 404 check). Assumes `ensureAggregatorSourceSchema()` has already run in
+ * the same request (every aggregator route calls it idempotently first).
+ */
+export async function getAggregatorSourceCommunitySlug(aggregatorSourceId: string): Promise<string | null> {
+  const { rows } = await getPool().query<{ communitySlug: string | null }>(
+    `SELECT "communitySlug" FROM "AggregatorSource" WHERE id = $1`,
+    [aggregatorSourceId],
+  );
+  return rows[0]?.communitySlug ?? null;
+}
