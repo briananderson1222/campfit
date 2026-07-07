@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "review-provenance-validation-lane-91-gates.flow-agents-workflow.full-suite-145-145-twice-cap-fault-injection-non-vacuous-delegate-runs-session-local-summary",
+      "subjectType": "workflow-check",
+      "subjectId": "review-provenance-validation/lane-91-gates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "full suite 145/145 twice + cap fault-injection non-vacuous (delegate runs, session-local summary)",
+      "value": "pass",
+      "createdAt": "2026-07-07T01:35:35Z",
+      "updatedAt": "2026-07-07T01:35:35Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-provenance-validation-browser-evidence.flow-agents-workflow.ui-state-browser-walkthrough-deferred-per-accepted-gap-precedent-95-tracked-by-campfit-96",
+      "subjectType": "workflow-check",
+      "subjectId": "review-provenance-validation/browser-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "UI-state browser walkthrough deferred per accepted-gap precedent (#95); tracked by campfit#96",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T01:35:35Z",
+      "updatedAt": "2026-07-07T01:35:35Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "review-provenance-validation-ac1-format-badge.flow-agents-workflow.r1-ac1-per-field-format-badge-valid-invalid-uncheckable-renders-correctly-against-camp-target-schema-for-scalar-enum-enum-array-and-schema-absent-field-fixtures",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-provenance-validation/ac1-format-badge",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R1/AC1: per-field format badge (valid/invalid/uncheckable) renders correctly against CAMP_TARGET_SCHEMA for scalar, enum, enum-array, and schema-absent field fixtures.",
+      "value": "pass",
+      "createdAt": "2026-07-07T01:35:35Z",
+      "updatedAt": "2026-07-07T01:35:35Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-provenance-validation-ac2-snapshot-drilldown.flow-agents-workflow.r2-ac2-proposal-level-drill-down-resolves-a-real-fixture-seeded-traverse-snapshot-sourceref-to-its-stored-snapshot-via-parsesnapshotsourceref-the-filesystem-snapshot-store-surfaced-through-a-new-read-only-api-route-and-panel-affordance-production-population-of-snapshotref-on-real-crawl-proposals-is-an-explicit-follow-up-not-covered-by-this-ac",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-provenance-validation/ac2-snapshot-drilldown",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R2/AC2: proposal-level drill-down resolves a real (fixture-seeded) traverse-snapshot sourceRef to its stored snapshot via parseSnapshotSourceRef + the filesystem snapshot store, surfaced through a new read-only API route and panel affordance. Production population of snapshotRef on real crawl proposals is an explicit follow-up, not covered by this AC.",
+      "value": "pass",
+      "createdAt": "2026-07-07T01:35:35Z",
+      "updatedAt": "2026-07-07T01:35:35Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-provenance-validation-ac3-no-provenance-marker.flow-agents-workflow.r3-ac3-a-proposed-changes-field-with-neither-excerpt-nor-sourceurl-is-visibly-marked-with-an-explicit-no-provenance-indicator-replacing-today-s-silent-no-render-gap-existing-excerpt-sourceurl-rendering-including-the-sourceurl-only-case-is-unchanged",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "review-provenance-validation/ac3-no-provenance-marker",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "R3/AC3: a proposed-changes field with neither excerpt nor sourceUrl is visibly marked with an explicit 'No provenance' indicator, replacing today's silent no-render gap; existing excerpt/sourceUrl rendering (including the sourceUrl-only case) is unchanged.",
+      "value": "pass",
+      "createdAt": "2026-07-07T01:35:35Z",
+      "updatedAt": "2026-07-07T01:35:35Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "review-provenance-validation-review.flow-agents-workflow.iteration-1-approved-m2-scoped-authz-m3-body-cap-resolved-non-vacuous-fault-injection-proven-m1-existence-oracle-accepted-inherited-w-comment-1-cosmetic-low-accepted",
+      "subjectType": "workflow-critique",
+      "subjectId": "review-provenance-validation/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Iteration 1 APPROVED: M2 scoped-authz + M3 body cap resolved (non-vacuous, fault-injection-proven); M1 existence-oracle accepted-inherited w/ comment; 1 cosmetic LOW accepted.",
+      "value": "pass",
+      "createdAt": "2026-07-07T01:35:35Z",
+      "updatedAt": "2026-07-07T01:35:35Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T01:35:35Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:review-provenance-validation-lane-91-gates.flow-agents-workflow.full-suite-145-145-twice-cap-fault-injection-non-vacuous-delegate-runs-session-local-summary",
+      "claimId": "review-provenance-validation-lane-91-gates.flow-agents-workflow.full-suite-145-145-twice-cap-fault-injection-non-vacuous-delegate-runs-session-local-summary",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "review-provenance-validation/evidence.json",
+      "excerptOrSummary": "full suite 145/145 twice + cap fault-injection non-vacuous (delegate runs, session-local summary)",
+      "observedAt": "2026-07-07T01:35:35Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:review-provenance-validation-browser-evidence.flow-agents-workflow.ui-state-browser-walkthrough-deferred-per-accepted-gap-precedent-95-tracked-by-campfit-96",
+      "claimId": "review-provenance-validation-browser-evidence.flow-agents-workflow.ui-state-browser-walkthrough-deferred-per-accepted-gap-precedent-95-tracked-by-campfit-96",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "review-provenance-validation/evidence.json",
+      "excerptOrSummary": "UI-state browser walkthrough deferred per accepted-gap precedent (#95); tracked by campfit#96",
+      "observedAt": "2026-07-07T01:35:35Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:review-provenance-validation-lane-91-gates.flow-agents-workflow.full-suite-145-145-twice-cap-fault-injection-non-vacuous-delegate-runs-session-local-summary",
+      "claimId": "review-provenance-validation-lane-91-gates.flow-agents-workflow.full-suite-145-145-twice-cap-fault-injection-non-vacuous-delegate-runs-session-local-summary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:review-provenance-validation-lane-91-gates.flow-agents-workflow.full-suite-145-145-twice-cap-fault-injection-non-vacuous-delegate-runs-session-local-summary"
+      ],
+      "createdAt": "2026-07-07T01:35:35Z",
+      "verifiedAt": "2026-07-07T01:35:35Z"
+    },
+    {
+      "id": "evt:review-provenance-validation-ac1-format-badge.flow-agents-workflow.r1-ac1-per-field-format-badge-valid-invalid-uncheckable-renders-correctly-against-camp-target-schema-for-scalar-enum-enum-array-and-schema-absent-field-fixtures",
+      "claimId": "review-provenance-validation-ac1-format-badge.flow-agents-workflow.r1-ac1-per-field-format-badge-valid-invalid-uncheckable-renders-correctly-against-camp-target-schema-for-scalar-enum-enum-array-and-schema-absent-field-fixtures",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T01:35:35Z",
+      "verifiedAt": "2026-07-07T01:35:35Z"
+    },
+    {
+      "id": "evt:review-provenance-validation-ac2-snapshot-drilldown.flow-agents-workflow.r2-ac2-proposal-level-drill-down-resolves-a-real-fixture-seeded-traverse-snapshot-sourceref-to-its-stored-snapshot-via-parsesnapshotsourceref-the-filesystem-snapshot-store-surfaced-through-a-new-read-only-api-route-and-panel-affordance-production-population-of-snapshotref-on-real-crawl-proposals-is-an-explicit-follow-up-not-covered-by-this-ac",
+      "claimId": "review-provenance-validation-ac2-snapshot-drilldown.flow-agents-workflow.r2-ac2-proposal-level-drill-down-resolves-a-real-fixture-seeded-traverse-snapshot-sourceref-to-its-stored-snapshot-via-parsesnapshotsourceref-the-filesystem-snapshot-store-surfaced-through-a-new-read-only-api-route-and-panel-affordance-production-population-of-snapshotref-on-real-crawl-proposals-is-an-explicit-follow-up-not-covered-by-this-ac",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T01:35:35Z",
+      "verifiedAt": "2026-07-07T01:35:35Z"
+    },
+    {
+      "id": "evt:review-provenance-validation-ac3-no-provenance-marker.flow-agents-workflow.r3-ac3-a-proposed-changes-field-with-neither-excerpt-nor-sourceurl-is-visibly-marked-with-an-explicit-no-provenance-indicator-replacing-today-s-silent-no-render-gap-existing-excerpt-sourceurl-rendering-including-the-sourceurl-only-case-is-unchanged",
+      "claimId": "review-provenance-validation-ac3-no-provenance-marker.flow-agents-workflow.r3-ac3-a-proposed-changes-field-with-neither-excerpt-nor-sourceurl-is-visibly-marked-with-an-explicit-no-provenance-indicator-replacing-today-s-silent-no-render-gap-existing-excerpt-sourceurl-rendering-including-the-sourceurl-only-case-is-unchanged",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T01:35:35Z",
+      "verifiedAt": "2026-07-07T01:35:35Z"
+    },
+    {
+      "id": "evt:review-provenance-validation-review.flow-agents-workflow.iteration-1-approved-m2-scoped-authz-m3-body-cap-resolved-non-vacuous-fault-injection-proven-m1-existence-oracle-accepted-inherited-w-comment-1-cosmetic-low-accepted",
+      "claimId": "review-provenance-validation-review.flow-agents-workflow.iteration-1-approved-m2-scoped-authz-m3-body-cap-resolved-non-vacuous-fault-injection-proven-m1-existence-oracle-accepted-inherited-w-comment-1-cosmetic-low-accepted",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T01:35:35Z",
+      "verifiedAt": "2026-07-07T01:35:35Z"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ import { FieldTimelineNote } from '@/components/admin/field-timeline';
 import { FieldFormatBadge } from '@/components/admin/field-format-badge';
 import { checkFieldFormat } from '@/lib/admin/review-format-validation';
 import { FieldProvenanceMarker, hasProvenance } from '@/components/admin/field-provenance-marker';
+import { SnapshotDrilldown } from '@/components/admin/snapshot-drilldown';
 import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
@@ -725,6 +726,12 @@ export function ReviewPanel({
               {proposal.crawlTriggeredBy && <p>Triggered by: {proposal.crawlTriggeredBy}</p>}
               <p>{fields.length + alreadyApplied.size} field{(fields.length + alreadyApplied.size) !== 1 ? 's' : ''} in proposal</p>
             </div>
+
+            {/* Proposal-level "view source snapshot" drill-down (R2, campfit#91).
+                Absent for every real proposal today (snapshotRef is not yet
+                populated by the ingestion lane) — SnapshotDrilldown renders
+                nothing in that case, distinct from R3's per-field marker. */}
+            <SnapshotDrilldown proposalId={proposal.id} snapshotRef={proposal.snapshotRef} />
           </div>
 
           {/* Crawl hint */}
