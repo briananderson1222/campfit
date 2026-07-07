@@ -128,6 +128,18 @@ export interface TraverseRecrawlOptions {
   maxContentChars?: number;
   log?: (msg: string) => void;
   now?: () => number;
+  /**
+   * The known camp's `Provider.requiresRender` (migration 019,
+   * campfit#53 spa-ingestion) — sets `IngestionSourceConfig.render` on the
+   * `SourceConfig` this adapter builds (previously always unset — the exact
+   * "dead config" gap the orchestrator flagged). No `renderImpl` is added
+   * here: this adapter is called from EVERY Vercel recrawl route today (see
+   * `crawl-pipeline.ts`'s camp-strategy call site), none of which configure
+   * one — a `requiresRender: true` camp's recrawl therefore fails closed
+   * with traverse's typed `invalid-config` FetchError (AC6), never a crash,
+   * never a silently-served empty-shell fetch presented as success.
+   */
+  requiresRender?: boolean;
 }
 
 /**
@@ -369,6 +381,7 @@ export async function runTraverseRecrawlForCamp(
     key: opts.campId,
     name: opts.campName,
     url: opts.websiteUrl,
+    render: opts.requiresRender,
   };
 
   const fetchResult = await runTraverseFetchAndAssemble(src, {

@@ -58,8 +58,15 @@ vi.mock('@/lib/db', () => ({
 }));
 
 const closeRenderBrowser = vi.fn();
+const createCampfitRenderImpl = vi.fn();
 vi.mock('@/lib/ingestion/render-fetch', () => ({
   closeRenderBrowser: (...args: unknown[]) => closeRenderBrowser(...args),
+  // campfit#53 (spa-ingestion): scrape.ts now also imports this to construct
+  // the real Playwright renderImpl (the ONE place in the codebase that
+  // does). Stubbed to a fixed sentinel here (this test asserts scrape.ts's
+  // CALL SHAPE into runCrawlPipeline/runTraversePipeline, not the renderer
+  // itself — real Playwright coverage lives in scripts/test-render-fetch.ts).
+  createCampfitRenderImpl: (...args: unknown[]) => createCampfitRenderImpl(...args),
 }));
 
 import { main } from '@/scripts/scrape';
@@ -109,6 +116,10 @@ describe('scripts/scrape.ts main()', () => {
     expect(deps.mode).toBe('live-with-capture');
     // Dry-run's sink must be a true no-op — never persists anything.
     await expect(deps.sink({}, {})).resolves.toBeNull();
+    // campfit#53 (spa-ingestion, AC1/AC2): even the dry-run path wires a real
+    // renderImpl — scripts/scrape.ts is the ONLY caller that constructs one.
+    expect(createCampfitRenderImpl).toHaveBeenCalledTimes(1);
+    expect(deps.fetchOptions?.renderImpl).toBe(createCampfitRenderImpl.mock.results[0].value);
 
     expect(runCrawlPipeline).not.toHaveBeenCalled();
     expect(poolQuery).not.toHaveBeenCalled();
@@ -150,6 +161,13 @@ describe('scripts/scrape.ts main()', () => {
     // the seam's own internal ensureAnchorCamp/sink wiring.
     expect(opts.sink).toBeUndefined();
     expect(opts.crawlRunId).toBeUndefined();
+    // campfit#53 (spa-ingestion, AC1/AC2/AC7): the live sweep threads a real
+    // renderImpl through CrawlOptions.fetchOptions — the GitHub Actions
+    // execution context is the only place this is wired (see scrape.ts's
+    // own file doc); every Vercel-route caller of runCrawlPipeline leaves
+    // this unset (see the per-route doc notes added alongside this task).
+    expect(createCampfitRenderImpl).toHaveBeenCalledTimes(1);
+    expect(opts.fetchOptions?.renderImpl).toBe(createCampfitRenderImpl.mock.results[0].value);
 
     // currentByItemNames actually queries the DB pool (not a dead passthrough).
     const current = await opts.currentByItemNames('avid4', ['Some Camp']);

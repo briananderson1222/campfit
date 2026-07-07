@@ -1,30 +1,40 @@
 /**
- * render-fetch.ts — headless-Chromium fetch for JS-rendered sources
- * (issue #41).
+ * render-fetch.ts — headless-Chromium renderer for JS-rendered sources
+ * (issue #41; migrated to traverse 0.13.0's native rendered-fetch seam,
+ * campfit#53 spa-ingestion).
  *
  * Some camp sources are JS-rendered SPAs whose plain fetch returns an empty
  * shell (the markup is populated client-side after load). A per-source
- * `render: true` (see `IngestionSourceConfig.render` in ./sources.ts) routes
- * that source's fetch through here instead of a plain HTTP GET.
+ * `render: true` (see `IngestionSourceConfig.render` in ./sources.ts) opts a
+ * source into rendering — but rendering itself only actually happens when
+ * the CALLER also configures `FetchSourceOptions.renderImpl` with the
+ * function this module builds ({@link createCampfitRenderImpl}).
  *
- * Since the full traverse cutover (PR #40), `lib/ingestion/traverse-pipeline.ts`
- * is the ONLY fetch path — there is no more CSS-selector `BaseScraper`. This
- * module therefore plugs into `@kontourai/traverse/fetch`'s injectable
- * `FetchLike` seam (`FetchSourceOptions.fetch`) via {@link createRenderFetchLike},
- * so a rendered source's bytes flow into the EXACT SAME downstream path
- * (snapshot capture -> content-prep -> schema-directed extraction) a
- * plain-fetched source's bytes do today — `fetchSource`/`fetchAndExtract`
- * never know the bytes came from a browser instead of a socket.
+ * Migration note (campfit#53): before traverse 0.13.0, this module built a
+ * `FetchLike` (`createRenderFetchLike`, now removed) that FAKED a `Response`
+ * from Playwright's rendered HTML and swapped it in for
+ * `FetchSourceOptions.fetch` — that trick fetched real content, but the
+ * resulting `Snapshot` never carried `rendered: true` (it flowed through the
+ * generic wire-fetch path), which is dishonest about provenance (issue #53's
+ * R3). traverse 0.13.0 (kontourai/traverse#41) added a REAL two-key seam:
+ * `SourceConfig.render?: boolean` (the source opts in) AND
+ * `FetchSourceOptions.renderImpl?: RenderImpl` (the caller configures a
+ * renderer) — `fetchSource` only renders when BOTH are set, and a
+ * successful render becomes a normal `Snapshot` with `rendered: true`
+ * honestly set (see `docs/decisions/rendered-fetch.md` in
+ * @kontourai/traverse's own repo). This module now builds a `RenderImpl`
+ * (`createCampfitRenderImpl`), not a `FetchLike` — `renderPage()`'s browser
+ * lifecycle, networkidle->domcontentloaded fallback, and hard-timeout
+ * discipline are unchanged; only the adapter shape changed.
  *
- * `FetchLike` also serves `fetchSource`'s own robots.txt lookup (same
- * injected function, see @kontourai/traverse's fetch-source.ts) — rendering
- * a `.txt` file with a full browser would be wasteful and would corrupt
- * `parseRobots`'s plain-text parsing (Chromium wraps a text response in its
- * own HTML viewer chrome). {@link createRenderFetchLike} special-cases
- * a trailing `robots.txt` path to a plain `fetch()`, mirroring the pattern this
- * repo's own test fixtures already use (see `makeFixtureFetch` in
- * scripts/test-traverse-replay.ts) — only the configured source's actual
- * page is ever rendered.
+ * Robots handling also changed as a side effect: traverse 0.13.0 checks
+ * robots.txt EXACTLY ONCE, against the requested URL, before `renderImpl` is
+ * ever invoked (decision 3, rendered-fetch.md) — using its own existing
+ * plain-fetch robots lookup, never the injected `renderImpl`. The old
+ * `/robots.txt` plain-fetch special-case this module used to need (so a
+ * rendered `FetchLike` didn't try to render a `.txt` file with a full
+ * browser) is therefore gone: `renderImpl` is now only ever called for the
+ * actual target page.
  *
  * Browser lifecycle: a single Chromium instance is lazily launched on first
  * use and reused for every rendered source in the process (a "sweep" is one
@@ -34,16 +44,17 @@
  * once after the sweep finishes.
  *
  * Isolation: `renderPage()` throws (never swallows) on failure — including a
- * hard per-source timeout. `createRenderFetchLike()`'s FetchLike propagates
- * that throw to `fetchSource`'s own try/catch, which turns it into a typed,
- * non-throwing `FetchError` on the `FetchResult` — exactly how a plain
- * network/timeout failure is surfaced today — so `traverse-pipeline.ts`'s
- * existing per-source isolation (never throws; one source's failure never
- * stops the next) covers a render failure with no special-casing.
+ * hard per-source timeout. `createCampfitRenderImpl()`'s `RenderImpl`
+ * propagates that throw; traverse maps a thrown `renderImpl` to the existing
+ * `adapter-error` `FetchErrorKind` on the (non-throwing) `FetchResult`
+ * (decision 8, rendered-fetch.md) — exactly how a plain network/timeout
+ * failure is surfaced today — so `traverse-pipeline.ts`'s existing
+ * per-source isolation (never throws; one source's failure never stops the
+ * next) covers a render failure with no special-casing.
  */
 
 import { chromium, errors as playwrightErrors, type Browser } from "@playwright/test";
-import type { FetchLike, FetchLikeResponse } from "@kontourai/traverse/fetch";
+import type { RenderImpl, RenderResult } from "@kontourai/traverse/fetch";
 
 /** Sane default hard timeout for a single rendered source (~30s). */
 export const DEFAULT_RENDER_TIMEOUT_MS = 30_000;
@@ -51,7 +62,13 @@ export const DEFAULT_RENDER_TIMEOUT_MS = 30_000;
 const RENDER_USER_AGENT =
   "Mozilla/5.0 (compatible; CampFitBot/1.0; +https://campfit.app/bot)";
 
-export interface RenderResult {
+/**
+ * Render telemetry for ONE `renderPage()` call — deliberately NOT named
+ * `RenderResult` (that name is traverse's own exported type,
+ * `@kontourai/traverse/fetch`'s `RenderImpl` return shape) to avoid shadowing
+ * it in this file's imports.
+ */
+export interface CampfitRenderTelemetry {
   /** Fully-rendered page HTML — the same shape a plain fetch's res.text() returns. */
   html: string;
   /** Wall-clock time (ms) the render took, start to finish. */
@@ -113,7 +130,7 @@ function isTimeoutError(err: unknown): boolean {
 export async function renderPage(
   url: string,
   timeoutMs: number = DEFAULT_RENDER_TIMEOUT_MS
-): Promise<RenderResult> {
+): Promise<CampfitRenderTelemetry> {
   const start = Date.now();
   const browser = await getBrowser();
   const page = await browser.newPage({ userAgent: RENDER_USER_AGENT });
@@ -138,48 +155,56 @@ export async function renderPage(
   }
 }
 
-export interface CreateRenderFetchLikeOptions {
+export interface CreateCampfitRenderImplOptions {
   /** Hard per-attempt render timeout — see `renderPage()`. Defaults to DEFAULT_RENDER_TIMEOUT_MS. */
   timeoutMs?: number;
   /**
    * Invoked once per successful render with its telemetry, so a caller
    * (traverse-pipeline.ts) can surface render duration / fallback use on the
-   * source's result without threading a return value through the FetchLike
-   * contract itself (`FetchLike` must return a `FetchLikeResponse`, not a
-   * render-specific shape).
+   * source's result without threading a return value through traverse's
+   * `RenderImpl` contract itself (a `RenderImpl` must return a
+   * `RenderResult`, not a render-specific telemetry shape).
    */
-  onRendered?: (info: RenderResult) => void;
+  onRendered?: (info: CampfitRenderTelemetry) => void;
 }
 
 /**
- * Builds a `FetchLike` (the injectable fetch seam `@kontourai/traverse/fetch`
- * accepts as `FetchSourceOptions.fetch`) that renders every request via
- * headless Chromium — EXCEPT `/robots.txt` lookups, which fall through to a
- * plain `fetch()` (see the file doc for why). Pass this as
- * `fetchOptions.fetch` for a source with `render: true`.
+ * Builds a `RenderImpl` (`@kontourai/traverse/fetch`'s native rendered-fetch
+ * seam — see this file's doc) that renders the requested URL via headless
+ * Chromium. Pass this as `fetchOptions.renderImpl` for any source that may
+ * set `SourceConfig.render: true` — traverse only invokes it when BOTH keys
+ * are set (the two-key opt-in gate, rendered-fetch.md decision 1); a
+ * `render: true` source with no `renderImpl` configured never reaches this
+ * function at all (traverse surfaces a typed `invalid-config` `FetchError`
+ * instead).
+ *
+ * `timeoutMs`: traverse passes this call's own `SourceConfig.timeoutMs`
+ * (traverse-pipeline.ts sets it to `src.renderTimeoutMs` for a render
+ * attempt) as a DOCUMENTED HINT — traverse does NOT wrap this call in its
+ * own timeout race (unlike the old `FetchLike` seam this migrated off of;
+ * see docs/decisions/rendered-fetch.md decision 2 in @kontourai/traverse's
+ * own repo) — so THIS function is solely responsible for enforcing it,
+ * which it does by forwarding it straight to `renderPage()`'s own hard,
+ * two-attempt timeout budget. Falls back to this function's own
+ * construction-time `opts.timeoutMs`/`DEFAULT_RENDER_TIMEOUT_MS` only in the
+ * defensive case traverse ever calls this without a resolved `timeoutMs`
+ * (it always resolves one today, from its own default or the caller's
+ * `SourceConfig.timeoutMs`).
+ *
+ * Ignores `opts.userAgent`: `renderPage()`'s own `RENDER_USER_AGENT`
+ * constant already owns campfit's honest, contactable bot identity (AC4),
+ * fixed regardless of what a caller's `SourceConfig.userAgent` happens to be
+ * for the (irrelevant, since headers/UA are inert on a rendered fetch per
+ * decision 7) wire-fetch path.
  */
-export function createRenderFetchLike(opts: CreateRenderFetchLikeOptions = {}): FetchLike {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
+export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {}): RenderImpl {
+  const fallbackTimeoutMs = opts.timeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
 
-  return async (url, init): Promise<FetchLikeResponse> => {
-    if (url.endsWith("/robots.txt")) {
-      return fetch(url, {
-        method: init.method,
-        headers: init.headers,
-        redirect: init.redirect,
-        signal: init.signal,
-      });
-    }
-
+  return async (url, renderOpts): Promise<RenderResult> => {
+    const timeoutMs = renderOpts?.timeoutMs ?? fallbackTimeoutMs;
     const result = await renderPage(url, timeoutMs);
     opts.onRendered?.(result);
 
-    return {
-      status: 200,
-      headers: {
-        get: (name: string) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null),
-      },
-      text: async () => result.html,
-    };
+    return { html: result.html };
   };
 }

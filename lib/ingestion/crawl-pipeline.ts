@@ -34,7 +34,7 @@
  */
 import { getPool } from '@/lib/db';
 import type { ExtractionProvider } from '@kontourai/traverse';
-import type { SnapshotStore } from '@kontourai/traverse/fetch';
+import type { FetchSourceOptions, SnapshotStore } from '@kontourai/traverse/fetch';
 import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
 import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
 import { resolveExtractionProvider } from './resolve-extraction-provider';
@@ -363,6 +363,22 @@ export interface CrawlOptions {
    * `recordUnhandledError` call in that branch below instead).
    */
   onSourceResult?: (result: TraversePipelineSourceResult) => void | Promise<void>;
+  /**
+   * Forwarded as-is to the `sources` strategy's `TraversePipelineDeps.fetchOptions`
+   * (campfit#53 spa-ingestion, Task 2.3) — the ONLY way a caller's
+   * `FetchSourceOptions.renderImpl` (traverse 0.13.0's native rendered-fetch
+   * seam) reaches `runTraversePipelineForSource`. `scripts/scrape.ts` is the
+   * only caller that sets this today (its own `createCampfitRenderImpl()`,
+   * wired only into the GitHub Actions sweep execution context — see that
+   * script's own comment). Every Vercel-route caller of this seam
+   * deliberately leaves this unset: a `render: true` source recrawled from
+   * a route with no `renderImpl` configured fails closed with traverse's
+   * typed `invalid-config` `FetchError`, never a crash, never a silent
+   * plain fetch (AC6/AC7). Ignored by the camp strategy (which threads
+   * `Provider.requiresRender` through `TraverseRecrawlOptions` instead —
+   * see `traverse-recrawl-adapter.ts`).
+   */
+  fetchOptions?: FetchSourceOptions;
 }
 
 export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun> {
@@ -387,23 +403,35 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     resolvedCampIds = rows.map(r => r.id);
   }
 
-  // Fetch camps to crawl (scalar fields only — array relations are fetched separately per camp)
-  const campsResult = await pool.query<Camp & { id: string; name: string; websiteUrl: string; communitySlug: string; fieldSources: Record<string, { approvedAt?: string }> }>(
+  // Fetch camps to crawl (scalar fields only — array relations are fetched separately per camp).
+  // LEFT JOINs Provider so each camp carries its provider's `requiresRender`
+  // flag (migration 019, campfit#53 spa-ingestion) — threaded into
+  // `runTraverseRecrawlForCamp`'s `TraverseRecrawlOptions.requiresRender`
+  // below (AC6). COALESCE to `false` for a camp with no linked provider
+  // (never requires render) — mirrors this query's own `fieldSources`
+  // COALESCE idiom.
+  const campsResult = await pool.query<Camp & { id: string; name: string; websiteUrl: string; communitySlug: string; fieldSources: Record<string, { approvedAt?: string }>; requiresRender: boolean }>(
     resolvedCampIds?.length
-      ? `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
-               "campType", category, "campTypes", "categories", state, zip,
-               "registrationStatus", "registrationOpenDate", "registrationCloseDate", "lunchIncluded",
-               address, "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
-               "interestingDetails", "providerId", "organizationName",
-               COALESCE("fieldSources", '{}') AS "fieldSources"
-         FROM "Camp" WHERE id = ANY($1) AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`
-      : `SELECT id, name, slug, "websiteUrl", "communitySlug", neighborhood, city, description,
-               "campType", category, "campTypes", "categories", state, zip,
-               "registrationStatus", "registrationOpenDate", "registrationCloseDate", "lunchIncluded",
-               address, "applicationUrl", "contactEmail", "contactPhone", "socialLinks",
-               "interestingDetails", "providerId", "organizationName",
-               COALESCE("fieldSources", '{}') AS "fieldSources"
-         FROM "Camp" WHERE "websiteUrl" IS NOT NULL AND "websiteUrl" != '' ORDER BY "lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
+      ? `SELECT c.id, c.name, c.slug, c."websiteUrl", c."communitySlug", c.neighborhood, c.city, c.description,
+               c."campType", c.category, c."campTypes", c."categories", c.state, c.zip,
+               c."registrationStatus", c."registrationOpenDate", c."registrationCloseDate", c."lunchIncluded",
+               c.address, c."applicationUrl", c."contactEmail", c."contactPhone", c."socialLinks",
+               c."interestingDetails", c."providerId", c."organizationName",
+               COALESCE(c."fieldSources", '{}') AS "fieldSources",
+               COALESCE(p."requiresRender", false) AS "requiresRender"
+         FROM "Camp" c
+         LEFT JOIN "Provider" p ON p.id = c."providerId"
+         WHERE c.id = ANY($1) AND c."websiteUrl" IS NOT NULL AND c."websiteUrl" != ''`
+      : `SELECT c.id, c.name, c.slug, c."websiteUrl", c."communitySlug", c.neighborhood, c.city, c.description,
+               c."campType", c.category, c."campTypes", c."categories", c.state, c.zip,
+               c."registrationStatus", c."registrationOpenDate", c."registrationCloseDate", c."lunchIncluded",
+               c.address, c."applicationUrl", c."contactEmail", c."contactPhone", c."socialLinks",
+               c."interestingDetails", c."providerId", c."organizationName",
+               COALESCE(c."fieldSources", '{}') AS "fieldSources",
+               COALESCE(p."requiresRender", false) AS "requiresRender"
+         FROM "Camp" c
+         LEFT JOIN "Provider" p ON p.id = c."providerId"
+         WHERE c."websiteUrl" IS NOT NULL AND c."websiteUrl" != '' ORDER BY c."lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
     resolvedCampIds?.length ? [resolvedCampIds] : []
   );
 
@@ -579,6 +607,13 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                 provider: extractionProvider!,
                 store: snapshotStore!,
                 mode: 'live-with-capture',
+                // campfit#53 (spa-ingestion, AC6): Provider.requiresRender,
+                // joined into `camp` by the SELECT above. No `fetchOptions.renderImpl`
+                // is configured on this run (see this function's own doc / the
+                // per-route call-site notes) — a requiresRender:true camp's
+                // recrawl fails closed with traverse's typed invalid-config
+                // FetchError instead of a crash or a silent empty-shell fetch.
+                requiresRender: (camp as unknown as { requiresRender: boolean }).requiresRender,
               });
           const durationMs = Date.now() - startMs;
           const displayModel = withModelOverrideNote(result.model, options.model);
@@ -774,6 +809,7 @@ async function runSourceSweepStrategy(
         sink,
         mode: 'live-with-capture',
         currentByItemNames: options.currentByItemNames,
+        fetchOptions: options.fetchOptions,
       });
 
       // Hand the raw per-source result to the optional observer BEFORE

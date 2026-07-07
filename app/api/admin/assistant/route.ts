@@ -627,6 +627,11 @@ async function startPipeline(opts: { triggeredBy: string; campIds?: string[]; pr
     rejectRunId = reject;
   });
 
+  // campfit#53 (spa-ingestion): no `fetchOptions.renderImpl` is configured here —
+  // this is a Vercel serverless route, which cannot launch headless Chromium (see
+  // scripts/scrape.ts's file doc). A `render: true`/`requiresRender: true` source
+  // recrawled from here fails closed with traverse's typed `invalid-config`
+  // FetchError instead of a crash or a silent unrendered fetch (AC6/AC7).
   runCrawlPipeline({
     triggeredBy: opts.triggeredBy,
     trigger: 'MANUAL',

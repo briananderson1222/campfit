@@ -98,6 +98,13 @@ export async function POST(request: Request) {
     // it surfaces on the returned run/results instead, uniformly with every
     // other crawl-trigger path on this seam.
     const collected: TraversePipelineSourceResult[] = [];
+    // campfit#53 (spa-ingestion): no `fetchOptions.renderImpl` is configured
+    // here — this is a Vercel serverless route (see this file's own 10s
+    // timeout note above), which cannot launch headless Chromium. A
+    // `render: true` source swept from here fails closed with traverse's
+    // typed `invalid-config` FetchError instead of a crash or a silent
+    // unrendered fetch (AC6/AC7). Only `scripts/scrape.ts` (the GitHub
+    // Actions sweep) configures a real renderImpl.
     const run = await runCrawlPipeline({
       sources,
       triggeredBy: "admin-api:scrape",
@@ -133,6 +140,10 @@ export async function POST(request: Request) {
   const store = createInMemorySnapshotStore();
   const sink: TraverseProposalSink = async () => null;
 
+  // Same fail-closed reasoning as the live branch above: no `renderImpl` is
+  // configured for this quick, no-DB smoke check either — a `render: true`
+  // source dry-run from here surfaces traverse's typed `invalid-config`
+  // FetchError, never a silent unrendered fetch.
   const results = await runTraversePipeline(sources, {
     provider,
     store,

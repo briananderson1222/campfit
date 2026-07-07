@@ -48,13 +48,16 @@
  * `node_modules/@kontourai/traverse/README.md`'s "SPA / JS-rendered pages"
  * section. `runTraversePipelineForSource` acts on both:
  *  - Pure `js-shell-suspected` on a NON-render source: retry that source
- *    exactly ONCE with the render `FetchLike` (lib/ingestion/render-fetch.ts),
- *    re-running the SAME snapshot-capture -> extraction path a `render: true`
- *    source uses. The retry's results REPLACE the first attempt's for
- *    routing (it is a strictly better read of the page) UNLESS the render
- *    itself fails, in which case the first attempt's (partial) results are
- *    kept — partial beats none. Either way the escalation is recorded on the
- *    result (`shellEscalation`) so the sweep summary can surface it.
+ *    exactly ONCE with `SourceConfig.render: true` (the same native seam a
+ *    curated `render: true` source uses), re-running the SAME
+ *    snapshot-capture -> extraction path. Skipped
+ *    entirely (never issued) when this run has no caller-injected
+ *    `FetchSourceOptions.renderImpl` configured — see `retrySkippedNoRenderer`
+ *    below. The retry's results REPLACE the first attempt's for routing (it
+ *    is a strictly better read of the page) UNLESS the render itself fails,
+ *    in which case the first attempt's (partial) results are kept — partial
+ *    beats none. Either way the escalation is recorded on the result
+ *    (`shellEscalation`) so the sweep summary can surface it.
  *  - Downgraded `js-shell-suspected-embedded-state-available`: no render (the
  *    sidecar already makes the page extractable) — the sidecar's PRESENCE and
  *    counts are recorded on the result (`embeddedStateAvailable`) so the
@@ -87,7 +90,18 @@ import {
 import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import type { IngestionSourceConfig } from "./sources";
-import { createRenderFetchLike, DEFAULT_RENDER_TIMEOUT_MS, type RenderResult } from "./render-fetch";
+
+/**
+ * Sane default hard timeout for a single rendered source (~30s) — matches
+ * the campfit-owned renderer module's own default constant of the same
+ * name. Duplicated (not imported) as a deliberate, disclosed side effect of
+ * AC7's fix: this file must no longer import that renderer module (or the
+ * headless-browser test package it depends on) transitively at module
+ * scope, since it is reachable from every Vercel route via
+ * crawl-pipeline.ts (see the file doc's shell-detection-retry section).
+ * Only scripts/scrape.ts's own import graph pulls that dependency in now.
+ */
+const DEFAULT_RENDER_TIMEOUT_MS = 30_000;
 
 /**
  * The review-sink seam. Given one item's traverse proposal record + which
@@ -183,15 +197,33 @@ export interface TraverseEmbeddedStateInfo {
 export interface TraverseShellEscalation {
   /** the first attempt fired the pure (non-downgraded) js-shell-suspected warning. */
   shellDetected: true;
-  /** a render retry was attempted (always true today — see the file doc). */
+  /**
+   * A render retry was actually ATTEMPTED. `false` in exactly one case
+   * (campfit#53 spa-ingestion): `deps.fetchOptions?.renderImpl` was unset in
+   * this execution context (every Vercel route today), so no retry could
+   * possibly succeed — see `retrySkippedNoRenderer`. Otherwise always
+   * `true` (mirrors this field's pre-#53 behavior).
+   */
   renderRetried: boolean;
-  /** true when the render retry itself failed (fetch/timeout) — first attempt's results were kept. */
+  /**
+   * `true` when a render retry was SKIPPED entirely because no
+   * `FetchSourceOptions.renderImpl` is configured in this execution
+   * context — never issued, since it would only ever produce traverse's
+   * `invalid-config` FetchError. Absent (not `false`) whenever a retry was
+   * actually attempted (`renderRetried: true`), so this field's mere
+   * presence unambiguously flags the "shell suspected, but this run has no
+   * renderer at all" case for a caller (e.g. a future ingestion-report
+   * classifier) without overloading `renderRetryFailed`, which is reserved
+   * for a retry that WAS attempted and failed.
+   */
+  retrySkippedNoRenderer?: true;
+  /** true when the render retry itself failed (fetch/timeout) — first attempt's results were kept. Always `false` when `renderRetried` is `false`. */
   renderRetryFailed: boolean;
-  /** true when the retry grouped MORE items than the first attempt. Absent when the retry failed. */
+  /** true when the retry grouped MORE items than the first attempt. Absent when the retry failed or was skipped. */
   renderImprovedProposalCount?: boolean;
   firstAttemptItemCount: number;
   firstAttemptWarnings: string[];
-  /** Absent when the retry failed outright (no extraction to count/report from). */
+  /** Absent when the retry failed outright or was skipped (no extraction to count/report from). */
   retryAttemptItemCount?: number;
   retryAttemptWarnings?: string[];
 }
@@ -237,13 +269,26 @@ export interface TraversePipelineSourceResult {
   /** wall time (ms) for the fetch+extract call(s) — sums both attempts when a shell retry fires. */
   latencyMs: number;
   /**
-   * Render telemetry (see lib/ingestion/render-fetch.ts) — present when this
-   * source had a page RENDERED and the render itself completed, whether from
-   * `render: true` or from a shell-detection auto-retry (a render that timed
-   * out surfaces on `fetchError` — or, for a retry, on `shellEscalation` —
-   * instead, with no telemetry, exactly like any other fetch failure).
+   * Traverse's own honest, presence-is-the-marker render signal
+   * (`Snapshot.rendered`, @kontourai/traverse@0.13.0's native rendered-fetch
+   * seam — see docs/decisions/rendered-fetch.md in that package) — `true`
+   * when this source's page was actually rendered via headless Chromium
+   * (whether from `render: true` or from a shell-detection auto-retry), and
+   * absent for a plain-fetched snapshot. Migrated off the pre-0.13.0
+   * campfit-side `{durationMs, usedNetworkidleFallback}` telemetry shape
+   * (campfit#53 spa-ingestion): this file no longer constructs the renderer
+   * itself (the caller injects `FetchSourceOptions.renderImpl` — see AC7),
+   * so it has no pipeline-owned side channel for that renderer-internal
+   * telemetry anymore; `usedNetworkidleFallback` still surfaces, honestly,
+   * as a `RenderResult.warnings` entry traverse merges into
+   * `FetchResult.warnings` (see the campfit-owned renderer module's
+   * `createCampfitRenderImpl`) — visible on `result.warnings`, not a
+   * dedicated field here. A render
+   * that timed out surfaces on `fetchError` — or, for a retry, on
+   * `shellEscalation` — instead, with `rendered` absent, exactly like any
+   * other fetch failure.
    */
-  render?: { durationMs: number; usedNetworkidleFallback: boolean };
+  rendered?: true;
   /** see {@link TraverseShellEscalation}. Present only for a NON-render source whose first attempt looked like a JS shell. */
   shellEscalation?: TraverseShellEscalation;
   /** see {@link TraverseEmbeddedStateInfo}. Present only when the downgraded (embedded-state-available) shell warning fired. */
@@ -333,12 +378,37 @@ export const DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE = 40;
  */
 export const DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE = 450_000;
 
-/** One fetch+extract call (a "attempt") — factored out so the shell-retry seam can run it twice. */
+/**
+ * One fetch+extract call (an "attempt") — factored out so the shell-retry
+ * seam can run it twice. `render` sets `SourceConfig.render` (traverse
+ * 0.13.0's native rendered-fetch seam) for THIS attempt; `deps.fetchOptions`
+ * (which may or may not carry a caller-injected `renderImpl` — see AC7) is
+ * always forwarded unchanged, never swapped per-attempt: the render DECISION
+ * lives on the source config now, not on which `fetch`/`renderImpl` gets
+ * passed in. When `render` is true and `deps.fetchOptions?.renderImpl` is
+ * unset, traverse itself surfaces a typed, non-throwing `invalid-config`
+ * `FetchError` (rendered-fetch.md decision 1) — never a crash, never a
+ * silent plain fetch.
+ *
+ * `renderTimeoutMs` (only meaningful when `render` is true) becomes
+ * `SourceConfig.timeoutMs` — traverse forwards this value VERBATIM as the
+ * `timeoutMs` HINT passed to `renderImpl` (rendered-fetch.md decision 2:
+ * traverse does NOT wrap `renderImpl` in its own timeout race, unlike the
+ * pre-0.13.0 `FetchLike` seam this migrated off of), so no doubled/padded
+ * "outer traverse timeout vs. the renderer's own timeout" arithmetic is
+ * needed anymore — the renderer enforces this value directly (see the
+ * campfit-owned renderer module's `createCampfitRenderImpl`). `retries` is deliberately
+ * left unset for a render attempt (not forced to `0`): traverse ignores
+ * `SourceConfig.retries` for a rendered fetch regardless, and explicitly
+ * SETTING it would trigger a "retries do not apply to a rendered fetch"
+ * warning on every single render (decision 7) — noise this file never
+ * wants for its own default render path.
+ */
 async function runFetchAndExtractAttempt(
   src: IngestionSourceConfig,
   deps: TraversePipelineDeps,
-  fetchOptions: FetchSourceOptions | undefined,
-  timeoutOverrideMs: number | undefined,
+  render: boolean,
+  renderTimeoutMs: number | undefined,
   now: () => number
 ): Promise<{ far: FetchAndExtractResult; latencyMs: number }> {
   const startedAt = now();
@@ -348,7 +418,8 @@ async function runFetchAndExtractAttempt(
       url: src.url,
       contentType: "html",
       userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
-      ...(timeoutOverrideMs !== undefined ? { timeoutMs: timeoutOverrideMs, retries: 0 } : {}),
+      ...(render ? { render: true } : {}),
+      ...(render && renderTimeoutMs !== undefined ? { timeoutMs: renderTimeoutMs } : {}),
     },
     {
       targetSchema: CAMP_TARGET_SCHEMA,
@@ -365,7 +436,7 @@ async function runFetchAndExtractAttempt(
       // funnel through this one attempt function.
       maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
       maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
-      fetchOptions,
+      fetchOptions: deps.fetchOptions,
     }
   );
   return { far, latencyMs: now() - startedAt };
@@ -407,37 +478,23 @@ async function runCoreFetchAndExtract(
     latencyMs: 0,
   };
 
-  // `render: true` (issue #41): swap the injected FetchLike for a
-  // headless-Chromium render instead of a plain HTTP GET, and give
-  // `fetchSource` a generous outer timeoutMs + zero retries so its own
-  // AbortController/retry loop doesn't fight (or triple) renderPage()'s own
-  // hard, two-attempt timeout budget (see render-fetch.ts). Any other
-  // injected fetchOptions (e.g. a test's `sleep`/`politenessState`) are
-  // preserved; only `fetch` is overridden. The same helper backs the
-  // shell-detection auto-retry below, so a retry renders exactly the same
-  // way a curated `render: true` source does.
+  // `render: true` (issue #41; native seam since @kontourai/traverse@0.13.0,
+  // campfit#53): the render DECISION now lives on `SourceConfig.render`
+  // (set per-attempt below), not on which `fetch`/`renderImpl` gets passed
+  // in — `deps.fetchOptions` (which may or may not carry a caller-injected
+  // `renderImpl`; see AC7) is forwarded unchanged to every attempt.
+  // `renderTimeoutMs` becomes `SourceConfig.timeoutMs` for a render attempt,
+  // which traverse forwards VERBATIM as the `timeoutMs` hint to `renderImpl`
+  // (no doubled/padded outer-timeout arithmetic needed — see
+  // `runFetchAndExtractAttempt`'s doc for why).
   const renderTimeoutMs = src.renderTimeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
-  const renderFetchOptions = (): FetchSourceOptions => ({
-    ...deps.fetchOptions,
-    fetch: createRenderFetchLike({
-      timeoutMs: renderTimeoutMs,
-      onRendered: (info: RenderResult) => {
-        core.render = { durationMs: info.durationMs, usedNetworkidleFallback: info.usedNetworkidleFallback };
-      },
-    }),
-  });
-  const renderTimeoutOverrideMs = renderTimeoutMs * 2 + 5_000;
-
-  const primaryFetchOptions: FetchSourceOptions | undefined = src.render
-    ? renderFetchOptions()
-    : deps.fetchOptions;
 
   let totalLatencyMs = 0;
   const attempt1 = await runFetchAndExtractAttempt(
     src,
     deps,
-    primaryFetchOptions,
-    src.render ? renderTimeoutOverrideMs : undefined,
+    !!src.render,
+    src.render ? renderTimeoutMs : undefined,
     now
   );
   totalLatencyMs += attempt1.latencyMs;
@@ -463,24 +520,46 @@ async function runCoreFetchAndExtract(
       );
     }
 
-    if (pureShellSuspected) {
+    if (pureShellSuspected && !deps.fetchOptions?.renderImpl) {
+      // No renderer configured in this execution context (every Vercel
+      // route today — see AC7/Task 2.3): a `render: true` retry attempt
+      // here would be doomed to traverse's own `invalid-config` FetchError,
+      // wasting latency/log noise on every sweep run for a source that
+      // trips the heuristic. Log the suspicion and move on with the first
+      // attempt's (unrendered) results — never issue a retry we already
+      // know cannot succeed.
+      const firstAttemptItemCount = assembleItems(far.extraction.proposals).length;
+      log(
+        `[traverse-pipeline] ${src.key}: js-shell-suspected but no renderImpl is configured in this ` +
+          `execution context — skipping the render retry (would fail invalid-config)`
+      );
+      core.shellEscalation = {
+        shellDetected: true,
+        renderRetried: false,
+        retrySkippedNoRenderer: true,
+        renderRetryFailed: false,
+        firstAttemptItemCount,
+        firstAttemptWarnings: firstWarnings,
+      };
+    } else if (pureShellSuspected) {
       const firstAttemptItemCount = assembleItems(far.extraction.proposals).length;
       log(`[traverse-pipeline] ${src.key}: js-shell-suspected — auto-retrying with a render`);
 
       const retryAttempt = await runFetchAndExtractAttempt(
         src,
         deps,
-        renderFetchOptions(),
-        renderTimeoutOverrideMs,
+        true,
+        renderTimeoutMs,
         now
       );
       totalLatencyMs += retryAttempt.latencyMs;
 
       const renderRetryFailed = retryAttempt.far.fetch.error !== undefined;
       if (renderRetryFailed) {
-        // Render itself failed (timeout/network) — partial (first-attempt)
+        // Render itself failed (timeout/network, or traverse's own
+        // invalid-config if somehow reached) — partial (first-attempt)
         // results beat none: keep `far` as the first attempt and just note
-        // the failed retry. `core.render` stays unset, exactly like any
+        // the failed retry. `core.rendered` stays unset, exactly like any
         // other render that never completed.
         core.shellEscalation = {
           shellDetected: true,
@@ -525,6 +604,15 @@ async function runCoreFetchAndExtract(
   if (far.fetch.snapshot) {
     core.snapshotRef = far.sourceRef ?? null;
     core.snapshotBodyHash = far.fetch.snapshot.bodyHash;
+  }
+  // traverse's own honest, presence-is-the-marker render signal (see
+  // `TraversePipelineSourceResult.rendered`'s doc) — never inferred from
+  // `src.render`/`shellEscalation` alone, only from the ACTUAL resolved
+  // snapshot, so a render that traverse silently skipped (e.g. a future
+  // config path this file doesn't yet know about) can never be
+  // misreported as rendered.
+  if (far.fetch.snapshot?.rendered) {
+    core.rendered = true;
   }
 
   if (!far.extraction) {
@@ -599,8 +687,14 @@ export async function runTraversePipelineForSource(
       `(${result.routedProposalIds.filter((id) => id !== null).length} proposal(s) created)` +
       `${result.tokensUsed !== null ? `, ${result.tokensUsed} tokens` : ""}, ${result.latencyMs}ms` +
       `${result.snapshotBodyHash ? ` [snapshot ${result.snapshotBodyHash.slice(0, 12)}]` : ""}` +
-      `${result.render ? ` [rendered in ${result.render.durationMs}ms${result.render.usedNetworkidleFallback ? ", networkidle→domcontentloaded fallback" : ""}]` : ""}` +
-      `${result.shellEscalation ? ` [shell-suspected retry: ${result.shellEscalation.renderRetryFailed ? "render failed, kept first attempt" : `${result.shellEscalation.firstAttemptItemCount}->${result.shellEscalation.retryAttemptItemCount} item(s)`}]` : ""}`
+      `${result.rendered ? ` [rendered]` : ""}` +
+      `${result.shellEscalation ? ` [shell-suspected: ${
+        result.shellEscalation.retrySkippedNoRenderer
+          ? "no renderer configured, retry skipped"
+          : result.shellEscalation.renderRetryFailed
+            ? "render retry failed, kept first attempt"
+            : `${result.shellEscalation.firstAttemptItemCount}->${result.shellEscalation.retryAttemptItemCount} item(s)`
+      }]` : ""}`
   );
   return result;
 }
