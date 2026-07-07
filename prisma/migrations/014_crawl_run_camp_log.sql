@@ -1,0 +1,21 @@
+-- 014_crawl_run_camp_log.sql — fix the missing `CrawlRun.campLog` migration
+-- (campfit#85, WS11 Slice 4, Wave 1 blocking prerequisite).
+--
+-- `appendCrawlLog` (lib/admin/crawl-repository.ts), and the readers that
+-- depend on it (`/admin/crawls`, the crawl status-json route, the Crawl
+-- Monitor UI), write/read a `CrawlRun.campLog` column that has never had an
+-- accompanying migration: `git log --oneline -S"campLog" --
+-- lib/admin/crawl-repository.ts` shows exactly one commit (7ae4a21, "Live
+-- crawl monitor with per-camp logs") added the column to code with no SQL,
+-- and scripts/test-db-reset.ts's SCHEMA_FILES (001-013 + admin-schema.sql)
+-- never creates it. Verified directly: `docker exec campfit-test-pg psql -U
+-- postgres -d campfit_test -c '\d "CrawlRun"'` lists every other CrawlRun
+-- column but not campLog.
+--
+-- ADDITIVE ONLY, idempotent (`ADD COLUMN IF NOT EXISTS`) so it safely no-ops
+-- against any database (e.g. production/Supabase) that may already have this
+-- column. Matches "errorLog"'s existing `DEFAULT '[]'::jsonb` convention
+-- (scripts/sql/admin-schema.sql) and is NOT NULL so `appendCrawlLog`'s
+-- `"campLog" || $1::jsonb` concatenation never hits a NULL.
+
+ALTER TABLE "CrawlRun" ADD COLUMN IF NOT EXISTS "campLog" JSONB NOT NULL DEFAULT '[]'::jsonb;

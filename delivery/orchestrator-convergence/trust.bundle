@@ -1,0 +1,345 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "orchestrator-convergence-lane-85-gates.flow-agents-workflow.135-tests-green-post-rebase-five-re-crawl-routes-zero-diff-decommission-sweep-clean-delegate-orchestrator-runs-session-local-summary",
+      "subjectType": "workflow-check",
+      "subjectId": "orchestrator-convergence/lane-85-gates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "135+ tests green post-rebase; five re-crawl routes zero-diff; decommission sweep clean (delegate + orchestrator runs, session-local summary)",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac1-seam-defined.flow-agents-workflow.runcrawlpipeline-lib-ingestion-crawl-pipeline-ts-is-the-one-documented-orchestration-seam-serving-both-a-camp-list-strategy-and-a-source-list-strategy-through-a-shared-internal-run-record-tracker-its-exported-name-module-path-existing-crawloptions-fields-are-unchanged-additive-only",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC1-seam-defined",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "runCrawlPipeline (lib/ingestion/crawl-pipeline.ts) is the one documented orchestration seam serving both a camp-list strategy and a source-list strategy through a shared internal run-record tracker; its exported name/module path/existing CrawlOptions fields are unchanged (additive only).",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac2-five-routes-unchanged.flow-agents-workflow.all-five-re-crawl-routes-camps-campid-crawl-providers-providerid-crawl-crawl-start-crawl-onboard-url-assistant-trigger-camp-crawl-trigger-provider-crawl-keep-working-against-the-converged-tracker-with-no-observable-behavior-change",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC2-five-routes-unchanged",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "All five re-crawl routes (camps/[campId]/crawl, providers/[providerId]/crawl, crawl/start, crawl/onboard-url, assistant trigger_camp_crawl/trigger_provider_crawl) keep working against the converged tracker with no observable behavior change.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac3-sweep-converged.flow-agents-workflow.scripts-scrape-ts-and-app-api-admin-scrape-route-ts-create-update-complete-their-crawlrun-through-the-same-tracker-runcrawlpipeline-sources-uses-for-the-camp-path-live-progress-increments-during-the-run-camplog-entries-per-routed-item-errorlog-entries-with-a-real-joinable-identifier-never-campid",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC3-sweep-converged",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "scripts/scrape.ts and app/api/admin/scrape/route.ts create/update/complete their CrawlRun through the same tracker runCrawlPipeline({ sources, ... }) uses for the camp path - live progress increments during the run, campLog entries per routed item, errorLog entries with a real joinable identifier (never campId: \"\").",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac4-scripts-verified-noop.flow-agents-workflow.scripts-run-crawl-ts-and-scripts-harvest-aggregator-ts-already-camp-based-already-calling-runcrawlpipeline-require-zero-call-site-changes-verified-not-assumed",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC4-scripts-verified-noop",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "scripts/run-crawl.ts and scripts/harvest-aggregator.ts (already camp-based, already calling runCrawlPipeline) require zero call-site changes - verified, not assumed.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac5-error-vocabulary-uniform.flow-agents-workflow.source-sweep-originated-failures-are-visible-and-classifiable-the-same-way-camp-path-failures-are-getuncrawlablecamps-and-classifyerror-are-not-silently-blind-to-sweep-failures-because-of-an-unjoinable-campid",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC5-error-vocabulary-uniform",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Source-sweep-originated failures are visible and classifiable the same way camp-path failures are - getUncrawlableCamps and classifyError are not silently blind to sweep failures because of an unjoinable campId.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac6-camplog-migration-fixed.flow-agents-workflow.crawlrun-camplog-has-a-real-migration-in-prisma-migrations-and-is-registered-in-scripts-test-db-reset-ts-s-schema-files-verified-against-the-local-campfit-test-pg-container",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC6-camplog-migration-fixed",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "CrawlRun.campLog has a real migration in prisma/migrations/ and is registered in scripts/test-db-reset.ts's SCHEMA_FILES, verified against the local campfit-test-pg container.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac7-decommission-verified.flow-agents-workflow.every-piece-of-duplicate-dead-run-record-bookkeeping-identified-as-superseded-ad-hoc-createcrawlrun-completecrawlrun-in-scrape-ts-and-admin-scrape-route-duplicated-inline-tracker-logic-in-crawl-pipeline-ts-is-deleted-not-left-reachable-behind-a-fallback-each-deletion-backed-by-regression-evidence",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC7-decommission-verified",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Every piece of duplicate/dead run-record bookkeeping identified as superseded (ad hoc createCrawlRun/completeCrawlRun in scrape.ts and admin/scrape route, duplicated inline tracker logic in crawl-pipeline.ts) is deleted, not left reachable behind a fallback, each deletion backed by regression evidence.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-ac8-suite-green.flow-agents-workflow.full-regression-suite-passes-npm-run-lint-test-recrawl-adapter-test-ingestion-runner-eslint-others-npm-test-vitest-incl-new-extended-integration-test-and-onboard-url-outcomes-test-ts-test-db-reset-against-test-database-url",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "orchestrator-convergence/AC8-suite-green",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Full regression suite passes: npm run lint (test:recrawl-adapter, test:ingestion-runner, eslint, others), npm test (vitest incl. new/extended integration test and onboard-url-outcomes.test.ts), test:db:reset against TEST_DATABASE_URL.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "orchestrator-convergence-review.flow-agents-workflow.iteration-1-approved-h1-stuck-running-closed-guardedwrite-stash-proven-regression-tests-h2-tested-documented-m3-ui-surface-shipped-m4-tracked-on-98-reviewer-flag-was-body-only-read-2-pre-existing-residuals-noted-non-blocking",
+      "subjectType": "workflow-critique",
+      "subjectId": "orchestrator-convergence/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Iteration 1 APPROVED: H1 stuck-RUNNING closed (guardedWrite, stash-proven regression tests), H2 tested+documented, M3 UI surface shipped; M4 tracked on #98 (reviewer flag was body-only read); 2 pre-existing residuals noted non-blocking.",
+      "value": "pass",
+      "createdAt": "2026-07-07T02:28:20Z",
+      "updatedAt": "2026-07-07T02:28:20Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T02:28:20Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:orchestrator-convergence-lane-85-gates.flow-agents-workflow.135-tests-green-post-rebase-five-re-crawl-routes-zero-diff-decommission-sweep-clean-delegate-orchestrator-runs-session-local-summary",
+      "claimId": "orchestrator-convergence-lane-85-gates.flow-agents-workflow.135-tests-green-post-rebase-five-re-crawl-routes-zero-diff-decommission-sweep-clean-delegate-orchestrator-runs-session-local-summary",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "orchestrator-convergence/evidence.json",
+      "excerptOrSummary": "135+ tests green post-rebase; five re-crawl routes zero-diff; decommission sweep clean (delegate + orchestrator runs, session-local summary)",
+      "observedAt": "2026-07-07T02:28:20Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:orchestrator-convergence-lane-85-gates.flow-agents-workflow.135-tests-green-post-rebase-five-re-crawl-routes-zero-diff-decommission-sweep-clean-delegate-orchestrator-runs-session-local-summary",
+      "claimId": "orchestrator-convergence-lane-85-gates.flow-agents-workflow.135-tests-green-post-rebase-five-re-crawl-routes-zero-diff-decommission-sweep-clean-delegate-orchestrator-runs-session-local-summary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:orchestrator-convergence-lane-85-gates.flow-agents-workflow.135-tests-green-post-rebase-five-re-crawl-routes-zero-diff-decommission-sweep-clean-delegate-orchestrator-runs-session-local-summary"
+      ],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac1-seam-defined.flow-agents-workflow.runcrawlpipeline-lib-ingestion-crawl-pipeline-ts-is-the-one-documented-orchestration-seam-serving-both-a-camp-list-strategy-and-a-source-list-strategy-through-a-shared-internal-run-record-tracker-its-exported-name-module-path-existing-crawloptions-fields-are-unchanged-additive-only",
+      "claimId": "orchestrator-convergence-ac1-seam-defined.flow-agents-workflow.runcrawlpipeline-lib-ingestion-crawl-pipeline-ts-is-the-one-documented-orchestration-seam-serving-both-a-camp-list-strategy-and-a-source-list-strategy-through-a-shared-internal-run-record-tracker-its-exported-name-module-path-existing-crawloptions-fields-are-unchanged-additive-only",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac2-five-routes-unchanged.flow-agents-workflow.all-five-re-crawl-routes-camps-campid-crawl-providers-providerid-crawl-crawl-start-crawl-onboard-url-assistant-trigger-camp-crawl-trigger-provider-crawl-keep-working-against-the-converged-tracker-with-no-observable-behavior-change",
+      "claimId": "orchestrator-convergence-ac2-five-routes-unchanged.flow-agents-workflow.all-five-re-crawl-routes-camps-campid-crawl-providers-providerid-crawl-crawl-start-crawl-onboard-url-assistant-trigger-camp-crawl-trigger-provider-crawl-keep-working-against-the-converged-tracker-with-no-observable-behavior-change",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac3-sweep-converged.flow-agents-workflow.scripts-scrape-ts-and-app-api-admin-scrape-route-ts-create-update-complete-their-crawlrun-through-the-same-tracker-runcrawlpipeline-sources-uses-for-the-camp-path-live-progress-increments-during-the-run-camplog-entries-per-routed-item-errorlog-entries-with-a-real-joinable-identifier-never-campid",
+      "claimId": "orchestrator-convergence-ac3-sweep-converged.flow-agents-workflow.scripts-scrape-ts-and-app-api-admin-scrape-route-ts-create-update-complete-their-crawlrun-through-the-same-tracker-runcrawlpipeline-sources-uses-for-the-camp-path-live-progress-increments-during-the-run-camplog-entries-per-routed-item-errorlog-entries-with-a-real-joinable-identifier-never-campid",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac4-scripts-verified-noop.flow-agents-workflow.scripts-run-crawl-ts-and-scripts-harvest-aggregator-ts-already-camp-based-already-calling-runcrawlpipeline-require-zero-call-site-changes-verified-not-assumed",
+      "claimId": "orchestrator-convergence-ac4-scripts-verified-noop.flow-agents-workflow.scripts-run-crawl-ts-and-scripts-harvest-aggregator-ts-already-camp-based-already-calling-runcrawlpipeline-require-zero-call-site-changes-verified-not-assumed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac5-error-vocabulary-uniform.flow-agents-workflow.source-sweep-originated-failures-are-visible-and-classifiable-the-same-way-camp-path-failures-are-getuncrawlablecamps-and-classifyerror-are-not-silently-blind-to-sweep-failures-because-of-an-unjoinable-campid",
+      "claimId": "orchestrator-convergence-ac5-error-vocabulary-uniform.flow-agents-workflow.source-sweep-originated-failures-are-visible-and-classifiable-the-same-way-camp-path-failures-are-getuncrawlablecamps-and-classifyerror-are-not-silently-blind-to-sweep-failures-because-of-an-unjoinable-campid",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac6-camplog-migration-fixed.flow-agents-workflow.crawlrun-camplog-has-a-real-migration-in-prisma-migrations-and-is-registered-in-scripts-test-db-reset-ts-s-schema-files-verified-against-the-local-campfit-test-pg-container",
+      "claimId": "orchestrator-convergence-ac6-camplog-migration-fixed.flow-agents-workflow.crawlrun-camplog-has-a-real-migration-in-prisma-migrations-and-is-registered-in-scripts-test-db-reset-ts-s-schema-files-verified-against-the-local-campfit-test-pg-container",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac7-decommission-verified.flow-agents-workflow.every-piece-of-duplicate-dead-run-record-bookkeeping-identified-as-superseded-ad-hoc-createcrawlrun-completecrawlrun-in-scrape-ts-and-admin-scrape-route-duplicated-inline-tracker-logic-in-crawl-pipeline-ts-is-deleted-not-left-reachable-behind-a-fallback-each-deletion-backed-by-regression-evidence",
+      "claimId": "orchestrator-convergence-ac7-decommission-verified.flow-agents-workflow.every-piece-of-duplicate-dead-run-record-bookkeeping-identified-as-superseded-ad-hoc-createcrawlrun-completecrawlrun-in-scrape-ts-and-admin-scrape-route-duplicated-inline-tracker-logic-in-crawl-pipeline-ts-is-deleted-not-left-reachable-behind-a-fallback-each-deletion-backed-by-regression-evidence",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-ac8-suite-green.flow-agents-workflow.full-regression-suite-passes-npm-run-lint-test-recrawl-adapter-test-ingestion-runner-eslint-others-npm-test-vitest-incl-new-extended-integration-test-and-onboard-url-outcomes-test-ts-test-db-reset-against-test-database-url",
+      "claimId": "orchestrator-convergence-ac8-suite-green.flow-agents-workflow.full-regression-suite-passes-npm-run-lint-test-recrawl-adapter-test-ingestion-runner-eslint-others-npm-test-vitest-incl-new-extended-integration-test-and-onboard-url-outcomes-test-ts-test-db-reset-against-test-database-url",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    },
+    {
+      "id": "evt:orchestrator-convergence-review.flow-agents-workflow.iteration-1-approved-h1-stuck-running-closed-guardedwrite-stash-proven-regression-tests-h2-tested-documented-m3-ui-surface-shipped-m4-tracked-on-98-reviewer-flag-was-body-only-read-2-pre-existing-residuals-noted-non-blocking",
+      "claimId": "orchestrator-convergence-review.flow-agents-workflow.iteration-1-approved-h1-stuck-running-closed-guardedwrite-stash-proven-regression-tests-h2-tested-documented-m3-ui-surface-shipped-m4-tracked-on-98-reviewer-flag-was-body-only-read-2-pre-existing-residuals-noted-non-blocking",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T02:28:20Z",
+      "verifiedAt": "2026-07-07T02:28:20Z"
+    }
+  ]
+}

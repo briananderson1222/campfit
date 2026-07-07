@@ -6,8 +6,33 @@
  *
  * dryRun=true runs fetch+extraction (in "live" fetch mode, no snapshot
  * persisted) and reports items found WITHOUT calling the review sink (no DB
- * write) — mirrors the old scraper route's dry-run contract. dryRun=false
- * runs the full pipeline (snapshot capture + routing to createProposal).
+ * write) — mirrors the old scraper route's dry-run contract, and stays OFF
+ * the shared orchestration seam below: `runCrawlPipeline`'s `sources`
+ * strategy always creates a real `CrawlRun` row (no dry-run concept of its
+ * own — mirrors `scripts/scrape.ts`'s identical `--dry-run` gating), so a
+ * dry run still calls `traverse-pipeline.ts`'s lower-level
+ * `runTraversePipeline` directly, exactly as before.
+ *
+ * dryRun=false runs the full pipeline through `runCrawlPipeline({ sources,
+ * ... })` (lib/ingestion/crawl-pipeline.ts) — THE one orchestration seam
+ * campfit#85 (WS11 Slice 4) converges every crawl trigger onto. This route
+ * no longer hand-rolls `createCrawlRun`/`completeCrawlRun` or its own
+ * `ensureAnchorCamp`+sink — the same shared run-record tracker the camp-path
+ * re-crawl routes use now backs this sweep too, so it gets live
+ * progress/campLog/errorLog writes and a real, joinable failure identifier
+ * (`source:<sourceKey>`, never the pre-convergence unjoinable `campId: ""`)
+ * for free (see crawl-pipeline.ts's file doc / crawl-run-tracker.ts).
+ * `CrawlOptions.onSourceResult` (Wave 4 addition, shared with
+ * `scripts/scrape.ts`'s identical need) collects the same per-source
+ * `TraversePipelineSourceResult[]` this route always built its response
+ * from, since `runCrawlPipeline` itself returns only the final `CrawlRun` —
+ * so the response's `results` array keeps its pre-existing per-source shape
+ * (source/url/ok/itemCount/routedFieldCount/tokensUsed/model/latencyMs/
+ * fetchError/extractionError/warnings) unchanged for API compatibility, with
+ * `runId`/`status` added on top (additive — never exposed before) so a
+ * caller can also poll `/api/admin/crawl/[runId]/status(-json)` (or the
+ * Crawl Monitor UI) for live progress mid-sweep, which this route never
+ * offered pre-convergence.
  *
  * Note: Vercel serverless functions have a 10s default timeout.
  * For long-running sweeps, use GitHub Actions (.github/workflows/scrape.yml)
@@ -16,17 +41,33 @@
 
 import { NextResponse } from "next/server";
 import { INGESTION_SOURCES } from "@/lib/ingestion/sources";
-import { slugify } from "@/lib/ingestion/slug";
-import { runTraversePipeline, type TraverseProposalSink } from "@/lib/ingestion/traverse-pipeline";
-import { createInMemorySnapshotStore, createFilesystemSnapshotStore } from "@kontourai/traverse/fetch";
-import { SNAPSHOT_STORE_ROOT } from "@/lib/ingestion/traverse-snapshot-store";
+import {
+  runTraversePipeline,
+  type TraverseProposalSink,
+  type TraversePipelineSourceResult,
+} from "@/lib/ingestion/traverse-pipeline";
+import { createInMemorySnapshotStore } from "@kontourai/traverse/fetch";
 import { resolveExtractionProvider } from "@/lib/ingestion/resolve-extraction-provider";
-import { createProposal } from "@/lib/admin/review-repository";
-import { createCrawlRun, completeCrawlRun } from "@/lib/admin/crawl-repository";
-import { getPool } from "@/lib/db";
+import { runCrawlPipeline } from "@/lib/ingestion/crawl-pipeline";
 import { DatumError } from "@kontourai/datum";
 
 export const maxDuration = 60; // Vercel Pro allows up to 300s
+
+function toResponseResult(r: TraversePipelineSourceResult) {
+  return {
+    source: r.source,
+    url: r.url,
+    ok: r.ok,
+    itemCount: r.itemCount,
+    routedFieldCount: r.routedFieldCount,
+    tokensUsed: r.tokensUsed,
+    model: r.model,
+    latencyMs: r.latencyMs,
+    fetchError: r.fetchError,
+    extractionError: r.extractionError,
+    warnings: r.warnings,
+  };
+}
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization");
@@ -46,6 +87,36 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!dryRun) {
+    // Live sweep — converged onto the one orchestration seam (campfit#85,
+    // WS11 Slice 4). Provider resolution/init failure is handled INSIDE
+    // `runCrawlPipeline` (mirrors the camp-path strategy's
+    // `providerInitError` handling): it records a well-defined per-source
+    // failure and marks the run FAILED rather than throwing, so a
+    // datum/provider config error no longer 500s this request the way the
+    // pre-convergence preflight check below (still used for dryRun) did —
+    // it surfaces on the returned run/results instead, uniformly with every
+    // other crawl-trigger path on this seam.
+    const collected: TraversePipelineSourceResult[] = [];
+    const run = await runCrawlPipeline({
+      sources,
+      triggeredBy: "admin-api:scrape",
+      trigger: "MANUAL",
+      onSourceResult: (result) => {
+        collected.push(result);
+      },
+    });
+
+    return NextResponse.json({
+      runId: run.id,
+      status: run.status,
+      results: collected.map(toResponseResult),
+    });
+  }
+
+  // dryRun: extract only, no persisted snapshot, no DB write, no CrawlRun —
+  // an in-memory store satisfies fetchAndExtract's "live" mode requirement
+  // without ever touching the filesystem, the review sink, or the tracker.
   let provider;
   try {
     provider = resolveExtractionProvider().provider;
@@ -59,85 +130,17 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  // dryRun: extract only, no persisted snapshot, no DB write — an in-memory
-  // store satisfies fetchAndExtract's "live" mode requirement without ever
-  // touching the filesystem or the review sink.
-  const store = dryRun
-    ? createInMemorySnapshotStore()
-    : createFilesystemSnapshotStore({ root: SNAPSHOT_STORE_ROOT });
-
-  let crawlRunId: string | null = null;
-  if (!dryRun) {
-    const crawlRun = await createCrawlRun({
-      triggeredBy: "admin-api:scrape",
-      trigger: "MANUAL",
-      totalCamps: sources.length,
-    });
-    crawlRunId = crawlRun.id;
-  }
-
-  const sink: TraverseProposalSink = async (record, meta) => {
-    if (dryRun || !crawlRunId) return null;
-    const pool = getPool();
-    const slug = slugify(record.itemName) || `item-${Date.now()}`;
-    const existing = await pool.query(`SELECT id FROM "Camp" WHERE slug = $1`, [slug]);
-    let campId: string;
-    if (existing.rows.length > 0) {
-      campId = existing.rows[0].id as string;
-    } else {
-      const inserted = await pool.query(
-        `INSERT INTO "Camp" (
-           id, slug, name, description, notes, "campType", category, "websiteUrl",
-           "interestingDetails", city, neighborhood, address, "lunchIncluded",
-           "registrationStatus", "sourceType", "sourceUrl", "dataConfidence", "lastVerifiedAt"
-         ) VALUES (
-           gen_random_uuid()::text, $1, $2, '', NULL, 'SUMMER_DAY'::"CampType",
-           'OTHER'::"CampCategory", $3, NULL, '', '', '', false,
-           'UNKNOWN'::"RegistrationStatus", 'SCRAPER'::"SourceType", $3,
-           'PLACEHOLDER'::"DataConfidence", NOW()
-         ) RETURNING id`,
-        [slug, record.itemName, meta.sourceUrl]
-      );
-      campId = inserted.rows[0].id as string;
-    }
-    return createProposal({
-      campId,
-      crawlRunId,
-      sourceUrl: meta.sourceUrl,
-      rawExtraction: record.rawExtraction,
-      proposedChanges: record.proposedChanges,
-      overallConfidence: record.overallConfidence,
-      extractionModel: record.extractionModel,
-    });
-  };
+  const store = createInMemorySnapshotStore();
+  const sink: TraverseProposalSink = async () => null;
 
   const results = await runTraversePipeline(sources, {
     provider,
     store,
     sink,
-    mode: dryRun ? "live" : "live-with-capture",
+    mode: "live",
   });
 
-  if (crawlRunId) {
-    const errorLog = results
-      .filter((r) => r.fetchError || r.extractionError)
-      .map((r) => ({ campId: "", error: r.fetchError ?? r.extractionError ?? "", url: r.url }));
-    await completeCrawlRun(crawlRunId, "COMPLETED", errorLog);
-  }
-
   return NextResponse.json({
-    results: results.map((r) => ({
-      source: r.source,
-      url: r.url,
-      ok: r.ok,
-      itemCount: r.itemCount,
-      routedFieldCount: r.routedFieldCount,
-      tokensUsed: r.tokensUsed,
-      model: r.model,
-      latencyMs: r.latencyMs,
-      fetchError: r.fetchError,
-      extractionError: r.extractionError,
-      warnings: r.warnings,
-    })),
+    results: results.map(toResponseResult),
   });
 }
