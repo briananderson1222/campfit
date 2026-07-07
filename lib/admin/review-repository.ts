@@ -1,9 +1,11 @@
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import { getPool } from '@/lib/db';
 import type { CampChangeProposal, ProposedChanges, ProposalStatus } from './types';
 import { communityScopeSql } from './community-access';
 import { getCampFieldTimeline } from './field-metadata';
+import { CAMP_SCALAR_FIELDS } from './proposal-fields';
+import { deriveFieldCorroboration, type FieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 
 export async function createProposal(opts: {
   campId: string;
@@ -48,16 +50,21 @@ export async function createProposal(opts: {
   return result.rows[0].id;
 }
 
-export async function getPendingProposals(opts: {
-  limit?: number;
-  offset?: number;
+/**
+ * Shared WHERE-clause/param builder for the "pending Camp proposal" base
+ * query — factored out of `getPendingProposals` (campfit#51, Wave 2 Task
+ * 2.1) so `getRankedReviewQueue` (below) shares the SAME filter semantics
+ * (status/minConfidence/campId/providerId/community scope) rather than
+ * duplicating them. Returns only the WHERE clause + its positional param
+ * values; callers append their own SELECT/JOIN/ORDER BY/LIMIT.
+ */
+function buildPendingProposalsBaseQuery(opts: {
   minConfidence?: number;
   campId?: string;
   providerId?: string;
   communitySlugs?: string[];
-}): Promise<{ proposals: CampChangeProposal[]; total: number }> {
-  const pool = getPool();
-  const { limit = 20, offset = 0, minConfidence = 0, campId, providerId, communitySlugs } = opts;
+}): { whereClause: string; filterValues: unknown[]; communityScopeClause: string } {
+  const { minConfidence = 0, campId, providerId, communitySlugs } = opts;
   const filters = [`p.status = 'PENDING'`, `p."overallConfidence" >= $1`];
   const filterValues: unknown[] = [minConfidence];
   const communityScope = communityScopeSql(communitySlugs, `c."communitySlug"`, filterValues.length + 1);
@@ -75,18 +82,35 @@ export async function getPendingProposals(opts: {
     filters.push(`c."providerId" = $${filterValues.length}`);
   }
 
-  const whereClause = filters.join(' AND ');
+  return { whereClause: filters.join(' AND '), filterValues, communityScopeClause: communityScope.clause };
+}
+
+const PENDING_PROPOSALS_SELECT = `
+  SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
+         c."providerId", c."lastVerifiedAt",
+         r."startedAt" AS "crawlStartedAt", r."completedAt" AS "crawlCompletedAt", r.trigger AS "crawlTrigger"
+  FROM "CampChangeProposal" p
+  JOIN "Camp" c ON c.id = p."campId"
+  LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
+`;
+
+export async function getPendingProposals(opts: {
+  limit?: number;
+  offset?: number;
+  minConfidence?: number;
+  campId?: string;
+  providerId?: string;
+  communitySlugs?: string[];
+}): Promise<{ proposals: CampChangeProposal[]; total: number }> {
+  const pool = getPool();
+  const { limit = 20, offset = 0 } = opts;
+  const { whereClause, filterValues, communityScopeClause } = buildPendingProposalsBaseQuery(opts);
   const rowValues = [...filterValues, limit, offset];
 
   const [rows, countRow] = await Promise.all([
     pool.query(
-      `SELECT p.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug",
-              c."providerId", c."lastVerifiedAt",
-              r."startedAt" AS "crawlStartedAt", r."completedAt" AS "crawlCompletedAt", r.trigger AS "crawlTrigger"
-       FROM "CampChangeProposal" p
-       JOIN "Camp" c ON c.id = p."campId"
-       LEFT JOIN "CrawlRun" r ON r.id = p."crawlRunId"
-       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScope.clause}
+      `${PENDING_PROPOSALS_SELECT}
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}
        ORDER BY p.priority DESC, p."createdAt" DESC
        LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
       rowValues
@@ -95,7 +119,7 @@ export async function getPendingProposals(opts: {
       `SELECT COUNT(*)
        FROM "CampChangeProposal" p
        JOIN "Camp" c ON c.id = p."campId"
-       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScope.clause}`,
+       WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}`,
       filterValues
     ),
   ]);
@@ -103,6 +127,150 @@ export async function getPendingProposals(opts: {
   return {
     proposals: rows.rows,
     total: parseInt(countRow.rows[0].count),
+  };
+}
+
+/**
+ * Safety ceiling on the ranked queue's full-pending-set fetch — mirrors the
+ * existing, already-accepted 500-row cap in `getPendingProposalQueue` below
+ * (same class of documented limitation, not new debt). The ranked queue
+ * needs the FULL pending set (both lanes) rather than one page at a time
+ * (see `getRankedReviewQueue`'s own comment for why), so its ceiling is
+ * somewhat higher.
+ */
+const RANKED_QUEUE_SAFETY_CAP = 1000;
+
+/**
+ * Bounded per-camp history depth for corroboration derivation
+ * (`getCampProposalHistoryBatch`) — avoids an unbounded history scan for a
+ * camp with a long crawl history.
+ */
+const PROPOSAL_HISTORY_DEPTH_PER_CAMP = 20;
+
+/**
+ * One query, bounded per-camp via a window function, returning every Camp's
+ * recent `CampChangeProposal` history (any status — a rejected/approved
+ * prior proposal for the same field/value still corroborates, since
+ * corroboration is about independent OBSERVATION agreement, not about the
+ * prior proposal's own review outcome) as `deriveFieldCorroboration`'s input
+ * shape. Grouped into a `Map<campId, ProposalHistoryRow[]>` in JS.
+ */
+export async function getCampProposalHistoryBatch(pool: Pool, campIds: string[]): Promise<Map<string, ProposalHistoryRow[]>> {
+  const map = new Map<string, ProposalHistoryRow[]>();
+  if (campIds.length === 0) return map;
+
+  const { rows } = await pool.query<{
+    id: string;
+    campId: string;
+    proposedChanges: ProposedChanges;
+    sourceUrl: string;
+    crawlRunId: string | null;
+    createdAt: string | Date;
+  }>(
+    `SELECT id, "campId", "proposedChanges", "sourceUrl", "crawlRunId", "createdAt"
+     FROM (
+       SELECT id, "campId", "proposedChanges", "sourceUrl", "crawlRunId", "createdAt",
+              ROW_NUMBER() OVER (PARTITION BY "campId" ORDER BY "createdAt" DESC) AS rn
+       FROM "CampChangeProposal"
+       WHERE "campId" = ANY($1::text[])
+     ) ranked
+     WHERE rn <= $2`,
+    [campIds, PROPOSAL_HISTORY_DEPTH_PER_CAMP],
+  );
+
+  for (const row of rows) {
+    const historyRow: ProposalHistoryRow = {
+      id: row.id,
+      proposedChanges: row.proposedChanges,
+      sourceUrl: row.sourceUrl,
+      crawlRunId: row.crawlRunId,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    };
+    const existing = map.get(row.campId);
+    if (existing) existing.push(historyRow);
+    else map.set(row.campId, [historyRow]);
+  }
+
+  return map;
+}
+
+/** A pending `CampChangeProposal`, annotated with its per-scalar-field exact-corroboration derivation. */
+export interface RankedProposal extends CampChangeProposal {
+  fieldCorroboration: Record<string, FieldCorroboration>;
+  /** Count of this proposal's scalar fields with `fieldCorroboration[field].exact === true`. */
+  batchEligibleFieldCount: number;
+}
+
+/**
+ * Confidence-ranked, two-lane review queue (campfit#51 R1/R2, Wave 2 Task
+ * 2.1). Reuses the SAME already-persisted `CampChangeProposal.overallConfidence`
+ * ranking signal `getPendingProposals` already exposes via `ConfidenceBadge` —
+ * no new scoring engine. Splits the full pending set (within the given
+ * community scope) into:
+ *
+ *  - `batchReady`: >=1 scalar field claim is exact-corroborated
+ *    (`deriveFieldCorroboration`), sorted `priority DESC, overallConfidence
+ *    DESC` — safest, fastest to dispose of first.
+ *  - `needsReview`: 0 corroborated field claims, sorted `priority DESC,
+ *    overallConfidence ASC` — riskiest/lowest-confidence surfaced first, so
+ *    limited reviewer attention lands on what most needs scrutiny.
+ *
+ * `limit`/`offset` are applied to EACH lane independently in JS — an
+ * explicit, named simplification since the two lanes are visually separate
+ * sections in the UI, not one combined list (pagination is per-lane, not a
+ * single combined page).
+ */
+export async function getRankedReviewQueue(opts: {
+  limit?: number;
+  offset?: number;
+  communitySlugs?: string[];
+}): Promise<{ batchReady: RankedProposal[]; needsReview: RankedProposal[]; total: number }> {
+  const pool = getPool();
+  const { limit, offset = 0 } = opts;
+  const { whereClause, filterValues, communityScopeClause } = buildPendingProposalsBaseQuery(opts);
+
+  const { rows } = await pool.query<CampChangeProposal>(
+    `${PENDING_PROPOSALS_SELECT}
+     WHERE ${whereClause} AND c."archivedAt" IS NULL${communityScopeClause}
+     ORDER BY p.priority DESC, p."overallConfidence" DESC
+     LIMIT $${filterValues.length + 1}`,
+    [...filterValues, RANKED_QUEUE_SAFETY_CAP],
+  );
+
+  const campIds = Array.from(new Set(rows.map((row) => row.campId)));
+  const historyByCamp = await getCampProposalHistoryBatch(pool, campIds);
+
+  const ranked: RankedProposal[] = rows.map((proposal) => {
+    const history = historyByCamp.get(proposal.campId) ?? [];
+    const fieldCorroboration: Record<string, FieldCorroboration> = {};
+    let batchEligibleFieldCount = 0;
+    for (const field of Object.keys(proposal.proposedChanges)) {
+      if (!CAMP_SCALAR_FIELDS.includes(field)) continue;
+      const corroboration = deriveFieldCorroboration({
+        targetProposalId: proposal.id,
+        targetCrawlRunId: proposal.crawlRunId,
+        field,
+        history,
+      });
+      fieldCorroboration[field] = corroboration;
+      if (corroboration.exact) batchEligibleFieldCount += 1;
+    }
+    return { ...proposal, fieldCorroboration, batchEligibleFieldCount };
+  });
+
+  const batchReady = ranked
+    .filter((proposal) => proposal.batchEligibleFieldCount > 0)
+    .sort((a, b) => (b.priority - a.priority) || (b.overallConfidence - a.overallConfidence));
+  const needsReview = ranked
+    .filter((proposal) => proposal.batchEligibleFieldCount === 0)
+    .sort((a, b) => (b.priority - a.priority) || (a.overallConfidence - b.overallConfidence));
+
+  const paginate = (list: RankedProposal[]) => (limit === undefined ? list : list.slice(offset, offset + limit));
+
+  return {
+    batchReady: paginate(batchReady),
+    needsReview: paginate(needsReview),
+    total: ranked.length,
   };
 }
 
