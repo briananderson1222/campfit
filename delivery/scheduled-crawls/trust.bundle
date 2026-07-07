@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "scheduled-crawls-lane-92-gates.flow-agents-workflow.full-suite-lint-chain-with-new-typecheck-gate-build-green-auth-hardening-mutation-tested-delegate-runs-session-local-summary",
+      "subjectType": "workflow-check",
+      "subjectId": "scheduled-crawls/lane-92-gates",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "full suite/lint-chain(with new typecheck gate)/build green; auth-hardening mutation-tested (delegate runs, session-local summary)",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "scheduled-crawls-ac1.flow-agents-workflow.r1-a-scheduled-cron-invocation-executes-a-bounded-batch-default-5-cap-10-through-runcrawlpipeline-campids-trigger-scheduled-limit-and-records-a-crawlrun-with-trigger-scheduled",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "scheduled-crawls/AC1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "(R1) A scheduled cron invocation executes a bounded batch (default 5, cap 10) through runCrawlPipeline({campIds, trigger:'SCHEDULED', limit}) and records a CrawlRun with trigger=SCHEDULED.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "scheduled-crawls-ac2.flow-agents-workflow.r2-schedule-enable-disable-priority-batch-size-persist-crawlschedule-row-and-render-in-admin-crawls-with-last-next-run",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "scheduled-crawls/AC2",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "(R2) Schedule enable/disable + priority + batch size persist (CrawlSchedule row) and render in /admin/crawls with last/next run.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "scheduled-crawls-ac3.flow-agents-workflow.r3-single-progress-transport-json-polling-status-json-shared-by-monitor-modal-button-sse-route-retired",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "scheduled-crawls/AC3",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "(R3) Single progress transport (JSON polling /status-json) shared by monitor/modal/button; SSE route retired.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "scheduled-crawls-ac4.flow-agents-workflow.r4-crawlrun-records-and-the-crawl-monitor-keep-working-unchanged-for-scheduled-runs",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "scheduled-crawls/AC4",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "(R4) CrawlRun records and the Crawl Monitor keep working unchanged for SCHEDULED runs.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "scheduled-crawls-tg1.flow-agents-workflow.wave-0-owner-approved-fold-in-not-a-92-ac-tsc-noemit-runs-as-part-of-npm-run-lint-tests-type-gate-coverage-clean-at-delivery",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "scheduled-crawls/TG1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Wave 0 (owner-approved fold-in, not a #92 AC): tsc --noEmit runs as part of npm run lint (tests/** type-gate coverage), clean at delivery.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "scheduled-crawls-review.flow-agents-workflow.iteration-1-approved-high-panel-crash-3-mediums-fail-open-cron-secret-pipeline-throw-coverage-resolver-truthy-semantics-all-resolved-with-revert-proven-tests-1-new-low-retry-unmount-cleanup-accepted-under-96",
+      "subjectType": "workflow-critique",
+      "subjectId": "scheduled-crawls/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Iteration 1 APPROVED: HIGH panel crash + 3 MEDIUMs (fail-open cron secret, pipeline-throw coverage, resolver truthy semantics) all resolved with revert-proven tests; 1 new LOW (retry unmount cleanup) accepted under #96.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:08:17Z",
+      "updatedAt": "2026-07-07T04:08:17Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T04:08:17Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:scheduled-crawls-lane-92-gates.flow-agents-workflow.full-suite-lint-chain-with-new-typecheck-gate-build-green-auth-hardening-mutation-tested-delegate-runs-session-local-summary",
+      "claimId": "scheduled-crawls-lane-92-gates.flow-agents-workflow.full-suite-lint-chain-with-new-typecheck-gate-build-green-auth-hardening-mutation-tested-delegate-runs-session-local-summary",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "scheduled-crawls/evidence.json",
+      "excerptOrSummary": "full suite/lint-chain(with new typecheck gate)/build green; auth-hardening mutation-tested (delegate runs, session-local summary)",
+      "observedAt": "2026-07-07T04:08:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:scheduled-crawls-lane-92-gates.flow-agents-workflow.full-suite-lint-chain-with-new-typecheck-gate-build-green-auth-hardening-mutation-tested-delegate-runs-session-local-summary",
+      "claimId": "scheduled-crawls-lane-92-gates.flow-agents-workflow.full-suite-lint-chain-with-new-typecheck-gate-build-green-auth-hardening-mutation-tested-delegate-runs-session-local-summary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:scheduled-crawls-lane-92-gates.flow-agents-workflow.full-suite-lint-chain-with-new-typecheck-gate-build-green-auth-hardening-mutation-tested-delegate-runs-session-local-summary"
+      ],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    },
+    {
+      "id": "evt:scheduled-crawls-ac1.flow-agents-workflow.r1-a-scheduled-cron-invocation-executes-a-bounded-batch-default-5-cap-10-through-runcrawlpipeline-campids-trigger-scheduled-limit-and-records-a-crawlrun-with-trigger-scheduled",
+      "claimId": "scheduled-crawls-ac1.flow-agents-workflow.r1-a-scheduled-cron-invocation-executes-a-bounded-batch-default-5-cap-10-through-runcrawlpipeline-campids-trigger-scheduled-limit-and-records-a-crawlrun-with-trigger-scheduled",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    },
+    {
+      "id": "evt:scheduled-crawls-ac2.flow-agents-workflow.r2-schedule-enable-disable-priority-batch-size-persist-crawlschedule-row-and-render-in-admin-crawls-with-last-next-run",
+      "claimId": "scheduled-crawls-ac2.flow-agents-workflow.r2-schedule-enable-disable-priority-batch-size-persist-crawlschedule-row-and-render-in-admin-crawls-with-last-next-run",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    },
+    {
+      "id": "evt:scheduled-crawls-ac3.flow-agents-workflow.r3-single-progress-transport-json-polling-status-json-shared-by-monitor-modal-button-sse-route-retired",
+      "claimId": "scheduled-crawls-ac3.flow-agents-workflow.r3-single-progress-transport-json-polling-status-json-shared-by-monitor-modal-button-sse-route-retired",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    },
+    {
+      "id": "evt:scheduled-crawls-ac4.flow-agents-workflow.r4-crawlrun-records-and-the-crawl-monitor-keep-working-unchanged-for-scheduled-runs",
+      "claimId": "scheduled-crawls-ac4.flow-agents-workflow.r4-crawlrun-records-and-the-crawl-monitor-keep-working-unchanged-for-scheduled-runs",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    },
+    {
+      "id": "evt:scheduled-crawls-tg1.flow-agents-workflow.wave-0-owner-approved-fold-in-not-a-92-ac-tsc-noemit-runs-as-part-of-npm-run-lint-tests-type-gate-coverage-clean-at-delivery",
+      "claimId": "scheduled-crawls-tg1.flow-agents-workflow.wave-0-owner-approved-fold-in-not-a-92-ac-tsc-noemit-runs-as-part-of-npm-run-lint-tests-type-gate-coverage-clean-at-delivery",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    },
+    {
+      "id": "evt:scheduled-crawls-review.flow-agents-workflow.iteration-1-approved-high-panel-crash-3-mediums-fail-open-cron-secret-pipeline-throw-coverage-resolver-truthy-semantics-all-resolved-with-revert-proven-tests-1-new-low-retry-unmount-cleanup-accepted-under-96",
+      "claimId": "scheduled-crawls-review.flow-agents-workflow.iteration-1-approved-high-panel-crash-3-mediums-fail-open-cron-secret-pipeline-throw-coverage-resolver-truthy-semantics-all-resolved-with-revert-proven-tests-1-new-low-retry-unmount-cleanup-accepted-under-96",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:08:17Z",
+      "verifiedAt": "2026-07-07T04:08:17Z"
+    }
+  ]
+}

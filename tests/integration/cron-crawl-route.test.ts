@@ -10,6 +10,15 @@
  * real DB-backed schedule row (that's `crawl-schedule-repository.test.ts`'s
  * job) or the real priority SQL (that's `crawl-priority-resolver.test.ts`'s
  * job) or the real pipeline (already covered by the #85 seam's own tests).
+ *
+ * Also covers campfit#92 code review's two MEDIUM findings against this
+ * route specifically:
+ *  - the fail-closed/timing-safe `CRON_SECRET` check (`isAuthorizedCronRequest`
+ *    in `route.ts`) — an unset secret and a wrong-length bearer token must
+ *    both still be rejected with 401, never fall through to authenticated;
+ *  - a `runCrawlPipeline` (or resolver) throw must degrade to an explicit
+ *    500 response, never an unhandled rejection or a silently-swallowed
+ *    `200 { ran: true }`.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -180,5 +189,92 @@ describe('GET /api/cron/crawl', () => {
     const [opts] = runCrawlPipeline.mock.calls[0];
     expect(opts.campIds).toEqual([]);
     expect(opts.limit).toBe(10);
+  });
+
+  it('degrades to an explicit 500 (never an unhandled rejection or a silent 200) when runCrawlPipeline rejects', async () => {
+    getSchedule.mockResolvedValue({
+      id: 'default',
+      enabled: true,
+      priority: 'stale',
+      batchSize: 5,
+      updatedAt: '2026-07-06T00:00:00.000Z',
+      updatedBy: null,
+    });
+    resolveCrawlCandidates.mockResolvedValue([
+      { id: 'camp-1', name: 'Camp 1', communitySlug: 'denver', websiteUrl: 'https://camp-1.example.com', dataConfidence: 'STALE', registrationStatus: 'UNKNOWN', lastVerifiedAt: null, missingFieldCount: 1, priorityScore: 100 },
+    ]);
+    runCrawlPipeline.mockRejectedValue(new Error('provider unavailable'));
+
+    const res = await GET(cronRequest());
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('provider unavailable');
+  });
+
+  it('degrades to an explicit 500 when resolveCrawlCandidates itself rejects, never calling runCrawlPipeline with stale data', async () => {
+    getSchedule.mockResolvedValue({
+      id: 'default',
+      enabled: true,
+      priority: 'stale',
+      batchSize: 5,
+      updatedAt: '2026-07-06T00:00:00.000Z',
+      updatedBy: null,
+    });
+    resolveCrawlCandidates.mockRejectedValue(new Error('db unreachable'));
+
+    const res = await GET(cronRequest());
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.error).toBe('db unreachable');
+    expect(runCrawlPipeline).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/cron/crawl — CRON_SECRET fail-closed + timing-safe auth hardening (campfit#92 code review MEDIUM)', () => {
+  const ORIGINAL_CRON_SECRET = process.env.CRON_SECRET;
+
+  afterEach(() => {
+    process.env.CRON_SECRET = ORIGINAL_CRON_SECRET;
+  });
+
+  it('rejects every request (never authenticates) when CRON_SECRET is unset, including the literal "Bearer undefined" a naive !== check would accept', async () => {
+    delete process.env.CRON_SECRET;
+
+    const res = await GET(
+      new Request('http://localhost/api/cron/crawl', {
+        headers: { authorization: 'Bearer undefined' },
+      })
+    );
+    expect(res.status).toBe(401);
+    expect(getSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects a same-content-different-length Authorization header (timingSafeEqual\'s length-guard path), never authenticating', async () => {
+    process.env.CRON_SECRET = CRON_SECRET;
+
+    const res = await GET(
+      new Request('http://localhost/api/cron/crawl', {
+        // Shorter than `Bearer ${CRON_SECRET}` — must be rejected before
+        // any byte-compare, not just an accidental mismatch.
+        headers: { authorization: 'Bearer short' },
+      })
+    );
+    expect(res.status).toBe(401);
+    expect(getSchedule).not.toHaveBeenCalled();
+  });
+
+  it('still authenticates the correct bearer token once CRON_SECRET is restored', async () => {
+    process.env.CRON_SECRET = CRON_SECRET;
+    getSchedule.mockResolvedValue({
+      id: 'default',
+      enabled: false,
+      priority: 'stale',
+      batchSize: 5,
+      updatedAt: '2026-07-06T00:00:00.000Z',
+      updatedBy: null,
+    });
+
+    const res = await GET(cronRequest());
+    expect(res.status).toBe(200);
   });
 });

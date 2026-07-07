@@ -29,7 +29,9 @@ import {
   formatUtcTimestamp,
   describeLastRun,
   describeNextRun,
+  classifyScheduleLoad,
   type ScheduleLastRun,
+  type ScheduleResponse,
 } from '@/app/admin/crawls/schedule-panel-view';
 
 describe('BATCH_SIZE_OPTIONS / PRIORITY_COPY — matches the route\'s own server-side ceilings', () => {
@@ -105,5 +107,39 @@ describe('describeNextRun', () => {
     const text = describeNextRun('2026-07-08T09:00:00.000Z', true);
     expect(text).toContain('Next run');
     expect(text).toContain('2026');
+  });
+});
+
+
+describe('classifyScheduleLoad — campfit#92 code review HIGH fix (initial-load GET classification)', () => {
+  const readyBody: ScheduleResponse = {
+    schedule: { id: 'default', enabled: true, priority: 'stale', batchSize: 5, updatedAt: '2026-07-06T00:00:00.000Z', updatedBy: null },
+    lastRun: null,
+    nextRun: '2026-07-08T09:00:00.000Z',
+  };
+
+  it('ok: classifies a 2xx JSON body as ready data (never wrapped/re-shaped)', () => {
+    const result = classifyScheduleLoad({ kind: 'ok', body: readyBody });
+    expect(result).toEqual({ status: 'ready', data: readyBody });
+  });
+
+  it('non-ok: classifies a non-2xx response as an error, using the body\'s own {error} message — never passed through as ready data', () => {
+    const result = classifyScheduleLoad({ kind: 'http-error', status: 403, body: { error: 'Forbidden' } });
+    expect(result).toEqual({ status: 'error', message: 'Forbidden' });
+  });
+
+  it('non-ok: falls back to a status-coded message when the error body has no {error} string (e.g. an HTML 500 page parsed as null)', () => {
+    const result = classifyScheduleLoad({ kind: 'http-error', status: 500, body: null });
+    expect(result).toEqual({ status: 'error', message: 'Failed to load schedule (status 500)' });
+  });
+
+  it('non-ok: ignores a non-string {error} field and falls back to the generic status message', () => {
+    const result = classifyScheduleLoad({ kind: 'http-error', status: 400, body: { error: 42 } });
+    expect(result).toEqual({ status: 'error', message: 'Failed to load schedule (status 400)' });
+  });
+
+  it('reject: classifies a network-level fetch rejection as a reachable error state (not stuck on loading forever)', () => {
+    const result = classifyScheduleLoad({ kind: 'network-error' });
+    expect(result).toEqual({ status: 'error', message: 'Failed to load schedule' });
   });
 });
