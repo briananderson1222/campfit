@@ -257,8 +257,8 @@ const PRICE_C = {
 };
 
 // Traverse's assembled relation shape intentionally has no persistence id.
-// campfit#109 owns reconciling this with stored relation identity in the
-// canonical pipeline; these fixtures characterize today's production shape.
+// campfit#109 reconciles it with stored relation identity in the consumer
+// projection while preserving these exact serialized candidate values.
 const EXTRACTED_PRICE_A = {
   label: PRICE_A.label,
   amount: PRICE_A.amount,
@@ -367,8 +367,8 @@ function testComputeDiffBehaviorTable() {
     },
   });
 
-  // The canonical crawl pipeline currently clears stored relations before
-  // diffing. campfit#109 owns making real current relations reachable.
+  // Preserve the explicit empty-current policy characterization. The
+  // canonical crawl pipeline no longer manufactures this shape in D0.
   const productionEmptyCurrent = computeDiff(
     makeCamp({ pricing: [] }),
     { pricing: [EXTRACTED_PRICE_A] },
@@ -380,13 +380,12 @@ function testComputeDiffBehaviorTable() {
   assert.equal(
     productionEmptyCurrent.pricing?.mode,
     "populate",
-    "canonical empty-current relation shape must characterize today's populate behavior (campfit#109)"
+    "an honestly empty current relation must remain populate"
   );
 
-  // If a caller supplies stored id-bearing relations, Traverse's id-less
-  // extracted shape does not retain the same whole-object identity today.
-  // campfit#109 owns the design change; #108 pins the honest behavior.
-  const productionIdentityMismatch = computeDiff(
+  // Stored ids are persistence metadata. The id-less same item is retained,
+  // so the one genuinely new item makes the now-reachable mode additive.
+  const hydratedDomainIdentity = computeDiff(
     makeCamp({ pricing: [PRICE_A] }),
     { pricing: [EXTRACTED_PRICE_A, EXTRACTED_PRICE_B] },
     { pricing: 0.93 },
@@ -395,9 +394,9 @@ function testComputeDiffBehaviorTable() {
     sourceUrl
   );
   assert.equal(
-    productionIdentityMismatch.pricing?.mode,
-    "update",
-    "id-bearing current vs id-less extracted [A] -> [A, B] must characterize today's update behavior (campfit#109)"
+    hydratedDomainIdentity.pricing?.mode,
+    "add_items",
+    "id-bearing current vs id-less extracted [A] -> [A, B] must use domain identity"
   );
 
   assert.deepEqual(

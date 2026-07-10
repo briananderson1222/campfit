@@ -5,6 +5,7 @@ import {
   changeWhenDifferent,
   outerArrayChange,
   projectProvenance,
+  relationDomainIdentity,
   relationFacts,
   scalarChange,
 } from './diff-kernel';
@@ -114,8 +115,9 @@ export function computeDiff(
 
     const currentArr = (current as unknown as Record<string, unknown>)[field];
     const currentItems = Array.isArray(currentArr) ? currentArr : [];
+    const identity = relationDomainIdentity(field);
 
-    const change = outerArrayChange(currentItems, extractedArr);
+    const change = outerArrayChange(currentItems, extractedArr, identity);
     if (change) {
       // Suppress recently-approved array fields too
       const src = fieldSources[field];
@@ -125,7 +127,7 @@ export function computeDiff(
       }
 
       // Check if extracted is purely additive (all current items still present)
-      const { allCurrentRetained, hasNovelCandidate } = relationFacts(currentItems, extractedArr);
+      const { allCurrentRetained, hasNovelCandidate } = relationFacts(currentItems, extractedArr, identity);
       const isAdditive = currentItems.length > 0 &&
         allCurrentRetained &&
         extractedArr.length > currentItems.length &&

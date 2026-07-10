@@ -403,7 +403,9 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     resolvedCampIds = rows.map(r => r.id);
   }
 
-  // Fetch camps to crawl (scalar fields only — array relations are fetched separately per camp).
+  // Fetch camps and all current relations in one set-based query. Correlated
+  // aggregates preserve the stored ids for persistence while normalizing the
+  // domain values consumed by the recrawl diff.
   // LEFT JOINs Provider so each camp carries its provider's `requiresRender`
   // flag (migration 019, campfit#53 spa-ingestion) — threaded into
   // `runTraverseRecrawlForCamp`'s `TraverseRecrawlOptions.requiresRender`
@@ -417,6 +419,21 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                c."registrationStatus", c."registrationOpenDate", c."registrationCloseDate", c."lunchIncluded",
                c.address, c."applicationUrl", c."contactEmail", c."contactPhone", c."socialLinks",
                c."interestingDetails", c."providerId", c."organizationName",
+               COALESCE((SELECT json_agg(jsonb_build_object(
+                 'id', ag.id, 'label', ag.label, 'minAge', ag."minAge", 'maxAge', ag."maxAge",
+                 'minGrade', ag."minGrade", 'maxGrade', ag."maxGrade"
+               ) ORDER BY ag."minAge" ASC NULLS LAST, ag.label ASC, ag.id ASC)
+                 FROM "CampAgeGroup" ag WHERE ag."campId" = c.id), '[]') AS "ageGroups",
+               COALESCE((SELECT json_agg(jsonb_build_object(
+                 'id', s.id, 'label', s.label, 'startDate', s."startDate"::text, 'endDate', s."endDate"::text,
+                 'startTime', s."startTime", 'endTime', s."endTime", 'earlyDropOff', s."earlyDropOff", 'latePickup', s."latePickup"
+               ) ORDER BY s."startDate" ASC NULLS LAST, s.label ASC, s.id ASC)
+                 FROM "CampSchedule" s WHERE s."campId" = c.id AND s."archivedAt" IS NULL), '[]') AS "schedules",
+               COALESCE((SELECT json_agg(jsonb_build_object(
+                 'id', pr.id, 'label', pr.label, 'amount', pr.amount::float, 'unit', pr.unit,
+                 'durationWeeks', pr."durationWeeks", 'ageQualifier', pr."ageQualifier", 'discountNotes', pr."discountNotes"
+               ) ORDER BY pr.amount ASC NULLS LAST, pr.label ASC, pr.id ASC)
+                 FROM "CampPricing" pr WHERE pr."campId" = c.id), '[]') AS "pricing",
                COALESCE(c."fieldSources", '{}') AS "fieldSources",
                COALESCE(p."requiresRender", false) AS "requiresRender"
          FROM "Camp" c
@@ -427,6 +444,21 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                c."registrationStatus", c."registrationOpenDate", c."registrationCloseDate", c."lunchIncluded",
                c.address, c."applicationUrl", c."contactEmail", c."contactPhone", c."socialLinks",
                c."interestingDetails", c."providerId", c."organizationName",
+               COALESCE((SELECT json_agg(jsonb_build_object(
+                 'id', ag.id, 'label', ag.label, 'minAge', ag."minAge", 'maxAge', ag."maxAge",
+                 'minGrade', ag."minGrade", 'maxGrade', ag."maxGrade"
+               ) ORDER BY ag."minAge" ASC NULLS LAST, ag.label ASC, ag.id ASC)
+                 FROM "CampAgeGroup" ag WHERE ag."campId" = c.id), '[]') AS "ageGroups",
+               COALESCE((SELECT json_agg(jsonb_build_object(
+                 'id', s.id, 'label', s.label, 'startDate', s."startDate"::text, 'endDate', s."endDate"::text,
+                 'startTime', s."startTime", 'endTime', s."endTime", 'earlyDropOff', s."earlyDropOff", 'latePickup', s."latePickup"
+               ) ORDER BY s."startDate" ASC NULLS LAST, s.label ASC, s.id ASC)
+                 FROM "CampSchedule" s WHERE s."campId" = c.id AND s."archivedAt" IS NULL), '[]') AS "schedules",
+               COALESCE((SELECT json_agg(jsonb_build_object(
+                 'id', pr.id, 'label', pr.label, 'amount', pr.amount::float, 'unit', pr.unit,
+                 'durationWeeks', pr."durationWeeks", 'ageQualifier', pr."ageQualifier", 'discountNotes', pr."discountNotes"
+               ) ORDER BY pr.amount ASC NULLS LAST, pr.label ASC, pr.id ASC)
+                 FROM "CampPricing" pr WHERE pr."campId" = c.id), '[]') AS "pricing",
                COALESCE(c."fieldSources", '{}') AS "fieldSources",
                COALESCE(p."requiresRender", false) AS "requiresRender"
          FROM "Camp" c
@@ -449,15 +481,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
   );
   const neighborhoods = neighborhoodsResult.rows.map(r => r.name);
 
-  // Attach empty arrays for relation fields — the diff engine handles missing arrays gracefully
-  // (fetching full relations for 158 camps upfront is expensive; we only load them if a diff
-  // for that field is detected, which happens in the approve step, not here)
-  const camps = campsResult.rows.map(c => ({
-    ...c,
-    ageGroups: [] as Camp['ageGroups'],
-    schedules: [] as Camp['schedules'],
-    pricing: [] as Camp['pricing'],
-  }));
+  const camps = campsResult.rows;
 
   // Create + track the crawl run record through the shared tracker (campfit#85
   // Wave 2 extraction — see crawl-run-tracker.ts's file doc for the seam this

@@ -243,6 +243,59 @@ afterAll(async () => {
 });
 
 describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () => {
+  it('campfit#109 D0 hydrates all current relation families before recrawl diffing', async () => {
+    const campId = await seedCamp({ name: 'Hydration Camp', websiteUrl: 'https://hydration.example.test/' });
+    await pool.query(
+      `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
+       VALUES ('age-b', $1, 'Value B', 8, 10, NULL, NULL), ('age-a', $1, 'Value A', 5, 7, NULL, NULL)`,
+      [campId],
+    );
+    await pool.query(
+      `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate")
+       VALUES ('schedule-b', $1, 'Value B', '2000-06-08', '2000-06-12'),
+              ('schedule-a', $1, 'Value A', '2000-06-01', '2000-06-05')`,
+      [campId],
+    );
+    await pool.query(
+      `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate", "archivedAt")
+       VALUES ('schedule-archived', $1, 'Archived Value', '2000-05-01', '2000-05-02', now())`,
+      [campId],
+    );
+    await pool.query(
+      `INSERT INTO "CampPricing" (id, "campId", label, amount, unit)
+       VALUES ('price-b', $1, 'Value B', 200.00, 'PER_WEEK'),
+              ('price-a', $1, 'Value A', 100.00, 'PER_WEEK')`,
+      [campId],
+    );
+
+    let hydrated: { ageGroups: unknown[]; schedules: unknown[]; pricing: unknown[] } | undefined;
+    runTraverseRecrawlForCamp.mockImplementation(async (options: { current: typeof hydrated }) => {
+      hydrated = options.current;
+      return errorRecrawlResult('fixture-stop-after-hydration');
+    });
+
+    await runCrawlPipeline({
+      triggeredBy: 'test:d0-relation-hydration',
+      trigger: 'MANUAL',
+      campIds: [campId],
+      concurrency: 1,
+    });
+
+    expect(hydrated).toBeDefined();
+    expect(hydrated!.ageGroups).toEqual([
+      { id: 'age-a', label: 'Value A', minAge: 5, maxAge: 7, minGrade: null, maxGrade: null },
+      { id: 'age-b', label: 'Value B', minAge: 8, maxAge: 10, minGrade: null, maxGrade: null },
+    ]);
+    expect(hydrated!.schedules).toEqual([
+      { id: 'schedule-a', label: 'Value A', startDate: '2000-06-01', endDate: '2000-06-05', startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
+      { id: 'schedule-b', label: 'Value B', startDate: '2000-06-08', endDate: '2000-06-12', startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
+    ]);
+    expect(hydrated!.pricing).toEqual([
+      { id: 'price-a', label: 'Value A', amount: 100, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null },
+      { id: 'price-b', label: 'Value B', amount: 200, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null },
+    ]);
+  });
+
   it('(1)(2)(3) camp strategy: mid-run progress increments, joinable campLog/errorLog identifiers, COMPLETED on a mixed run', async () => {
     const okCampId = await seedCamp({ name: 'OK Camp', websiteUrl: 'https://ok-camp.example.test/' });
     const errCampId = await seedCamp({ name: 'Err Camp', websiteUrl: 'https://err-camp.example.test/' });
