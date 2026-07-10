@@ -10,12 +10,17 @@ import {
   outerArrayChange,
   pricingDomainIdentity,
   scheduleDomainIdentity,
+  type DomainIdentityResult,
 } from "../lib/ingestion/diff-kernel";
 import type { Camp } from "../lib/types";
+import {
+  D0_FIXED_NOW,
+  RELATION_REPLAY_CASES,
+  type RelationMode,
+} from "./d0-relation-fixtures";
 
 const ROOT = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
-const FIXED_NOW = Date.parse("2000-01-01T00:00:00.000Z");
-const DAY_MS = 86_400_000;
+const FIXED_NOW = D0_FIXED_NOW;
 
 const ageStored = {
   id: "persisted-id",
@@ -152,9 +157,25 @@ function testCanonicalEncoding(): void {
 }
 
 function testDomainIdentity(): void {
-  assert.equal(ageGroupDomainIdentity(ageStored), ageGroupDomainIdentity(ageCandidate));
-  assert.equal(scheduleDomainIdentity(scheduleStored), scheduleDomainIdentity(scheduleCandidate));
-  assert.equal(pricingDomainIdentity(priceStored), pricingDomainIdentity(priceCandidate));
+  assert.equal(ageGroupDomainIdentity({ ...ageCandidate, minAge: Infinity }).ok, false);
+  assert.equal(ageGroupDomainIdentity({ ...ageCandidate, maxAge: -Infinity }).ok, false);
+  assert.equal(scheduleDomainIdentity({ ...scheduleCandidate, startDate: null }).ok, false);
+  assert.equal(scheduleDomainIdentity({ ...scheduleCandidate, endDate: undefined }).ok, false);
+  assert.equal(scheduleDomainIdentity({ ...scheduleCandidate, startDate: "not-a-date" }).ok, false);
+  assert.equal(scheduleDomainIdentity({ ...scheduleCandidate, endDate: "2000-99-99" }).ok, false);
+  assert.equal(scheduleDomainIdentity({ ...scheduleCandidate, startDate: new Date(Number.NaN) }).ok, false);
+  assert.equal(pricingDomainIdentity({ ...priceCandidate, amount: null }).ok, false);
+  assert.equal(pricingDomainIdentity({ ...priceCandidate, unit: null }).ok, false);
+  assert.equal(pricingDomainIdentity({ ...priceCandidate, amount: Infinity }).ok, false);
+  assert.equal(pricingDomainIdentity({ ...priceCandidate, amount: -Infinity }).ok, false);
+
+  const key = (result: DomainIdentityResult): string => {
+    assert.equal(result.ok, true);
+    return result.ok ? result.key : "";
+  };
+  assert.equal(key(ageGroupDomainIdentity(ageStored)), key(ageGroupDomainIdentity(ageCandidate)));
+  assert.equal(key(scheduleDomainIdentity(scheduleStored)), key(scheduleDomainIdentity(scheduleCandidate)));
+  assert.equal(key(pricingDomainIdentity(priceStored)), key(pricingDomainIdentity(priceCandidate)));
 
   for (const [identity, value, mutations] of [
     [ageGroupDomainIdentity, ageCandidate, {
@@ -170,7 +191,7 @@ function testDomainIdentity(): void {
     }],
   ] as const) {
     for (const [field, changed] of Object.entries(mutations)) {
-      assert.notEqual(identity(value), identity({ ...value, [field]: changed }), `${field} must remain in domain identity`);
+      assert.notEqual(key(identity(value)), key(identity({ ...value, [field]: changed })), `${field} must remain in domain identity`);
     }
   }
 
@@ -186,54 +207,21 @@ function testDomainIdentity(): void {
 }
 
 function testRelationModesAndSuppression(): void {
-  const cases = [
-    ["ageGroups", ageStored, ageCandidate, { ...ageCandidate, label: "Group B" }],
-    ["schedules", scheduleStored, scheduleCandidate, { ...scheduleCandidate, label: "Session B" }],
-    ["pricing", priceStored, priceCandidate, { ...priceCandidate, label: "Price B" }],
-  ] as const;
-
   const originalNow = Date.now;
   Date.now = () => FIXED_NOW;
   try {
-    for (const [field, stored, same, novel] of cases) {
-      assert.deepEqual(
-        computeDiff(makeCamp({ [field]: [stored] } as Partial<Camp>), { [field]: [same] }, { [field]: 0.9 }),
+    for (const fixture of RELATION_REPLAY_CASES.filter((entry) =>
+      entry.fixtureRefs.includes("scripts/test-d0-identity-hydration.ts")
+    )) {
+      const changes = computeDiff(
+        makeCamp({ [fixture.field]: fixture.current } as Partial<Camp>),
+        { [fixture.field]: fixture.candidate },
+        { [fixture.field]: fixture.confidence },
         {},
-        `${field}: persistence-only differences must not propose a review`
+        fixture.approvedAt ? { [fixture.field]: { approvedAt: fixture.approvedAt } } : {},
       );
-      assert.equal(
-        computeDiff(makeCamp({ [field]: [stored] } as Partial<Camp>), { [field]: [same, novel] }, { [field]: 0.9 })[field]?.mode,
-        "add_items",
-        `${field}: stored same item plus one novel item must be additive`
-      );
-      assert.equal(
-        computeDiff(makeCamp({ [field]: [stored] } as Partial<Camp>), { [field]: [novel] }, { [field]: 0.9 })[field]?.mode,
-        "update",
-        `${field}: replacement/removal remains update`
-      );
-      assert.equal(
-        computeDiff(makeCamp({ [field]: [stored, stored] } as Partial<Camp>), { [field]: [same, novel] }, { [field]: 0.9 })[field]?.mode,
-        "update",
-        `${field}: duplicate multiplicity must be retained`
-      );
-
-      const inside30Days = new Date(FIXED_NOW - 30 * DAY_MS + 1).toISOString();
-      const outside30Days = new Date(FIXED_NOW - 30 * DAY_MS - 1).toISOString();
-      assert.deepEqual(
-        computeDiff(makeCamp({ [field]: [stored] } as Partial<Camp>), { [field]: [same, novel] }, { [field]: 0.79 }, {}, { [field]: { approvedAt: inside30Days } }),
-        {},
-        `${field}: additive change below 0.8 inside 30 days stays suppressed`
-      );
-      assert.equal(
-        computeDiff(makeCamp({ [field]: [stored] } as Partial<Camp>), { [field]: [same, novel] }, { [field]: 0.8 }, {}, { [field]: { approvedAt: inside30Days } })[field]?.mode,
-        "add_items",
-        `${field}: additive change at 0.8 inside 30 days surfaces`
-      );
-      assert.equal(
-        computeDiff(makeCamp({ [field]: [stored] } as Partial<Camp>), { [field]: [same, novel] }, { [field]: 0.79 }, {}, { [field]: { approvedAt: outside30Days } })[field]?.mode,
-        "add_items",
-        `${field}: additive change outside 30 days surfaces`
-      );
+      const mode = (changes[fixture.field]?.mode ?? (fixture.noneReason === "suppressed" ? "suppressed" : "none")) as RelationMode;
+      assert.equal(mode, fixture.expectedPost, fixture.id);
     }
   } finally {
     Date.now = originalNow;
@@ -258,4 +246,4 @@ testCanonicalEncoding();
 testDomainIdentity();
 testRelationModesAndSuppression();
 testCanonicalHydrationShape();
-console.log("D0 identity/hydration fixtures: 4 groups passed; 3 relation families; 18 retained-field mutations");
+console.log("D0 identity/hydration fixtures: 4 groups passed; 3 relation families; 18 retained-field mutations; 11 malformed required/non-finite cases");

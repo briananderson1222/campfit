@@ -73,6 +73,16 @@ import { recordRecrawlFreshness } from "../lib/ingestion/recrawl-freshness";
 import { computeDiff } from "../lib/ingestion/diff-engine";
 import { createStubProvider, type StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 import type { Camp } from "../lib/types";
+import {
+  D0_FIXED_NOW,
+  RECRAWL_EXTRACTED_PRICE_A as EXTRACTED_PRICE_A,
+  RECRAWL_EXTRACTED_PRICE_B as EXTRACTED_PRICE_B,
+  RECRAWL_PRICE_A as PRICE_A,
+  RECRAWL_PRICE_B as PRICE_B,
+  RECRAWL_PRICE_C as PRICE_C,
+  RELATION_REPLAY_CASES,
+  type RelationMode,
+} from "./d0-relation-fixtures";
 
 const FIXTURE_DIR = path.join(
   path.dirname(url.fileURLToPath(import.meta.url)),
@@ -226,56 +236,9 @@ function makeCamp(overrides: Partial<Camp> = {}): Camp {
   };
 }
 
-const PRICE_A = {
-  id: "price-a",
-  label: "Standard week",
-  amount: 425,
-  unit: "PER_WEEK" as const,
-  durationWeeks: null,
-  ageQualifier: null,
-  discountNotes: null,
-};
-
-const PRICE_B = {
-  id: "price-b",
-  label: "Extended week",
-  amount: 525,
-  unit: "PER_WEEK" as const,
-  durationWeeks: null,
-  ageQualifier: null,
-  discountNotes: null,
-};
-
-const PRICE_C = {
-  id: "price-c",
-  label: "Holiday week",
-  amount: 475,
-  unit: "PER_WEEK" as const,
-  durationWeeks: null,
-  ageQualifier: null,
-  discountNotes: null,
-};
-
 // Traverse's assembled relation shape intentionally has no persistence id.
 // campfit#109 reconciles it with stored relation identity in the consumer
 // projection while preserving these exact serialized candidate values.
-const EXTRACTED_PRICE_A = {
-  label: PRICE_A.label,
-  amount: PRICE_A.amount,
-  unit: PRICE_A.unit,
-  durationWeeks: PRICE_A.durationWeeks,
-  ageQualifier: PRICE_A.ageQualifier,
-  discountNotes: PRICE_A.discountNotes,
-};
-
-const EXTRACTED_PRICE_B = {
-  label: PRICE_B.label,
-  amount: PRICE_B.amount,
-  unit: PRICE_B.unit,
-  durationWeeks: PRICE_B.durationWeeks,
-  ageQualifier: PRICE_B.ageQualifier,
-  discountNotes: PRICE_B.discountNotes,
-};
 
 const FIXED_NOW = Date.parse("2000-01-01T00:00:00.000Z");
 const SUPPRESSION_WINDOW_MS = 30 * 86_400_000;
@@ -509,6 +472,31 @@ function testComputeDiffBehaviorTable() {
   );
 
   console.log("✓ accepted deltas: duplicate-only [A] -> [A, A] is update; duplicate-current retention uses multiset counts; genuine additions remain add_items");
+}
+
+function testSharedD0RelationReplayCorpus() {
+  const originalDateNow = Date.now;
+  Date.now = () => D0_FIXED_NOW;
+  try {
+    const cases = RELATION_REPLAY_CASES.filter((entry) =>
+      entry.fixtureRefs.includes("scripts/test-recrawl-adapter.ts")
+    );
+    for (const fixture of cases) {
+      const changes = computeDiff(
+        makeCamp({ [fixture.field]: fixture.current } as unknown as Partial<Camp>),
+        { [fixture.field]: fixture.candidate },
+        { [fixture.field]: fixture.confidence },
+        {},
+        fixture.approvedAt ? { [fixture.field]: { approvedAt: fixture.approvedAt } } : {},
+      );
+      const mode = (changes[fixture.field]?.mode ??
+        (fixture.noneReason === "suppressed" ? "suppressed" : "none")) as RelationMode;
+      assert.equal(mode, fixture.expectedPost, fixture.id);
+    }
+    console.log(`✓ shared D0 relation replay corpus: ${cases.length} recrawl classifier cases`);
+  } finally {
+    Date.now = originalDateNow;
+  }
 }
 
 // ─── 1. Single-item page targets the known camp unambiguously ────────────
@@ -1192,6 +1180,7 @@ async function testCrawlPipelineWiresNotModifiedToFreshnessSeam() {
 
 async function main() {
   testComputeDiffBehaviorTable();
+  testSharedD0RelationReplayCorpus();
   await testSingleItemPageTargetsKnownCamp();
   await testMultiItemPageMatchesByName();
   await testMultiItemPageAmbiguousFailsLoud();

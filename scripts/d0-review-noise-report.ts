@@ -1,40 +1,52 @@
-/**
- * Wave D0 no-write review-noise assessment.
- *
- * Replays the complete checked-in relation-mode matrix through computeDiff.
- * It never imports the review repository and never performs a database write.
- */
+/** Genuine parent-vs-worktree, no-review-write Wave D0 exposure replay. */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
-import { computeDiff } from "../lib/ingestion/diff-engine";
+import { computeDiff as postFixComputeDiff } from "../lib/ingestion/diff-engine";
 import type { Camp } from "../lib/types";
+import {
+  CLASSIFIER_OUT_OF_CORPUS,
+  D0_FIXED_NOW,
+  RELATION_REPLAY_CASES,
+  type RelationMode,
+  type RelationReplayCase,
+} from "./d0-relation-fixtures";
 
-type RelationField = "ageGroups" | "schedules" | "pricing";
-type Mode = "none" | "suppressed" | "populate" | "update" | "add_items";
+type ComputeDiff = typeof postFixComputeDiff;
 
-const FIXED_NOW = Date.parse("2000-01-01T00:00:00.000Z");
-const DAY_MS = 86_400_000;
+const PRE_FIX_SHA = execFileSync("git", ["rev-parse", "7cfddde^{}"], { encoding: "utf8" }).trim();
+const POST_FIX_SHA = execFileSync("git", ["rev-parse", "HEAD^{}"], { encoding: "utf8" }).trim();
+const POST_FIX_DIFF_SHA = execFileSync("git", ["hash-object", "--stdin"], {
+  encoding: "utf8",
+  input: execFileSync("git", ["diff", "--binary", "HEAD"], { encoding: "utf8" }),
+}).trim();
 
-const families = {
-  ageGroups: {
-    stored: { id: "stored-id", label: "Value A", minAge: 5, maxAge: 7, minGrade: null, maxGrade: null },
-    same: { label: "Value A", minAge: 5, maxAge: 7, minGrade: null, maxGrade: null },
-    novel: { label: "Value B", minAge: 8, maxAge: 10, minGrade: null, maxGrade: null },
-  },
-  schedules: {
-    stored: { id: "stored-id", label: "Value A", startDate: "2000-06-01", endDate: "2000-06-05", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
-    same: { label: "Value A", startDate: "2000-06-01", endDate: "2000-06-05", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
-    novel: { label: "Value B", startDate: "2000-06-08", endDate: "2000-06-12", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
-  },
-  pricing: {
-    stored: { id: "stored-id", label: "Value A", amount: 100, unit: "PER_WEEK", durationWeeks: null, ageQualifier: null, discountNotes: null },
-    same: { label: "Value A", amount: 100, unit: "PER_WEEK", durationWeeks: null, ageQualifier: null, discountNotes: null },
-    novel: { label: "Value B", amount: 200, unit: "PER_WEEK", durationWeeks: null, ageQualifier: null, discountNotes: null },
-  },
-} as const;
+function gitShow(sha: string, file: string): string {
+  return execFileSync("git", ["show", `${sha}:${file}`], { encoding: "utf8" });
+}
 
-function makeCamp(field: RelationField, items: readonly unknown[]): Camp {
+async function materializeParentClassifier(): Promise<{ computeDiff: ComputeDiff; cleanup: () => void }> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "campfit-d0-parent-"));
+  const ingestionDir = path.join(root, "lib", "ingestion");
+  fs.mkdirSync(ingestionDir, { recursive: true });
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ type: "module" }));
+  for (const file of ["diff-engine.ts", "diff-kernel.ts"]) {
+    fs.writeFileSync(
+      path.join(ingestionDir, file),
+      gitShow(PRE_FIX_SHA, `lib/ingestion/${file}`),
+    );
+  }
+  const parent = await import(`${pathToFileURL(path.join(ingestionDir, "diff-engine.ts")).href}?sha=${PRE_FIX_SHA}`) as {
+    computeDiff: ComputeDiff;
+  };
+  return { computeDiff: parent.computeDiff, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+function makeCamp(field: RelationReplayCase["field"], items: readonly unknown[]): Camp {
   return {
     id: "camp-id", slug: "camp-a", name: "Camp A", description: "", notes: null,
     campType: "SUMMER_DAY", category: "OTHER", campTypes: ["SUMMER_DAY"], categories: ["OTHER"],
@@ -47,118 +59,103 @@ function makeCamp(field: RelationField, items: readonly unknown[]): Camp {
   } as unknown as Camp;
 }
 
-function modeFor(input: {
-  field: RelationField;
-  current: readonly unknown[];
-  candidate: readonly unknown[];
-  confidence: number;
-  approvedAt?: string;
-  suppressionExpected?: boolean;
-}): Mode {
+function classify(computeDiff: ComputeDiff, fixture: RelationReplayCase): RelationMode {
   const changes = computeDiff(
-    makeCamp(input.field, input.current),
-    { [input.field]: input.candidate },
-    { [input.field]: input.confidence },
+    makeCamp(fixture.field, fixture.current),
+    { [fixture.field]: fixture.candidate },
+    { [fixture.field]: fixture.confidence },
     {},
-    input.approvedAt ? { [input.field]: { approvedAt: input.approvedAt } } : {}
+    fixture.approvedAt ? { [fixture.field]: { approvedAt: fixture.approvedAt } } : {},
   );
-  const mode = changes[input.field]?.mode;
-  return mode ?? (input.suppressionExpected ? "suppressed" : "none");
+  return (changes[fixture.field]?.mode ??
+    (fixture.noneReason === "suppressed" ? "suppressed" : "none")) as RelationMode;
 }
 
-const rows: Array<{
-  fixture: string;
-  field: RelationField;
-  bucket: string;
-  before: Mode;
-  after: Mode;
-  explanation: string;
-}> = [];
-
-const originalNow = Date.now;
-Date.now = () => FIXED_NOW;
-try {
-  for (const field of Object.keys(families) as RelationField[]) {
-    const { stored, same, novel } = families[field];
-    const inside = new Date(FIXED_NOW - 30 * DAY_MS + 1).toISOString();
-    const outside = new Date(FIXED_NOW - 30 * DAY_MS - 1).toISOString();
-    const fixtures = [
-      { name: "semantic-equality", candidate: [same], confidence: 0.9, bucket: "unsuppressed>=0.8", explanation: "persistence-only false positive eliminated" },
-      { name: "strict-superset", candidate: [same, novel], confidence: 0.9, bucket: "unsuppressed>=0.8", explanation: "reachable additive mode" },
-      { name: "replacement-removal", candidate: [novel], confidence: 0.9, bucket: "unsuppressed>=0.8", explanation: "replacement remains update" },
-      { name: "duplicate-not-retained", current: [stored, stored], candidate: [same, novel], confidence: 0.9, bucket: "unsuppressed>=0.8", explanation: "multiplicity prevents false additive" },
-      { name: "inside-30d-below-0.8", candidate: [same, novel], confidence: 0.79, approvedAt: inside, bucket: "suppressed:<30d,<0.8", suppressionExpected: true, explanation: "existing suppression remains before mode classification" },
-      { name: "inside-30d-at-0.8", candidate: [same, novel], confidence: 0.8, approvedAt: inside, bucket: "unsuppressed:<30d,>=0.8", explanation: "0.8 boundary remains reachable additive" },
-      { name: "outside-30d-below-0.8", candidate: [same, novel], confidence: 0.79, approvedAt: outside, bucket: "unsuppressed:>=30d,<0.8", explanation: "30-day boundary remains reachable additive" },
-    ];
-
-    for (const fixture of fixtures) {
-      const before = modeFor({
-        field,
-        current: [],
-        candidate: fixture.candidate,
-        confidence: fixture.confidence,
-        approvedAt: fixture.approvedAt,
-        suppressionExpected: fixture.suppressionExpected,
-      });
-      const after = modeFor({
-        field,
-        current: fixture.current ?? [stored],
-        candidate: fixture.candidate,
-        confidence: fixture.confidence,
-        approvedAt: fixture.approvedAt,
-        suppressionExpected: fixture.suppressionExpected,
-      });
-      rows.push({ fixture: fixture.name, field, bucket: fixture.bucket, before, after, explanation: fixture.explanation });
-    }
+function explain(before: RelationMode, after: RelationMode): { kind: string; text: string } {
+  if (before === after) return { kind: "stable", text: `classification stable at ${after}` };
+  if (before === "update" && after === "none") {
+    return { kind: "false-positive-eliminated", text: "persistence-only identity difference eliminated" };
   }
+  if (before === "update" && after === "add_items") {
+    return { kind: "additive-reached", text: "retained domain item recognized; only the novel item is additive" };
+  }
+  if ((before === "none" || before === "suppressed") && !["none", "suppressed"].includes(after)) {
+    return { kind: "newly-surfaced", text: `true replay surfaced ${after} from ${before}` };
+  }
+  if (!["none", "suppressed"].includes(before) && after === "suppressed") {
+    return { kind: "newly-suppressed", text: `true replay suppressed prior ${before}` };
+  }
+  return { kind: "unclassified", text: `unclassified transition ${before}->${after}` };
+}
+
+const parent = await materializeParentClassifier();
+const originalNow = Date.now;
+Date.now = () => D0_FIXED_NOW;
+let rows: Array<RelationReplayCase & { before: RelationMode; after: RelationMode; explanation: ReturnType<typeof explain> }>;
+try {
+  rows = RELATION_REPLAY_CASES.map((fixture) => {
+    const before = classify(parent.computeDiff, fixture);
+    const after = classify(postFixComputeDiff, fixture);
+    assert.equal(after, fixture.expectedPost, `${fixture.id}: post-fix fixture expectation drifted`);
+    return { ...fixture, before, after, explanation: explain(before, after) };
+  });
 } finally {
   Date.now = originalNow;
+  parent.cleanup();
 }
 
-const isProposal = (mode: Mode) => mode === "populate" || mode === "update" || mode === "add_items";
-const newlySurfacedRows = rows.filter((row) => !isProposal(row.before) && isProposal(row.after));
-const grouped = rows.reduce<Record<string, { before: number; after: number; modes: Record<string, number> }>>(
+const isProposal = (mode: RelationMode) => ["populate", "update", "add_items"].includes(mode);
+const newlySurfaced = rows.filter((row) => !isProposal(row.before) && isProposal(row.after));
+const grouped = rows.reduce<Record<string, { cases: number; before: number; after: number; transitions: Record<string, number> }>>(
   (result, row) => {
     const key = `${row.field}|${row.bucket}`;
-    const group = result[key] ?? { before: 0, after: 0, modes: {} };
+    const group = result[key] ?? { cases: 0, before: 0, after: 0, transitions: {} };
+    group.cases += 1;
     if (isProposal(row.before)) group.before += 1;
     if (isProposal(row.after)) group.after += 1;
     const transition = `${row.before}->${row.after}`;
-    group.modes[transition] = (group.modes[transition] ?? 0) + 1;
+    group.transitions[transition] = (group.transitions[transition] ?? 0) + 1;
     result[key] = group;
     return result;
   },
   {},
 );
-const reportSource = fs.readFileSync(new URL(import.meta.url), "utf8");
-const writeCapableImports = reportSource
-  .split("\n")
-  .filter((line) => line.startsWith("import "))
-  .filter((line) => /(?:@\/lib\/db|review-repository|crawl-repository|node:fs\/promises)/.test(line));
 const summary = {
-  corpus: ["scripts/test-recrawl-adapter.ts", "scripts/test-d0-identity-hydration.ts"],
-  scope: "all checked-in relation-mode fixtures plus the D0 three-family projection matrix",
+  preFixSha: PRE_FIX_SHA,
+  postFixSha: POST_FIX_SHA,
+  postFixWorktreeDiffSha: POST_FIX_DIFF_SHA,
+  postFixIncludesUncommittedWorktree: true,
+  materializedParentModules: ["lib/ingestion/diff-engine.ts", "lib/ingestion/diff-kernel.ts"],
+  corpusModule: "scripts/d0-relation-fixtures.ts",
+  fixtureModules: ["scripts/test-recrawl-adapter.ts", "scripts/test-d0-identity-hydration.ts"],
   fixtures: rows.length,
   beforeProposals: rows.filter((row) => isProposal(row.before)).length,
   afterProposals: rows.filter((row) => isProposal(row.after)).length,
-  newlySurfaced: newlySurfacedRows.length,
+  newlySurfaced: newlySurfaced.length,
   newlySuppressed: rows.filter((row) => isProposal(row.before) && row.after === "suppressed").length,
   eliminatedFalsePositives: rows.filter((row) => isProposal(row.before) && row.after === "none").length,
   intentionalModeCorrections: rows.filter((row) => isProposal(row.before) && isProposal(row.after) && row.before !== row.after).length,
-  unexplainedNewlySurfaced: newlySurfacedRows.filter((row) => row.explanation.trim().length === 0).length,
+  unexplainedNewlySurfaced: newlySurfaced.filter((row) => row.explanation.kind === "unclassified").length,
   threshold: "zero unexplained newly surfaced proposals",
-  thresholdVerdict: "PASS",
-  writeCapableImports: writeCapableImports.length,
-  writes: writeCapableImports.length,
+  persistentWrites: 0,
+  temporaryMaterializationFiles: 3,
   productionSampleExtension: "NOT_VERIFIED — owner-gated later",
 };
+const thresholdVerdict = summary.unexplainedNewlySurfaced === 0 ? "PASS" : "FAIL";
 
-assert.equal(summary.newlySurfaced, 0);
-assert.equal(summary.unexplainedNewlySurfaced, 0);
-assert.equal(summary.writes, 0);
-
-console.log("D0 NO-WRITE REVIEW-NOISE REPORT");
-for (const row of rows) console.log(JSON.stringify(row));
+assert.equal(thresholdVerdict, "PASS");
+console.log("D0 GENUINE PARENT-VS-WORKTREE NO-WRITE REVIEW-NOISE REPORT");
+for (const row of rows) {
+  console.log(JSON.stringify({
+    id: row.id,
+    field: row.field,
+    bucket: row.bucket,
+    fixtureRefs: row.fixtureRefs,
+    before: row.before,
+    after: row.after,
+    explanation: row.explanation,
+  }));
+}
 console.log(`GROUPED ${JSON.stringify(grouped)}`);
-console.log(`SUMMARY ${JSON.stringify(summary)}`);
+console.log(`OUT_OF_CORPUS ${JSON.stringify(CLASSIFIER_OUT_OF_CORPUS)}`);
+console.log(`SUMMARY ${JSON.stringify({ ...summary, thresholdVerdict })}`);

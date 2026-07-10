@@ -18,7 +18,18 @@ export type CanonicalValueResult =
   | { ok: true; key: string }
   | { ok: false; error: { code: "cycle" | "unsupported"; message: string } };
 
-type RelationIdentity = (value: unknown) => string;
+export interface DomainIdentityError {
+  code: "invalid-domain-value" | "canonicalization-failed";
+  family: "ageGroups" | "schedules" | "pricing";
+  field: string;
+  message: string;
+}
+
+export type DomainIdentityResult =
+  | { ok: true; key: string }
+  | { ok: false; error: DomainIdentityError };
+
+type RelationIdentity = (value: unknown) => string | DomainIdentityResult;
 
 function segment(tag: string, value = ""): string {
   return `${tag}${value.length}:${value}`;
@@ -122,13 +133,23 @@ function isFailedIdentity(key: string): boolean {
   return key.startsWith("!identity-error:") || key.startsWith("!domain-error:");
 }
 
+function resolveIdentity(identity: RelationIdentity, value: unknown): string {
+  const result = identity(value);
+  if (typeof result === "string") return result;
+  return result.ok
+    ? result.key
+    : `!domain-error:${result.error.family}:${result.error.field}:${result.error.code}`;
+}
+
 function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
 function normalizedDate(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? "invalid-date" : value.toISOString().slice(0, 10);
+  }
   const text = String(value);
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
@@ -205,24 +226,75 @@ export function projectPricingDomain(value: unknown): PricingDomainValue {
   };
 }
 
-export function ageGroupDomainIdentity(value: unknown): string {
+function domainFailure(
+  family: DomainIdentityError["family"],
+  field: string,
+  message: string,
+): DomainIdentityResult {
+  return { ok: false, error: { code: "invalid-domain-value", family, field, message } };
+}
+
+function encodeDomain(
+  family: DomainIdentityError["family"],
+  value: AgeGroupDomainValue | ScheduleDomainValue | PricingDomainValue,
+): DomainIdentityResult {
+  const result = canonicalValueKey(value);
+  return result.ok
+    ? result
+    : {
+        ok: false,
+        error: {
+          code: "canonicalization-failed",
+          family,
+          field: "*",
+          message: result.error.message,
+        },
+      };
+}
+
+function validDate(value: string | null): boolean {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+export function ageGroupDomainIdentity(value: unknown): DomainIdentityResult {
   const projection = projectAgeGroupDomain(value);
-  if (projection.label === null || [projection.minAge, projection.maxAge, projection.minGrade, projection.maxGrade].some(Number.isNaN)) {
-    return "!domain-error:ageGroups";
+  if (projection.label === null) return domainFailure("ageGroups", "label", "label is required");
+  for (const field of ["minAge", "maxAge", "minGrade", "maxGrade"] as const) {
+    const candidate = projection[field];
+    if (candidate !== null && !Number.isFinite(candidate)) {
+      return domainFailure("ageGroups", field, `${field} must be finite when present`);
+    }
   }
-  return canonicalIdentity(projection);
+  return encodeDomain("ageGroups", projection);
 }
 
-export function scheduleDomainIdentity(value: unknown): string {
+export function scheduleDomainIdentity(value: unknown): DomainIdentityResult {
   const projection = projectScheduleDomain(value);
-  return projection.label === null ? "!domain-error:schedules" : canonicalIdentity(projection);
+  if (projection.label === null) return domainFailure("schedules", "label", "label is required");
+  if (!validDate(projection.startDate)) {
+    return domainFailure("schedules", "startDate", "startDate is required and must be a valid date");
+  }
+  if (!validDate(projection.endDate)) {
+    return domainFailure("schedules", "endDate", "endDate is required and must be a valid date");
+  }
+  return encodeDomain("schedules", projection);
 }
 
-export function pricingDomainIdentity(value: unknown): string {
+export function pricingDomainIdentity(value: unknown): DomainIdentityResult {
   const projection = projectPricingDomain(value);
-  return projection.label === null || (projection.amount !== null && Number.isNaN(projection.amount))
-    ? "!domain-error:pricing"
-    : canonicalIdentity(projection);
+  if (projection.label === null) return domainFailure("pricing", "label", "label is required");
+  if (projection.amount === null || !Number.isFinite(projection.amount)) {
+    return domainFailure("pricing", "amount", "amount is required and must be finite");
+  }
+  if (projection.unit === null || projection.unit.length === 0) {
+    return domainFailure("pricing", "unit", "unit is required");
+  }
+  if (projection.durationWeeks !== null && !Number.isFinite(projection.durationWeeks)) {
+    return domainFailure("pricing", "durationWeeks", "durationWeeks must be finite when present");
+  }
+  return encodeDomain("pricing", projection);
 }
 
 export function relationDomainIdentity(
@@ -286,8 +358,8 @@ export function outerArrayChange(
     oldValue,
     newValue,
     (oldCandidate, newCandidate) => {
-      const oldKeys = (oldCandidate as unknown[]).map(identity).sort();
-      const newKeys = (newCandidate as unknown[]).map(identity).sort();
+      const oldKeys = (oldCandidate as unknown[]).map((value) => resolveIdentity(identity, value)).sort();
+      const newKeys = (newCandidate as unknown[]).map((value) => resolveIdentity(identity, value)).sort();
       if (oldKeys.some(isFailedIdentity) || newKeys.some(isFailedIdentity)) return false;
       return canonicalIdentity(oldKeys) === canonicalIdentity(newKeys);
     }
@@ -299,16 +371,16 @@ export function relationFacts(
   candidateItems: unknown[],
   identity: RelationIdentity = stableOuterArrayIdentity
 ): RelationFacts {
-  const currentIdentities = new Set(currentItems.map(identity));
+  const currentIdentities = new Set(currentItems.map((value) => resolveIdentity(identity, value)));
   const remainingCandidateCounts = new Map<string, number>();
   for (const item of candidateItems) {
-    const key = identity(item);
+    const key = resolveIdentity(identity, item);
     if (isFailedIdentity(key)) continue;
     remainingCandidateCounts.set(key, (remainingCandidateCounts.get(key) ?? 0) + 1);
   }
 
   const allCurrentRetained = currentItems.every((item) => {
-    const key = identity(item);
+    const key = resolveIdentity(identity, item);
     if (isFailedIdentity(key)) return false;
     const remaining = remainingCandidateCounts.get(key) ?? 0;
     if (remaining === 0) return false;
@@ -319,7 +391,7 @@ export function relationFacts(
   return {
     allCurrentRetained,
     hasNovelCandidate: candidateItems.some((item) => {
-      const key = identity(item);
+      const key = resolveIdentity(identity, item);
       return isFailedIdentity(key) || !currentIdentities.has(key);
     }),
   };
