@@ -1178,10 +1178,15 @@ async function testCrawlPipelineWiresNotModifiedToFreshnessSeam() {
   );
   assert.match(
     source,
-    /recordRecrawlFreshness\(pool, \{ campId: camp\.id, checkedAt: new Date\(\) \}\)/,
-    "the notModified branch must record crawl freshness (lastCrawledAt) for the exact camp"
+    /const freshnessUpdated = await recordRecrawlFreshness\(pool, \{ campId: camp\.id, checkedAt: new Date\(\) \}\)/,
+    "the notModified branch must record crawl freshness (lastCrawledAt) for the exact camp, and consume the boolean return"
   );
-  console.log("✓ campfit#77 wiring: crawl-pipeline routes a notModified recrawl to recordRecrawlFreshness before any proposal/provider work (full DB path NOT_VERIFIED here — see the DB integration suite)");
+  assert.match(
+    source,
+    /if \(!freshnessUpdated\) \{\s*console\.warn\(\s*`\[crawl\] freshness update skipped: camp \$\{camp\.id\} no longer exists/,
+    "a missing/deleted camp row (false return) must be surfaced via a warning, not silently swallowed (review finding L1)"
+  );
+  console.log("✓ campfit#77 wiring: crawl-pipeline routes a notModified recrawl to recordRecrawlFreshness before any proposal/provider work, consumes the boolean return, and warns on a deleted-camp miss (full DB path NOT_VERIFIED here — see the DB integration suite)");
 }
 
 // ─── Run ────────────────────────────────────────────────────────────────
