@@ -55,7 +55,7 @@
     "@kontourai/datum": "^0.3.0",
     "@kontourai/surface": "^2.3.0",
     "@kontourai/survey": "^1.5.0",
-    "@kontourai/traverse": "^0.13.0",
+    "@kontourai/traverse": "0.14.1",
     "@prisma/client": "^7.8.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.108.0",
