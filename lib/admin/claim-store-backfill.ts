@@ -16,7 +16,7 @@
  *    `COALESCE(...) || $patch::jsonb` merge new keys over old — there is no
  *    history, only the current source). Shape actually written (a superset of
  *    `lib/types.ts`'s `FieldSource`, which is missing `attestedBy`/`notes`):
- *    `{ excerpt: string | null, sourceUrl: string, approvedAt: string,
+ *    `{ excerpt: string | null, sourceUrl: string, approvedAt?: string,
  *    attestedBy?: string, notes?: string }`. Because there is exactly one
  *    entry per field, this projects to exactly one deterministic Evidence +
  *    one deterministic VerificationEvent per field.
@@ -93,7 +93,7 @@ const CAMP_REPEATED_POLICY_ID = 'policy.camp.repeated-field';
 interface LegacyFieldSource {
   excerpt: string | null;
   sourceUrl: string;
-  approvedAt: string;
+  approvedAt?: string | null;
   attestedBy?: string;
   notes?: string;
 }
@@ -162,6 +162,8 @@ async function projectFieldSource(
   source: LegacyFieldSource,
   summary: BackfillSummary,
 ): Promise<void> {
+  const approvedAt = source.approvedAt;
+  if (!approvedAt) throw new Error(`Cannot project unapproved fieldSources entry for ${campId}.${field}`);
   const claimId = campCanonicalClaimId(campId, field);
   await persistClaim(pool, claimDraftForField(campId, field));
 
@@ -180,7 +182,7 @@ async function projectFieldSource(
       method,
       sourceRef,
       excerptOrSummary: source.excerpt ?? source.notes ?? 'Legacy fieldSources entry with no recorded excerpt.',
-      observedAt: source.approvedAt,
+      observedAt: approvedAt,
       collectedBy,
     };
     await appendEvidence(pool, evidence);
@@ -197,8 +199,8 @@ async function projectFieldSource(
       actor: collectedBy,
       method,
       evidenceIds: [evidenceId],
-      createdAt: source.approvedAt,
-      verifiedAt: source.approvedAt,
+      createdAt: approvedAt,
+      verifiedAt: approvedAt,
     };
     await appendEvent(pool, event);
     summary.eventsInserted++;
@@ -307,7 +309,11 @@ export async function backfillClaimStore(pool: Pool, options: { dryRun?: boolean
   for (const camp of camps) {
     const sources = camp.fieldSources ?? {};
     for (const [field, source] of Object.entries(sources)) {
-      if (!isVerifiedCampField(field)) {
+      // Discovery and other automated ingestion paths may store traceable,
+      // unapproved observations in fieldSources. Approval is the authority
+      // boundary: never erase "observed" into a verified Claim/Event merely
+      // because the field itself belongs to the verified claim set.
+      if (!isVerifiedCampField(field) || !source?.approvedAt) {
         summary.fieldSourcesSkipped++;
         continue;
       }

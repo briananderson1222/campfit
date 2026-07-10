@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
-import { discoverCampsFromUrl, filterNewDiscoveries } from '@/lib/ingestion/llm-discovery';
+import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from '@/lib/ingestion/llm-discovery';
+import { resolveExtractionProvider } from '@/lib/ingestion/resolve-extraction-provider';
+import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { parseDomain } from '@/lib/admin/onboarding-validation';
@@ -64,7 +66,13 @@ export async function POST(req: Request) {
   }
 
   // Run discovery on the URL
-  const discovery = await discoverCampsFromUrl(url, {}).catch(() => null);
+  let discoveryDeps: { provider: ReturnType<typeof resolveExtractionProvider>['provider']; store: ReturnType<typeof createCampfitSnapshotStore> };
+  try {
+    discoveryDeps = { provider: resolveExtractionProvider().provider, store: createCampfitSnapshotStore() };
+  } catch (error) {
+    return NextResponse.json({ error: `Discovery provider unavailable: ${error instanceof Error ? error.message : String(error)}` }, { status: 422 });
+  }
+  const discovery = await discoverCampsFromUrl(url, discoveryDeps).catch(() => null);
   if (!discovery || discovery.error || !discovery.stubs.length) {
     return NextResponse.json({ error: discovery?.error ?? 'No camps found on that page. Try the camp\'s programs or schedule page.' }, { status: 422 });
   }
@@ -105,11 +113,12 @@ export async function POST(req: Request) {
   for (const stub of newStubs) {
     const campUrl = stub.detailUrl ?? url;
     const campSlug = toSlug(stub.name) + '-' + Math.random().toString(36).slice(2, 6);
+    const fieldSources = buildDiscoveryFieldSources(stub);
     const { rows: [camp] } = await pool.query<{ id: string }>(
-      `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", "dataConfidence", "campType", category, "campTypes", "categories", "providerId")
-       VALUES ($1, $2, $3, $4, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $5)
+      `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", "dataConfidence", "campType", category, "campTypes", "categories", "providerId", "fieldSources")
+       VALUES ($1, $2, $3, $4, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $5, $6::jsonb)
        ON CONFLICT (slug) DO NOTHING RETURNING id`,
-      [stub.name, campSlug, campUrl, communitySlug, providerId]
+      [stub.name, campSlug, campUrl, communitySlug, providerId, JSON.stringify(fieldSources)]
     );
     if (camp) newCampIds.push(camp.id);
   }

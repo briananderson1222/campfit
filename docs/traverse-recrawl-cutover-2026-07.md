@@ -292,9 +292,9 @@ triage `recommendation()` string surfaced in the admin UI.
 | Route | Selection semantics | Discovery? | Model override? | Migration impact |
 | --- | --- | --- | --- | --- |
 | `app/api/admin/camps/[campId]/crawl/route.ts` | Single known `campId` | No | Yes (not honored for extraction, see AC8) | Per-camp adapter targets that exact `campId` directly |
-| `app/api/admin/providers/[providerId]/crawl/route.ts` | All camps for a `providerId` (bulk) | Yes | Yes | Bulk orchestration unchanged; discovery pre-pass stays legacy; per-camp step migrated |
+| `app/api/admin/providers/[providerId]/crawl/route.ts` | All camps for a `providerId` (bulk) | Yes | Yes | Bulk orchestration unchanged; discovery pre-pass uses traverse extraction as of campfit#78; per-camp step migrated |
 | `app/api/admin/crawl/start/route.ts` | `campIds` array, or all camps missing `websiteUrl` | Yes | Yes | Same bulk path; largest blast radius, most-tested |
-| `app/api/admin/crawl/onboard-url/route.ts` | Discovers+creates new camps, then re-crawls only the new `campIds` | Yes (core function) | No | Discovery/creation entirely legacy/unchanged (AC11); only the trailing `runCrawlPipeline` call is migrated |
+| `app/api/admin/crawl/onboard-url/route.ts` | Discovers+creates new camps, then re-crawls only the new `campIds` | Yes (core function) | No | Discovery uses plain traverse live-with-capture as of campfit#78; the trailing `runCrawlPipeline` call remains unchanged |
 | `app/api/admin/assistant/route.ts` (`startPipeline`) | Single `campId` OR `providerIds`, AI-assistant tool-call | No | No | Structurally identical to the two dedicated routes; zero route-level change |
 
 All five (plus `scripts/run-crawl.ts` / `scripts/harvest-aggregator.ts`) funnel through the
@@ -304,24 +304,23 @@ result-shape adapter). Admin polling UI (`recrawl-button.tsx`, `crawl-modal.tsx`
 `app/admin/crawls/page.tsx`) is unaffected — it only ever reads `CrawlRun` fields
 (`runId`/`status`/`newProposals`), never the extraction result shape directly.
 
-## Discovery stays on the legacy path (AC11)
+## Discovery cutover supersession (campfit#78, 2026-07-10)
 
-`lib/ingestion/llm-discovery.ts` (`discoverCampsFromUrl`/`filterNewDiscoveries`), the
-`discover` flag on 3 of the 5 routes, and `onboard-url`'s core discover-then-create flow have
-**no traverse equivalent** — traverse has no concept of "detect a listing page and enumerate
-programs on it" as a distinct pre-pass from per-item extraction. Migrating discovery is a
-separate, larger piece of work, explicitly out of this issue's scope. This is why
-`llm-provider.ts` is TRIMMED, not deleted: `callLLM`/`callAnthropic`/`callGemini`/`callOllama`/
-`LLMResponse` are kept because `llm-discovery.ts:13` still imports `callLLM` for discovery.
-`buildPrompt` and its `DENVER_NEIGHBORHOODS` constant — the extraction-only parts — were
-deleted (see "Dead-code closure" below).
+The historical AC11 statement below was true for the original recrawl cutover, but campfit#78
+now supersedes it. `discoverCampsFromUrl` uses traverse's narrow discovery schema and the
+resolved/injected `ExtractionProvider`; the raw `callLLM` prompt/parser path and
+`lib/ingestion/llm-provider.ts` are deleted. Scheduled/shared-listing pre-passes use
+revalidating capture (a trustworthy `304` means unchanged/no extraction and never "not a
+listing"), while explicit admin/CLI onboarding uses plain live-with-capture. New Camps remain
+`PLACEHOLDER`; their name and optional website observations retain field-specific verified
+excerpts, locators, and stored snapshot refs without `approvedAt`.
 
 ## Dead-code closure (AC2, AC3, AC4)
 
 | Item | Disposition |
 | --- | --- |
 | `lib/ingestion/llm-extractor.ts` | Deleted (whole file — `extractCampDataFromUrl`, `parseExtractionResponse`, `extractJsonObject`, `computeOverallConfidence`) |
-| `lib/ingestion/llm-provider.ts`'s `buildPrompt` + `DENVER_NEIGHBORHOODS` | Deleted; `callLLM`/`callAnthropic`/`callGemini`/`callOllama`/`LLMResponse` KEPT for discovery (AC11) |
+| `lib/ingestion/llm-provider.ts` | Fully deleted by campfit#78 after discovery moved to the resolved/injected traverse provider path |
 | `scripts/debug-extract.ts` | **Deleted**, not repointed. Rationale: it was a thin, standalone live-network CLI wrapper (`extractCampDataFromUrl(url, name)` -> print JSON) with no `package.json` script wiring (confirmed: zero `debug-extract` references in `package.json`) and no other consumers. Repointing it at `runTraverseRecrawlForCamp` would require synthesizing a full `Camp` "current" row, a resolved `ExtractionProvider`, and a `SnapshotStore` for a URL with no corresponding DB camp — a meaningfully heavier, DB-shaped tool for what was a one-line debug script. `scripts/test-recrawl-adapter.ts` (network-free, stub provider) and `npm run crawl -- --id <campId>` (live, DB-backed, real provider) already cover the "debug one URL's extraction" need at the two ends of the fidelity spectrum this script sat between. |
 
 Before-count (pre-migration baseline, recorded from planning):
@@ -335,10 +334,9 @@ literal identifier strings so this grep stays a clean zero — see e.g.
 `lib/ingestion/traverse-recrawl-adapter.ts`'s file doc, which now says "the retired hand-rolled
 per-camp extraction function" instead of spelling the old name.)
 
-`grep -n "buildPrompt\|DENVER_NEIGHBORHOODS" lib/ingestion/llm-provider.ts` returns zero.
-`grep -rn "\bcallLLM(" --include="*.ts" --include="*.tsx" .` shows exactly 2 hits: the
-definition in `llm-provider.ts` and the one call site in `llm-discovery.ts:90` — confirming
-`callLLM` has exactly one surviving consumer family.
+As of campfit#78, `test:discovery-replay` guards that `callLLM`, the bespoke discovery prompt
+and parser, and direct fetch composition cannot be resurrected; `lib/ingestion/llm-provider.ts`
+no longer exists.
 
 ## Version bump + cost-guard follow-up (AC12)
 
