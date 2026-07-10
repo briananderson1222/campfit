@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CrawlPriority, CrawlPreviewCamp } from '@/app/api/admin/crawl/preview/route';
-import type { LLMModel } from '@/app/api/admin/crawl/models/route';
 
 type RunState = 'idle' | 'running' | 'done' | 'error';
 type ModalPriority = CrawlPriority | 'onboard_url';
@@ -35,28 +34,6 @@ const PRIORITY_OPTIONS: { value: ModalPriority; label: string; description: stri
 ];
 
 const LIMIT_OPTIONS = [5, 10, 20, 50];
-
-// Provider-choice decision (traverse-recrawl-cutover plan, Task 1.4 / AC8):
-// `/api/admin/crawl/models` now reads live from `.datum/config.json`'s
-// `anthropic-compatible` providers (traverse ships no Gemini/Ollama adapter —
-// see that route's header doc), so `provider` here is an open-ended datum
-// provider id (e.g. "zai", "anthropic"), not the old fixed 3-way union.
-// `PROVIDER_COLORS` keeps curated colors for the providers datum actually
-// registers today, falling back to a neutral color for any other id so a new
-// datum provider never renders unstyled.
-const PROVIDER_COLORS: Record<string, string> = {
-  anthropic: 'bg-violet-100 text-violet-700',
-  zai:       'bg-teal-100 text-teal-700',
-};
-
-function modelBadgeClass(badge: string, provider: string): string {
-  if (badge === 'No Key') return 'bg-red-100 text-red-500 line-through opacity-60';
-  return PROVIDER_COLORS[provider] ?? 'bg-gray-100 text-gray-600';
-}
-
-function isModelDisabled(badge: string): boolean {
-  return badge === 'No Key';
-}
 
 function formatDate(iso: string | null) {
   if (!iso) return 'Never';
@@ -90,13 +67,6 @@ export function CrawlModal({
   const [priority, setPriority] = useState<ModalPriority>(isRetry ? 'specific' : 'all');
   const [limit, setLimit] = useState(10);
   const [onboardUrl, setOnboardUrl] = useState('');
-
-  // Model selection — only meaningful for the discovery pre-pass (see the
-  // "Model selector" section below); extraction always resolves its provider
-  // via datum, never this picker (AC8, docs/traverse-recrawl-cutover-2026-07.md).
-  const [models, setModels] = useState<LLMModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
-  const [defaultModelId, setDefaultModelId] = useState<string>('');
 
   // Specific-camp search
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,19 +104,6 @@ export function CrawlModal({
   // the initial onboard-url response, rendered in the "done" panel alongside
   // the crawl-progress summary.
   const [onboardOutcome, setOnboardOutcome] = useState<OnboardUrlOutcome | null>(null);
-
-  // Load models once on open
-  useEffect(() => {
-    if (!open || models.length > 0) return;
-    fetch('/api/admin/crawl/models')
-      .then(r => r.json())
-      .then(d => {
-        setModels(d.models ?? []);
-        setDefaultModelId(d.default ?? '');
-        if (!selectedModel) setSelectedModel(d.default ?? '');
-      })
-      .catch(() => {});
-  }, [open, models.length, selectedModel]);
 
   const fetchPreview = useCallback(async () => {
     if (priority === 'specific' || priority === 'onboard_url') return;
@@ -194,12 +151,6 @@ export function CrawlModal({
   const crawlCamps = priority === 'specific'
     ? searchResults.filter(c => selectedCampIds.has(c.id))
     : (preview?.camps ?? []);
-
-  // Label of the datum-resolved default extraction model (models/route.ts's
-  // `default`, i.e. the `extraction-default` datum role) — surfaced as helper
-  // text so the discovery-only model picker below can't be mistaken for an
-  // extraction-model choice.
-  const defaultModelLabel = models.find(m => m.id === defaultModelId)?.label ?? defaultModelId;
 
   const startCrawl = async () => {
     // Onboard URL mode — separate flow
@@ -271,7 +222,7 @@ export function CrawlModal({
       const res = await fetch('/api/admin/crawl/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campIds, model: selectedModel || undefined, discover }),
+        body: JSON.stringify({ campIds, discover }),
       });
       if (!res.ok) throw new Error(await res.text());
       const { runId } = await res.json();
@@ -546,57 +497,6 @@ export function CrawlModal({
                       </div>
                     </button>
                   </div>
-
-                  {/* Model selector — discovery-only (AC8, iteration-2 fix). Field
-                      extraction ALWAYS resolves its provider via datum
-                      (resolve-extraction-provider.ts) and ignores this picker
-                      entirely (see crawl-pipeline.ts's warnModelOverrideIgnored /
-                      withModelOverrideNote — the per-run `model` override is only
-                      ever honored by this legacy discovery pre-pass). Rendering
-                      this picker unconditionally would make it a dead control for
-                      the default/common re-crawl flow (discover off), so it's
-                      shown only when the toggle above is on, matching this
-                      modal's existing pattern of hiding sections that don't apply
-                      to the current mode (search/onboard-url/limit above). */}
-                  {discover && models.length > 0 && (
-                    <div>
-                      <label className="text-xs font-semibold text-bark-400 uppercase tracking-wide mb-2 block">Discovery LLM Model</label>
-                      <div className="flex flex-wrap gap-2">
-                        {models.map(m => {
-                          const disabled = isModelDisabled(m.badge);
-                          const disabledTitle = disabled
-                            ? `No API key configured for the "${m.provider}" datum provider (.datum/config.json) — set its auth env var to enable`
-                            : undefined;
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => !disabled && setSelectedModel(m.id)}
-                              disabled={disabled}
-                              title={disabled ? disabledTitle : undefined}
-                              className={cn(
-                                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-all',
-                                disabled
-                                  ? 'border-cream-200/40 text-bark-300 cursor-not-allowed opacity-50'
-                                  : selectedModel === m.id
-                                    ? 'border-pine-400 bg-pine-50 text-pine-700'
-                                    : 'border-cream-300/60 hover:border-cream-400 text-bark-500'
-                              )}
-                            >
-                              {m.label}
-                              <span className={cn('text-xs px-1.5 py-0.5 rounded-md font-semibold', modelBadgeClass(m.badge, m.provider))}>
-                                {m.badge}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="text-xs text-bark-300 mt-1.5">
-                        Only used for finding new programs on listing pages. Field extraction
-                        always uses the datum-resolved default{defaultModelLabel ? ` (${defaultModelLabel})` : ''} —
-                        this selection has no effect on it.
-                      </p>
-                    </div>
-                  )}
 
                   {/* Priority preview list */}
                   {priority !== 'specific' && priority !== 'onboard_url' && (

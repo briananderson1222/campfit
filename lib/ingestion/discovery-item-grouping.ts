@@ -17,6 +17,29 @@ export interface GroupedDiscoveryItem {
 
 type Field = "name" | "detailUrl" | "snippet";
 const FIELDS = new Set<Field>(["name", "detailUrl", "snippet"]);
+const DEDUPE_THRESHOLD = 0.75;
+
+function bigrams(value: string): Set<string> {
+  // Keep this byte-for-byte equivalent to llm-discovery's preserved Dice
+  // normalization: punctuation removal, whitespace collapse, and Set bigrams.
+  const normalized = value.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  const result = new Set<string>();
+  for (let index = 0; index < normalized.length - 1; index++) {
+    result.add(normalized.slice(index, index + 2));
+  }
+  return result;
+}
+
+function diceCoefficient(left: string, right: string): number {
+  const leftBigrams = bigrams(left);
+  const rightBigrams = bigrams(right);
+  if (leftBigrams.size === 0 || rightBigrams.size === 0) return 0;
+  let intersection = 0;
+  leftBigrams.forEach((gram) => {
+    if (rightBigrams.has(gram)) intersection++;
+  });
+  return (2 * intersection) / (leftBigrams.size + rightBigrams.size);
+}
 
 export function groupDiscoveryItems(
   proposals: ExtractionProposal[],
@@ -34,7 +57,6 @@ export function groupDiscoveryItems(
   }
 
   const warnings: string[] = [];
-  const seen = new Set<string>();
   const items: GroupedDiscoveryItem[] = [];
   for (const [index, fields] of [...groups].sort((a, b) => a[0] - b[0])) {
     if (chunkBoundaryIndices.has(index)) {
@@ -49,9 +71,7 @@ export function groupDiscoveryItems(
       warnings.push(`items[${index}] dropped: missing verified name provenance`);
       continue;
     }
-    const key = name.toLocaleLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (items.some((item) => diceCoefficient(name, item.name) >= DEDUPE_THRESHOLD)) continue;
 
     let detailUrl: string | null = null;
     let detailUrlExcerpt: string | null = null;

@@ -142,10 +142,10 @@ function discoveryProposal(
 
 function crossChunkDiscoveryGroupingCheck() {
   const proposals: ExtractionProposal[] = [
-    discoveryProposal("items[].name", "Course A", 0, "Course A", 10),
+    discoveryProposal("items[].name", "Alder Hiking", 0, "Alder Hiking", 10),
     discoveryProposal("items[].detailUrl", "/course-a", 0, "[Course A details](/course-a)", 20),
     discoveryProposal("items[].snippet", "Alpha excerpt", 0, "Alpha excerpt", 50),
-    discoveryProposal("items[].name", "Course B", 1, "Course B", 100),
+    discoveryProposal("items[].name", "Beacon Art", 1, "Beacon Art", 100),
     discoveryProposal("items[].detailUrl", "/course-b", 1, "[Course B details](/course-b)", 110),
     discoveryProposal("items[].snippet", "Bravo excerpt", 1, "Bravo excerpt", 140),
     // This schema-invalid proposal must be filtered BEFORE the generic index
@@ -153,10 +153,10 @@ function crossChunkDiscoveryGroupingCheck() {
     discoveryProposal("items[].ignored", "not a discovery field", 99, "not a discovery field", 170),
     // A second traverse chunk restarts its local item indices at 0 and 1,
     // while locators continue forward in the shared prepared document.
-    discoveryProposal("items[].name", "Course C", 0, "Course C", 500),
+    discoveryProposal("items[].name", "Cedar Science", 0, "Cedar Science", 500),
     discoveryProposal("items[].detailUrl", "/course-c", 0, "[Course C details](/course-c)", 510),
     discoveryProposal("items[].snippet", "Charlie excerpt", 0, "Charlie excerpt", 540),
-    discoveryProposal("items[].name", "Course D", 1, "Course D", 600),
+    discoveryProposal("items[].name", "Delta Music", 1, "Delta Music", 600),
     discoveryProposal("items[].detailUrl", "/course-d", 1, "[Course D details](/course-d)", 610),
     discoveryProposal("items[].snippet", "Delta excerpt", 1, "Delta excerpt", 640),
   ];
@@ -165,10 +165,10 @@ function crossChunkDiscoveryGroupingCheck() {
   assert.deepEqual(
     grouped.items.map(({ name, detailUrl, excerpt, locator }) => ({ name, detailUrl, excerpt, locator })),
     [
-      { name: "Course A", detailUrl: "https://example.test/course-a", excerpt: "Alpha excerpt", locator: "chars:50-63" },
-      { name: "Course B", detailUrl: "https://example.test/course-b", excerpt: "Bravo excerpt", locator: "chars:140-153" },
-      { name: "Course C", detailUrl: "https://example.test/course-c", excerpt: "Charlie excerpt", locator: "chars:540-555" },
-      { name: "Course D", detailUrl: "https://example.test/course-d", excerpt: "Delta excerpt", locator: "chars:640-653" },
+      { name: "Alder Hiking", detailUrl: "https://example.test/course-a", excerpt: "Alpha excerpt", locator: "chars:50-63" },
+      { name: "Beacon Art", detailUrl: "https://example.test/course-b", excerpt: "Bravo excerpt", locator: "chars:140-153" },
+      { name: "Cedar Science", detailUrl: "https://example.test/course-c", excerpt: "Charlie excerpt", locator: "chars:540-555" },
+      { name: "Delta Music", detailUrl: "https://example.test/course-d", excerpt: "Delta excerpt", locator: "chars:640-653" },
     ],
     "two chunks whose local indices collide at 0/1 must preserve four ordered name/URL/excerpt/locator pairings",
   );
@@ -177,6 +177,30 @@ function crossChunkDiscoveryGroupingCheck() {
     "the first item in the second chunk must surface the canonical rebase warning at filtered global index 2",
   );
   console.log("✓ discovery cross-chunk rebasing: colliding 0/1 indices preserve 4 ordered name/URL/excerpt/locator pairings and surface the boundary warning");
+}
+
+async function discoveryDistinctnessContractCheck() {
+  const discoverNames = async (names: string[], suffix: string) => {
+    const body = `<main>${names.map((name) => `<h2>${name}</h2>`).join("")}</main>`;
+    return discoverCampsFromUrl(`https://example.test/listings/${suffix}`, {
+      provider: createStubProvider(names.map((name, index) => ({
+        fieldPath: `items[${index}].name`,
+        candidateValue: name,
+        needle: name,
+      }))),
+      store: createInMemorySnapshotStore(),
+      fetchOptions: { fetch: fixtureFetch(body), sleep: async () => {} },
+    });
+  };
+
+  const nearDuplicates = await discoverNames(["Camp Alpha", "Camp Alpha!"], "near-duplicates");
+  assert.equal(nearDuplicates.stubs.length, 1, "Dice-equivalent stubs must produce one surviving insert");
+  assert.equal(nearDuplicates.isListingPage, false, "one post-dedupe survivor is not a listing page");
+
+  const distinct = await discoverNames(["Camp Alpha", "Camp Beta"], "distinct");
+  assert.equal(distinct.stubs.length, 2, "genuinely distinct stubs must produce two inserts");
+  assert.equal(distinct.isListingPage, true, "two post-dedupe survivors are a listing page");
+  console.log("✓ discovery distinctness: Dice-equivalent Alpha/Alpha! => 1 insert and false; distinct Alpha/Beta => 2 inserts and true");
 }
 
 function sourceGuard() {
@@ -194,5 +218,6 @@ function sourceGuard() {
 await characterizeCorpus();
 await faultAndBoundaryChecks();
 crossChunkDiscoveryGroupingCheck();
+await discoveryDistinctnessContractCheck();
 sourceGuard();
 console.log("\ndiscovery replay verification passed");
