@@ -41,6 +41,7 @@ import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
 import { startRun } from './crawl-run-tracker';
 import { createProposal } from '@/lib/admin/review-repository';
+import { recordRecrawlFreshness } from './recrawl-freshness';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
 import type { CrawlProgressEvent, CrawlRun, LLMExtractionResult } from '@/lib/admin/types';
@@ -629,6 +630,35 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
             // Still record failure metric (shape-adapted — see toLegacyMetricsResult)
             const siteHost = getSiteHost(camp.websiteUrl);
             await recordExtractionMetrics({ runId, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound: 0, durationMs });
+          } else if (result.notModified) {
+            // Conditional GET (campfit#77 AC1, amended): a trustworthy 304 — the
+            // page is byte-identical to the prior snapshot. Record CRAWL freshness
+            // (`lastCrawledAt`) via the narrow repository seam; this deliberately
+            // does NOT touch `lastVerifiedAt`/`dataConfidence` (owned by claim
+            // verification — issue #77 orchestrator ruling 2026-07-10). Skip
+            // createProposal AND matchOrCreateProvider entirely, and record an
+            // honest zero-change, zero-spend outcome. `providerCalls`/`tokensUsed`
+            // on `result` are already 0/null (extraction never ran).
+            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id, checkedAt: new Date() });
+            if (!freshnessUpdated) {
+              console.warn(
+                `[crawl] freshness update skipped: camp ${camp.id} no longer exists (deleted between recrawl selection and freshness write)`
+              );
+            }
+
+            const siteHost = getSiteHost(camp.websiteUrl);
+            await recordExtractionMetrics({ runId, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound: 0, durationMs });
+
+            await tracker.recordItemOutcome({
+              status: 'no_changes',
+              campId: camp.id, campName: camp.name, url: camp.websiteUrl,
+              model: displayModel,
+              fieldsChanged: [],
+              durationMs,
+              proposalId: null,
+              confidence: result.overallConfidence,
+              newProposalsDelta: 0,
+            });
           } else {
             const proposedChanges = result.proposedChanges;
             const changesFound = Object.keys(proposedChanges).length;

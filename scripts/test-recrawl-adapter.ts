@@ -69,6 +69,7 @@ import * as url from "node:url";
 import type { ExtractionProvider, ProviderExtractionOutput } from "@kontourai/traverse";
 import { createInMemorySnapshotStore, type FetchLike } from "@kontourai/traverse/fetch";
 import { runTraverseRecrawlForCamp } from "../lib/ingestion/traverse-recrawl-adapter";
+import { recordRecrawlFreshness } from "../lib/ingestion/recrawl-freshness";
 import { computeDiff } from "../lib/ingestion/diff-engine";
 import { createStubProvider, type StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 import type { Camp } from "../lib/types";
@@ -96,6 +97,88 @@ function makeFixtureFetch(html: string): FetchLike {
       },
       text: async () => (isRobots ? "User-agent: *\nDisallow:" : html),
     };
+  };
+}
+
+// ─── campfit#77 conditional-GET fixtures ─────────────────────────────────
+//
+// A response-`headers.get()` shim mirroring `makeFixtureFetch`'s shape.
+// `fetchSource` reads validators via `response.headers.get("etag")` /
+// `"last-modified"` (lowercase), so keys are stored lowercased.
+function hdrGet(map: Record<string, string>): { get(name: string): string | null } {
+  return { get: (name: string) => map[name.toLowerCase()] ?? null };
+}
+
+/**
+ * Captures what the injected fetch saw on the MAIN (non-robots) resource — the
+ * request headers (to assert `If-None-Match`/`If-Modified-Since` were/weren't
+ * sent) and how many times the response body was read (to prove a bodyless 304
+ * transferred nothing).
+ */
+interface RecrawlFetchProbe {
+  mainRequests: number;
+  mainRequestHeaders: Record<string, string>[];
+  bodyReads: number;
+}
+
+function newProbe(): RecrawlFetchProbe {
+  return { mainRequests: 0, mainRequestHeaders: [], bodyReads: 0 };
+}
+
+/**
+ * A validator-aware injected fetch. Serves `/robots.txt` allow-all, then for the
+ * main resource:
+ *  - mode `"200"`: always a fresh `200` carrying `etag`/`last-modified` + `html`.
+ *  - mode `"304-when-validated"`: a bodyless `304` IFF the request carried the
+ *    matching `If-None-Match` AND `If-Modified-Since` (a real conditional-GET
+ *    hit); otherwise a fresh `200` (so a missing-validator bug surfaces as a body
+ *    read instead of a silent 304). `text()` increments `probe.bodyReads` so a
+ *    304 that never reads its body is provable.
+ */
+function makeValidatorFetch(
+  html: string,
+  etag: string,
+  lastModified: string,
+  mode: "200" | "304-when-validated",
+  probe: RecrawlFetchProbe
+): FetchLike {
+  return (async (fetchUrl: string, init?: { headers?: Record<string, string> }) => {
+    if (fetchUrl.endsWith("/robots.txt")) {
+      return { status: 200, headers: hdrGet({ "content-type": "text/plain" }), text: async () => "User-agent: *\nDisallow:" };
+    }
+    const headers = init?.headers ?? {};
+    probe.mainRequests++;
+    probe.mainRequestHeaders.push({ ...headers });
+    const validated = headers["If-None-Match"] === etag && headers["If-Modified-Since"] === lastModified;
+    if (mode === "304-when-validated" && validated) {
+      return {
+        status: 304,
+        headers: hdrGet({ "content-type": "text/html; charset=utf-8", etag, "last-modified": lastModified }),
+        text: async () => {
+          probe.bodyReads++;
+          return "";
+        },
+      };
+    }
+    return {
+      status: 200,
+      headers: hdrGet({ "content-type": "text/html; charset=utf-8", etag, "last-modified": lastModified }),
+      text: async () => {
+        probe.bodyReads++;
+        return html;
+      },
+    };
+  }) as FetchLike;
+}
+
+/** A provider whose `extract()` counts calls then throws — proves, independently of telemetry, that extraction never runs on a 304. */
+function makeThrowingProvider(counter: { calls: number }): ExtractionProvider {
+  return {
+    name: "throwing-on-304",
+    async extract(): Promise<ProviderExtractionOutput> {
+      counter.calls++;
+      throw new Error("extract() must never be called on a 304 (campfit#77 AC1)");
+    },
   };
 }
 
@@ -843,6 +926,269 @@ async function testRequiresRenderFailsClosedWithNoRenderer() {
   console.log("✓ AC6: Provider.requiresRender with no renderImpl configured fails closed with a typed invalid-config error, never a crash or silent empty-shell success");
 }
 
+// ─── 12. campfit#77 AC1: conditional GET — 304 skips extraction, records
+// crawl freshness, zero provider calls ────────────────────────────────────
+
+async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
+  const html = loadFixture("avid4-healthy.html");
+  const etag = '"v1-abc"';
+  const lastModified = "Wed, 01 Jan 2025 00:00:00 GMT";
+  const store = createInMemorySnapshotStore();
+
+  // Run 1 — seed: a fresh 200 that captures a snapshot WITH validators
+  // (etag/last-modified). An empty store means no conditional GET is attempted,
+  // so this is a plain first fetch.
+  const seedProbe = newProbe();
+  const seedSpecs: StubProposalSpec[] = [
+    { fieldPath: "items[].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[].city", candidateValue: "Boulder", needle: "Boulder, Colorado" },
+  ];
+  const seed = await runTraverseRecrawlForCamp({
+    campId: "camp-304",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-304", city: "" }),
+    provider: createStubProvider(seedSpecs, { model: "stub-304-seed" }),
+    store,
+    mode: "live-with-capture",
+    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "200", seedProbe), sleep: async () => {} },
+    log: () => {},
+  });
+  assert.equal(seed.ok, true, "seed run must succeed and capture a snapshot with validators");
+  assert.equal(seed.notModified ?? false, false, "the seeding 200 is not a 304");
+  assert.ok(seed.snapshot.bodyHash, "seed run must capture a snapshot bodyHash");
+  assert.ok(
+    !("If-None-Match" in (seedProbe.mainRequestHeaders[0] ?? {})),
+    "the first fetch (empty store) must send no validators"
+  );
+
+  // Run 2 — the store now holds a validated prior: a conditional GET must send
+  // If-None-Match/If-Modified-Since and receive a bodyless 304. The provider
+  // throws-on-call so any accidental extraction is caught independently of
+  // telemetry.
+  const probe = newProbe();
+  const providerCounter = { calls: 0 };
+  const result = await runTraverseRecrawlForCamp({
+    campId: "camp-304",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-304", city: "" }),
+    provider: makeThrowingProvider(providerCounter),
+    store,
+    mode: "live-with-capture",
+    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "304-when-validated", probe), sleep: async () => {} },
+    log: () => {},
+  });
+
+  const req = probe.mainRequestHeaders[0] ?? {};
+  assert.equal(req["If-None-Match"], etag, "the recrawl must send If-None-Match from the prior snapshot's etag");
+  assert.equal(req["If-Modified-Since"], lastModified, "the recrawl must send If-Modified-Since from the prior snapshot's last-modified");
+  assert.equal(probe.bodyReads, 0, "a bodyless 304 must never have its body read (zero body transfer)");
+  assert.equal(providerCounter.calls, 0, "extract() must never be called on a 304 (throwing-provider counter proves it)");
+  assert.equal(result.ok, true, "a 304 is a successful freshness check");
+  assert.equal(result.notModified, true, "a 304 must surface notModified: true");
+  assert.equal(result.providerCalls, 0, "zero provider calls on a 304 (telemetry)");
+  assert.equal(result.tokensUsed, null, "no tokens used on a 304 — extraction never ran");
+  assert.deepEqual(result.proposedChanges, {}, "a 304 proposes nothing");
+  assert.equal(result.itemCount, 0, "a 304 selects/groups no items");
+  assert.equal(result.matchedItemName, null, "a 304 matches no item");
+  assert.ok(result.snapshot.bodyHash, "the re-served prior snapshot's provenance is present");
+  assert.equal(result.snapshot.bodyHash, seed.snapshot.bodyHash, "the 304 re-serves the byte-identical prior snapshot");
+
+  // Freshness seam: recordRecrawlFreshness writes ONLY lastCrawledAt (crawl
+  // freshness), never lastVerifiedAt/dataConfidence — asserted directly against
+  // a fake pool with a fixed clock (AC1 amendment, issue #77).
+  const checkedAt = new Date("2026-07-10T12:00:00.000Z");
+  const queries: { text: string; values: unknown[] }[] = [];
+  const fakePool = {
+    query: async (text: string, values: unknown[]) => {
+      queries.push({ text, values });
+      return { rowCount: 1 };
+    },
+  };
+  const updated = await recordRecrawlFreshness(fakePool as never, { campId: "camp-304", checkedAt });
+  assert.equal(updated, true, "a present camp row reports updated: true");
+  assert.equal(queries.length, 1, "exactly one UPDATE is issued");
+  assert.match(queries[0].text, /UPDATE "Camp" SET "lastCrawledAt" = \$1 WHERE id = \$2/, "writes lastCrawledAt for the exact camp id, parameterized");
+  assert.doesNotMatch(queries[0].text, /lastVerifiedAt|dataConfidence/, "must NEVER touch lastVerifiedAt/dataConfidence — verification authority is untouched (AC1 amendment)");
+  assert.deepEqual(queries[0].values, [checkedAt, "camp-304"], "exact checkedAt + campId params");
+  const missingPool = { query: async () => ({ rowCount: 0 }) };
+  assert.equal(
+    await recordRecrawlFreshness(missingPool as never, { campId: "gone", checkedAt }),
+    false,
+    "a missing/deleted camp row is observable as updated: false"
+  );
+
+  console.log("✓ campfit#77 AC1: an unchanged page (304) sends validators, transfers no body, runs zero provider calls, skips extraction/selection/diff/proposal, and records crawl freshness (lastCrawledAt only)");
+}
+
+// ─── 13. campfit#77 AC2: a changed page's fresh 200 behaves exactly as today ─
+
+async function testConditionalGet200PreservesChangedPageBehavior() {
+  const html = loadFixture("avid4-healthy.html");
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[].city", candidateValue: "Boulder", needle: "Boulder, Colorado" },
+  ];
+
+  // Baseline: the pre-#77 plain path. An EMPTY store means no conditional GET is
+  // attempted even though the adapter now opts in — byte-for-byte the old fetch.
+  const baselineProbe = newProbe();
+  const baseline = await runTraverseRecrawlForCamp({
+    campId: "camp-200",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-200", city: "" }),
+    provider: createStubProvider(specs, { model: "stub-200-baseline" }),
+    store: createInMemorySnapshotStore(),
+    mode: "live-with-capture",
+    fetchOptions: { fetch: makeValidatorFetch(html, '"old"', "Wed, 01 Jan 2025 00:00:00 GMT", "200", baselineProbe), sleep: async () => {} },
+    log: () => {},
+  });
+  assert.equal(baseline.ok, true, "baseline plain-path recrawl succeeds");
+  assert.ok(baseline.proposedChanges["city"], "baseline produces the city populate");
+
+  // Revalidating changed-200: seed a prior (old etag/last-modified), then serve a
+  // fresh 200 with a NEW etag. Validators ARE sent, but a changed 200 does NOT
+  // short-circuit — full fetch -> extract -> computeDiff runs, with output
+  // identical to the baseline plain path.
+  const store = createInMemorySnapshotStore();
+  const seedProbe = newProbe();
+  await runTraverseRecrawlForCamp({
+    campId: "camp-200",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-200", city: "" }),
+    provider: createStubProvider(specs, { model: "stub-200-seed" }),
+    store,
+    mode: "live-with-capture",
+    fetchOptions: { fetch: makeValidatorFetch(html, '"old"', "Wed, 01 Jan 2025 00:00:00 GMT", "200", seedProbe), sleep: async () => {} },
+    log: () => {},
+  });
+
+  const probe = newProbe();
+  const providerCounter = { calls: 0 };
+  const changedStub = createStubProvider(specs, { model: "stub-200-changed" });
+  const countingProvider: ExtractionProvider = {
+    name: "counting-changed-200",
+    async extract(input): Promise<ProviderExtractionOutput> {
+      providerCounter.calls++;
+      return changedStub.extract(input);
+    },
+  };
+  const changed = await runTraverseRecrawlForCamp({
+    campId: "camp-200",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-200", city: "" }),
+    provider: countingProvider,
+    store,
+    mode: "live-with-capture",
+    // A NEW etag => the server treats the page as changed, returns a fresh 200.
+    fetchOptions: { fetch: makeValidatorFetch(html, '"new"', "Thu, 02 Jan 2025 00:00:00 GMT", "200", probe), sleep: async () => {} },
+    log: () => {},
+  });
+
+  const req = probe.mainRequestHeaders[0] ?? {};
+  assert.equal(req["If-None-Match"], '"old"', "a changed-page recrawl still SENDS the prior validators (conditional GET attempted)");
+  assert.equal(changed.notModified ?? false, false, "a fresh 200 is not notModified");
+  assert.ok(providerCounter.calls > 0, "a changed 200 calls the provider (full extraction ran)");
+  assert.ok(probe.bodyReads > 0, "a changed 200 reads the response body");
+  assert.deepEqual(
+    changed.proposedChanges,
+    baseline.proposedChanges,
+    "a changed 200 produces byte-identical proposedChanges to the pre-#77 plain path (AC2 regression lock)"
+  );
+  assert.equal(changed.matchedItemName, baseline.matchedItemName, "the matched item is unchanged from the plain path");
+  // Note: duplicate-only array growth => `update` remains locked by #108's
+  // testComputeDiffBehaviorTable above (unchanged, not re-asserted here).
+
+  console.log("✓ campfit#77 AC2: a changed page's fresh 200 still sends validators, reads the body, runs full extraction, and produces output identical to the pre-#77 plain path");
+}
+
+// ─── 14. campfit#77 DOD-RENDER: rendered recrawls never use HTTP validators ─
+
+async function testConditionalGetDoesNotApplyToRenderedRecrawl() {
+  const html = loadFixture("avid4-healthy.html");
+  const etag = '"render-prior"';
+  const lastModified = "Wed, 01 Jan 2025 00:00:00 GMT";
+  const store = createInMemorySnapshotStore();
+
+  // Seed a validated prior snapshot for this camp, so we can prove a rendered
+  // recrawl neither sends nor reuses those HTTP validators.
+  const seedProbe = newProbe();
+  await runTraverseRecrawlForCamp({
+    campId: "camp-render",
+    websiteUrl: "https://spa-provider.example/camp",
+    campName: "SPA Provider Camp",
+    current: makeCamp({ id: "camp-render", name: "SPA Provider Camp", slug: "spa-provider-camp" }),
+    provider: createStubProvider(
+      [{ fieldPath: "items[].name", candidateValue: "SPA Provider Camp", needle: "Mountain Explorers Day Camp" }],
+      { model: "stub-render-seed" }
+    ),
+    store,
+    mode: "live-with-capture",
+    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "200", seedProbe), sleep: async () => {} },
+    log: () => {},
+  });
+
+  // Recrawl the SAME camp as requiresRender:true with NO renderImpl — every
+  // Vercel route's real configuration. A validator probe is injected; the render
+  // path must never issue an HTTP conditional GET with it.
+  const probe = newProbe();
+  const result = await runTraverseRecrawlForCamp({
+    campId: "camp-render",
+    websiteUrl: "https://spa-provider.example/camp",
+    campName: "SPA Provider Camp",
+    current: makeCamp({ id: "camp-render", name: "SPA Provider Camp", slug: "spa-provider-camp" }),
+    requiresRender: true,
+    provider: createStubProvider([], { model: "stub-render" }),
+    store,
+    mode: "live-with-capture",
+    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "304-when-validated", probe), sleep: async () => {} },
+    log: () => {},
+  });
+
+  assert.equal(result.ok, false, "a requiresRender camp with no renderImpl still fails closed");
+  assert.ok(result.error?.startsWith("invalid-config:"), `expected a typed invalid-config error, got: ${result.error}`);
+  assert.equal(result.notModified ?? false, false, "a rendered recrawl is never notModified — revalidation does not apply to render:true");
+  assert.equal(result.itemCount, 0, "no items were grouped from a failed rendered fetch");
+  const anyValidatorSent = probe.mainRequestHeaders.some((h) => "If-None-Match" in h || "If-Modified-Since" in h);
+  assert.equal(anyValidatorSent, false, "HTTP validators must never be sent on a rendered recrawl (revalidate is gated on !render)");
+
+  console.log("✓ campfit#77 DOD-RENDER: a rendered recrawl never sends/reuses HTTP validators and retains fail-closed semantics even with a validated prior snapshot in the store");
+}
+
+// ─── 15. campfit#77 wiring: crawl-pipeline routes a notModified recrawl to the
+// crawl-freshness seam and skips proposal/provider work (structural — the full
+// DB path is exercised by the DB-backed integration suite, NOT_VERIFIED here
+// with no TEST_DATABASE_URL) ───────────────────────────────────────────────
+
+async function testCrawlPipelineWiresNotModifiedToFreshnessSeam() {
+  const source = fs.readFileSync(path.join(ROOT_DIR, "lib/ingestion/crawl-pipeline.ts"), "utf8");
+  assert.match(
+    source,
+    /import\s*{\s*recordRecrawlFreshness\s*}\s*from\s*['"]\.\/recrawl-freshness['"]/,
+    "crawl-pipeline must import the crawl-freshness seam"
+  );
+  assert.match(
+    source,
+    /else if \(result\.notModified\)/,
+    "crawl-pipeline must branch on result.notModified BEFORE the changed-page proposal block"
+  );
+  assert.match(
+    source,
+    /const freshnessUpdated = await recordRecrawlFreshness\(pool, \{ campId: camp\.id, checkedAt: new Date\(\) \}\)/,
+    "the notModified branch must record crawl freshness (lastCrawledAt) for the exact camp, and consume the boolean return"
+  );
+  assert.match(
+    source,
+    /if \(!freshnessUpdated\) \{\s*console\.warn\(\s*`\[crawl\] freshness update skipped: camp \$\{camp\.id\} no longer exists/,
+    "a missing/deleted camp row (false return) must be surfaced via a warning, not silently swallowed (review finding L1)"
+  );
+  console.log("✓ campfit#77 wiring: crawl-pipeline routes a notModified recrawl to recordRecrawlFreshness before any proposal/provider work, consumes the boolean return, and warns on a deleted-camp miss (full DB path NOT_VERIFIED here — see the DB integration suite)");
+}
+
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -857,6 +1203,10 @@ async function main() {
   await testCampIdsSweepIsolatesFailures();
   await testOnboardUrlTrailingRecrawlPopulatesPlaceholderCamp();
   await testRequiresRenderFailsClosedWithNoRenderer();
+  await testConditionalGet304SkipsExtractionAndRefreshesFreshness();
+  await testConditionalGet200PreservesChangedPageBehavior();
+  await testConditionalGetDoesNotApplyToRenderedRecrawl();
+  await testCrawlPipelineWiresNotModifiedToFreshnessSeam();
   console.log("\ntraverse recrawl adapter verification passed");
 }
 

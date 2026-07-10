@@ -157,6 +157,19 @@ export interface TraverseRecrawlOptions {
 export interface TraverseRecrawlResult {
   ok: boolean;
   /**
+   * `true` ONLY when a conditional-GET recrawl (campfit#77) found the page
+   * UNCHANGED: the plain-HTTP fetch sent `If-None-Match`/`If-Modified-Since`
+   * from the prior snapshot and got a trustworthy `304`, so traverse re-served
+   * the byte-identical prior snapshot and this adapter returned BEFORE item
+   * selection / `computeDiff` / any provider call. `ok: true` with empty
+   * `proposedChanges`, `providerCalls: 0`, `tokensUsed: null`, `itemCount: 0`,
+   * and `matchedItemName: null`. The caller (`crawl-pipeline.ts`) records crawl
+   * freshness (`lastCrawledAt`) and skips proposal creation + provider matching.
+   * Absent (never `false`) on a changed `200`, a fetch/extraction failure, or an
+   * item-selection failure.
+   */
+  notModified?: boolean;
+  /**
    * null on success; a stable, kind-tagged reason string on failure.
    * Fetch/extraction failures reuse traverse's own `${kind}: ${message}`
    * convention (`fetchError`/`extractionError` off `TraverseCampFetchResult`)
@@ -392,6 +405,13 @@ export async function runTraverseRecrawlForCamp(
     // requirement without implying any routing happens here.
     sink: async () => null,
     mode: opts.mode,
+    // Conditional GET (campfit#77): a per-camp recrawl opts into revalidation.
+    // The pipeline applies it ONLY to the plain-HTTP attempt (`revalidate &&
+    // !render`), so a `requiresRender` camp and any shell-detection render retry
+    // are unaffected — validators are never sent through a renderer (AC / DOD-
+    // RENDER). Reuses `opts.store` (the existing filesystem SnapshotStore) for
+    // the prior-snapshot validator lookup; no new cache.
+    revalidate: true,
     fetchOptions: opts.fetchOptions,
     extraFieldHints: buildExtraFieldHints(opts),
     maxContentChars: opts.maxContentChars,
@@ -409,6 +429,32 @@ export async function runTraverseRecrawlForCamp(
     latencyMs: fetchResult.latencyMs,
     warnings: fetchResult.warnings,
   };
+
+  // Conditional GET (campfit#77 AC1): a trustworthy 304 — the page is unchanged.
+  // Return a successful `notModified` result BEFORE item selection,
+  // `computeDiff`, and any proposal work. `fetchResult.providerCalls` is 0 and
+  // `tokensUsed` is null (extraction never ran — see
+  // `fetchAndExtractRevalidating`), carried through `shared`. `snapshot` is the
+  // re-served prior's provenance. The caller records crawl freshness only.
+  if (fetchResult.notModified) {
+    return {
+      ok: true,
+      notModified: true,
+      error: null,
+      proposedChanges: {},
+      overallConfidence: 0,
+      matchedItemName: null,
+      itemCount: 0,
+      rawExtraction: {
+        via: "traverse-recrawl",
+        campId: opts.campId,
+        notModified: true,
+        warnings: fetchResult.warnings,
+      },
+      ...shared,
+      warnings: [...fetchResult.warnings, "not-modified: content unchanged since prior snapshot (304)"],
+    };
+  }
 
   if (!fetchResult.ok) {
     const error =

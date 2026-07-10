@@ -67,12 +67,14 @@
  *    rendered) — never more than one render per source per run.
  */
 
-import { fetchAndExtract } from "@kontourai/traverse/fetch";
+import { fetchAndExtract, fetchSource, buildSnapshotSourceRef } from "@kontourai/traverse/fetch";
 import type {
+  FetchAndExtractOptions,
   FetchAndExtractResult,
   FetchMode,
   FetchSourceOptions,
   SnapshotStore,
+  SourceConfig,
 } from "@kontourai/traverse/fetch";
 import {
   extract,
@@ -122,6 +124,21 @@ export interface TraversePipelineDeps {
   mode?: FetchMode;
   /** injectable fetch/time seams forwarded to fetchSource — network-free tests. */
   fetchOptions?: FetchSourceOptions;
+  /**
+   * Opt this run into a CONDITIONAL GET on the PLAIN-HTTP attempt (campfit#77).
+   * When `true`, the plain (`render: false`) attempt sets
+   * `SourceConfig.revalidate: true` and threads `deps.store` to the fetch layer
+   * so traverse sends `If-None-Match`/`If-Modified-Since` from the prior
+   * snapshot's validators; a trustworthy `304` re-serves the prior snapshot
+   * marked `notModified` and this pipeline returns BEFORE extraction (zero
+   * provider calls, `TraverseCoreFetchResult.notModified: true`). Off by default
+   * (source sweeps never revalidate). Has NO effect on a rendered attempt or a
+   * shell-detection render retry — `SourceConfig.revalidate` is meaningless with
+   * `render: true` (traverse emits a warning), so this pipeline only applies it
+   * to the plain attempt (`revalidate && !render`). Only the per-camp recrawl
+   * adapter (traverse-recrawl-adapter.ts) sets this today.
+   */
+  revalidate?: boolean;
   /** override the fetch User-Agent (defaults to the honest CampFit bot UA). */
   userAgent?: string;
   /**
@@ -231,8 +248,19 @@ export interface TraverseShellEscalation {
 export interface TraversePipelineSourceResult {
   source: string;
   url: string;
-  /** true when fetch + extraction both completed without error (0 items is still ok). */
+  /** true when fetch + extraction both completed without error (0 items is still ok). A `notModified` 304 is also `ok: true` — a successful freshness check with no extraction. */
   ok: boolean;
+  /**
+   * `true` ONLY when a conditional-GET revalidating attempt (`deps.revalidate`
+   * on the plain-HTTP path — campfit#77) received a trustworthy `304 Not
+   * Modified`: traverse re-served the byte-identical prior snapshot marked
+   * `Snapshot.notModified`, and this pipeline returned BEFORE `extract()` — so
+   * `providerCalls === 0`, `tokensUsed === null`, no `items`, no proposals. The
+   * caller records crawl freshness and skips all extraction/diff/proposal work.
+   * Absent (never `false`) on a fresh `200`, a rendered/replay/non-revalidating
+   * attempt, or any fetch failure.
+   */
+  notModified?: boolean;
   /** number of items (camps/courses/programs) traverse grouped out of this page. */
   itemCount: number;
   /** proposal ids the sink returned, one per routed item (null = sink no-op / not routed). */
@@ -412,34 +440,117 @@ async function runFetchAndExtractAttempt(
   now: () => number
 ): Promise<{ far: FetchAndExtractResult; latencyMs: number }> {
   const startedAt = now();
-  const far = await fetchAndExtract(
-    {
-      id: src.key,
-      url: src.url,
-      contentType: "html",
-      userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
-      ...(render ? { render: true } : {}),
-      ...(render && renderTimeoutMs !== undefined ? { timeoutMs: renderTimeoutMs } : {}),
-    },
-    {
-      targetSchema: CAMP_TARGET_SCHEMA,
-      fieldHints: mergeFieldHints(deps),
-      provider: deps.provider,
-      store: deps.store,
-      mode: deps.mode ?? "live-with-capture",
-      maxContentChars: deps.maxContentChars,
-      // Real, non-unbounded defaults (unlike `maxContentChars` above) — see
-      // DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE / DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE's
-      // docs for the maxChunks=40 arithmetic. Covers both the scheduled
-      // sweep (runTraversePipelineForSource) and the per-camp re-crawl
-      // (runTraverseFetchAndAssemble / traverse-recrawl-adapter.ts) — both
-      // funnel through this one attempt function.
-      maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
-      maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
-      fetchOptions: deps.fetchOptions,
-    }
-  );
+  const mode = deps.mode ?? "live-with-capture";
+  // Conditional GET (campfit#77) applies ONLY to the plain-HTTP attempt: it is
+  // meaningless with `render: true` (traverse warns and ignores it — a renderer
+  // has no HTTP response to conditionally re-request), and pointless in replay
+  // (no network hop). So the shell-detection render retry (which passes
+  // `render: true`) never revalidates, and neither does a rendered source.
+  const revalidateThisAttempt = deps.revalidate === true && !render && mode !== "replay";
+  const config: SourceConfig = {
+    id: src.key,
+    url: src.url,
+    contentType: "html",
+    userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
+    ...(render ? { render: true } : {}),
+    ...(render && renderTimeoutMs !== undefined ? { timeoutMs: renderTimeoutMs } : {}),
+    ...(revalidateThisAttempt ? { revalidate: true } : {}),
+  };
+  const opts: FetchAndExtractOptions = {
+    targetSchema: CAMP_TARGET_SCHEMA,
+    fieldHints: mergeFieldHints(deps),
+    provider: deps.provider,
+    store: deps.store,
+    mode,
+    maxContentChars: deps.maxContentChars,
+    // Real, non-unbounded defaults (unlike `maxContentChars` above) — see
+    // DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE / DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE's
+    // docs for the maxChunks=40 arithmetic. Covers both the scheduled
+    // sweep (runTraversePipelineForSource) and the per-camp re-crawl
+    // (runTraverseFetchAndAssemble / traverse-recrawl-adapter.ts) — both
+    // funnel through this one attempt function.
+    maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
+    maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
+    fetchOptions: deps.fetchOptions,
+  };
+  // The revalidating path composes fetch->extract itself so a trustworthy 304
+  // can return BEFORE extraction (zero provider calls). Every OTHER path stays
+  // on the unchanged one-call `fetchAndExtract` composition, byte-for-byte.
+  const far = revalidateThisAttempt
+    ? await fetchAndExtractRevalidating(config, opts)
+    : await fetchAndExtract(config, opts);
   return { far, latencyMs: now() - startedAt };
+}
+
+/**
+ * Conditional-GET-aware composition (campfit#77) — a narrow parallel to
+ * traverse's own `fetchAndExtract` (`@kontourai/traverse/fetch`'s `compose.ts`)
+ * that inserts ONE decision between fetch and extract: if the fetched snapshot
+ * is a trustworthy `304` (`Snapshot.notModified`, re-served byte-identical prior
+ * from `store`), return BEFORE `extract()` so ZERO provider calls happen (AC1).
+ * For every other outcome — a fresh `200`, or a fetch failure — this is
+ * behaviorally identical to `fetchAndExtract`: same store threading for
+ * validator lookup, same `live-with-capture` persistence, same `sourceRef`, and
+ * the SAME `extract()` option forwarding (so a changed page rejoins the existing
+ * pipeline unchanged — AC2). Mirrors `compose.ts` deliberately; traverse
+ * @0.14.1 exposes no upstream fetch-before-extract seam to consume instead (the
+ * sanctioned fallback in the C1 plan's preferred design #2). Never throws — a
+ * fetch failure surfaces as `{ fetch }` with no `extraction`, exactly like
+ * `fetchAndExtract`.
+ */
+async function fetchAndExtractRevalidating(
+  config: SourceConfig,
+  opts: FetchAndExtractOptions
+): Promise<FetchAndExtractResult> {
+  // Thread the composition-level `store` into fetchSource's options so the
+  // conditional GET can look up the prior snapshot's validators — mirrors
+  // compose.ts's `acquire` exactly (without this, revalidate would silently
+  // fetch unconditionally).
+  const fetchOptions: FetchSourceOptions = { ...(opts.fetchOptions ?? {}) };
+  if (opts.store && fetchOptions.store === undefined) fetchOptions.store = opts.store;
+
+  const fetchResult = await fetchSource(config, fetchOptions);
+  // `live-with-capture` persistence of a FRESH snapshot — identical to
+  // compose.ts. A re-served `notModified` prior is already in the store; putting
+  // it back is idempotent, so this stays a faithful mirror without special-casing.
+  if ((opts.mode ?? "live") === "live-with-capture" && fetchResult.snapshot && opts.store) {
+    await opts.store.put(fetchResult.snapshot);
+  }
+  if (!fetchResult.snapshot) {
+    return { fetch: fetchResult };
+  }
+  const snapshot = fetchResult.snapshot;
+  const sourceRef = buildSnapshotSourceRef(snapshot);
+
+  // AC1: a trustworthy 304 — return BEFORE extract(). No `extraction` payload,
+  // so `runCoreFetchAndExtract` recognizes the unchanged branch and never
+  // touches the provider. `sourceRef` still carries the prior snapshot's
+  // provenance for the freshness record.
+  if (snapshot.notModified) {
+    return { fetch: fetchResult, sourceRef };
+  }
+
+  // Fresh 200 → identical to fetchAndExtract's extract() call (every option
+  // forwarded verbatim). A changed page rejoins the existing shell-retry /
+  // grouping / diff pipeline with no behavior drift (AC2).
+  const extraction = await extract({
+    content: snapshot.bodyBytes ?? snapshot.body,
+    contentType: snapshot.contentType,
+    sourceRef,
+    targetSchema: opts.targetSchema,
+    provider: opts.provider,
+    fieldHints: opts.fieldHints,
+    maxContentChars: opts.maxContentChars,
+    prep: opts.prep,
+    chunkSize: opts.chunkSize,
+    chunkOverlap: opts.chunkOverlap,
+    maxChunks: opts.maxChunks,
+    maxProviderCalls: opts.maxProviderCalls,
+    maxTotalTokens: opts.maxTotalTokens,
+    pdfTextExtractor: opts.pdfTextExtractor,
+    imageTextExtractor: opts.imageTextExtractor,
+  });
+  return { fetch: fetchResult, extraction, sourceRef };
 }
 
 /** Shared source-result fields produced by fetch + the shell-detection auto-retry + extraction — every {@link TraversePipelineSourceResult} field EXCEPT the per-item routing fields (`itemCount`/`routedProposalIds`/`routedFieldCount`), which depend on what a caller does with `far.extraction.proposals` once grouped. */
@@ -613,6 +724,20 @@ async function runCoreFetchAndExtract(
   // misreported as rendered.
   if (far.fetch.snapshot?.rendered) {
     core.rendered = true;
+  }
+
+  // Conditional GET (campfit#77 AC1): a trustworthy 304 re-served the prior
+  // snapshot marked `notModified`. `fetchAndExtractRevalidating` returned BEFORE
+  // extraction, so `far.extraction` is absent by design — this is a SUCCESSFUL
+  // freshness check, not a fetch failure. Mark it `ok` + `notModified` and
+  // return now (tokensUsed stays `null`, providerCalls stays `0`, no items),
+  // BEFORE the `!far.extraction` failure branch below would mislabel it. Only
+  // reachable on the plain revalidating recrawl path — a rendered attempt never
+  // sets `revalidate`, so it can never land here.
+  if (far.fetch.snapshot?.notModified) {
+    core.notModified = true;
+    core.ok = true;
+    return { far, core };
   }
 
   if (!far.extraction) {
