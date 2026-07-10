@@ -221,8 +221,8 @@ Use the canonical TypeScript runner's `--provider [providerId]` flag:
 npm run crawl -- --provider xyz  # crawl all camps for this provider
 ```
 
-This crawls all camps where `providerId = xyz` ordered by `lastVerifiedAt ASC` — efficient for
-"recrawl all Botanic Gardens camps."
+This crawls all camps where `providerId = xyz`. The provider-scoped selection currently applies no
+`lastVerifiedAt` ordering; only the unrestricted crawl path orders camps by `lastVerifiedAt ASC`.
 
 ### Future: Discovery crawl mode
 

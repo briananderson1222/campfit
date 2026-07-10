@@ -173,6 +173,49 @@ const PRICE_C = {
   discountNotes: null,
 };
 
+// Traverse's assembled relation shape intentionally has no persistence id.
+// campfit#109 owns reconciling this with stored relation identity in the
+// canonical pipeline; these fixtures characterize today's production shape.
+const EXTRACTED_PRICE_A = {
+  label: PRICE_A.label,
+  amount: PRICE_A.amount,
+  unit: PRICE_A.unit,
+  durationWeeks: PRICE_A.durationWeeks,
+  ageQualifier: PRICE_A.ageQualifier,
+  discountNotes: PRICE_A.discountNotes,
+};
+
+const EXTRACTED_PRICE_B = {
+  label: PRICE_B.label,
+  amount: PRICE_B.amount,
+  unit: PRICE_B.unit,
+  durationWeeks: PRICE_B.durationWeeks,
+  ageQualifier: PRICE_B.ageQualifier,
+  discountNotes: PRICE_B.discountNotes,
+};
+
+const FIXED_NOW = Date.parse("2026-07-10T12:00:00.000Z");
+
+function withFixedNow<T>(run: () => T): T {
+  const originalDateNow = Date.now;
+  Date.now = () => FIXED_NOW;
+  try {
+    return run();
+  } finally {
+    Date.now = originalDateNow;
+  }
+}
+
+async function withFixedNowAsync<T>(run: () => Promise<T>): Promise<T> {
+  const originalDateNow = Date.now;
+  Date.now = () => FIXED_NOW;
+  try {
+    return await run();
+  } finally {
+    Date.now = originalDateNow;
+  }
+}
+
 // ─── campfit#108 Wave 0: direct computeDiff behavior lock ───────────────
 
 function testComputeDiffBehaviorTable() {
@@ -236,6 +279,39 @@ function testComputeDiffBehaviorTable() {
     },
   });
 
+  // The canonical crawl pipeline currently clears stored relations before
+  // diffing. campfit#109 owns making real current relations reachable.
+  const productionEmptyCurrent = computeDiff(
+    makeCamp({ pricing: [] }),
+    { pricing: [EXTRACTED_PRICE_A] },
+    { pricing: 0.93 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    productionEmptyCurrent.pricing?.mode,
+    "populate",
+    "canonical empty-current relation shape must characterize today's populate behavior (campfit#109)"
+  );
+
+  // If a caller supplies stored id-bearing relations, Traverse's id-less
+  // extracted shape does not retain the same whole-object identity today.
+  // campfit#109 owns the design change; #108 pins the honest behavior.
+  const productionIdentityMismatch = computeDiff(
+    makeCamp({ pricing: [PRICE_A] }),
+    { pricing: [EXTRACTED_PRICE_A, EXTRACTED_PRICE_B] },
+    { pricing: 0.93 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    productionIdentityMismatch.pricing?.mode,
+    "update",
+    "id-bearing current vs id-less extracted [A] -> [A, B] must characterize today's update behavior (campfit#109)"
+  );
+
   assert.deepEqual(
     computeDiff(
       makeCamp({ pricing: [PRICE_A, PRICE_B] }),
@@ -274,17 +350,19 @@ function testComputeDiffBehaviorTable() {
     "confidence exactly 0.3 must remain eligible and missing provenance must remain omitted"
   );
 
-  const recentlyApproved = { city: { approvedAt: new Date(Date.now() - 86_400_000).toISOString() } };
-  assert.deepEqual(
-    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, recentlyApproved),
-    {},
-    "a recently approved field at confidence 0.79 must be suppressed"
-  );
-  assert.deepEqual(
-    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, recentlyApproved),
-    { city: { old: "Denver", new: "Boulder", confidence: 0.8, mode: "update" } },
-    "a recently approved field at confidence exactly 0.8 must surface"
-  );
+  const recentlyApproved = { city: { approvedAt: new Date(FIXED_NOW - 86_400_000).toISOString() } };
+  withFixedNow(() => {
+    assert.deepEqual(
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, recentlyApproved),
+      {},
+      "a recently approved field at confidence 0.79 must be suppressed"
+    );
+    assert.deepEqual(
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, recentlyApproved),
+      { city: { old: "Denver", new: "Boulder", confidence: 0.8, mode: "update" } },
+      "a recently approved field at confidence exactly 0.8 must surface"
+    );
+  });
 
   console.log("✓ computeDiff characterization: strict superset/replacement/populate/reorder, exact serialization, confidence/suppression boundaries, and provenance omission");
 
@@ -308,7 +386,36 @@ function testComputeDiffBehaviorTable() {
       sourceUrl,
     },
   }, "duplicate-only growth must be update because it contains no novel candidate");
-  console.log("✓ accepted delta: duplicate-only [A] -> [A, A] is update; genuine [A] -> [A, B] remains add_items");
+
+  const duplicateCurrentNotRetained = computeDiff(
+    makeCamp({ pricing: [PRICE_A, PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_B, PRICE_C] },
+    { pricing: 0.96 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    duplicateCurrentNotRetained.pricing?.mode,
+    "update",
+    "[A, A] -> [A, B, C] must be update because candidate multiplicity does not retain both A occurrences"
+  );
+
+  const duplicateCurrentRetained = computeDiff(
+    makeCamp({ pricing: [PRICE_A, PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_A, PRICE_B] },
+    { pricing: 0.97 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    duplicateCurrentRetained.pricing?.mode,
+    "add_items",
+    "[A, A] -> [A, A, B] must be add_items because both A occurrences are retained and B is novel"
+  );
+
+  console.log("✓ accepted deltas: duplicate-only [A] -> [A, A] is update; duplicate-current retention uses multiset counts; genuine additions remain add_items");
 }
 
 // ─── 1. Single-item page targets the known camp unambiguously ────────────
@@ -412,59 +519,61 @@ async function testMultiItemPageAmbiguousFailsLoud() {
 // ─── 4. AC6: 30-day/0.8-confidence suppression actually fires ────────────
 
 async function testSuppressionFires() {
-  const html = loadFixture("avid4-healthy.html");
-  const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString();
+  return withFixedNowAsync(async () => {
+    const html = loadFixture("avid4-healthy.html");
+    const tenDaysAgo = new Date(FIXED_NOW - 10 * 86_400_000).toISOString();
 
-  // Low-confidence re-proposal (0.5) of a field approved 10 days ago must be
-  // SUPPRESSED — this is the exact scenario re-crawling an already-reviewed
-  // camp hits routinely.
-  const lowConfSpecs: StubProposalSpec[] = [
-    { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Typo)", needle: "Mountain Explorers Day Camp", confidence: 0.5 },
-  ];
-  const suppressed = await runTraverseRecrawlForCamp({
-    campId: "camp-4",
-    websiteUrl: "https://avid4.com/day-camps/colorado/",
-    campName: "Mountain Explorers Day Camp",
-    current: makeCamp({ id: "camp-4" }),
-    fieldSources: { name: { approvedAt: tenDaysAgo } },
-    provider: createStubProvider(lowConfSpecs, { model: "stub-suppress" }),
-    store: createInMemorySnapshotStore(),
-    mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
-    log: () => {},
+    // Low-confidence re-proposal (0.5) of a field approved 10 days ago must be
+    // SUPPRESSED — this is the exact scenario re-crawling an already-reviewed
+    // camp hits routinely.
+    const lowConfSpecs: StubProposalSpec[] = [
+      { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Typo)", needle: "Mountain Explorers Day Camp", confidence: 0.5 },
+    ];
+    const suppressed = await runTraverseRecrawlForCamp({
+      campId: "camp-4",
+      websiteUrl: "https://avid4.com/day-camps/colorado/",
+      campName: "Mountain Explorers Day Camp",
+      current: makeCamp({ id: "camp-4" }),
+      fieldSources: { name: { approvedAt: tenDaysAgo } },
+      provider: createStubProvider(lowConfSpecs, { model: "stub-suppress" }),
+      store: createInMemorySnapshotStore(),
+      mode: "live-with-capture",
+      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      log: () => {},
+    });
+    assert.equal(suppressed.ok, true);
+    assert.ok(
+      !("name" in suppressed.proposedChanges),
+      "a low-confidence (<0.8) re-proposal of a field approved <30 days ago must be suppressed"
+    );
+
+    // Same scenario, but confidence clears the 0.8 suppression threshold — the
+    // change MUST still be proposed (proves this isn't an accidental blanket
+    // block on the field).
+    const highConfSpecs: StubProposalSpec[] = [
+      { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Renamed)", needle: "Mountain Explorers Day Camp", confidence: 0.95 },
+    ];
+    const notSuppressed = await runTraverseRecrawlForCamp({
+      campId: "camp-4",
+      websiteUrl: "https://avid4.com/day-camps/colorado/",
+      campName: "Mountain Explorers Day Camp",
+      current: makeCamp({ id: "camp-4" }),
+      fieldSources: { name: { approvedAt: tenDaysAgo } },
+      provider: createStubProvider(highConfSpecs, { model: "stub-not-suppress" }),
+      store: createInMemorySnapshotStore(),
+      mode: "live-with-capture",
+      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      log: () => {},
+    });
+    assert.equal(notSuppressed.ok, true);
+    assert.ok(
+      "name" in notSuppressed.proposedChanges,
+      "a HIGH-confidence (>=0.8) re-proposal must still be proposed even within the 30-day suppression window"
+    );
+    assert.equal(notSuppressed.proposedChanges["name"].new, "Mountain Explorer Day Camp (Renamed)");
+
+    console.log("✓ AC6: 30-day/0.8-confidence suppression of a recently-approved field fires on the re-crawl path, and does not over-suppress high-confidence changes");
   });
-  assert.equal(suppressed.ok, true);
-  assert.ok(
-    !("name" in suppressed.proposedChanges),
-    "a low-confidence (<0.8) re-proposal of a field approved <30 days ago must be suppressed"
-  );
-
-  // Same scenario, but confidence clears the 0.8 suppression threshold — the
-  // change MUST still be proposed (proves this isn't an accidental blanket
-  // block on the field).
-  const highConfSpecs: StubProposalSpec[] = [
-    { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Renamed)", needle: "Mountain Explorers Day Camp", confidence: 0.95 },
-  ];
-  const notSuppressed = await runTraverseRecrawlForCamp({
-    campId: "camp-4",
-    websiteUrl: "https://avid4.com/day-camps/colorado/",
-    campName: "Mountain Explorers Day Camp",
-    current: makeCamp({ id: "camp-4" }),
-    fieldSources: { name: { approvedAt: tenDaysAgo } },
-    provider: createStubProvider(highConfSpecs, { model: "stub-not-suppress" }),
-    store: createInMemorySnapshotStore(),
-    mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
-    log: () => {},
-  });
-  assert.equal(notSuppressed.ok, true);
-  assert.ok(
-    "name" in notSuppressed.proposedChanges,
-    "a HIGH-confidence (>=0.8) re-proposal must still be proposed even within the 30-day suppression window"
-  );
-  assert.equal(notSuppressed.proposedChanges["name"].new, "Mountain Explorer Day Camp (Renamed)");
-
-  console.log("✓ AC6: 30-day/0.8-confidence suppression of a recently-approved field fires on the re-crawl path, and does not over-suppress high-confidence changes");
 }
 
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───

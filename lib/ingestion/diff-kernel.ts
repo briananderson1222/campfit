@@ -72,9 +72,22 @@ export function outerArrayChange(oldValue: unknown[], newValue: unknown[]): Valu
 
 export function relationFacts(currentItems: unknown[], candidateItems: unknown[]): RelationFacts {
   const currentIdentities = new Set(currentItems.map(stableOuterArrayIdentity));
-  const candidateIdentities = new Set(candidateItems.map(stableOuterArrayIdentity));
+  const remainingCandidateCounts = new Map<string, number>();
+  for (const item of candidateItems) {
+    const identity = stableOuterArrayIdentity(item);
+    remainingCandidateCounts.set(identity, (remainingCandidateCounts.get(identity) ?? 0) + 1);
+  }
+
+  const allCurrentRetained = currentItems.every((item) => {
+    const identity = stableOuterArrayIdentity(item);
+    const remaining = remainingCandidateCounts.get(identity) ?? 0;
+    if (remaining === 0) return false;
+    remainingCandidateCounts.set(identity, remaining - 1);
+    return true;
+  });
+
   return {
-    allCurrentRetained: currentItems.every((item) => candidateIdentities.has(stableOuterArrayIdentity(item))),
+    allCurrentRetained,
     hasNovelCandidate: candidateItems.some((item) => !currentIdentities.has(stableOuterArrayIdentity(item))),
   };
 }

@@ -99,10 +99,18 @@ or create a shared package.
 For re-crawl relation arrays, `add_items` now means all of the following: current items are
 non-empty, every current item is retained under the existing stable structural identity,
 the candidate count grows, and at least one candidate is genuinely novel. Consequently,
-duplicate-only growth such as `[A] -> [A, A]` is an `update`, while `[A] -> [A, B]` remains
-`add_items`; replacements/removals remain `update`, empty current remains `populate`, and
-pure reorder remains a no-op. Exact serialization fixtures pin key presence and ordering so
-this duplicate-only mode correction is the sole accepted output delta.
+retention uses multiset counts: `[A, A] -> [A, B, C]` is an `update`, while
+`[A, A] -> [A, A, B]` is `add_items`. Duplicate-only growth such as `[A] -> [A, A]` is an
+`update`, while shape-matched `[A] -> [A, B]` remains `add_items`; replacements/removals remain
+`update`, empty current remains `populate`, and pure reorder remains a no-op.
+
+That additive classification is currently reachable only for callers that supply shape-matched
+current relations. The canonical crawl pipeline does not: it clears current relation arrays before
+diffing, which produces `populate`, and Traverse extracts id-less relation objects while stored
+relations are id-bearing, which produces `update` when real stored relations are supplied. The
+production-shape characterization fixtures pin both behaviors honestly. campfit#109 owns making
+relation additive classification reachable through the canonical pipeline; campfit#108 does not
+change pipeline behavior or the existing whole-object identity semantics.
 
 The legacy JavaScript crawl runner has been deleted. Repository and owner-reported
 out-of-repository scheduler scans found no consumers, and the legacy file contained no unique
