@@ -38,6 +38,7 @@ import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import type { PricingUnit } from "@/lib/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
 import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
+import { changeWhenDifferent, projectProvenance } from "./diff-kernel";
 
 export interface TraverseExtractOptions {
   /** Raw page content (html) or already-extracted text. */
@@ -125,15 +126,19 @@ export function itemToProposedChanges(
     const fp = item.scalars[scalarPath];
     if (!fp) continue;
     const currentVal = current[scalarPath];
-    if (normalizeScalar(currentVal) === normalizeScalar(fp.candidateValue)) continue;
+    const change = changeWhenDifferent(
+      currentVal,
+      fp.candidateValue,
+      (oldValue, newValue) => normalizeScalar(oldValue) === normalizeScalar(newValue)
+    );
+    if (!change) continue;
     const isEmpty = currentVal === null || currentVal === undefined || currentVal === "";
     const diff: FieldDiff = {
-      old: (currentVal as FieldDiff["old"]) ?? null,
-      new: fp.candidateValue,
+      ...change,
+      old: (change.old as FieldDiff["old"]) ?? null,
       confidence: fp.confidence,
       mode: isEmpty ? "populate" : "update",
-      excerpt: fp.excerpt,
-      ...(sourceUrl ? { sourceUrl } : {}),
+      ...projectProvenance({ excerpt: fp.excerpt, sourceUrl, includeEmptyExcerpt: true }),
     };
     changes[scalarPath] = diff;
   }
@@ -150,8 +155,7 @@ export function itemToProposedChanges(
       })),
       confidence: meanConfidence(item.ageGroups.map((ag) => ag.confidence)),
       mode: "add_items",
-      excerpt: item.ageGroups[0].label,
-      ...(sourceUrl ? { sourceUrl } : {}),
+      ...projectProvenance({ excerpt: item.ageGroups[0].label, sourceUrl, includeEmptyExcerpt: true }),
     };
   }
 
@@ -169,8 +173,7 @@ export function itemToProposedChanges(
       })),
       confidence: meanConfidence(item.schedules.map((s) => s.confidence)),
       mode: "add_items",
-      excerpt: item.schedules[0].label,
-      ...(sourceUrl ? { sourceUrl } : {}),
+      ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true }),
     };
   }
 
@@ -187,8 +190,7 @@ export function itemToProposedChanges(
       })),
       confidence: meanConfidence(item.pricing.map((p) => p.confidence)),
       mode: "add_items",
-      excerpt: item.pricing[0].label,
-      ...(sourceUrl ? { sourceUrl } : {}),
+      ...projectProvenance({ excerpt: item.pricing[0].label, sourceUrl, includeEmptyExcerpt: true }),
     };
   }
 

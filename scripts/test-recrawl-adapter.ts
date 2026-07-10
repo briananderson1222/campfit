@@ -69,6 +69,7 @@ import * as url from "node:url";
 import type { ExtractionProvider, ProviderExtractionOutput } from "@kontourai/traverse";
 import { createInMemorySnapshotStore, type FetchLike } from "@kontourai/traverse/fetch";
 import { runTraverseRecrawlForCamp } from "../lib/ingestion/traverse-recrawl-adapter";
+import { computeDiff } from "../lib/ingestion/diff-engine";
 import { createStubProvider, type StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 import type { Camp } from "../lib/types";
 
@@ -140,6 +141,174 @@ function makeCamp(overrides: Partial<Camp> = {}): Camp {
     pricing: [],
     ...overrides,
   };
+}
+
+const PRICE_A = {
+  id: "price-a",
+  label: "Standard week",
+  amount: 425,
+  unit: "PER_WEEK" as const,
+  durationWeeks: null,
+  ageQualifier: null,
+  discountNotes: null,
+};
+
+const PRICE_B = {
+  id: "price-b",
+  label: "Extended week",
+  amount: 525,
+  unit: "PER_WEEK" as const,
+  durationWeeks: null,
+  ageQualifier: null,
+  discountNotes: null,
+};
+
+const PRICE_C = {
+  id: "price-c",
+  label: "Holiday week",
+  amount: 475,
+  unit: "PER_WEEK" as const,
+  durationWeeks: null,
+  ageQualifier: null,
+  discountNotes: null,
+};
+
+// ─── campfit#108 Wave 0: direct computeDiff behavior lock ───────────────
+
+function testComputeDiffBehaviorTable() {
+  const sourceUrl = "https://example.test/camps";
+  const excerpt = "Weekly camp prices";
+
+  const strictSuperset = computeDiff(
+    makeCamp({ pricing: [PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_B] },
+    { pricing: 0.91 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(strictSuperset, {
+    pricing: {
+      old: [PRICE_A],
+      new: [PRICE_A, PRICE_B],
+      confidence: 0.91,
+      mode: "add_items",
+      excerpt,
+      sourceUrl,
+    },
+  });
+
+  const replacement = computeDiff(
+    makeCamp({ pricing: [PRICE_A, PRICE_B] }),
+    { pricing: [PRICE_A, PRICE_C] },
+    { pricing: 0.92 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(replacement, {
+    pricing: {
+      old: [PRICE_A, PRICE_B],
+      new: [PRICE_A, PRICE_C],
+      confidence: 0.92,
+      mode: "update",
+      excerpt,
+      sourceUrl,
+    },
+  });
+
+  const populate = computeDiff(
+    makeCamp({ pricing: [] }),
+    { pricing: [PRICE_A] },
+    { pricing: 0.93 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(populate, {
+    pricing: {
+      old: [],
+      new: [PRICE_A],
+      confidence: 0.93,
+      mode: "populate",
+      excerpt,
+      sourceUrl,
+    },
+  });
+
+  assert.deepEqual(
+    computeDiff(
+      makeCamp({ pricing: [PRICE_A, PRICE_B] }),
+      { pricing: [PRICE_B, PRICE_A] },
+      { pricing: 0.94 },
+      { pricing: excerpt },
+      {},
+      sourceUrl
+    ),
+    {},
+    "pure outer-array reorder must produce no proposal"
+  );
+
+  const exactSerialized = computeDiff(
+    makeCamp({ name: "Old name", campTypes: ["SUMMER_DAY"], pricing: [PRICE_A] }),
+    { name: "New name", campTypes: ["SUMMER_DAY", "SCHOOL_BREAK"], pricing: [PRICE_A, PRICE_B] },
+    { name: 0.81, campTypes: 0.82, pricing: 0.83 },
+    { name: "Camp title", campTypes: "Program types", pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    JSON.stringify(exactSerialized),
+    '{"name":{"old":"Old name","new":"New name","confidence":0.81,"mode":"update","excerpt":"Camp title","sourceUrl":"https://example.test/camps"},"campTypes":{"old":["SUMMER_DAY"],"new":["SUMMER_DAY","SCHOOL_BREAK"],"confidence":0.82,"mode":"update","excerpt":"Program types","sourceUrl":"https://example.test/camps"},"pricing":{"old":[{"id":"price-a","label":"Standard week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"new":[{"id":"price-a","label":"Standard week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null},{"id":"price-b","label":"Extended week","amount":525,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"confidence":0.83,"mode":"add_items","excerpt":"Weekly camp prices","sourceUrl":"https://example.test/camps"}}',
+    "representative multi-field recrawl output must preserve property presence and order byte-for-byte"
+  );
+
+  assert.deepEqual(
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.299999 }),
+    {},
+    "confidence just below 0.3 must be omitted"
+  );
+  assert.deepEqual(
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.3 }),
+    { city: { old: "Denver", new: "Boulder", confidence: 0.3, mode: "update" } },
+    "confidence exactly 0.3 must remain eligible and missing provenance must remain omitted"
+  );
+
+  const recentlyApproved = { city: { approvedAt: new Date(Date.now() - 86_400_000).toISOString() } };
+  assert.deepEqual(
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, recentlyApproved),
+    {},
+    "a recently approved field at confidence 0.79 must be suppressed"
+  );
+  assert.deepEqual(
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, recentlyApproved),
+    { city: { old: "Denver", new: "Boulder", confidence: 0.8, mode: "update" } },
+    "a recently approved field at confidence exactly 0.8 must surface"
+  );
+
+  console.log("✓ computeDiff characterization: strict superset/replacement/populate/reorder, exact serialization, confidence/suppression boundaries, and provenance omission");
+
+  // Keep the pre-fix RED assertion last: every characterization above must
+  // pass before the baseline fails on the one known behavior defect.
+  const duplicateOnly = computeDiff(
+    makeCamp({ pricing: [PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_A] },
+    { pricing: 0.95 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(duplicateOnly, {
+    pricing: {
+      old: [PRICE_A],
+      new: [PRICE_A, PRICE_A],
+      confidence: 0.95,
+      mode: "update",
+      excerpt,
+      sourceUrl,
+    },
+  }, "duplicate-only growth must be update because it contains no novel candidate");
+  console.log("✓ accepted delta: duplicate-only [A] -> [A, A] is update; genuine [A] -> [A, B] remains add_items");
 }
 
 // ─── 1. Single-item page targets the known camp unambiguously ────────────
@@ -557,6 +726,7 @@ async function testRequiresRenderFailsClosedWithNoRenderer() {
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
+  testComputeDiffBehaviorTable();
   await testSingleItemPageTargetsKnownCamp();
   await testMultiItemPageMatchesByName();
   await testMultiItemPageAmbiguousFailsLoud();

@@ -80,6 +80,43 @@ it does not go through `itemToProposedChanges` at all. Proven by
 suppressed when re-proposed at confidence 0.5, and is NOT suppressed (still proposed) when
 re-proposed at confidence 0.95 — proving this isn't an accidental blanket block on the field.
 
+### Local comparison kernel and intentionally separate policies (campfit#108)
+
+The two proposal paths now share a pure, local comparison/provenance seam in
+`lib/ingestion/diff-kernel.ts`, without collapsing their intentionally different policies:
+
+- Re-crawl `computeDiff` still owns its field families, `0.3` confidence floor, recent-
+  approval suppression, empty-candidate rules, and `populate`/`update`/`add_items` choice.
+- First-pass `itemToProposedChanges` still has no confidence floor or recent-approval
+  suppression. Present relation arrays still emit `old: null` with `mode: "add_items"`
+  without comparing current relations.
+
+The kernel owns only deterministic scalar and order-insensitive outer-array comparison,
+exact old/new change records, structural relation facts, and provenance projection. This is
+a local seam for possible future extraction; campfit#108 does **not** extract it to Lookout
+or create a shared package.
+
+For re-crawl relation arrays, `add_items` now means all of the following: current items are
+non-empty, every current item is retained under the existing stable structural identity,
+the candidate count grows, and at least one candidate is genuinely novel. Consequently,
+duplicate-only growth such as `[A] -> [A, A]` is an `update`, while `[A] -> [A, B]` remains
+`add_items`; replacements/removals remain `update`, empty current remains `populate`, and
+pure reorder remains a no-op. Exact serialization fixtures pin key presence and ordering so
+this duplicate-only mode correction is the sole accepted output delta.
+
+The legacy JavaScript crawl runner has been deleted. Repository and owner-reported
+out-of-repository scheduler scans found no consumers, and the legacy file contained no unique
+fixtures to migrate. Canonical crawl commands use `npm run crawl`, backed by
+`scripts/run-crawl.ts` and `runCrawlPipeline`; provider-scoped crawling remains available as
+`npm run crawl -- --provider <providerId>`. Obsolete hand-prompt, direct-fetch, API-key
+fallback, local-diff, and direct-SQL behavior was intentionally not moved to the canonical
+path.
+
+One known runner difference is deliberately out of scope: canonical `scripts/run-crawl.ts`
+currently exits before fetch for `--dry-run`, whereas the legacy runner's dry run fetches
+pages and skips LLM/database writes. campfit#108 does not redefine canonical dry-run
+semantics.
+
 ## Per-camp targeting (Stop-short risk 5) — never a name-keyed whole-DB match
 
 Traverse's `currentByItemNames` (built for "does a camp with this extracted name already
