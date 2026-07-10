@@ -173,7 +173,7 @@ function locatorStart(locator: string): number | null {
  * after the first (i.e. every point a rebase actually happened) — so callers
  * can attach a visible warning instead of rebasing silently.
  */
-function assignGlobalItemIndices(proposals: ExtractionProposal[]): {
+export function assignGlobalItemIndices(proposals: ExtractionProposal[]): {
   items: { globalIndex: number; proposal: ExtractionProposal }[];
   chunkBoundaryIndices: Set<number>;
 } {

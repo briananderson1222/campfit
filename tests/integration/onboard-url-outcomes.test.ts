@@ -27,15 +27,32 @@ import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 // ── Import-boundary mocks (lib/ingestion/** untouched — only the import is stubbed) ──
 
 const discoverCampsFromUrl = vi.fn();
+const ROUTE_FIXTURE_SNAPSHOT_REF = 'traverse-snapshot:campfit-discovery%3Ahttps%3A%2F%2Ffixture.example%2Fprograms?url=https%3A%2F%2Ffixture.example%2Fprograms&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&fetchedAt=2026-07-10T00%3A00%3A00.000Z';
 
 vi.mock('@/lib/ingestion/llm-discovery', () => ({
   discoverCampsFromUrl: (...args: unknown[]) => discoverCampsFromUrl(...args),
+  buildDiscoveryFieldSources: (stub: { name: string }) => ({
+    name: {
+      excerpt: stub.name,
+      locator: 'chars:0-10',
+      sourceUrl: 'https://fixture.example/programs',
+      sourceRef: ROUTE_FIXTURE_SNAPSHOT_REF,
+    },
+  }),
   // Deterministic stand-in for the real Dice-coefficient fuzzy matcher: a
   // stub is "new" iff its name isn't an exact (case-insensitive) match for
   // an existing camp name. Good enough to exercise the created/skipped
   // breakdown without depending on the real similarity threshold.
   filterNewDiscoveries: (stubs: { name: string }[], existingNames: string[]) =>
     stubs.filter((s) => !existingNames.some((n) => n.toLowerCase() === s.name.toLowerCase())),
+}));
+
+vi.mock('@/lib/ingestion/resolve-extraction-provider', () => ({
+  resolveExtractionProvider: () => ({ provider: { name: 'route-test-provider' } }),
+}));
+
+vi.mock('@/lib/ingestion/traverse-snapshot-store', () => ({
+  createCampfitSnapshotStore: () => ({}),
 }));
 
 vi.mock('@/lib/ingestion/crawl-pipeline', () => ({
@@ -144,6 +161,20 @@ describe('POST /api/admin/crawl/onboard-url — created/skipped breakdown (R5/AC
     );
     expect(providerRows).toHaveLength(1);
     expect(await campCountForProvider(pool, providerRows[0].id)).toBe(2);
+    const { rows: evidenceRows } = await pool.query<{ dataConfidence: string; fieldSources: Record<string, Record<string, unknown>> }>(
+      `SELECT "dataConfidence", "fieldSources" FROM "Camp" WHERE "providerId" = $1 ORDER BY name`,
+      [providerRows[0].id],
+    );
+    expect(evidenceRows).toHaveLength(2);
+    for (const row of evidenceRows) {
+      expect(row.dataConfidence).toBe('PLACEHOLDER');
+      expect(row.fieldSources.name).toMatchObject({
+        locator: 'chars:0-10',
+        sourceUrl: 'https://fixture.example/programs',
+        sourceRef: ROUTE_FIXTURE_SNAPSHOT_REF,
+      });
+      expect(row.fieldSources.name.approvedAt).toBeUndefined();
+    }
   });
 
   it('(b) existing domain with a mix of new and duplicate programs: providerCreated false, partial created/skipped breakdown', async () => {

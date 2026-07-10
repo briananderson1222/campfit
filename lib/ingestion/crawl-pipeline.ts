@@ -43,7 +43,7 @@ import { startRun } from './crawl-run-tracker';
 import { createProposal } from '@/lib/admin/review-repository';
 import { recordRecrawlFreshness } from './recrawl-freshness';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
-import { discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
+import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
 import type { CrawlProgressEvent, CrawlRun, LLMExtractionResult } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 import { runTraversePipelineForSource } from './traverse-pipeline';
@@ -279,14 +279,13 @@ function providerUnavailableResult(error: string): TraverseRecrawlResult {
  * process-level provider from `TRAVERSE_ROLE`/datum config, with no per-call
  * ref parameter). Rather than silently dropping the override, this is
  * recorded in the run's `campLog` (see `withModelOverrideNote` below) and
- * logged once here for operators. Discovery's `options.model` usage (the
- * pre-pass below, `discoverCampsFromUrl`) is UNCHANGED and still honors it —
- * only the traverse-backed extraction step cannot.
+ * logged once here for operators. Discovery uses the same resolved traverse
+ * provider, so the retired per-call discovery model override is not revived.
  */
 function warnModelOverrideIgnored(model: string | undefined): void {
   if (!model) return;
   console.warn(
-    `[crawl] model override '${model}' requested but traverse-backed extraction resolves its provider from datum (.datum/config.json via resolve-extraction-provider.ts), not a per-run override — the override is NOT applied to extraction (discovery, if enabled, still honors it). Recorded on each camp's crawl-log entry.`
+    `[crawl] model override '${model}' requested but traverse-backed extraction and discovery resolve their provider from datum (.datum/config.json via resolve-extraction-provider.ts), not a per-run override — the override is NOT applied. Recorded on each camp's crawl-log entry.`
   );
 }
 
@@ -517,18 +516,21 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
       // ── Discovery pre-pass ──────────────────────────────────────────────────
       // Prefer provider-level discovery roots so discovery can start from the site root/listing
       // instead of only from a downstream camp page.
-      // Discovery stays on the legacy `discoverCampsFromUrl`/`callLLM` path
-      // (traverse-recrawl-cutover plan AC11 — no traverse equivalent for
-      // listing-page enumeration); `options.model` is still honored here.
+      // Scheduled/shared discovery uses conditional capture. A trustworthy
+      // 304 means unchanged and therefore produces no new inserts/provider work.
       const providerId = domainCamps[0]?.providerId ?? null;
       const preferredListingUrl = providerId ? providerDiscoveryRoots[providerId] : null;
-      if (options.discover === true) {
+      if (options.discover === true && extractionProvider && snapshotStore) {
         const sharedCampUrl = domainCamps.length >= 2 ? domainCamps[0].websiteUrl : null;
         const sharedUrl = sharedCampUrl ? domainCamps.every(c => c.websiteUrl === sharedCampUrl) : false;
         const listingUrl = preferredListingUrl ?? (sharedUrl ? sharedCampUrl : null);
         if (listingUrl) {
           const existingNames = domainCamps.map(c => c.name);
-          const discovery = await discoverCampsFromUrl(listingUrl, { model: options.model }).catch(err => {
+          const discovery = await discoverCampsFromUrl(listingUrl, {
+            provider: extractionProvider,
+            store: snapshotStore,
+            revalidate: true,
+          }).catch(err => {
             console.error(`[crawl] discovery failed for ${listingUrl}:`, err);
             return null;
           });
@@ -542,12 +544,13 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                 try {
                   const campUrl = stub.detailUrl ?? listingUrl;
                   const campSlug = toSlug(stub.name) + '-' + Math.random().toString(36).slice(2, 6);
+                  const fieldSources = buildDiscoveryFieldSources(stub);
                   const { rows: [newCamp] } = await pool.query<{ id: string; name: string; websiteUrl: string; communitySlug: string; city: string | null; fieldSources: Record<string, unknown> }>(
-                    `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", city, "dataConfidence", "campType", category, "campTypes", "categories", "providerId")
-                     VALUES ($1, $2, $3, $4, $5, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $6)
+                    `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", city, "dataConfidence", "campType", category, "campTypes", "categories", "providerId", "fieldSources")
+                     VALUES ($1, $2, $3, $4, $5, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $6, $7::jsonb)
                      ON CONFLICT (slug) DO NOTHING
                      RETURNING id, name, "websiteUrl", "communitySlug", city, COALESCE("fieldSources", '{}') AS "fieldSources"`,
-                    [stub.name, campSlug, campUrl, refCamp.communitySlug, refCamp.city, refCamp.providerId]
+                    [stub.name, campSlug, campUrl, refCamp.communitySlug, refCamp.city, refCamp.providerId, JSON.stringify(fieldSources)]
                   );
                   if (newCamp) {
                     console.log(`[crawl] created discovered camp: ${newCamp.name} (${newCamp.id})`);

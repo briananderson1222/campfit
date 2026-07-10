@@ -67,7 +67,7 @@
  *    rendered) — never more than one render per source per run.
  */
 
-import { fetchAndExtract, fetchSource, buildSnapshotSourceRef } from "@kontourai/traverse/fetch";
+import { fetchAndExtract } from "@kontourai/traverse/fetch";
 import type {
   FetchAndExtractOptions,
   FetchAndExtractResult,
@@ -77,12 +77,12 @@ import type {
   SourceConfig,
 } from "@kontourai/traverse/fetch";
 import {
-  extract,
   SHELL_WARNING_CODE,
   SHELL_WARNING_CODE_EMBEDDED,
   type EmbeddedState,
   type ExtractionProvider,
 } from "@kontourai/traverse";
+import { fetchAndExtractWithRevalidation } from "./traverse-fetch-extract";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS } from "./traverse-schema";
 import {
   buildTraverseItemProposalRecords,
@@ -477,7 +477,7 @@ async function runFetchAndExtractAttempt(
   // can return BEFORE extraction (zero provider calls). Every OTHER path stays
   // on the unchanged one-call `fetchAndExtract` composition, byte-for-byte.
   const far = revalidateThisAttempt
-    ? await fetchAndExtractRevalidating(config, opts)
+    ? await fetchAndExtractWithRevalidation(config, opts, true)
     : await fetchAndExtract(config, opts);
   return { far, latencyMs: now() - startedAt };
 }
@@ -498,60 +498,6 @@ async function runFetchAndExtractAttempt(
  * fetch failure surfaces as `{ fetch }` with no `extraction`, exactly like
  * `fetchAndExtract`.
  */
-async function fetchAndExtractRevalidating(
-  config: SourceConfig,
-  opts: FetchAndExtractOptions
-): Promise<FetchAndExtractResult> {
-  // Thread the composition-level `store` into fetchSource's options so the
-  // conditional GET can look up the prior snapshot's validators — mirrors
-  // compose.ts's `acquire` exactly (without this, revalidate would silently
-  // fetch unconditionally).
-  const fetchOptions: FetchSourceOptions = { ...(opts.fetchOptions ?? {}) };
-  if (opts.store && fetchOptions.store === undefined) fetchOptions.store = opts.store;
-
-  const fetchResult = await fetchSource(config, fetchOptions);
-  // `live-with-capture` persistence of a FRESH snapshot — identical to
-  // compose.ts. A re-served `notModified` prior is already in the store; putting
-  // it back is idempotent, so this stays a faithful mirror without special-casing.
-  if ((opts.mode ?? "live") === "live-with-capture" && fetchResult.snapshot && opts.store) {
-    await opts.store.put(fetchResult.snapshot);
-  }
-  if (!fetchResult.snapshot) {
-    return { fetch: fetchResult };
-  }
-  const snapshot = fetchResult.snapshot;
-  const sourceRef = buildSnapshotSourceRef(snapshot);
-
-  // AC1: a trustworthy 304 — return BEFORE extract(). No `extraction` payload,
-  // so `runCoreFetchAndExtract` recognizes the unchanged branch and never
-  // touches the provider. `sourceRef` still carries the prior snapshot's
-  // provenance for the freshness record.
-  if (snapshot.notModified) {
-    return { fetch: fetchResult, sourceRef };
-  }
-
-  // Fresh 200 → identical to fetchAndExtract's extract() call (every option
-  // forwarded verbatim). A changed page rejoins the existing shell-retry /
-  // grouping / diff pipeline with no behavior drift (AC2).
-  const extraction = await extract({
-    content: snapshot.bodyBytes ?? snapshot.body,
-    contentType: snapshot.contentType,
-    sourceRef,
-    targetSchema: opts.targetSchema,
-    provider: opts.provider,
-    fieldHints: opts.fieldHints,
-    maxContentChars: opts.maxContentChars,
-    prep: opts.prep,
-    chunkSize: opts.chunkSize,
-    chunkOverlap: opts.chunkOverlap,
-    maxChunks: opts.maxChunks,
-    maxProviderCalls: opts.maxProviderCalls,
-    maxTotalTokens: opts.maxTotalTokens,
-    pdfTextExtractor: opts.pdfTextExtractor,
-    imageTextExtractor: opts.imageTextExtractor,
-  });
-  return { fetch: fetchResult, extraction, sourceRef };
-}
 
 /** Shared source-result fields produced by fetch + the shell-detection auto-retry + extraction — every {@link TraversePipelineSourceResult} field EXCEPT the per-item routing fields (`itemCount`/`routedProposalIds`/`routedFieldCount`), which depend on what a caller does with `far.extraction.proposals` once grouped. */
 type TraverseCoreFetchResult = Omit<TraversePipelineSourceResult, "itemCount" | "routedProposalIds" | "routedFieldCount">;

@@ -461,6 +461,50 @@ describe("AC2 claim-store-adapter", () => {
 });
 
 describe("AC3 backfill", () => {
+  it("skips unapproved discovery observations while still projecting an approved fieldSource control", async () => {
+    const testPool = getTestPool();
+    const pool = getProductionPool();
+    const campId = await insertCamp(testPool, { name: "C2 unapproved observation Camp" });
+    const approvedAt = new Date().toISOString();
+    await testPool.query(
+      `UPDATE "Camp" SET "fieldSources" = $1::jsonb WHERE id = $2`,
+      [
+        JSON.stringify({
+          websiteUrl: {
+            excerpt: "[Program details](https://example.com/camp)",
+            locator: "chars:0-30",
+            sourceUrl: "https://example.com/programs",
+            sourceRef: `traverse-snapshot:campfit-discovery%3Ahttps%3A%2F%2Fexample.com%2Fprograms?url=https%3A%2F%2Fexample.com%2Fprograms&sha256=${"a".repeat(64)}&fetchedAt=2026-07-10T00%3A00%3A00.000Z`,
+          },
+          description: {
+            excerpt: "Approved description.",
+            sourceUrl: "https://example.com/camp",
+            approvedAt,
+            attestedBy: "reviewer@campfit.test",
+          },
+        }),
+        campId,
+      ],
+    );
+
+    const summary = await backfillClaimStore(pool, { dryRun: false });
+    expect(summary.fieldSourcesProjected).toBe(1);
+    expect(summary.fieldSourcesSkipped).toBe(1);
+    expect(summary.evidenceInserted).toBe(1);
+    expect(summary.eventsInserted).toBe(1);
+
+    const claims = await testPool.query<{ fieldOrBehavior: string }>(
+      `SELECT "fieldOrBehavior" FROM "SurfaceClaimDefinition" WHERE "subjectId" = $1 ORDER BY "fieldOrBehavior"`,
+      [campId],
+    );
+    expect(claims.rows).toEqual([{ fieldOrBehavior: "description" }]);
+    const events = await testPool.query<{ status: string }>(
+      `SELECT status FROM "SurfaceVerificationEvent" WHERE "claimId" = $1`,
+      [campCanonicalClaimId(campId, "description")],
+    );
+    expect(events.rows).toEqual([{ status: "verified" }]);
+  });
+
   it("projects fieldSources + FieldAttestation (ACTIVE and INVALIDATED) into Claim/Evidence/VerificationEvent rows, dry-run writes nothing, and re-running is idempotent", async () => {
     const testPool = getTestPool();
     const pool = getProductionPool();
@@ -1566,4 +1610,3 @@ describe("V1 concurrency fix — claim-store.ts's per-subject advisory lock", ()
     expect(claimRows.rows.map((row) => row.id).sort()).toEqual([claimIdA, claimIdB].sort());
   });
 });
-

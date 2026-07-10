@@ -222,37 +222,25 @@ union — every remaining option now resolves to a real, registered datum provid
 never-resolvable Gemini/Ollama entries the legacy hardcoded list carried are gone).
 
 **That endpoint fix alone did not make the picker meaningful for the dominant re-crawl
-flow.** `CrawlOptions.model` — the per-run override the five routes/`crawl-modal.tsx` still
-POST — is NOT expressible against `resolveExtractionProvider()` as written (it resolves one
+flow.** `CrawlOptions.model` — a legacy per-run override API callers may still POST — is NOT
+expressible against `resolveExtractionProvider()` as written (it resolves one
 process-level provider from datum/`TRAVERSE_ROLE`, with no per-call ref parameter). Rather
-than silently dropping the override, `crawl-pipeline.ts` logs one `console.warn` per run and
-annotates each camp's `campLog.model` display string with
+than silently dropping an override that reaches it, `crawl-pipeline.ts` logs one
+`console.warn` per run and annotates each camp's `campLog.model` display string with
 `[requested override "<model>" not applied — traverse extraction resolves its provider via
 datum, not a per-run override]` — the undecorated `extractionModel` column written to
-`CampChangeProposal` stays the real, undecorated model id for data integrity. This annotation
-is a backstop for API-level callers of the five routes (any caller can still pass `model` in
-the request body — it is simply recorded, never silently dropped) and is unchanged by the fix
-below. Discovery's `options.model` usage (the legacy `discoverCampsFromUrl` pre-pass, when
-`discover: true`) is UNCHANGED and still honors the override — only the traverse-backed
-extraction step cannot.
+`CampChangeProposal` stays the real, undecorated resolved model id for data integrity. This
+compatibility behavior applies only to routes that still read and forward a stale `model`
+request value; routes that never accept one produce no override warning or annotation.
 
-Because `discover` defaults to `false` for every route except onboard-a-new-site (whose flow
-doesn't surface this picker at all — it POSTs no `model`/`discover` fields, see the
-per-route table below), the model picker being rendered unconditionally in `crawl-modal.tsx`
-made it a functional no-op for the common/default admin flow: selecting any model had zero
-effect on the crawl that ran, with no indication of that in the UI. An earlier version of
-this doc claimed "no option in the picker does nothing when selected" — that was true only in
-the narrow endpoint sense (every listed option resolves to a real provider) and did not hold
-for the dominant re-crawl path, where no option affected the run at all.
-
-**Fix (iteration 2, 2026-07-03):** `crawl-modal.tsx`'s model picker now renders only when the
-"Discover new programs" toggle is on — the one place `options.model` is still honored. It
-also carries inline helper text naming the datum-resolved extraction default (read live from
-`/api/admin/crawl/models`'s `default` field) and stating plainly that the selection applies to
-discovery only and never affects extraction. With the toggle off (the default, and the common
-re-crawl path), the picker is not shown at all, so there is no dead or misleading control left
-in that flow. Field extraction's provider is, and remains, entirely datum-resolved —
-`options.model`/the picker never drive it, in any mode.
+**campfit#78 correction (iteration 3, 2026-07-10):** discovery no longer has a legacy
+per-call model override. Both discovery and field extraction use the standard
+`resolveExtractionProvider()` path (or an explicitly injected `ExtractionProvider` in
+deterministic tests). `crawl-modal.tsx` therefore no longer loads or renders the discovery
+model picker and no longer includes `model` in its start payload. The "Discover new programs"
+toggle remains; enabling it selects discovery behavior, not a provider. Any future per-run
+provider choice must be implemented through the standard provider-resolution contract before
+an admin control can promise it.
 
 ## Error-vocabulary parity (AC9)
 
@@ -289,13 +277,13 @@ triage `recommendation()` string surfaced in the admin UI.
 
 ## Per-route parity (AC1, AC10)
 
-| Route | Selection semantics | Discovery? | Model override? | Migration impact |
+| Route | Selection semantics | Discovery? | Effective per-route provider/model override? | Migration impact |
 | --- | --- | --- | --- | --- |
-| `app/api/admin/camps/[campId]/crawl/route.ts` | Single known `campId` | No | Yes (not honored for extraction, see AC8) | Per-camp adapter targets that exact `campId` directly |
-| `app/api/admin/providers/[providerId]/crawl/route.ts` | All camps for a `providerId` (bulk) | Yes | Yes | Bulk orchestration unchanged; discovery pre-pass stays legacy; per-camp step migrated |
-| `app/api/admin/crawl/start/route.ts` | `campIds` array, or all camps missing `websiteUrl` | Yes | Yes | Same bulk path; largest blast radius, most-tested |
-| `app/api/admin/crawl/onboard-url/route.ts` | Discovers+creates new camps, then re-crawls only the new `campIds` | Yes (core function) | No | Discovery/creation entirely legacy/unchanged (AC11); only the trailing `runCrawlPipeline` call is migrated |
-| `app/api/admin/assistant/route.ts` (`startPipeline`) | Single `campId` OR `providerIds`, AI-assistant tool-call | No | No | Structurally identical to the two dedicated routes; zero route-level change |
+| `app/api/admin/camps/[campId]/crawl/route.ts` | Single known `campId` | No | No — reads and forwards a stale `model`; the pipeline warns, records an ignored-override annotation in `campLog.model`, and persists the actual resolved extraction model | Per-camp adapter targets that exact `campId` directly |
+| `app/api/admin/providers/[providerId]/crawl/route.ts` | All camps for a `providerId` (bulk) | Yes, when `discover: true` | No — reads and forwards a stale `model`; discovery and extraction use standard provider resolution, while the pipeline warns and annotates the ignored override | Bulk orchestration unchanged; discovery pre-pass uses standard provider resolution as of campfit#78; per-camp step migrated |
+| `app/api/admin/crawl/start/route.ts` | `campIds` array, or all camps missing `websiteUrl` | Yes, when `discover: true` | No — reads and forwards a stale `model`; discovery and extraction use standard provider resolution, while the pipeline warns and annotates the ignored override | Same bulk path; largest blast radius, most-tested |
+| `app/api/admin/crawl/onboard-url/route.ts` | Discovers+creates new camps, then re-crawls only the new `campIds` | Yes (core function) | No — never reads or forwards `model`, so there is no ignored-override warning or annotation; direct discovery and trailing extraction use standard provider resolution | Discovery uses plain traverse live-with-capture as of campfit#78; the trailing `runCrawlPipeline` call remains unchanged |
+| `app/api/admin/assistant/route.ts` (`startPipeline`) | Single `campId` OR `providerIds`, AI-assistant tool-call | No | No — `startPipeline` accepts and forwards no `model`, so there is no ignored-override warning or annotation; extraction uses standard provider resolution | Structurally identical to the two dedicated routes; zero route-level change |
 
 All five (plus `scripts/run-crawl.ts` / `scripts/harvest-aggregator.ts`) funnel through the
 same `CrawlOptions`/`runCrawlPipeline`; `CrawlOptions`/`CrawlRun` exports are unchanged
@@ -304,24 +292,25 @@ result-shape adapter). Admin polling UI (`recrawl-button.tsx`, `crawl-modal.tsx`
 `app/admin/crawls/page.tsx`) is unaffected — it only ever reads `CrawlRun` fields
 (`runId`/`status`/`newProposals`), never the extraction result shape directly.
 
-## Discovery stays on the legacy path (AC11)
+## Discovery cutover supersession (campfit#78, 2026-07-10)
 
-`lib/ingestion/llm-discovery.ts` (`discoverCampsFromUrl`/`filterNewDiscoveries`), the
-`discover` flag on 3 of the 5 routes, and `onboard-url`'s core discover-then-create flow have
-**no traverse equivalent** — traverse has no concept of "detect a listing page and enumerate
-programs on it" as a distinct pre-pass from per-item extraction. Migrating discovery is a
-separate, larger piece of work, explicitly out of this issue's scope. This is why
-`llm-provider.ts` is TRIMMED, not deleted: `callLLM`/`callAnthropic`/`callGemini`/`callOllama`/
-`LLMResponse` are kept because `llm-discovery.ts:13` still imports `callLLM` for discovery.
-`buildPrompt` and its `DENVER_NEIGHBORHOODS` constant — the extraction-only parts — were
-deleted (see "Dead-code closure" below).
+The historical AC11 statement below was true for the original recrawl cutover, but campfit#78
+now supersedes it. `discoverCampsFromUrl` uses traverse's narrow discovery schema and the
+standard resolved/injected `ExtractionProvider`; model selection flows through
+`resolveExtractionProvider()` rather than a per-call discovery override. The raw `callLLM`
+prompt/parser path and
+`lib/ingestion/llm-provider.ts` are deleted. Scheduled/shared-listing pre-passes use
+revalidating capture (a trustworthy `304` means unchanged/no extraction and never "not a
+listing"), while explicit admin/CLI onboarding uses plain live-with-capture. New Camps remain
+`PLACEHOLDER`; their name and optional website observations retain field-specific verified
+excerpts, locators, and stored snapshot refs without `approvedAt`.
 
 ## Dead-code closure (AC2, AC3, AC4)
 
 | Item | Disposition |
 | --- | --- |
 | `lib/ingestion/llm-extractor.ts` | Deleted (whole file — `extractCampDataFromUrl`, `parseExtractionResponse`, `extractJsonObject`, `computeOverallConfidence`) |
-| `lib/ingestion/llm-provider.ts`'s `buildPrompt` + `DENVER_NEIGHBORHOODS` | Deleted; `callLLM`/`callAnthropic`/`callGemini`/`callOllama`/`LLMResponse` KEPT for discovery (AC11) |
+| `lib/ingestion/llm-provider.ts` | Fully deleted by campfit#78 after discovery moved to the resolved/injected traverse provider path |
 | `scripts/debug-extract.ts` | **Deleted**, not repointed. Rationale: it was a thin, standalone live-network CLI wrapper (`extractCampDataFromUrl(url, name)` -> print JSON) with no `package.json` script wiring (confirmed: zero `debug-extract` references in `package.json`) and no other consumers. Repointing it at `runTraverseRecrawlForCamp` would require synthesizing a full `Camp` "current" row, a resolved `ExtractionProvider`, and a `SnapshotStore` for a URL with no corresponding DB camp — a meaningfully heavier, DB-shaped tool for what was a one-line debug script. `scripts/test-recrawl-adapter.ts` (network-free, stub provider) and `npm run crawl -- --id <campId>` (live, DB-backed, real provider) already cover the "debug one URL's extraction" need at the two ends of the fidelity spectrum this script sat between. |
 
 Before-count (pre-migration baseline, recorded from planning):
@@ -335,10 +324,9 @@ literal identifier strings so this grep stays a clean zero — see e.g.
 `lib/ingestion/traverse-recrawl-adapter.ts`'s file doc, which now says "the retired hand-rolled
 per-camp extraction function" instead of spelling the old name.)
 
-`grep -n "buildPrompt\|DENVER_NEIGHBORHOODS" lib/ingestion/llm-provider.ts` returns zero.
-`grep -rn "\bcallLLM(" --include="*.ts" --include="*.tsx" .` shows exactly 2 hits: the
-definition in `llm-provider.ts` and the one call site in `llm-discovery.ts:90` — confirming
-`callLLM` has exactly one surviving consumer family.
+As of campfit#78, `test:discovery-replay` guards that `callLLM`, the bespoke discovery prompt
+and parser, and direct fetch composition cannot be resurrected; `lib/ingestion/llm-provider.ts`
+no longer exists.
 
 ## Version bump + cost-guard follow-up (AC12)
 

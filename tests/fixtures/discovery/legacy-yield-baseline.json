@@ -1,0 +1,41 @@
+{
+  "contract": "campfit#78 AC1 amended 2026-07-10: deterministic new-path yield corpus; no legacy baseline exists",
+  "deferredEvidence": "One-time live old-vs-new spot-check after merge",
+  "fixtures": [
+    {
+      "fixture": "tests/fixtures/traverse/avid4-multi-item.html",
+      "bodySha256": "ce450593348d456b93a6338a63bcd1a180b17c46375fbe3bef7667fd74da52b9",
+      "expectedNames": ["Mountain Explorers Day Camp", "Junior Rangers Day Camp"],
+      "expectedCount": 2,
+      "isListingPage": true
+    },
+    {
+      "fixture": "tests/fixtures/traverse/avid4-full-fields.html",
+      "bodySha256": "fad5e9ef10dbbc8da0a4695b186ba3f3c5b9bbbf965fd5c7adc33f71308f1b15",
+      "expectedNames": ["Mountain Explorers Day Camp"],
+      "expectedCount": 1,
+      "isListingPage": false
+    },
+    {
+      "fixture": "tests/fixtures/traverse/avid4-healthy.html",
+      "bodySha256": "da784a47b3dd62b1bf634615abcde7fcde70f9daf285ae6c7f1e2f0038c6a28b",
+      "expectedNames": ["Mountain Explorers Day Camp"],
+      "expectedCount": 1,
+      "isListingPage": false
+    },
+    {
+      "fixture": "tests/fixtures/traverse/denver-art-museum.html",
+      "bodySha256": "b97679423f3ef910f8087a38a8c8fe2746eb5ed1a78b7fa16f0ac1f00d620fb2",
+      "expectedNames": ["Young Artists Summer Camp"],
+      "expectedCount": 1,
+      "isListingPage": false
+    },
+    {
+      "fixture": "inline:synthetic-relative-links",
+      "bodySha256": "db22cb5d99ec684808eac2249077e8c9e5090edd9f1e9d7949cd6933812835d0",
+      "expectedNames": ["River Makers", "Sky Studio"],
+      "expectedCount": 2,
+      "isListingPage": true
+    }
+  ]
+}
