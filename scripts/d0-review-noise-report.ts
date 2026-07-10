@@ -20,9 +20,10 @@ type ComputeDiff = typeof postFixComputeDiff;
 
 const PRE_FIX_SHA = execFileSync("git", ["rev-parse", "7cfddde^{}"], { encoding: "utf8" }).trim();
 const POST_FIX_SHA = execFileSync("git", ["rev-parse", "HEAD^{}"], { encoding: "utf8" }).trim();
+const POST_FIX_DIFF = execFileSync("git", ["diff", "--binary", "HEAD"], { encoding: "utf8" });
 const POST_FIX_DIFF_SHA = execFileSync("git", ["hash-object", "--stdin"], {
   encoding: "utf8",
-  input: execFileSync("git", ["diff", "--binary", "HEAD"], { encoding: "utf8" }),
+  input: POST_FIX_DIFF,
 }).trim();
 
 function gitShow(sha: string, file: string): string {
@@ -124,7 +125,7 @@ const summary = {
   preFixSha: PRE_FIX_SHA,
   postFixSha: POST_FIX_SHA,
   postFixWorktreeDiffSha: POST_FIX_DIFF_SHA,
-  postFixIncludesUncommittedWorktree: true,
+  postFixIncludesUncommittedWorktree: POST_FIX_DIFF.length > 0,
   materializedParentModules: ["lib/ingestion/diff-engine.ts", "lib/ingestion/diff-kernel.ts"],
   corpusModule: "scripts/d0-relation-fixtures.ts",
   fixtureModules: ["scripts/test-recrawl-adapter.ts", "scripts/test-d0-identity-hydration.ts"],
