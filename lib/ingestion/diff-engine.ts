@@ -1,6 +1,13 @@
 import type { Camp } from '@/lib/types';
 import type { CampInput } from './adapter';
 import type { ProposedChanges, FieldDiff } from '@/lib/admin/types';
+import {
+  changeWhenDifferent,
+  outerArrayChange,
+  projectProvenance,
+  relationFacts,
+  scalarChange,
+} from './diff-kernel';
 
 const MIN_CONFIDENCE = 0.3; // Skip fields below this threshold
 const SUPPRESS_DAYS = 30;  // Re-suppress recently-approved fields at low confidence
@@ -38,7 +45,8 @@ export function computeDiff(
 
     const currentVal = (current as unknown as Record<string, unknown>)[field];
 
-    if (normalize(currentVal) !== normalize(extractedVal)) {
+    const change = scalarChange(currentVal, extractedVal);
+    if (change) {
       // Suppress re-proposals for recently-approved fields at low confidence
       const src = fieldSources[field];
       if (src?.approvedAt) {
@@ -48,12 +56,10 @@ export function computeDiff(
 
       const isEmpty = currentVal === null || currentVal === undefined || currentVal === '';
       changes[field] = {
-        old: currentVal,
-        new: extractedVal,
+        ...change,
         confidence: conf,
         mode: isEmpty ? 'populate' : 'update',
-        ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
-        ...(sourceUrl ? { sourceUrl } : {}),
+        ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
       };
     }
   }
@@ -76,7 +82,12 @@ export function computeDiff(
     const sortedCurrent = [...currentItems].sort().join(',');
     const sortedExtracted = [...(extractedVal as unknown[])].sort().join(',');
 
-    if (sortedCurrent !== sortedExtracted) {
+    const change = changeWhenDifferent(
+      currentItems,
+      extractedVal,
+      () => sortedCurrent === sortedExtracted
+    );
+    if (change) {
       const src = fieldSources[field];
       if (src?.approvedAt) {
         const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
@@ -85,12 +96,10 @@ export function computeDiff(
 
       const isEmpty = currentItems.length === 0;
       changes[field] = {
-        old: currentItems,
-        new: extractedVal,
+        ...change,
         confidence: conf,
         mode: isEmpty ? 'populate' : 'update',
-        ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
-        ...(sourceUrl ? { sourceUrl } : {}),
+        ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
       };
     }
   }
@@ -106,7 +115,8 @@ export function computeDiff(
     const currentArr = (current as unknown as Record<string, unknown>)[field];
     const currentItems = Array.isArray(currentArr) ? currentArr : [];
 
-    if (stableJson(currentItems) !== stableJson(extractedArr)) {
+    const change = outerArrayChange(currentItems, extractedArr);
+    if (change) {
       // Suppress recently-approved array fields too
       const src = fieldSources[field];
       if (src?.approvedAt) {
@@ -115,19 +125,17 @@ export function computeDiff(
       }
 
       // Check if extracted is purely additive (all current items still present)
-      const currentSet = new Set(currentItems.map(i => stableJson(i)));
+      const { allCurrentRetained, hasNovelCandidate } = relationFacts(currentItems, extractedArr);
       const isAdditive = currentItems.length > 0 &&
-        extractedArr.every((item: unknown) => currentSet.has(stableJson(item)) || !currentSet.has(stableJson(item))) &&
+        allCurrentRetained &&
         extractedArr.length > currentItems.length &&
-        currentItems.every((item: unknown) => new Set(extractedArr.map((i: unknown) => stableJson(i))).has(stableJson(item)));
+        hasNovelCandidate;
 
       changes[field] = {
-        old: currentItems,
-        new: extractedArr,
+        ...change,
         confidence: conf,
         mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
-        ...(excerpts[field] ? { excerpt: excerpts[field] } : {}),
-        ...(sourceUrl ? { sourceUrl } : {}),
+        ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
       };
     }
   }
@@ -140,28 +148,4 @@ export function computeOverallConfidence(proposedChanges: ProposedChanges): numb
   if (diffs.length === 0) return 0;
   const avg = diffs.reduce((sum, d) => sum + d.confidence, 0) / diffs.length;
   return Math.round(avg * 100) / 100;
-}
-
-function normalize(val: unknown): string {
-  if (val === null || val === undefined || val === '') return '';
-  if (typeof val === 'boolean') return String(val);
-  if (typeof val === 'number') return String(val);
-  if (typeof val === 'object') return stableObjectString(val);
-  return String(val).trim().toLowerCase();
-}
-
-function stableObjectString(val: unknown): string {
-  if (Array.isArray(val)) return stableJson(val);
-  if (!val || typeof val !== 'object') return String(val ?? '');
-  const entries = Object.entries(val as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify(Object.fromEntries(entries));
-}
-
-function stableJson(val: unknown): string {
-  if (!Array.isArray(val)) return JSON.stringify(val);
-  // Sort arrays by JSON stringification for stable comparison
-  const sorted = [...val].sort((a, b) =>
-    JSON.stringify(a).localeCompare(JSON.stringify(b))
-  );
-  return JSON.stringify(sorted);
 }

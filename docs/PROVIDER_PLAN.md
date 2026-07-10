@@ -216,13 +216,13 @@ for each camp: fetch URL → extract → diff → propose
 
 ### New: provider-aware crawl (Phase 2)
 
-Add `--provider [providerId]` flag to `run-crawl.mjs`:
+Use the canonical TypeScript runner's `--provider [providerId]` flag:
 ```
-node scripts/run-crawl.mjs --provider xyz  # crawl all camps for this provider
+npm run crawl -- --provider xyz  # crawl all camps for this provider
 ```
 
-This crawls all camps where `providerId = xyz` ordered by `lastVerifiedAt ASC` — efficient for
-"recrawl all Botanic Gardens camps."
+This crawls all camps where `providerId = xyz`. The provider-scoped selection currently applies no
+`lastVerifiedAt` ordering; only the unrestricted crawl path orders camps by `lastVerifiedAt ASC`.
 
 ### Future: Discovery crawl mode
 
@@ -260,7 +260,7 @@ Minimal for Phase 1, but unlocks:
 | 7 | Provider API CRUD routes | 2h | GET/POST/PATCH |
 | 8 | Public "more from this provider" section | 2h | Camp detail page |
 | 9 | DB migration Phase 2 (drop organizationName) | 15min | After 2 weeks |
-| 10 | Crawl --provider flag | 1h | run-crawl.mjs arg |
+| 10 | Crawl --provider flag | 1h | `scripts/run-crawl.ts` arg via `npm run crawl` |
 | 11 | Discovery crawl mode | 4h | Future, complex |
 
 Total for items 1–8: ~14h of focused work.

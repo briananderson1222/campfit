@@ -69,6 +69,7 @@ import * as url from "node:url";
 import type { ExtractionProvider, ProviderExtractionOutput } from "@kontourai/traverse";
 import { createInMemorySnapshotStore, type FetchLike } from "@kontourai/traverse/fetch";
 import { runTraverseRecrawlForCamp } from "../lib/ingestion/traverse-recrawl-adapter";
+import { computeDiff } from "../lib/ingestion/diff-engine";
 import { createStubProvider, type StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 import type { Camp } from "../lib/types";
 
@@ -140,6 +141,292 @@ function makeCamp(overrides: Partial<Camp> = {}): Camp {
     pricing: [],
     ...overrides,
   };
+}
+
+const PRICE_A = {
+  id: "price-a",
+  label: "Standard week",
+  amount: 425,
+  unit: "PER_WEEK" as const,
+  durationWeeks: null,
+  ageQualifier: null,
+  discountNotes: null,
+};
+
+const PRICE_B = {
+  id: "price-b",
+  label: "Extended week",
+  amount: 525,
+  unit: "PER_WEEK" as const,
+  durationWeeks: null,
+  ageQualifier: null,
+  discountNotes: null,
+};
+
+const PRICE_C = {
+  id: "price-c",
+  label: "Holiday week",
+  amount: 475,
+  unit: "PER_WEEK" as const,
+  durationWeeks: null,
+  ageQualifier: null,
+  discountNotes: null,
+};
+
+// Traverse's assembled relation shape intentionally has no persistence id.
+// campfit#109 owns reconciling this with stored relation identity in the
+// canonical pipeline; these fixtures characterize today's production shape.
+const EXTRACTED_PRICE_A = {
+  label: PRICE_A.label,
+  amount: PRICE_A.amount,
+  unit: PRICE_A.unit,
+  durationWeeks: PRICE_A.durationWeeks,
+  ageQualifier: PRICE_A.ageQualifier,
+  discountNotes: PRICE_A.discountNotes,
+};
+
+const EXTRACTED_PRICE_B = {
+  label: PRICE_B.label,
+  amount: PRICE_B.amount,
+  unit: PRICE_B.unit,
+  durationWeeks: PRICE_B.durationWeeks,
+  ageQualifier: PRICE_B.ageQualifier,
+  discountNotes: PRICE_B.discountNotes,
+};
+
+const FIXED_NOW = Date.parse("2000-01-01T00:00:00.000Z");
+const SUPPRESSION_WINDOW_MS = 30 * 86_400_000;
+
+function approvalTimestamp(offsetFromBoundaryMs: number): string {
+  return new Date(FIXED_NOW - SUPPRESSION_WINDOW_MS + offsetFromBoundaryMs).toISOString();
+}
+
+function withFixedNow<T>(run: () => T): T {
+  const originalDateNow = Date.now;
+  Date.now = () => FIXED_NOW;
+  try {
+    return run();
+  } finally {
+    Date.now = originalDateNow;
+  }
+}
+
+async function withFixedNowAsync<T>(run: () => Promise<T>): Promise<T> {
+  const originalDateNow = Date.now;
+  Date.now = () => FIXED_NOW;
+  try {
+    return await run();
+  } finally {
+    Date.now = originalDateNow;
+  }
+}
+
+// ─── campfit#108 Wave 0: direct computeDiff behavior lock ───────────────
+
+function testComputeDiffBehaviorTable() {
+  const sourceUrl = "https://example.test/camps";
+  const excerpt = "Weekly camp prices";
+
+  const strictSuperset = computeDiff(
+    makeCamp({ pricing: [PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_B] },
+    { pricing: 0.91 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(strictSuperset, {
+    pricing: {
+      old: [PRICE_A],
+      new: [PRICE_A, PRICE_B],
+      confidence: 0.91,
+      mode: "add_items",
+      excerpt,
+      sourceUrl,
+    },
+  });
+
+  const replacement = computeDiff(
+    makeCamp({ pricing: [PRICE_A, PRICE_B] }),
+    { pricing: [PRICE_A, PRICE_C] },
+    { pricing: 0.92 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(replacement, {
+    pricing: {
+      old: [PRICE_A, PRICE_B],
+      new: [PRICE_A, PRICE_C],
+      confidence: 0.92,
+      mode: "update",
+      excerpt,
+      sourceUrl,
+    },
+  });
+
+  const populate = computeDiff(
+    makeCamp({ pricing: [] }),
+    { pricing: [PRICE_A] },
+    { pricing: 0.93 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(populate, {
+    pricing: {
+      old: [],
+      new: [PRICE_A],
+      confidence: 0.93,
+      mode: "populate",
+      excerpt,
+      sourceUrl,
+    },
+  });
+
+  // The canonical crawl pipeline currently clears stored relations before
+  // diffing. campfit#109 owns making real current relations reachable.
+  const productionEmptyCurrent = computeDiff(
+    makeCamp({ pricing: [] }),
+    { pricing: [EXTRACTED_PRICE_A] },
+    { pricing: 0.93 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    productionEmptyCurrent.pricing?.mode,
+    "populate",
+    "canonical empty-current relation shape must characterize today's populate behavior (campfit#109)"
+  );
+
+  // If a caller supplies stored id-bearing relations, Traverse's id-less
+  // extracted shape does not retain the same whole-object identity today.
+  // campfit#109 owns the design change; #108 pins the honest behavior.
+  const productionIdentityMismatch = computeDiff(
+    makeCamp({ pricing: [PRICE_A] }),
+    { pricing: [EXTRACTED_PRICE_A, EXTRACTED_PRICE_B] },
+    { pricing: 0.93 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    productionIdentityMismatch.pricing?.mode,
+    "update",
+    "id-bearing current vs id-less extracted [A] -> [A, B] must characterize today's update behavior (campfit#109)"
+  );
+
+  assert.deepEqual(
+    computeDiff(
+      makeCamp({ pricing: [PRICE_A, PRICE_B] }),
+      { pricing: [PRICE_B, PRICE_A] },
+      { pricing: 0.94 },
+      { pricing: excerpt },
+      {},
+      sourceUrl
+    ),
+    {},
+    "pure outer-array reorder must produce no proposal"
+  );
+
+  const exactSerialized = computeDiff(
+    makeCamp({ name: "Old name", campTypes: ["SUMMER_DAY"], pricing: [PRICE_A] }),
+    { name: "New name", campTypes: ["SUMMER_DAY", "SCHOOL_BREAK"], pricing: [PRICE_A, PRICE_B] },
+    { name: 0.81, campTypes: 0.82, pricing: 0.83 },
+    { name: "Camp title", campTypes: "Program types", pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    JSON.stringify(exactSerialized),
+    '{"name":{"old":"Old name","new":"New name","confidence":0.81,"mode":"update","excerpt":"Camp title","sourceUrl":"https://example.test/camps"},"campTypes":{"old":["SUMMER_DAY"],"new":["SUMMER_DAY","SCHOOL_BREAK"],"confidence":0.82,"mode":"update","excerpt":"Program types","sourceUrl":"https://example.test/camps"},"pricing":{"old":[{"id":"price-a","label":"Standard week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"new":[{"id":"price-a","label":"Standard week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null},{"id":"price-b","label":"Extended week","amount":525,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"confidence":0.83,"mode":"add_items","excerpt":"Weekly camp prices","sourceUrl":"https://example.test/camps"}}',
+    "representative multi-field recrawl output must preserve property presence and order byte-for-byte"
+  );
+
+  assert.deepEqual(
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.299999 }),
+    {},
+    "confidence just below 0.3 must be omitted"
+  );
+  assert.deepEqual(
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.3 }),
+    { city: { old: "Denver", new: "Boulder", confidence: 0.3, mode: "update" } },
+    "confidence exactly 0.3 must remain eligible and missing provenance must remain omitted"
+  );
+
+  const justInsideSuppressionWindow = { city: { approvedAt: approvalTimestamp(1) } };
+  const justOutsideSuppressionWindow = { city: { approvedAt: approvalTimestamp(-1) } };
+  withFixedNow(() => {
+    assert.deepEqual(
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justInsideSuppressionWindow),
+      {},
+      "a low-confidence scalar approved just inside 30 days must be suppressed"
+    );
+    assert.deepEqual(
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justOutsideSuppressionWindow),
+      { city: { old: "Denver", new: "Boulder", confidence: 0.79, mode: "update" } },
+      "a low-confidence scalar approved just outside 30 days must surface"
+    );
+    assert.deepEqual(
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, justInsideSuppressionWindow),
+      { city: { old: "Denver", new: "Boulder", confidence: 0.8, mode: "update" } },
+      "a recently approved field at confidence exactly 0.8 must surface"
+    );
+  });
+
+  console.log("✓ computeDiff characterization: strict superset/replacement/populate/reorder, exact serialization, confidence/suppression boundaries, and provenance omission");
+
+  // Keep the pre-fix RED assertion last: every characterization above must
+  // pass before the baseline fails on the one known behavior defect.
+  const duplicateOnly = computeDiff(
+    makeCamp({ pricing: [PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_A] },
+    { pricing: 0.95 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.deepEqual(duplicateOnly, {
+    pricing: {
+      old: [PRICE_A],
+      new: [PRICE_A, PRICE_A],
+      confidence: 0.95,
+      mode: "update",
+      excerpt,
+      sourceUrl,
+    },
+  }, "duplicate-only growth must be update because it contains no novel candidate");
+
+  const duplicateCurrentNotRetained = computeDiff(
+    makeCamp({ pricing: [PRICE_A, PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_B, PRICE_C] },
+    { pricing: 0.96 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    duplicateCurrentNotRetained.pricing?.mode,
+    "update",
+    "[A, A] -> [A, B, C] must be update because candidate multiplicity does not retain both A occurrences"
+  );
+
+  const duplicateCurrentRetained = computeDiff(
+    makeCamp({ pricing: [PRICE_A, PRICE_A] }),
+    { pricing: [PRICE_A, PRICE_A, PRICE_B] },
+    { pricing: 0.97 },
+    { pricing: excerpt },
+    {},
+    sourceUrl
+  );
+  assert.equal(
+    duplicateCurrentRetained.pricing?.mode,
+    "add_items",
+    "[A, A] -> [A, A, B] must be add_items because both A occurrences are retained and B is novel"
+  );
+
+  console.log("✓ accepted deltas: duplicate-only [A] -> [A, A] is update; duplicate-current retention uses multiset counts; genuine additions remain add_items");
 }
 
 // ─── 1. Single-item page targets the known camp unambiguously ────────────
@@ -243,59 +530,61 @@ async function testMultiItemPageAmbiguousFailsLoud() {
 // ─── 4. AC6: 30-day/0.8-confidence suppression actually fires ────────────
 
 async function testSuppressionFires() {
-  const html = loadFixture("avid4-healthy.html");
-  const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString();
+  return withFixedNowAsync(async () => {
+    const html = loadFixture("avid4-healthy.html");
+    const justInsideSuppressionWindow = approvalTimestamp(1);
 
-  // Low-confidence re-proposal (0.5) of a field approved 10 days ago must be
-  // SUPPRESSED — this is the exact scenario re-crawling an already-reviewed
-  // camp hits routinely.
-  const lowConfSpecs: StubProposalSpec[] = [
-    { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Typo)", needle: "Mountain Explorers Day Camp", confidence: 0.5 },
-  ];
-  const suppressed = await runTraverseRecrawlForCamp({
-    campId: "camp-4",
-    websiteUrl: "https://avid4.com/day-camps/colorado/",
-    campName: "Mountain Explorers Day Camp",
-    current: makeCamp({ id: "camp-4" }),
-    fieldSources: { name: { approvedAt: tenDaysAgo } },
-    provider: createStubProvider(lowConfSpecs, { model: "stub-suppress" }),
-    store: createInMemorySnapshotStore(),
-    mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
-    log: () => {},
+    // Low-confidence re-proposal (0.5) of a field approved just inside 30 days must be
+    // SUPPRESSED — this is the exact scenario re-crawling an already-reviewed
+    // camp hits routinely.
+    const lowConfSpecs: StubProposalSpec[] = [
+      { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Typo)", needle: "Mountain Explorers Day Camp", confidence: 0.5 },
+    ];
+    const suppressed = await runTraverseRecrawlForCamp({
+      campId: "camp-4",
+      websiteUrl: "https://avid4.com/day-camps/colorado/",
+      campName: "Mountain Explorers Day Camp",
+      current: makeCamp({ id: "camp-4" }),
+      fieldSources: { name: { approvedAt: justInsideSuppressionWindow } },
+      provider: createStubProvider(lowConfSpecs, { model: "stub-suppress" }),
+      store: createInMemorySnapshotStore(),
+      mode: "live-with-capture",
+      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      log: () => {},
+    });
+    assert.equal(suppressed.ok, true);
+    assert.ok(
+      !("name" in suppressed.proposedChanges),
+      "a low-confidence (<0.8) re-proposal of a field approved <30 days ago must be suppressed"
+    );
+
+    // Same scenario, but confidence clears the 0.8 suppression threshold — the
+    // change MUST still be proposed (proves this isn't an accidental blanket
+    // block on the field).
+    const highConfSpecs: StubProposalSpec[] = [
+      { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Renamed)", needle: "Mountain Explorers Day Camp", confidence: 0.95 },
+    ];
+    const notSuppressed = await runTraverseRecrawlForCamp({
+      campId: "camp-4",
+      websiteUrl: "https://avid4.com/day-camps/colorado/",
+      campName: "Mountain Explorers Day Camp",
+      current: makeCamp({ id: "camp-4" }),
+      fieldSources: { name: { approvedAt: justInsideSuppressionWindow } },
+      provider: createStubProvider(highConfSpecs, { model: "stub-not-suppress" }),
+      store: createInMemorySnapshotStore(),
+      mode: "live-with-capture",
+      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      log: () => {},
+    });
+    assert.equal(notSuppressed.ok, true);
+    assert.ok(
+      "name" in notSuppressed.proposedChanges,
+      "a HIGH-confidence (>=0.8) re-proposal must still be proposed even within the 30-day suppression window"
+    );
+    assert.equal(notSuppressed.proposedChanges["name"].new, "Mountain Explorer Day Camp (Renamed)");
+
+    console.log("✓ AC6: 30-day/0.8-confidence suppression of a recently-approved field fires on the re-crawl path, and does not over-suppress high-confidence changes");
   });
-  assert.equal(suppressed.ok, true);
-  assert.ok(
-    !("name" in suppressed.proposedChanges),
-    "a low-confidence (<0.8) re-proposal of a field approved <30 days ago must be suppressed"
-  );
-
-  // Same scenario, but confidence clears the 0.8 suppression threshold — the
-  // change MUST still be proposed (proves this isn't an accidental blanket
-  // block on the field).
-  const highConfSpecs: StubProposalSpec[] = [
-    { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Renamed)", needle: "Mountain Explorers Day Camp", confidence: 0.95 },
-  ];
-  const notSuppressed = await runTraverseRecrawlForCamp({
-    campId: "camp-4",
-    websiteUrl: "https://avid4.com/day-camps/colorado/",
-    campName: "Mountain Explorers Day Camp",
-    current: makeCamp({ id: "camp-4" }),
-    fieldSources: { name: { approvedAt: tenDaysAgo } },
-    provider: createStubProvider(highConfSpecs, { model: "stub-not-suppress" }),
-    store: createInMemorySnapshotStore(),
-    mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
-    log: () => {},
-  });
-  assert.equal(notSuppressed.ok, true);
-  assert.ok(
-    "name" in notSuppressed.proposedChanges,
-    "a HIGH-confidence (>=0.8) re-proposal must still be proposed even within the 30-day suppression window"
-  );
-  assert.equal(notSuppressed.proposedChanges["name"].new, "Mountain Explorer Day Camp (Renamed)");
-
-  console.log("✓ AC6: 30-day/0.8-confidence suppression of a recently-approved field fires on the re-crawl path, and does not over-suppress high-confidence changes");
 }
 
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───
@@ -557,6 +846,7 @@ async function testRequiresRenderFailsClosedWithNoRenderer() {
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
+  testComputeDiffBehaviorTable();
   await testSingleItemPageTargetsKnownCamp();
   await testMultiItemPageMatchesByName();
   await testMultiItemPageAmbiguousFailsLoud();

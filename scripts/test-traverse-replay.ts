@@ -64,6 +64,7 @@ import {
   buildTraverseItemProposalRecords,
 } from "../lib/ingestion/traverse-extractor";
 import { assembleItems } from "../lib/ingestion/traverse-item-grouping";
+import type { AssembledItem } from "../lib/ingestion/traverse-item-grouping";
 import { createStubProvider, StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 import {
   runTraversePipelineForSource,
@@ -89,6 +90,48 @@ function loadFixture(name: string): string {
 }
 
 const LOCATOR_RE = /^chars:(\d+)-(\d+)$/;
+
+function testItemToProposedChangesExactSerialization() {
+  const item: AssembledItem = {
+    itemIndex: 0,
+    scalars: {
+      name: {
+        candidateValue: "New camp name",
+        confidence: 0.91,
+        excerpt: "New camp name",
+        locator: "chars:0-13",
+        extractor: "fixture",
+      },
+      city: {
+        candidateValue: "Boulder",
+        confidence: 0.2,
+        excerpt: "Boulder, Colorado",
+        locator: "chars:20-37",
+        extractor: "fixture",
+      },
+    },
+    ageGroups: [{ label: "Ages 6-12", minAge: 6, maxAge: 12, confidence: 0.8 }],
+    schedules: [{ label: "June 3-7", startDate: "2026-06-03", endDate: "2026-06-07", confidence: 0.82 }],
+    pricing: [{ label: "$425 per week", amount: 425, confidence: 0.84 }],
+    campTypes: [],
+    categories: [],
+    allProposals: [],
+    warnings: [],
+  };
+
+  const serialized = JSON.stringify(itemToProposedChanges(
+    item,
+    { name: "Old camp name", city: "" },
+    "https://example.test/first-pass"
+  ));
+  assert.equal(
+    serialized,
+    '{"name":{"old":"Old camp name","new":"New camp name","confidence":0.91,"mode":"update","excerpt":"New camp name","sourceUrl":"https://example.test/first-pass"},"city":{"old":"","new":"Boulder","confidence":0.2,"mode":"populate","excerpt":"Boulder, Colorado","sourceUrl":"https://example.test/first-pass"},"ageGroups":{"old":null,"new":[{"label":"Ages 6-12","minAge":6,"maxAge":12,"minGrade":null,"maxGrade":null}],"confidence":0.8,"mode":"add_items","excerpt":"Ages 6-12","sourceUrl":"https://example.test/first-pass"},"schedules":{"old":null,"new":[{"label":"June 3-7","startDate":"2026-06-03","endDate":"2026-06-07","startTime":null,"endTime":null,"earlyDropOff":null,"latePickup":null}],"confidence":0.82,"mode":"add_items","excerpt":"June 3-7","sourceUrl":"https://example.test/first-pass"},"pricing":{"old":null,"new":[{"label":"$425 per week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"confidence":0.84,"mode":"add_items","excerpt":"$425 per week","sourceUrl":"https://example.test/first-pass"}}',
+    "first-pass proposal output must retain a changed scalar below the recrawl 0.3 floor and preserve scalar modes, relation defaults, provenance, and key order byte-for-byte"
+  );
+
+  console.log("✓ itemToProposedChanges exact serialization retains a 0.2-confidence scalar and preserves first-pass relation policy");
+}
 
 /** Assert every surviving proposal's excerpt + locator is internally consistent. */
 function assertProvenanceVerified(prepared: string, proposals: ExtractionProposal[]) {
@@ -670,6 +713,7 @@ async function testPipelineFailureIsolation() {
 // ─── Run ────────────────────────────────────────────────────────────────
 
 async function main() {
+  testItemToProposedChangesExactSerialization();
   await testMultiItemGrouping();
   await testCrossChunkItemIndexRebase();
   await testSameChunkOutOfOrderIsNotMistakenForAChunkBoundary();
