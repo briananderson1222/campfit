@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { computeDiff as postFixComputeDiff } from "../lib/ingestion/diff-engine";
 import type { Camp } from "../lib/types";
@@ -17,6 +17,14 @@ import {
 } from "./d0-relation-fixtures";
 
 type ComputeDiff = typeof postFixComputeDiff;
+interface ParentClassifier {
+  computeDiff: ComputeDiff;
+  resolvedModulePath: string;
+  materializationRoot: string;
+  pathUnderMaterializationRoot: boolean;
+  pathOutsideWorktree: boolean;
+  cleanup: () => void;
+}
 
 const PRE_FIX_SHA = execFileSync("git", ["rev-parse", "7cfddde^{}"], { encoding: "utf8" }).trim();
 const POST_FIX_SHA = execFileSync("git", ["rev-parse", "HEAD^{}"], { encoding: "utf8" }).trim();
@@ -30,7 +38,12 @@ function gitShow(sha: string, file: string): string {
   return execFileSync("git", ["show", `${sha}:${file}`], { encoding: "utf8" });
 }
 
-async function materializeParentClassifier(): Promise<{ computeDiff: ComputeDiff; cleanup: () => void }> {
+function pathIsUnder(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function materializeParentClassifier(): Promise<ParentClassifier> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "campfit-d0-parent-"));
   const ingestionDir = path.join(root, "lib", "ingestion");
   fs.mkdirSync(ingestionDir, { recursive: true });
@@ -41,10 +54,30 @@ async function materializeParentClassifier(): Promise<{ computeDiff: ComputeDiff
       gitShow(PRE_FIX_SHA, `lib/ingestion/${file}`),
     );
   }
-  const parent = await import(`${pathToFileURL(path.join(ingestionDir, "diff-engine.ts")).href}?sha=${PRE_FIX_SHA}`) as {
+  const parentModuleUrl = pathToFileURL(path.join(ingestionDir, "diff-engine.ts"));
+  const parent = await import(`${parentModuleUrl.href}?sha=${PRE_FIX_SHA}`) as {
     computeDiff: ComputeDiff;
   };
-  return { computeDiff: parent.computeDiff, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  const resolvedModulePath = fs.realpathSync(fileURLToPath(parentModuleUrl));
+  const materializationRoot = fs.realpathSync(root);
+  const worktreeRoot = fs.realpathSync(process.cwd());
+  const pathUnderMaterializationRoot = pathIsUnder(materializationRoot, resolvedModulePath);
+  const pathOutsideWorktree = !pathIsUnder(worktreeRoot, resolvedModulePath);
+  if (!pathUnderMaterializationRoot || !pathOutsideWorktree) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw new Error(
+      `LAUNDERED_REPLAY: parent module path assertion failed: resolved=${resolvedModulePath} ` +
+      `underTemp=${pathUnderMaterializationRoot} outsideWorktree=${pathOutsideWorktree}`,
+    );
+  }
+  return {
+    computeDiff: parent.computeDiff,
+    resolvedModulePath,
+    materializationRoot,
+    pathUnderMaterializationRoot,
+    pathOutsideWorktree,
+    cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+  };
 }
 
 function makeCamp(field: RelationReplayCase["field"], items: readonly unknown[]): Camp {
@@ -90,6 +123,25 @@ function explain(before: RelationMode, after: RelationMode): { kind: string; tex
 }
 
 const parent = await materializeParentClassifier();
+const sentinel: RelationReplayCase = {
+  id: "anti-laundering:persistence-id-false-positive",
+  field: "ageGroups",
+  current: [{ id: "sentinel-persistence-id", campId: "sentinel-owner", label: "Sentinel", minAge: 5, maxAge: 7, minGrade: null, maxGrade: null }],
+  candidate: [{ label: "Sentinel", minAge: 5, maxAge: 7, minGrade: null, maxGrade: null }],
+  confidence: 0.9,
+  noneReason: "equality",
+  bucket: "anti-laundering-sentinel",
+  expectedPost: "none",
+  fixtureRefs: ["scripts/d0-review-noise-report.ts"],
+};
+const sentinelParentMode = classify(parent.computeDiff, sentinel);
+const sentinelPostFixMode = classify(postFixComputeDiff, sentinel);
+if (sentinelParentMode === sentinelPostFixMode || sentinelParentMode !== "update" || sentinelPostFixMode !== "none") {
+  parent.cleanup();
+  throw new Error(
+    `LAUNDERED_REPLAY: sentinel divergence missing: parent=${sentinelParentMode} postFix=${sentinelPostFixMode}`,
+  );
+}
 const originalNow = Date.now;
 Date.now = () => D0_FIXED_NOW;
 let rows: Array<RelationReplayCase & { before: RelationMode; after: RelationMode; explanation: ReturnType<typeof explain> }>;
@@ -141,10 +193,26 @@ const summary = {
   persistentWrites: 0,
   temporaryMaterializationFiles: 3,
   productionSampleExtension: "NOT_VERIFIED — owner-gated later",
+  guards: {
+    parentModulePath: {
+      resolved: parent.resolvedModulePath,
+      underTempMaterialization: parent.pathUnderMaterializationRoot,
+      outsideWorktree: parent.pathOutsideWorktree,
+      verdict: "PASS",
+    },
+    sentinelDivergence: {
+      id: sentinel.id,
+      parent: sentinelParentMode,
+      postFix: sentinelPostFixMode,
+      verdict: "PASS",
+    },
+  },
 };
 const thresholdVerdict = summary.unexplainedNewlySurfaced === 0 ? "PASS" : "FAIL";
 
 assert.equal(thresholdVerdict, "PASS");
+console.log(`GUARD parent-module-path underTemp=${parent.pathUnderMaterializationRoot} outsideWorktree=${parent.pathOutsideWorktree} PASS`);
+console.log(`GUARD sentinel-divergence parent=${sentinelParentMode} postFix=${sentinelPostFixMode} PASS`);
 console.log("D0 GENUINE PARENT-VS-WORKTREE NO-WRITE REVIEW-NOISE REPORT");
 for (const row of rows) {
   console.log(JSON.stringify({
