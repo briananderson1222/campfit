@@ -19,6 +19,22 @@ const SYNTHETIC = '<main><h1>Programs</h1><article><h2>River Makers</h2><p>Build
 function sha256(body: string) { return createHash("sha256").update(body).digest("hex"); }
 function fixtureBody(name: string) { return name.startsWith("inline:") ? SYNTHETIC : readFileSync(join(ROOT, name), "utf8"); }
 function hdrGet(values: Record<string, string>) { return { get: (name: string) => values[name.toLowerCase()] ?? null }; }
+function testDiceCoefficient(left: string, right: string): number {
+  const toBigrams = (value: string) => {
+    const normalized = value.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+    const result = new Set<string>();
+    for (let index = 0; index < normalized.length - 1; index++) result.add(normalized.slice(index, index + 2));
+    return result;
+  };
+  const leftBigrams = toBigrams(left);
+  const rightBigrams = toBigrams(right);
+  if (leftBigrams.size === 0 || rightBigrams.size === 0) return 0;
+  let intersection = 0;
+  leftBigrams.forEach((gram) => {
+    if (rightBigrams.has(gram)) intersection++;
+  });
+  return (2 * intersection) / (leftBigrams.size + rightBigrams.size);
+}
 function fixtureFetch(body: string, validators = false, return304 = false): FetchLike {
   return (async (url: string, init?: { headers?: Record<string, string> }) => {
     if (url.endsWith("/robots.txt")) return { status: 200, headers: hdrGet({ "content-type": "text/plain" }), text: async () => "User-agent: *\nDisallow:" };
@@ -197,10 +213,19 @@ async function discoveryDistinctnessContractCheck() {
   assert.equal(nearDuplicates.stubs.length, 1, "Dice-equivalent stubs must produce one surviving insert");
   assert.equal(nearDuplicates.isListingPage, false, "one post-dedupe survivor is not a listing page");
 
+  const boundaryNames = ["Camp Alpha One", "Camp Alpha Two"];
+  const boundaryScore = testDiceCoefficient(boundaryNames[0], boundaryNames[1]);
+  assert.equal(boundaryScore, 10 / 13, "near-boundary fixture must retain its exact Dice score");
+  assert.ok(boundaryScore >= 0.75, "near-boundary fixture must dedupe at the production threshold");
+  assert.ok(boundaryScore < 0.95, "near-boundary fixture must separate the 0.75 and 0.95 mutation thresholds");
+  const boundaryDuplicates = await discoverNames(boundaryNames, "boundary-duplicates");
+  assert.equal(boundaryDuplicates.stubs.length, 1, "near-boundary Dice-equivalent stubs must produce one surviving insert");
+  assert.equal(boundaryDuplicates.isListingPage, false, "one near-boundary post-dedupe survivor is not a listing page");
+
   const distinct = await discoverNames(["Camp Alpha", "Camp Beta"], "distinct");
   assert.equal(distinct.stubs.length, 2, "genuinely distinct stubs must produce two inserts");
   assert.equal(distinct.isListingPage, true, "two post-dedupe survivors are a listing page");
-  console.log("✓ discovery distinctness: Dice-equivalent Alpha/Alpha! => 1 insert and false; distinct Alpha/Beta => 2 inserts and true");
+  console.log("✓ discovery distinctness: deep duplicate Alpha/Alpha! and boundary duplicate Alpha One/Alpha Two (Dice 10/13) => 1 insert and false; distinct Alpha/Beta => 2 inserts and true");
 }
 
 function sourceGuard() {
