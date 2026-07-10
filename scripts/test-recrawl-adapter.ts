@@ -194,7 +194,12 @@ const EXTRACTED_PRICE_B = {
   discountNotes: PRICE_B.discountNotes,
 };
 
-const FIXED_NOW = Date.parse("2026-07-10T12:00:00.000Z");
+const FIXED_NOW = Date.parse("2000-01-01T00:00:00.000Z");
+const SUPPRESSION_WINDOW_MS = 30 * 86_400_000;
+
+function approvalTimestamp(offsetFromBoundaryMs: number): string {
+  return new Date(FIXED_NOW - SUPPRESSION_WINDOW_MS + offsetFromBoundaryMs).toISOString();
+}
 
 function withFixedNow<T>(run: () => T): T {
   const originalDateNow = Date.now;
@@ -350,15 +355,21 @@ function testComputeDiffBehaviorTable() {
     "confidence exactly 0.3 must remain eligible and missing provenance must remain omitted"
   );
 
-  const recentlyApproved = { city: { approvedAt: new Date(FIXED_NOW - 86_400_000).toISOString() } };
+  const justInsideSuppressionWindow = { city: { approvedAt: approvalTimestamp(1) } };
+  const justOutsideSuppressionWindow = { city: { approvedAt: approvalTimestamp(-1) } };
   withFixedNow(() => {
     assert.deepEqual(
-      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, recentlyApproved),
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justInsideSuppressionWindow),
       {},
-      "a recently approved field at confidence 0.79 must be suppressed"
+      "a low-confidence scalar approved just inside 30 days must be suppressed"
     );
     assert.deepEqual(
-      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, recentlyApproved),
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justOutsideSuppressionWindow),
+      { city: { old: "Denver", new: "Boulder", confidence: 0.79, mode: "update" } },
+      "a low-confidence scalar approved just outside 30 days must surface"
+    );
+    assert.deepEqual(
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, justInsideSuppressionWindow),
       { city: { old: "Denver", new: "Boulder", confidence: 0.8, mode: "update" } },
       "a recently approved field at confidence exactly 0.8 must surface"
     );
@@ -521,9 +532,9 @@ async function testMultiItemPageAmbiguousFailsLoud() {
 async function testSuppressionFires() {
   return withFixedNowAsync(async () => {
     const html = loadFixture("avid4-healthy.html");
-    const tenDaysAgo = new Date(FIXED_NOW - 10 * 86_400_000).toISOString();
+    const justInsideSuppressionWindow = approvalTimestamp(1);
 
-    // Low-confidence re-proposal (0.5) of a field approved 10 days ago must be
+    // Low-confidence re-proposal (0.5) of a field approved just inside 30 days must be
     // SUPPRESSED — this is the exact scenario re-crawling an already-reviewed
     // camp hits routinely.
     const lowConfSpecs: StubProposalSpec[] = [
@@ -534,7 +545,7 @@ async function testSuppressionFires() {
       websiteUrl: "https://avid4.com/day-camps/colorado/",
       campName: "Mountain Explorers Day Camp",
       current: makeCamp({ id: "camp-4" }),
-      fieldSources: { name: { approvedAt: tenDaysAgo } },
+      fieldSources: { name: { approvedAt: justInsideSuppressionWindow } },
       provider: createStubProvider(lowConfSpecs, { model: "stub-suppress" }),
       store: createInMemorySnapshotStore(),
       mode: "live-with-capture",
@@ -558,7 +569,7 @@ async function testSuppressionFires() {
       websiteUrl: "https://avid4.com/day-camps/colorado/",
       campName: "Mountain Explorers Day Camp",
       current: makeCamp({ id: "camp-4" }),
-      fieldSources: { name: { approvedAt: tenDaysAgo } },
+      fieldSources: { name: { approvedAt: justInsideSuppressionWindow } },
       provider: createStubProvider(highConfSpecs, { model: "stub-not-suppress" }),
       store: createInMemorySnapshotStore(),
       mode: "live-with-capture",
