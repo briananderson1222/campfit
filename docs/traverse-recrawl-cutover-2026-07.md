@@ -225,13 +225,13 @@ never-resolvable Gemini/Ollama entries the legacy hardcoded list carried are gon
 flow.** `CrawlOptions.model` — a legacy per-run override API callers may still POST — is NOT
 expressible against `resolveExtractionProvider()` as written (it resolves one
 process-level provider from datum/`TRAVERSE_ROLE`, with no per-call ref parameter). Rather
-than silently dropping the override, `crawl-pipeline.ts` logs one `console.warn` per run and
-annotates each camp's `campLog.model` display string with
+than silently dropping an override that reaches it, `crawl-pipeline.ts` logs one
+`console.warn` per run and annotates each camp's `campLog.model` display string with
 `[requested override "<model>" not applied — traverse extraction resolves its provider via
 datum, not a per-run override]` — the undecorated `extractionModel` column written to
-`CampChangeProposal` stays the real, undecorated model id for data integrity. This annotation
-is a backstop for API-level callers of the five routes (an API caller can still pass `model`
-in the request body — it is recorded, never silently dropped).
+`CampChangeProposal` stays the real, undecorated resolved model id for data integrity. This
+compatibility behavior applies only to routes that still read and forward a stale `model`
+request value; routes that never accept one produce no override warning or annotation.
 
 **campfit#78 correction (iteration 3, 2026-07-10):** discovery no longer has a legacy
 per-call model override. Both discovery and field extraction use the standard
@@ -279,11 +279,11 @@ triage `recommendation()` string surfaced in the admin UI.
 
 | Route | Selection semantics | Discovery? | Effective per-route provider/model override? | Migration impact |
 | --- | --- | --- | --- | --- |
-| `app/api/admin/camps/[campId]/crawl/route.ts` | Single known `campId` | No | No — a legacy `model` value may be accepted, warned, and ignored | Per-camp adapter targets that exact `campId` directly |
-| `app/api/admin/providers/[providerId]/crawl/route.ts` | All camps for a `providerId` (bulk) | Yes | No — a legacy `model` value may be accepted, warned, and ignored | Bulk orchestration unchanged; discovery pre-pass uses standard provider resolution as of campfit#78; per-camp step migrated |
-| `app/api/admin/crawl/start/route.ts` | `campIds` array, or all camps missing `websiteUrl` | Yes | No — a legacy `model` value may be accepted, warned, and ignored | Same bulk path; discovery and extraction use standard provider resolution; largest blast radius, most-tested |
-| `app/api/admin/crawl/onboard-url/route.ts` | Discovers+creates new camps, then re-crawls only the new `campIds` | Yes (core function) | No — standard provider resolution | Discovery uses plain traverse live-with-capture as of campfit#78; the trailing `runCrawlPipeline` call remains unchanged |
-| `app/api/admin/assistant/route.ts` (`startPipeline`) | Single `campId` OR `providerIds`, AI-assistant tool-call | No | No — standard provider resolution | Structurally identical to the two dedicated routes; zero route-level change |
+| `app/api/admin/camps/[campId]/crawl/route.ts` | Single known `campId` | No | No — reads and forwards a stale `model`; the pipeline warns, records an ignored-override annotation in `campLog.model`, and persists the actual resolved extraction model | Per-camp adapter targets that exact `campId` directly |
+| `app/api/admin/providers/[providerId]/crawl/route.ts` | All camps for a `providerId` (bulk) | Yes, when `discover: true` | No — reads and forwards a stale `model`; discovery and extraction use standard provider resolution, while the pipeline warns and annotates the ignored override | Bulk orchestration unchanged; discovery pre-pass uses standard provider resolution as of campfit#78; per-camp step migrated |
+| `app/api/admin/crawl/start/route.ts` | `campIds` array, or all camps missing `websiteUrl` | Yes, when `discover: true` | No — reads and forwards a stale `model`; discovery and extraction use standard provider resolution, while the pipeline warns and annotates the ignored override | Same bulk path; largest blast radius, most-tested |
+| `app/api/admin/crawl/onboard-url/route.ts` | Discovers+creates new camps, then re-crawls only the new `campIds` | Yes (core function) | No — never reads or forwards `model`, so there is no ignored-override warning or annotation; direct discovery and trailing extraction use standard provider resolution | Discovery uses plain traverse live-with-capture as of campfit#78; the trailing `runCrawlPipeline` call remains unchanged |
+| `app/api/admin/assistant/route.ts` (`startPipeline`) | Single `campId` OR `providerIds`, AI-assistant tool-call | No | No — `startPipeline` accepts and forwards no `model`, so there is no ignored-override warning or annotation; extraction uses standard provider resolution | Structurally identical to the two dedicated routes; zero route-level change |
 
 All five (plus `scripts/run-crawl.ts` / `scripts/harvest-aggregator.ts`) funnel through the
 same `CrawlOptions`/`runCrawlPipeline`; `CrawlOptions`/`CrawlRun` exports are unchanged
