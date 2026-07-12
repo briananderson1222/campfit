@@ -2,8 +2,8 @@
  * lib/admin/camp-repository.ts — admin camp-create repository (campfit#90
  * Wave 2 Task B / R3 / AC3). Mirrors `provider-repository.ts`'s
  * `createProvider`/`makeUniqueSlug` shape. Raw `pg` via `getPool()` only —
- * no Prisma Client (`prisma/schema.prisma` is schema-as-documentation here,
- * see `scripts/test-db-reset.ts`'s header comment).
+ * no ORM. Schema source of truth is the SQL in `prisma/migrations/`, run
+ * through node-pg-migrate (see `scripts/test-db-reset.ts`'s header comment).
  */
 import { getPool } from '@/lib/db';
 import type { Camp, CampType, CampCategory } from '@/lib/types';

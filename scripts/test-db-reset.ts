@@ -7,8 +7,8 @@
  * Supabase instance behind `DATABASE_URL`/`PGHOST`, so there is no fallback.
  *
  * Schema source of truth is the hand-written SQL in `prisma/migrations`, run
- * through node-pg-migrate. `prisma/schema.prisma` / `prisma db push` is not
- * used because application database access and migrations remain raw SQL.
+ * through node-pg-migrate. (The `prisma/` folder name is legacy — Prisma and
+ * `schema.prisma` were removed; app DB access and migrations are raw SQL.)
  *
  * Shared by two callers:
  *  - the `test:db:reset` CLI script (this file, run directly via tsx)
