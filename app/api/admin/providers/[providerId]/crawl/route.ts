@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { logAndMapPublicEgressError } from '@/lib/security/public-egress-error';
 import { getPool } from '@/lib/db';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
@@ -80,6 +81,6 @@ export async function POST(req: Request, props: { params: Promise<{ providerId: 
     ]);
     return NextResponse.json({ runId, campCount: campIds.length, discover });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return NextResponse.json({ error: logAndMapPublicEgressError('[providers/crawl] failed to start:', err) }, { status: 500 });
   }
 }

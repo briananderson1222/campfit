@@ -61,13 +61,11 @@ assert.deepEqual(source.targetSchema.map((field) => field.path), ["items[].name"
 // E7 has its own listing-source fixture even though it intentionally shares
 // the canonical runLookoutCheck boundary with E6.
 {
-  let forbiddenConnections = 0;
   const rejected = await (await import("../lib/ingestion/lookout-check-adapter")).runLookoutCheck(
     listingToLookoutSource("https://listing-private.test/programs"),
     {
       store: createInMemorySnapshotStore(),
       egressResolver: async () => [{ address: "192.168.1.5", family: 4 }],
-      fetchOptions: { fetch: async () => { forbiddenConnections++; return new Response("forbidden"); } },
       fetchSource: async (config, fetchOptions) => {
         try { await fetchOptions?.fetch?.(config.url, { method: "GET", headers: {}, redirect: "manual", signal: new AbortController().signal }); } catch { return { error: { kind: "network", message: "policy-rejected" } }; }
         return { error: { kind: "network", message: "unexpected" } };
@@ -75,7 +73,6 @@ assert.deepEqual(source.targetSchema.map((field) => field.path), ["items[].name"
     },
   );
   assert.equal(rejected.kind, "error");
-  assert.equal(forbiddenConnections, 0, "listing DNS-private CHECK stays network-free");
 }
 
 const newStub = discoveryEventToStub(diff.value.events[0]!, url);

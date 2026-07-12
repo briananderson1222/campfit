@@ -10,12 +10,19 @@ export const EGRESS_POLICY_PROFILES = [
 export type EgressPolicyProfile = (typeof EGRESS_POLICY_PROFILES)[number];
 export type EgressAddress = { address: string; family: 4 | 6 };
 export type EgressResolver = (hostname: string) => Promise<Array<{ address: string; family?: number }>>;
-export type EgressConnector = (request: { request: Request; url: URL; address: EgressAddress }) => Promise<Response>;
+type EgressConnector = (request: { request: Request; url: URL; address: EgressAddress }) => Promise<Response>;
+export interface EgressResponseOracle {
+  responses: Array<{
+    status?: number; headers?: HeadersInit; body?: string; error?: true;
+    urlSuffix?: string; whenHeaders?: Record<string, string>; withoutHeaders?: string[]; repeat?: boolean;
+  }>;
+}
 
 export type EgressPolicyErrorCode =
   | "INVALID_URL" | "INVALID_SCHEME" | "CREDENTIALS" | "INVALID_HOST" | "DENIED_HOST"
   | "INVALID_PORT" | "DNS_FAILURE" | "DENIED_ADDRESS" | "REDIRECT_INVALID"
-  | "REDIRECT_LIMIT" | "REDIRECT_LOOP" | "CONNECT_FAILED";
+  | "REDIRECT_LIMIT" | "REDIRECT_LOOP" | "REDIRECT_DOWNGRADE" | "CONNECT_FAILED"
+  | "UNTRUSTED_TRANSPORT";
 
 export class EgressUrlPolicyError extends Error {
   readonly name = "EgressUrlPolicyError";
@@ -104,6 +111,17 @@ function classifyAddress(address: string, profile: EgressPolicyProfile, safeHost
   if (!v6) fail("INVALID_HOST", profile, safeHost);
   const mapped = prefix(v6, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0], 96);
   if (mapped) return classifyAddress(v6.slice(12).join("."), profile, safeHost);
+  // IPv4-compatible (::a.b.c.d) and RFC 6052 translated
+  // (::ffff:0:a.b.c.d) forms are classified by their embedded IPv4 bytes.
+  const compatible = v6.slice(0, 12).every((byte) => byte === 0);
+  const translated = prefix(v6, [0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0, 0, 0], 96);
+  if (compatible || translated) return classifyAddress(v6.slice(12).join("."), profile, safeHost);
+  const wellKnownTranslation = prefix(v6, [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 96);
+  const localTranslation = prefix(v6, [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 48);
+  if (wellKnownTranslation) return classifyAddress(v6.slice(12).join("."), profile, safeHost);
+  // Local-use /48 permits multiple RFC 6052 payload placements. Deny the
+  // entire translation prefix until each supported layout is unambiguous.
+  if (localTranslation) fail("DENIED_ADDRESS", profile, safeHost);
   if (V6_DENY.some(([network, bits]) => prefix(v6, network, bits))) fail("DENIED_ADDRESS", profile, safeHost);
   return { address, family: 6 };
 }
@@ -161,18 +179,63 @@ const defaultConnector: EgressConnector = async ({ request, url, address }) => {
   });
 };
 
+function cloneInert(value: unknown, seen = new Set<object>()): unknown {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value !== "object" || seen.has(value)) throw new TypeError("Response oracle accepts acyclic inert data only");
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== Array.prototype) throw new TypeError("Response oracle accepts plain data only");
+  seen.add(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Object.getOwnPropertySymbols(value).length) throw new TypeError("Response oracle rejects symbols");
+  const output: unknown[] | Record<string, unknown> = Array.isArray(value) ? [] : {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (key === "length" && Array.isArray(value)) continue;
+    if (!("value" in descriptor) || descriptor.get || descriptor.set) throw new TypeError("Response oracle rejects accessors");
+    (output as Record<string, unknown>)[key] = cloneInert(descriptor.value, seen);
+  }
+  seen.delete(value);
+  return Object.freeze(output);
+}
+function validateResponseOracle(oracle: EgressResponseOracle): EgressResponseOracle {
+  return cloneInert(oracle) as EgressResponseOracle;
+}
+
 export function createGuardedFetch(options: {
-  profile?: EgressPolicyProfile; resolver?: EgressResolver; connector?: EgressConnector;
-  fetchImpl?: typeof fetch; maxRedirects?: number;
+  profile?: EgressPolicyProfile; resolver?: EgressResolver; responseOracle?: EgressResponseOracle;
+  maxRedirects?: number;
 } = {}): typeof fetch {
   const profile = options.profile ?? "operatorDiscovery";
+  const inertOracle = options.responseOracle ? validateResponseOracle(options.responseOracle) : undefined;
   // An injected fetch is a deterministic test/adapter seam. It remains beneath
   // policy evaluation and manual redirect handling, so caller composition can
   // never replace the guard. Production (no injection) uses the pinned socket
   // connector above.
-  const connector = options.connector ?? (options.fetchImpl
-    ? async ({ request }: Parameters<EgressConnector>[0]) => options.fetchImpl!(request, { redirect: "manual" })
-    : defaultConnector);
+  const oracleResponses = inertOracle ? [...inertOracle.responses] : undefined;
+  const connector: EgressConnector = oracleResponses
+    ? async ({ request, url, address }) => {
+      const headers = Object.fromEntries(request.headers);
+      void address;
+      const index = oracleResponses.findIndex((candidate) =>
+        (!candidate.urlSuffix || url.href.endsWith(candidate.urlSuffix))
+        && (!candidate.whenHeaders || Object.entries(candidate.whenHeaders).every(([name, value]) => request.headers.get(name) === value))
+        && (!candidate.withoutHeaders || candidate.withoutHeaders.every((name) => request.headers.get(name) === null)),
+      );
+      const response = index < 0 ? undefined : oracleResponses[index];
+      if (response && !response.repeat) oracleResponses.splice(index, 1);
+      if (!response || response.error) throw new Error("fixture oracle failure");
+      void headers;
+      let sent = false;
+      const body = response.body === undefined ? null : new ReadableStream({
+        pull(controller) {
+          if (sent) return;
+          sent = true;
+          controller.enqueue(new TextEncoder().encode(response.body));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: response.status ?? 200, headers: response.headers });
+    }
+    : defaultConnector;
   const maxRedirects = options.maxRedirects ?? 5;
   return async (input: string | URL | Request, init?: RequestInit) => {
     let request = new Request(input, init);
@@ -190,9 +253,18 @@ export function createGuardedFetch(options: {
       if (!location) return response;
       let next: URL;
       try { next = new URL(location, evaluated.url); } catch { fail("REDIRECT_INVALID", profile, evaluated.url.hostname); }
-      const headers = new Headers(request.headers);
+      if (evaluated.url.protocol === "https:" && next.protocol === "http:") {
+        fail("REDIRECT_DOWNGRADE", profile, next.hostname);
+      }
+      let headers = new Headers(request.headers);
       if (next.origin !== evaluated.url.origin) {
-        headers.delete("authorization"); headers.delete("cookie"); headers.delete("proxy-authorization");
+        const safe = new Headers();
+        // Cross-origin redirects carry only ordinary representation metadata.
+        for (const name of ["accept", "accept-language", "user-agent"]) {
+          const value = headers.get(name);
+          if (value !== null) safe.set(name, value);
+        }
+        headers = safe;
       }
       const rewrite = response.status === 303 || ((response.status === 301 || response.status === 302) && request.method === "POST");
       request = new Request(next, { method: rewrite ? "GET" : request.method, headers, body: rewrite || request.method === "GET" || request.method === "HEAD" ? undefined : await request.clone().arrayBuffer(), redirect: "manual" });
@@ -208,40 +280,24 @@ export function createGuardedFetch(options: {
 export function createGuardedTraverseFetchOptions(
   existing: FetchSourceOptions | undefined,
   profile: EgressPolicyProfile,
-  deps: { resolver?: EgressResolver; connector?: EgressConnector } = {},
+  deps: { resolver?: EgressResolver; responseOracle?: EgressResponseOracle } = {},
 ): FetchSourceOptions {
-  const injected = existing?.fetch;
-  // A caller-supplied FetchLike is a trusted, non-socket transport seam (the
-  // repository uses it for deterministic fixtures). It is still subordinate
-  // to literal/hostname/redirect policy. With no explicit resolver there is no
-  // OS connection to pin or DNS answer to classify, so use a public sentinel;
-  // threat fixtures inject a resolver to exercise private/mixed DNS answers.
-  const resolver = deps.resolver ?? (injected ? async () => [{ address: "93.184.216.34", family: 4 }] : undefined);
-  const fetchImpl: typeof fetch | undefined = injected
-    ? async (input, init) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      const headers = Object.fromEntries(request.headers);
-      // Preserve Traverse's documented header spellings for structural test
-      // fakes and consumers that inspect the record directly.
-      if (headers["if-none-match"] !== undefined) {
-        headers["If-None-Match"] = headers["if-none-match"];
-        delete headers["if-none-match"];
-      }
-      if (headers["if-modified-since"] !== undefined) {
-        headers["If-Modified-Since"] = headers["if-modified-since"];
-        delete headers["if-modified-since"];
-      }
-      return injected(request.url, {
-        method: "GET",
-        headers,
-        redirect: "manual",
-        signal: request.signal,
-      }) as Promise<Response>;
-    }
-    : undefined;
-  const guarded = createGuardedFetch({ profile, resolver, connector: deps.connector, fetchImpl });
+  if (existing?.fetch) fail("UNTRUSTED_TRANSPORT", profile);
+  const fixture = existing as (FetchSourceOptions & {
+    egressResponseOracle?: EgressResponseOracle;
+    egressResolver?: EgressResolver;
+  }) | undefined;
+  // Executable caller transports were refused above. Deterministic fixtures
+  // may supply only declarative response records; the guard still owns URL
+  // evaluation, redirect handling, request construction, and observations.
+  const guarded = createGuardedFetch({
+    profile,
+    resolver: deps.resolver ?? fixture?.egressResolver,
+    responseOracle: deps.responseOracle ?? fixture?.egressResponseOracle,
+  });
+  const { egressResponseOracle: _oracle, egressResolver: _resolver, ...nonNetwork } = fixture ?? {};
   return {
-    ...existing,
+    ...nonNetwork,
     fetch: (url, init) => guarded(url, init) as ReturnType<NonNullable<FetchSourceOptions["fetch"]>>,
   };
 }

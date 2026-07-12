@@ -73,14 +73,13 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
       return { isListingPage: true, stubs: [], model, unchanged: true, warnings: result.fetch.warnings };
     }
     if (result.fetch.error || !result.fetch.snapshot) {
-      const detail = result.fetch.error?.message ?? "no snapshot returned";
-      return { isListingPage: false, stubs: [], model, error: `Fetch failed: ${detail}` };
+      return { isListingPage: false, stubs: [], model, error: "Upstream provider request failed" };
     }
     if (!result.extraction) {
       return { isListingPage: false, stubs: [], model, error: "Extraction failed: no extraction result" };
     }
     if (result.extraction.error) {
-      return { isListingPage: false, stubs: [], model, error: `Extraction failed: ${result.extraction.error}` };
+      return { isListingPage: false, stubs: [], model, error: "Upstream provider extraction failed" };
     }
     if (!result.sourceRef) {
       return { isListingPage: false, stubs: [], model, error: "Extraction failed: snapshot source ref missing" };

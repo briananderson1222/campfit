@@ -87,6 +87,21 @@ export interface CampfitRenderTelemetry {
 // reused by every subsequent call in this process — see the file doc above.
 let browserPromise: Promise<Browser> | null = null;
 
+export class BrowserHostnameEgressUnavailableError extends Error {
+  readonly name = "BrowserHostnameEgressUnavailableError";
+  constructor() { super("Browser hostname egress unavailable: no pinned Chromium transport"); }
+}
+export function browserEgressRouteDecision(rawUrl: string): "abort" | "evaluate-ip" {
+  return isIP(new URL(rawUrl).hostname.replace(/^\[|\]$/g, "")) ? "evaluate-ip" : "abort";
+}
+export function assertBrowserHostnameActivation(): never {
+  // Readiness is derived from the exact routing policy, not a parallel flag.
+  if (browserEgressRouteDecision("https://activation-probe.invalid/") === "abort") {
+    throw new BrowserHostnameEgressUnavailableError();
+  }
+  throw new BrowserHostnameEgressUnavailableError();
+}
+
 function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = chromium.launch({ headless: true });
@@ -123,7 +138,7 @@ export async function installGuardedPageNetwork(
 ): Promise<void> {
   await page.route("**/*", async (route) => {
     const requestUrl = new URL(route.request().url());
-    if (!isIP(requestUrl.hostname.replace(/^\[|\]$/g, ""))) {
+    if (browserEgressRouteDecision(requestUrl.href) === "abort") {
       await route.abort("blockedbyclient");
       return;
     }
@@ -156,7 +171,7 @@ export async function installGuardedPageNetwork(
  */
 export async function renderPage(
   url: string,
-  timeoutMs: number = DEFAULT_RENDER_TIMEOUT_MS
+  timeoutMs: number = DEFAULT_RENDER_TIMEOUT_MS,
 ): Promise<CampfitRenderTelemetry> {
   const start = Date.now();
   const browser = await getBrowser();
@@ -228,6 +243,7 @@ export interface CreateCampfitRenderImplOptions {
  * needed the fallback.
  */
 export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {}): RenderImpl {
+  assertBrowserHostnameActivation();
   const fallbackTimeoutMs = opts.timeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
 
   return async (url, renderOpts): Promise<RenderResult> => {

@@ -15,6 +15,7 @@ import { getPool } from '@/lib/db';
 import { stripHtmlToText } from '@/lib/ingestion/html-stripper';
 import {
   createGuardedFetch,
+  EgressUrlPolicyError,
   type EgressResolver,
 } from '@/lib/security/egress-url-policy';
 
@@ -68,11 +69,13 @@ export abstract class BaseHarvester {
   readonly sourceName: string;
   private readonly guardedFetch: typeof fetch;
 
-  constructor(sourceName: string, egress: { fetch?: typeof fetch; resolver?: EgressResolver } = {}) {
+  constructor(sourceName: string, egress: { resolver?: EgressResolver } = {}) {
+    if ("fetch" in egress || "connector" in egress) {
+      throw new EgressUrlPolicyError('UNTRUSTED_TRANSPORT', 'fixedHarvester');
+    }
     this.sourceName = sourceName;
     this.guardedFetch = createGuardedFetch({
       profile: 'fixedHarvester',
-      fetchImpl: egress.fetch,
       resolver: egress.resolver,
     });
   }

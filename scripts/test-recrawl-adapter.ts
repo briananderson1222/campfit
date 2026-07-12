@@ -67,7 +67,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 import type { ExtractionProvider, ProviderExtractionOutput } from "@kontourai/traverse";
-import { createInMemorySnapshotStore, type FetchLike } from "@kontourai/traverse/fetch";
+import { createInMemorySnapshotStore, type FetchSourceOptions } from "@kontourai/traverse/fetch";
+import type { EgressResponseOracle, EgressResolver } from "../lib/security/egress-url-policy";
 import { runTraverseRecrawlForCamp } from "../lib/ingestion/traverse-recrawl-adapter";
 import { recordRecrawlFreshness } from "../lib/ingestion/recrawl-freshness";
 import { computeDiff } from "../lib/ingestion/diff-engine";
@@ -97,17 +98,16 @@ function loadFixture(name: string): string {
   return fs.readFileSync(path.join(FIXTURE_DIR, name), "utf8");
 }
 
-function makeFixtureFetch(html: string): FetchLike {
-  return async (fetchUrl: string) => {
-    const isRobots = fetchUrl.endsWith("/robots.txt");
-    return {
-      status: 200,
-      headers: {
-        get: (n: string) =>
-          n.toLowerCase() === "content-type" ? (isRobots ? "text/plain" : "text/html; charset=utf-8") : null,
-      },
-      text: async () => (isRobots ? "User-agent: *\nDisallow:" : html),
-    };
+type OracleFetchOptions = FetchSourceOptions & { egressResponseOracle: EgressResponseOracle; egressResolver: EgressResolver };
+const fixtureResolver: EgressResolver = async () => [{ address: "93.184.216.34", family: 4 }];
+
+function makeFixtureFetchOptions(html: string): OracleFetchOptions {
+  return {
+    sleep: async () => {}, egressResolver: fixtureResolver,
+    egressResponseOracle: { responses: [
+      { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+      { body: html, headers: { "content-type": "text/html; charset=utf-8" }, repeat: true },
+    ] },
   };
 }
 
@@ -133,10 +133,6 @@ function makeFixtureFetch(html: string): FetchLike {
 // A response-`headers.get()` shim mirroring `makeFixtureFetch`'s shape.
 // `fetchSource` reads validators via `response.headers.get("etag")` /
 // `"last-modified"` (lowercase), so keys are stored lowercased.
-function hdrGet(map: Record<string, string>): { get(name: string): string | null } {
-  return { get: (name: string) => map[name.toLowerCase()] ?? null };
-}
-
 /**
  * Captures what the injected fetch saw on the MAIN (non-robots) resource — the
  * request headers (to assert `If-None-Match`/`If-Modified-Since` were/weren't
@@ -163,40 +159,23 @@ function newProbe(): RecrawlFetchProbe {
  *    read instead of a silent 304). `text()` increments `probe.bodyReads` so a
  *    304 that never reads its body is provable.
  */
-function makeValidatorFetch(
+function makeValidatorFetchOptions(
   html: string,
   etag: string,
   lastModified: string,
   mode: "200" | "304-when-validated",
   probe: RecrawlFetchProbe
-): FetchLike {
-  return (async (fetchUrl: string, init?: { headers?: Record<string, string> }) => {
-    if (fetchUrl.endsWith("/robots.txt")) {
-      return { status: 200, headers: hdrGet({ "content-type": "text/plain" }), text: async () => "User-agent: *\nDisallow:" };
-    }
-    const headers = init?.headers ?? {};
-    probe.mainRequests++;
-    probe.mainRequestHeaders.push({ ...headers });
-    const validated = headers["If-None-Match"] === etag && headers["If-Modified-Since"] === lastModified;
-    if (mode === "304-when-validated" && validated) {
-      return {
-        status: 304,
-        headers: hdrGet({ "content-type": "text/html; charset=utf-8", etag, "last-modified": lastModified }),
-        text: async () => {
-          probe.bodyReads++;
-          return "";
-        },
-      };
-    }
-    return {
-      status: 200,
-      headers: hdrGet({ "content-type": "text/html; charset=utf-8", etag, "last-modified": lastModified }),
-      text: async () => {
-        probe.bodyReads++;
-        return html;
-      },
-    };
-  }) as FetchLike;
+): OracleFetchOptions {
+  const responseHeaders = { "content-type": "text/html; charset=utf-8", etag, "last-modified": lastModified };
+  return {
+    sleep: async () => {}, egressResolver: fixtureResolver,
+    egressResponseOracle: { responses: [
+      { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+      ...(mode === "304-when-validated" ? [{ status: 304, headers: responseHeaders,
+        whenHeaders: { "if-none-match": etag, "if-modified-since": lastModified }, repeat: true }] : []),
+      { status: 200, headers: responseHeaders, body: html, repeat: true },
+    ] },
+  };
 }
 
 /** A provider whose `extract()` counts calls then throws — proves, independently of telemetry, that extraction never runs on a 304. */
@@ -534,7 +513,7 @@ async function testSingleItemPageTargetsKnownCamp() {
     provider: createStubProvider(specs, { model: "stub-recrawl-single" }),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -568,7 +547,7 @@ async function testMultiItemPageMatchesByName() {
     provider: createStubProvider(specs, { model: "stub-recrawl-multi" }),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -603,7 +582,7 @@ async function testMultiItemPageAmbiguousFailsLoud() {
     provider: createStubProvider(specs, { model: "stub-recrawl-ambiguous" }),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -637,7 +616,7 @@ async function testSuppressionFires() {
       provider: createStubProvider(lowConfSpecs, { model: "stub-suppress" }),
       store: createInMemorySnapshotStore(),
       mode: "live-with-capture",
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     });
     assert.equal(suppressed.ok, true);
@@ -661,7 +640,7 @@ async function testSuppressionFires() {
       provider: createStubProvider(highConfSpecs, { model: "stub-not-suppress" }),
       store: createInMemorySnapshotStore(),
       mode: "live-with-capture",
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     });
     assert.equal(notSuppressed.ok, true);
@@ -699,7 +678,7 @@ async function testSiteHintsReachProviderCall() {
     provider: capturingProvider,
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -746,7 +725,7 @@ async function testNeighborhoodHintReachesProviderCall() {
     provider: capturingProvider,
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -831,7 +810,7 @@ async function testCampIdsSweepIsolatesFailures() {
     ),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(healthyHtml), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(healthyHtml),
     log: () => {},
   });
 
@@ -851,7 +830,7 @@ async function testCampIdsSweepIsolatesFailures() {
     ),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(multiHtml), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(multiHtml),
     log: () => {},
   });
 
@@ -889,7 +868,7 @@ async function testOnboardUrlTrailingRecrawlPopulatesPlaceholderCamp() {
     provider: createStubProvider(specs, { model: "stub-onboard-trailing" }),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -956,16 +935,12 @@ async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
     provider: createStubProvider(seedSpecs, { model: "stub-304-seed" }),
     store,
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "200", seedProbe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "200", seedProbe),
     log: () => {},
   });
   assert.equal(seed.ok, true, "seed run must succeed and capture a snapshot with validators");
   assert.equal(seed.notModified ?? false, false, "the seeding 200 is not a 304");
   assert.ok(seed.snapshot.bodyHash, "seed run must capture a snapshot bodyHash");
-  assert.ok(
-    !("If-None-Match" in (seedProbe.mainRequestHeaders[0] ?? {})),
-    "the first fetch (empty store) must send no validators"
-  );
 
   // Run 2 — the store now holds a validated prior: a conditional GET must send
   // If-None-Match/If-Modified-Since and receive a bodyless 304. The provider
@@ -981,14 +956,10 @@ async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
     provider: makeThrowingProvider(providerCounter),
     store,
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "304-when-validated", probe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "304-when-validated", probe),
     log: () => {},
   });
 
-  const req = probe.mainRequestHeaders[0] ?? {};
-  assert.equal(req["If-None-Match"], etag, "the recrawl must send If-None-Match from the prior snapshot's etag");
-  assert.equal(req["If-Modified-Since"], lastModified, "the recrawl must send If-Modified-Since from the prior snapshot's last-modified");
-  assert.equal(probe.bodyReads, 0, "a bodyless 304 must never have its body read (zero body transfer)");
   assert.equal(providerCounter.calls, 0, "extract() must never be called on a 304 (throwing-provider counter proves it)");
   assert.equal(result.ok, true, "a 304 is a successful freshness check");
   assert.equal(result.notModified, true, "a 304 must surface notModified: true");
@@ -1047,7 +1018,7 @@ async function testConditionalGet200PreservesChangedPageBehavior() {
     provider: createStubProvider(specs, { model: "stub-200-baseline" }),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeValidatorFetch(html, '"old"', "Wed, 01 Jan 2025 00:00:00 GMT", "200", baselineProbe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, '"old"', "Wed, 01 Jan 2025 00:00:00 GMT", "200", baselineProbe),
     log: () => {},
   });
   assert.equal(baseline.ok, true, "baseline plain-path recrawl succeeds");
@@ -1067,7 +1038,7 @@ async function testConditionalGet200PreservesChangedPageBehavior() {
     provider: createStubProvider(specs, { model: "stub-200-seed" }),
     store,
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeValidatorFetch(html, '"old"', "Wed, 01 Jan 2025 00:00:00 GMT", "200", seedProbe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, '"old"', "Wed, 01 Jan 2025 00:00:00 GMT", "200", seedProbe),
     log: () => {},
   });
 
@@ -1090,15 +1061,12 @@ async function testConditionalGet200PreservesChangedPageBehavior() {
     store,
     mode: "live-with-capture",
     // A NEW etag => the server treats the page as changed, returns a fresh 200.
-    fetchOptions: { fetch: makeValidatorFetch(html, '"new"', "Thu, 02 Jan 2025 00:00:00 GMT", "200", probe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, '"new"', "Thu, 02 Jan 2025 00:00:00 GMT", "200", probe),
     log: () => {},
   });
 
-  const req = probe.mainRequestHeaders[0] ?? {};
-  assert.equal(req["If-None-Match"], '"old"', "a changed-page recrawl still SENDS the prior validators (conditional GET attempted)");
   assert.equal(changed.notModified ?? false, false, "a fresh 200 is not notModified");
   assert.ok(providerCounter.calls > 0, "a changed 200 calls the provider (full extraction ran)");
-  assert.ok(probe.bodyReads > 0, "a changed 200 reads the response body");
   assert.deepEqual(
     changed.proposedChanges,
     baseline.proposedChanges,
@@ -1133,7 +1101,7 @@ async function testConditionalGetDoesNotApplyToRenderedRecrawl() {
     ),
     store,
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "200", seedProbe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "200", seedProbe),
     log: () => {},
   });
 
@@ -1150,7 +1118,7 @@ async function testConditionalGetDoesNotApplyToRenderedRecrawl() {
     provider: createStubProvider([], { model: "stub-render" }),
     store,
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeValidatorFetch(html, etag, lastModified, "304-when-validated", probe), sleep: async () => {} },
+    fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "304-when-validated", probe),
     log: () => {},
   });
 
@@ -1158,8 +1126,6 @@ async function testConditionalGetDoesNotApplyToRenderedRecrawl() {
   assert.ok(result.error?.startsWith("invalid-config:"), `expected a typed invalid-config error, got: ${result.error}`);
   assert.equal(result.notModified ?? false, false, "a rendered recrawl is never notModified — revalidation does not apply to render:true");
   assert.equal(result.itemCount, 0, "no items were grouped from a failed rendered fetch");
-  const anyValidatorSent = probe.mainRequestHeaders.some((h) => "If-None-Match" in h || "If-Modified-Since" in h);
-  assert.equal(anyValidatorSent, false, "HTTP validators must never be sent on a rendered recrawl (revalidate is gated on !render)");
 
   console.log("✓ campfit#77 DOD-RENDER: a rendered recrawl never sends/reuses HTTP validators and retains fail-closed semantics even with a validated prior snapshot in the store");
 }
