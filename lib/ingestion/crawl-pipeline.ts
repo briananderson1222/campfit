@@ -36,6 +36,7 @@ import { getPool } from '@/lib/db';
 import type { ExtractionProvider } from '@kontourai/traverse';
 import type { FetchSourceOptions, SnapshotStore } from '@kontourai/traverse/fetch';
 import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
+import { runLookoutRecrawlForCamp } from './lookout-check-adapter';
 import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
 import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
@@ -44,6 +45,12 @@ import { createProposal } from '@/lib/admin/review-repository';
 import { recordRecrawlFreshness } from './recrawl-freshness';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
+import { runLookoutListingDiscovery } from './lookout-discovery';
+import { createDiscoveryPlaceholderRepository } from './lookout-discovery-repository';
+
+// Process-boundary flag: captured once on module initialization. Default OFF
+// until the owner accepts the complete DB-backed parity corpus.
+export const LOOKOUT_RECRAWL_ENABLED = process.env.LOOKOUT_RECRAWL === '1';
 import type { CrawlProgressEvent, CrawlRun, LLMExtractionResult } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 import { runTraversePipelineForSource } from './traverse-pipeline';
@@ -549,6 +556,21 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         const sharedUrl = sharedCampUrl ? domainCamps.every(c => c.websiteUrl === sharedCampUrl) : false;
         const listingUrl = preferredListingUrl ?? (sharedUrl ? sharedCampUrl : null);
         if (listingUrl) {
+          const refCamp = domainCamps[0] as unknown as { communitySlug: string; city: string | null; providerId: string | null };
+          if (LOOKOUT_RECRAWL_ENABLED) {
+            try {
+              const outcome = await runLookoutListingDiscovery(listingUrl, {
+                provider: extractionProvider,
+                store: snapshotStore,
+                repository: createDiscoveryPlaceholderRepository(pool, refCamp),
+                fetchOptions: options.fetchOptions,
+                requiresRender: domainCamps.some((camp) => (camp as unknown as { requiresRender: boolean }).requiresRender),
+              });
+              if (outcome.inserted > 0) console.log(`[crawl] Lookout discovery inserted ${outcome.inserted} new programs at ${listingUrl}`);
+            } catch (err) {
+              console.error(`[crawl] Lookout discovery failed for ${listingUrl}:`, err);
+            }
+          } else {
           const existingNames = domainCamps.map(c => c.name);
           const discovery = await discoverCampsFromUrl(listingUrl, {
             provider: extractionProvider,
@@ -563,7 +585,6 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
             if (newStubs.length > 0) {
               console.log(`[crawl] discovery found ${newStubs.length} new programs at ${listingUrl}`);
               // Resolve community/provider info from first camp in group
-              const refCamp = domainCamps[0] as unknown as { communitySlug: string; city: string | null; providerId: string | null };
               for (const stub of newStubs) {
                 try {
                   const campUrl = stub.detailUrl ?? listingUrl;
@@ -596,6 +617,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               }
             }
           }
+          }
         }
       }
 
@@ -624,7 +646,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
           const fieldSources = (camp as unknown as { fieldSources: Record<string, { approvedAt?: string }> }).fieldSources ?? {};
           const result: TraverseRecrawlResult = providerInitError
             ? providerUnavailableResult(providerInitError)
-            : await runTraverseRecrawlForCamp({
+            : await (LOOKOUT_RECRAWL_ENABLED ? runLookoutRecrawlForCamp : runTraverseRecrawlForCamp)({
                 campId: camp.id,
                 websiteUrl: camp.websiteUrl,
                 campName: camp.name,
