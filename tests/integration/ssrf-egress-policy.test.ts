@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import http from "node:http";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { createInMemorySnapshotStore } from "@kontourai/traverse/fetch";
 import { createStubProvider } from "@/tests/fixtures/traverse/stub-provider";
 
@@ -19,11 +22,66 @@ import { runTraversePipelineForSource } from "@/lib/ingestion/traverse-pipeline"
 import { browserEgressRouteDecision, createCampfitRenderImpl } from "@/lib/ingestion/render-fetch";
 import { logAndMapPublicEgressError, publicEgressError, UpstreamProviderError } from "@/lib/security/public-egress-error";
 
+const routeHarness = vi.hoisted(() => ({
+  error: new Error("unset route error"),
+  queryResults: [] as Array<{ rows: unknown[] }>,
+  runCrawlPipeline: vi.fn(),
+}));
+
+vi.mock("@/lib/ingestion/crawl-pipeline", () => ({
+  runCrawlPipeline: (...args: unknown[]) => routeHarness.runCrawlPipeline(...args),
+}));
+vi.mock("@/lib/db", () => ({
+  getPool: () => ({ query: vi.fn(async () => routeHarness.queryResults.shift() ?? { rows: [] }) }),
+}));
+vi.mock("@/lib/admin/access", () => ({
+  requireAdminAccess: vi.fn(async () => ({ access: { email: "admin@example.test", isModerator: false } })),
+}));
+vi.mock("@/lib/admin/community-access", () => ({
+  getCampCommunitySlug: vi.fn(async () => "community"),
+  getProviderCommunitySlug: vi.fn(async () => "community"),
+  getCampIdsCommunitySlugs: vi.fn(async () => ["community"]),
+}));
+
+import { POST as crawlCamp } from "@/app/api/admin/camps/[campId]/crawl/route";
+import { POST as crawlProvider } from "@/app/api/admin/providers/[providerId]/crawl/route";
+import { POST as crawlStart } from "@/app/api/admin/crawl/start/route";
+
 const resolver = (answers: Record<string, string[]>): EgressResolver => async (hostname) =>
   (answers[hostname] ?? []).map((address) => ({ address }));
 const oracle = (...responses: EgressResponseOracle["responses"]): EgressResponseOracle => ({ responses });
 
 describe("server egress URL policy threat matrix", () => {
+  it.each([
+    {
+      route: "camps/[campId]/crawl",
+      arrange: () => { routeHarness.queryResults = [{ rows: [{ id: "camp-1", websiteUrl: "https://safe.example" }] }, { rows: [] }]; },
+      invoke: () => crawlCamp(new Request("http://local.test", { method: "POST", body: "{}" }), { params: Promise.resolve({ campId: "camp-1" }) }),
+    },
+    {
+      route: "providers/[providerId]/crawl",
+      arrange: () => { routeHarness.queryResults = [{ rows: [{ id: "provider-1", crawlRootUrl: "https://safe.example", websiteUrl: null }] }, { rows: [{ id: "camp-1" }] }]; },
+      invoke: () => crawlProvider(new Request("http://local.test", { method: "POST", body: "{}" }), { params: Promise.resolve({ providerId: "provider-1" }) }),
+    },
+    {
+      route: "crawl/start",
+      arrange: () => { routeHarness.queryResults = []; },
+      invoke: () => crawlStart(new Request("http://local.test", { method: "POST", body: JSON.stringify({ campIds: ["camp-1"] }) })),
+    },
+  ])("keeps secret-bearing failures out of the serialized $route response", async ({ arrange, invoke }) => {
+    const sentinel = `ROUTE_SECRET_${Math.random().toString(36).slice(2)}`;
+    routeHarness.error = new Error(sentinel);
+    routeHarness.runCrawlPipeline.mockImplementation(() => Promise.reject(routeHarness.error));
+    arrange();
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await invoke();
+    const serialized = await response.text();
+    expect(response.status).toBe(500);
+    expect(JSON.parse(serialized)).toEqual({ error: "Crawl request failed" });
+    expect(serialized).not.toContain(sentinel);
+    log.mockRestore();
+  });
+
   it("rejects hostile oracle descriptors before executing getters or sinks", async () => {
     let executed = false;
     const record = Object.defineProperty({}, "body", { enumerable: true, get() { executed = true; return "ok"; } });
@@ -103,6 +161,33 @@ describe("server egress URL policy threat matrix", () => {
     const guardedFetch = createGuardedFetch({ resolver: rebindingResolver, responseOracle });
     await expect((await guardedFetch("https://example.test/")).text()).resolves.toBe("ok");
     expect(calls).toBe(1);
+  });
+
+  it("invokes the production transport with only the vetted IP literal", async () => {
+    const destinations: string[] = [];
+    const requestSpy = vi.spyOn(http, "request").mockImplementation(((options: http.RequestOptions, callback: (response: PassThrough) => void) => {
+      destinations.push(String(options.hostname));
+      const outgoing = new EventEmitter() as EventEmitter & { write: () => void; end: () => void };
+      outgoing.write = () => undefined;
+      outgoing.end = () => {
+        const incoming = new PassThrough() as PassThrough & { statusCode: number; headers: http.IncomingHttpHeaders };
+        incoming.statusCode = 200;
+        incoming.headers = { "content-type": "text/plain" };
+        callback(incoming);
+        incoming.end("ok");
+      };
+      return outgoing;
+    }) as unknown as typeof http.request);
+    let resolutions = 0;
+    const guarded = createGuardedFetch({
+      resolver: async () => [{ address: ++resolutions === 1 ? "93.184.216.34" : "127.0.0.1" }],
+    });
+    await expect((await guarded("http://rebinding.example/")).text()).resolves.toBe("ok");
+    expect(destinations).toEqual(["93.184.216.34"]);
+    expect(destinations).not.toContain("rebinding.example");
+    expect(destinations).not.toContain("127.0.0.1");
+    expect(resolutions).toBe(1);
+    requestSpy.mockRestore();
   });
 
   it.each(["http://[::127.0.0.1]", "http://[::ffff:0:127.0.0.1]", "http://[::ffff:127.0.0.1]"])(
