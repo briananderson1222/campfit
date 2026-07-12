@@ -58,6 +58,16 @@ import type { TraverseProposalSink, TraversePipelineDeps, TraversePipelineSource
 import type { IngestionSourceConfig } from './sources';
 import { slugify } from './slug';
 
+/** Production review-sink gate shared by ordinary changes and Lookout's
+ * unchanged-first-enablement DB-current projection. */
+export async function deliverRecrawlReview(
+  result: TraverseRecrawlResult,
+  sink: () => Promise<string>,
+): Promise<string | null> {
+  if (!result.ok || Object.keys(result.proposedChanges).length === 0) return null;
+  return sink();
+}
+
 // ── Provider matching helpers ──────────────────────────────────────────────────
 
 function parseDomain(url: string): string | null {
@@ -668,6 +678,16 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
           const durationMs = Date.now() - startMs;
           const displayModel = withModelOverrideNote(result.model, options.model);
 
+          // First Lookout enablement may classify byte-identical input while
+          // replay still finds a DB-current change. Record crawl freshness,
+          // then continue into the ordinary proposal sink exactly once.
+          if (result.ok && result.unchangedFreshness) {
+            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id, checkedAt: new Date() });
+            if (!freshnessUpdated) {
+              console.warn(`[crawl] freshness update skipped: camp ${camp.id} no longer exists (deleted between recrawl selection and freshness write)`);
+            }
+          }
+
           if (!result.ok) {
             const error = result.error ?? 'traverse-recrawl: unknown extraction failure';
             await tracker.recordItemOutcome({
@@ -715,7 +735,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
             let proposalId: string | null = null;
             let newProposalsDelta: 0 | 1 = 0;
             if (changesFound > 0) {
-              proposalId = await createProposal({
+              proposalId = await deliverRecrawlReview(result, () => createProposal({
                 campId: camp.id,
                 crawlRunId: runId,
                 sourceUrl: camp.websiteUrl,
@@ -725,7 +745,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                 extractionModel: result.model,
                 snapshotRef: result.snapshot.ref,
                 snapshotBodyHash: result.snapshot.bodyHash,
-              });
+              }));
               newProposalsDelta = 1;
             }
 

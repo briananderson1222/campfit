@@ -7,6 +7,7 @@ import { buildSnapshotSourceRef, type Snapshot, type SnapshotStore } from "@kont
 import { campToLookoutSource, isLookoutUnchanged, listingToLookoutSource, runLookoutCheck, runLookoutRecrawlForCamp } from "../lib/ingestion/lookout-check-adapter";
 import type { TraverseRecrawlResult } from "../lib/ingestion/traverse-recrawl-adapter";
 import type { Camp } from "../lib/types";
+import { deliverRecrawlReview } from "../lib/ingestion/crawl-pipeline";
 
 const known = campToLookoutSource({ id: "raw-camp-id", websiteUrl: "https://camp.test" });
 assert.equal(known.id, "raw-camp-id");
@@ -48,12 +49,14 @@ try {
   const sourceId = "baseline-camp";
   let latest: Snapshot = { ...snapshot, sourceId, url: "https://baseline.test", body: "Old", bodyHash: "old-hash", fetchedAt: "2026-07-11T00:00:00.000Z" };
   const corpusStore: SnapshotStore = { latest: async () => latest, get: async () => latest, list: async () => [latest], put: async (next) => { latest = next; } };
-  let phase: "baseline" | "changed" = "baseline";
+  let phase: "baseline" | "changed" | "recovery" = "baseline";
   let replayCalls = 0;
   const replayCamp = async (): Promise<TraverseRecrawlResult> => ({
     ...(replayCalls++, {}),
-    ok: true, error: null, proposedChanges: {}, overallConfidence: 0, model: "fixture",
-    rawExtraction: { itemIndex: 0, itemName: "Baseline Camp", proposals: [{ fieldPath: "items[].name", candidateValue: phase === "baseline" ? "Old" : "New", confidence: 0.9, provenance: { excerpt: phase === "baseline" ? "Old" : "New", locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0] }] },
+    ok: true, error: null, proposedChanges: phase === "baseline" ? {
+      city: { old: "Denver", new: "Boulder", confidence: 0.9, excerpt: "Boulder", sourceUrl: latest.url, mode: "update" },
+    } : {}, overallConfidence: 0, model: "fixture",
+    rawExtraction: { itemIndex: 0, itemName: "Baseline Camp", proposals: [{ fieldPath: "items[].name", candidateValue: phase === "baseline" ? "Old" : phase === "changed" ? "New" : "Newest", confidence: 0.9, provenance: { excerpt: phase === "baseline" ? "Old" : phase === "changed" ? "New" : "Newest", locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0] }] },
     matchedItemName: "Baseline Camp", itemCount: 1, snapshot: { ref: buildSnapshotSourceRef(latest), bodyHash: latest.bodyHash },
     tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: [],
   });
@@ -67,7 +70,15 @@ try {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
     fetchSource: async () => ({ snapshot: latest }), clock: () => "2026-07-11T01:00:00.000Z",
   });
-  assert.equal(unchanged.ok, true, unchanged.error ?? "baseline failed"); assert.equal(unchanged.notModified, true);
+  assert.equal(unchanged.ok, true, unchanged.error ?? "baseline failed");
+  assert.equal(unchanged.notModified, undefined, "nonempty DB-current review changes must not take the pipeline freshness-only branch");
+  assert.equal(unchanged.unchangedFreshness, true, "pipeline records unchanged freshness before delivering review changes");
+  assert.equal(unchanged.proposedChanges.city?.old, "Denver", "DB-current Denver remains review authority on first enablement");
+  assert.equal(unchanged.proposedChanges.city?.new, "Boulder", "snapshot Boulder reaches the normal proposal flow despite zero baseline events");
+  let reviewSinkCalls = 0;
+  const proposalId = await deliverRecrawlReview(unchanged, async () => { reviewSinkCalls++; return "proposal-boulder-denver"; });
+  assert.equal(proposalId, "proposal-boulder-denver");
+  assert.equal(reviewSinkCalls, 1, "production review dispatcher creates the Boulder/Denver proposal exactly once");
   assert.ok((await observationStore.loadLatest(sourceId)).ok, "unchanged first enablement seeds observation pointer");
   assert.deepEqual(await readdir(path.join(baselineRoot, "survey")).catch(() => []), [], "baseline emits no consumer-visible survey");
   const unchangedAgain = await runLookoutRecrawlForCamp(options, {
@@ -84,6 +95,26 @@ try {
   });
   assert.equal(changed.ok, true);
   assert.equal((await readdir(path.join(baselineRoot, "survey"))).filter((name) => name.endsWith(".json")).length, 1, "first later change emits exactly one survey");
+
+  // Production-coordinator crash recovery: a changed run advances the pointer
+  // but fails publication, then a byte-identical unchanged run must publish the
+  // pending batch before taking its early return.
+  phase = "recovery";
+  const recoverySnapshot: Snapshot = { ...next, body: "Recovery", bodyHash: "recovery-hash", fetchedAt: "2026-07-12T02:00:00.000Z" };
+  const failedFinalize = await runLookoutRecrawlForCamp(options, {
+    observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
+    fetchSource: async () => ({ snapshot: recoverySnapshot }), clock: () => "2026-07-12T03:00:00.000Z",
+    emissionFaults: { beforeSurveyFinalize: () => { throw new Error("injected coordinator finalize failure"); } },
+  });
+  assert.equal(failedFinalize.ok, false, "coordinator exposes finalize failure");
+  latest = recoverySnapshot;
+  const recoveredUnchanged = await runLookoutRecrawlForCamp(options, {
+    observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
+    fetchSource: async () => ({ snapshot: recoverySnapshot }), clock: () => "2026-07-12T04:00:00.000Z",
+  });
+  assert.equal(recoveredUnchanged.ok, true, recoveredUnchanged.error ?? "unchanged recovery failed");
+  assert.equal(recoveredUnchanged.notModified, true);
+  assert.equal((await readdir(path.join(baselineRoot, "survey"))).filter((name) => name.endsWith(".json")).length, 2, "unchanged coordinator entry publishes staged pending batch");
 
   const ambiguousReplay = async (): Promise<TraverseRecrawlResult> => ({
     ...(await replayCamp()),

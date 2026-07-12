@@ -81,7 +81,7 @@ async function finalizePending(pendingPath: string, root: string): Promise<void>
 }
 
 /** Recover a commit that advanced its observation pointer before publication. */
-async function recoverPending(sourceId: string, store: ObservationStore, root: string): Promise<void> {
+export async function recoverPendingSurveyDelivery(sourceId: string, store: ObservationStore, root = LOOKOUT_SURVEY_SPOOL_ROOT): Promise<void> {
   const pendingRoot = path.join(root, ".pending");
   const names = await readdir(pendingRoot).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return [];
@@ -118,7 +118,7 @@ export async function emitCampfitObservation(input: {
 }) {
   const delegate = input.store ?? createCampfitObservationStore();
   const spoolRoot = input.spoolRoot ?? LOOKOUT_SURVEY_SPOOL_ROOT;
-  try { await recoverPending(input.source.id, delegate, spoolRoot); } catch (cause) {
+  try { await recoverPendingSurveyDelivery(input.source.id, delegate, spoolRoot); } catch (cause) {
     return { ok: false as const, error: { kind: "persistence-error" as const, message: "Could not recover pending Survey delivery", cause } };
   }
   let authored: SurveyInput | null = null;

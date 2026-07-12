@@ -5,7 +5,7 @@ import { fetchSource as traverseFetchSource } from "@kontourai/traverse/fetch";
 import type { Camp } from "@/lib/types";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import { runTraverseRecrawlForCamp, type TraverseRecrawlOptions, type TraverseRecrawlResult } from "./traverse-recrawl-adapter";
-import { createCampfitObservationStore, emitCampfitObservation } from "./lookout-observation-store";
+import { createCampfitObservationStore, emitCampfitObservation, recoverPendingSurveyDelivery } from "./lookout-observation-store";
 
 export { LOOKOUT_CADENCE_HINT, campToLookoutSource, listingToLookoutSource } from "./lookout-sources";
 import { campToLookoutSource } from "./lookout-sources";
@@ -38,7 +38,7 @@ export function isLookoutUnchanged(result: CheckResult): boolean {
  */
 export async function runLookoutRecrawlForCamp(
   options: TraverseRecrawlOptions,
-  deps: { fetchSource?: FetchSource; clock?: () => string; observationStore?: ObservationStore; surveySpoolRoot?: string; replayCamp?: typeof runTraverseRecrawlForCamp } = {},
+  deps: { fetchSource?: FetchSource; clock?: () => string; observationStore?: ObservationStore; surveySpoolRoot?: string; replayCamp?: typeof runTraverseRecrawlForCamp; emissionFaults?: { beforeObservationCommit?: () => void; beforeSurveyFinalize?: () => void } } = {},
 ): Promise<TraverseRecrawlResult> {
   const policy: RenderPolicy = options.requiresRender ? "always" : "on-shell-warning";
   const source = campToLookoutSource(options.current, policy);
@@ -48,6 +48,13 @@ export async function runLookoutRecrawlForCamp(
   // implementation detail of the store factory rather than one coordinator-
   // owned store instance.
   const observationStore = deps.observationStore ?? createCampfitObservationStore();
+  // Reconcile the pointer-advanced/finalize-failed crash window before CHECK.
+  // This must run even when every subsequent response is a permanent 304.
+  try {
+    await recoverPendingSurveyDelivery(source.id, observationStore, deps.surveySpoolRoot);
+  } catch (cause) {
+    return failed(options, `lookout-recovery:${cause instanceof Error ? cause.message : String(cause)}`);
+  }
   let checked = await runLookoutCheck(source, {
     store: options.store,
     fetchSource: deps.fetchSource ?? traverseFetchSource,
@@ -60,12 +67,14 @@ export async function runLookoutRecrawlForCamp(
   if (checked.kind === "unchanged-304" || checked.kind === "unchanged-hash") {
     const snapshotRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
     const persisted = observationStore ? await observationStore.loadLatest(source.id) : null;
+    let baselineResult: TraverseRecrawlResult | null = null;
     if (persisted && !persisted.ok) return failed(options, `lookout-baseline:${persisted.error.kind}: ${persisted.error.message}`);
     if (!persisted || persisted.value === null) {
       // CHECK can be unchanged on first enablement because Traverse already has
       // a production snapshot corpus. Replay that exact classified snapshot to
       // seed Lookout's observation baseline without reviewer-visible events.
       const baseline = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
+      baselineResult = baseline;
       if (!baseline.ok) return failed(options, `lookout-baseline:${baseline.error}`);
       if (baseline.snapshot.ref !== snapshotRef) return failed(options, `lookout-baseline:snapshot-mismatch: classified ${snapshotRef}, replayed ${baseline.snapshot.ref ?? "none"}`);
       const selection = selectedKnownCampProposals(baseline, options);
@@ -75,16 +84,23 @@ export async function runLookoutRecrawlForCamp(
         source, entityKey: options.campId, checkedAt: checked.checkedAt,
         resultKind: "unchanged-hash", proposals,
         observation: { sourceId: source.id, snapshotRef, observedAt: checked.checkedAt, proposals },
-        store: observationStore, spoolRoot: deps.surveySpoolRoot, now: deps.clock,
+        store: observationStore, spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
       });
       if (!emission.ok) return failed(options, `lookout-baseline:${emission.error.kind}: ${emission.error.message}`);
       if (emission.value.events.length !== 0 || emission.value.surveyInput !== null) return failed(options, "lookout-baseline:unexpected-events");
     }
-    return {
-      ...failed(options, ""), ok: true, notModified: true, error: null,
-      snapshot: { ref: snapshotRef, bodyHash: null },
-      warnings: [...checked.warnings, `lookout:${checked.kind}`],
-    };
+    // A zero-event baseline does not mean zero review proposals. On first
+    // enablement the replay result is the DB-current projection and must flow
+    // to the normal review sink (for example snapshot Boulder vs DB Denver).
+    if (baselineResult) {
+      const hasReviewChanges = Object.keys(baselineResult.proposedChanges).length > 0;
+      return {
+        ...baselineResult,
+        ...(hasReviewChanges ? { unchangedFreshness: true } : { notModified: true }),
+        warnings: [...checked.warnings, ...baselineResult.warnings, `lookout:${checked.kind}`],
+      };
+    }
+    return { ...failed(options, ""), ok: true, notModified: true, error: null, snapshot: { ref: snapshotRef, bodyHash: null }, warnings: [...checked.warnings, `lookout:${checked.kind}`] };
   }
   // The plain extraction classifies shell content only; it cannot render on
   // its own. A shell warning triggers one separately Lookout-classified render.
@@ -124,7 +140,7 @@ export async function runLookoutRecrawlForCamp(
   const emission = await emitCampfitObservation({
     source, observation, checkedAt: checked.checkedAt, proposals,
     entityKey: options.campId, store: observationStore,
-    spoolRoot: deps.surveySpoolRoot, now: deps.clock,
+    spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
   });
   if (!emission.ok) return failed(options, `lookout-emission:${emission.error.kind}: ${emission.error.message}`);
   // First enablement is an explicit native baseline: Lookout commits the
