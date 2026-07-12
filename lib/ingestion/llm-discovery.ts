@@ -5,6 +5,7 @@ import { DISCOVERY_FIELD_HINTS, DISCOVERY_TARGET_SCHEMA } from "./discovery-sche
 import { groupDiscoveryItems } from "./discovery-item-grouping";
 import { fetchAndExtractWithRevalidation } from "./traverse-fetch-extract";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
+import { createGuardedTraverseFetchOptions, type EgressPolicyProfile } from "@/lib/security/egress-url-policy";
 
 export interface DiscoveredCampStub {
   name: string;
@@ -41,6 +42,7 @@ export interface DiscoveryOptions {
   maxChars?: number;
   maxProviderCalls?: number;
   maxTotalTokens?: number;
+  egressProfile?: EgressPolicyProfile;
 }
 
 export async function discoverCampsFromUrl(url: string, options: DiscoveryOptions): Promise<DiscoveryResult> {
@@ -60,7 +62,9 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
         // lower either ceiling, but discovery is never silently unbounded.
         maxProviderCalls: options.maxProviderCalls ?? 40,
         maxTotalTokens: options.maxTotalTokens ?? 450_000,
-        fetchOptions: options.fetchOptions,
+        fetchOptions: (options.mode ?? "live-with-capture") === "replay"
+          ? options.fetchOptions
+          : createGuardedTraverseFetchOptions(options.fetchOptions, options.egressProfile ?? "storedCrawlTarget"),
       },
       options.revalidate === true,
     );
