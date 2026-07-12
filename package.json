@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
+    "test:ssrf-egress": "vitest run --config vitest.ssrf.config.ts",
     "test:db:reset": "tsx scripts/test-db-reset.ts",
     "typecheck": "tsc --noEmit",
     "lint": "npm run typecheck && npm run check:content-boundary && npm run check:decisions && npm run test:safe-url && npm run test:ingestion-runner && npm run test:content-guards && npm run test:render-fetch && npm run test:shell-detect-retry && npm run test:cutover-baseline && npm run test:discovery-replay && npm run test:traverse-replay && npm run test:recrawl-adapter && npm run test:traverse-cost-guards && eslint .",
