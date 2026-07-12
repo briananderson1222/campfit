@@ -19,3 +19,4 @@ playwright-report/
 
 # Traverse pilot local parity artifacts (Slice 1b)
 artifacts/
+.d1-replay-sample/
