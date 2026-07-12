@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "sourceId": "fixture-camp-alpha",
+      "sourceUrl": "https://example.test/camps/alpha",
+      "snapshotRef": "snapshot:fixture-camp-alpha:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "snapshotBodyHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "current": { "name": "Camp Alpha", "city": "Denver" },
+      "extracted": { "city": "Boulder" },
+      "confidence": { "city": 0.9 },
+      "excerpts": { "city": "Located in Boulder" }
+    },
+    {
+      "sourceId": "fixture-camp-pending",
+      "sourceUrl": "https://example.test/camps/pending",
+      "snapshotRef": "snapshot:fixture-camp-pending:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "snapshotBodyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "current": { "name": "Pending Change Camp", "city": "Denver" },
+      "extracted": { "city": "Boulder" },
+      "confidence": { "city": 0.9 },
+      "excerpts": { "city": "Now serving Boulder" }
+    }
+  ]
+}

@@ -168,6 +168,12 @@ export interface TraverseRecrawlResult {
    */
   notModified?: boolean;
   /**
+   * The bytes were unchanged, but first Lookout enablement replayed the exact
+   * snapshot and found DB-current review changes. The crawl pipeline records
+   * crawl freshness once and still delivers proposedChanges to review.
+   */
+  unchangedFreshness?: boolean;
+  /**
    * null on success; a stable, kind-tagged reason string on failure.
    * Fetch/extraction failures reuse traverse's own `${kind}: ${message}`
    * convention (`fetchError`/`extractionError` off `TraverseCampFetchResult`)

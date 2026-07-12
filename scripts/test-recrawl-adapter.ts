@@ -71,6 +71,7 @@ import { createInMemorySnapshotStore, type FetchLike } from "@kontourai/traverse
 import { runTraverseRecrawlForCamp } from "../lib/ingestion/traverse-recrawl-adapter";
 import { recordRecrawlFreshness } from "../lib/ingestion/recrawl-freshness";
 import { computeDiff } from "../lib/ingestion/diff-engine";
+import { dispatchKnownCampRecrawl, LOOKOUT_RECRAWL_ENABLED } from "../lib/ingestion/crawl-pipeline";
 import { createStubProvider, type StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 import type { Camp } from "../lib/types";
 import {
@@ -108,6 +109,23 @@ function makeFixtureFetch(html: string): FetchLike {
       text: async () => (isRobots ? "User-agent: *\nDisallow:" : html),
     };
   };
+}
+
+// The assertion exercises the same dispatcher called by runCrawlPipeline,
+// with distinguishable delegates. It fails if either flag branch is inverted,
+// bypassed, or calls both coordinators.
+{
+  let legacyCalls = 0;
+  let lookoutCalls = 0;
+  const sentinel = (model: string) => ({ ok: true, error: null, proposedChanges: {}, overallConfidence: 0, model, rawExtraction: { proposals: [] }, matchedItemName: null, itemCount: 0, snapshot: { ref: null, bodyHash: null }, tokensUsed: 0, providerCalls: 0, latencyMs: 0, warnings: [] });
+  const result = await dispatchKnownCampRecrawl({} as never, {
+    enabled: LOOKOUT_RECRAWL_ENABLED,
+    legacy: async () => { legacyCalls++; return sentinel("legacy") as never; },
+    lookout: async () => { lookoutCalls++; return sentinel("lookout") as never; },
+  });
+  assert.equal(result.model, LOOKOUT_RECRAWL_ENABLED ? "lookout" : "legacy", "dispatcher returns the selected coordinator result");
+  assert.equal(legacyCalls, LOOKOUT_RECRAWL_ENABLED ? 0 : 1, "flag selects legacy exactly when disabled");
+  assert.equal(lookoutCalls, LOOKOUT_RECRAWL_ENABLED ? 1 : 0, "flag selects Lookout exactly when enabled");
 }
 
 // ─── campfit#77 conditional-GET fixtures ─────────────────────────────────

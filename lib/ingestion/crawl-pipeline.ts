@@ -36,6 +36,7 @@ import { getPool } from '@/lib/db';
 import type { ExtractionProvider } from '@kontourai/traverse';
 import type { FetchSourceOptions, SnapshotStore } from '@kontourai/traverse/fetch';
 import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
+import { runLookoutRecrawlForCamp } from './lookout-check-adapter';
 import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
 import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
@@ -44,12 +45,43 @@ import { createProposal } from '@/lib/admin/review-repository';
 import { recordRecrawlFreshness } from './recrawl-freshness';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
+import { runLookoutListingDiscovery } from './lookout-discovery';
+import { createDiscoveryPlaceholderRepository } from './lookout-discovery-repository';
+
+// Process-boundary flag: captured once on module initialization. Default OFF
+// until the owner accepts the complete DB-backed parity corpus.
+export const LOOKOUT_RECRAWL_ENABLED = process.env.LOOKOUT_RECRAWL === '1';
 import type { CrawlProgressEvent, CrawlRun, LLMExtractionResult } from '@/lib/admin/types';
 import type { Camp } from '@/lib/types';
 import { runTraversePipelineForSource } from './traverse-pipeline';
 import type { TraverseProposalSink, TraversePipelineDeps, TraversePipelineSourceResult } from './traverse-pipeline';
 import type { IngestionSourceConfig } from './sources';
 import { slugify } from './slug';
+
+/** Production review-sink gate shared by ordinary changes and Lookout's
+ * unchanged-first-enablement DB-current projection. */
+export async function deliverRecrawlReview(
+  result: TraverseRecrawlResult,
+  sink: () => Promise<string>,
+): Promise<string | null> {
+  if (!result.ok || Object.keys(result.proposedChanges).length === 0) return null;
+  return sink();
+}
+
+/** Narrow, injectable seam for proving the process-boundary cutover flag
+ * selects exactly one production recrawl coordinator. */
+export async function dispatchKnownCampRecrawl(
+  options: Parameters<typeof runTraverseRecrawlForCamp>[0],
+  deps: {
+    legacy?: typeof runTraverseRecrawlForCamp;
+    lookout?: typeof runLookoutRecrawlForCamp;
+    enabled?: boolean;
+  } = {},
+): Promise<TraverseRecrawlResult> {
+  const legacy = deps.legacy ?? runTraverseRecrawlForCamp;
+  const lookout = deps.lookout ?? runLookoutRecrawlForCamp;
+  return (deps.enabled ?? LOOKOUT_RECRAWL_ENABLED) ? lookout(options) : legacy(options);
+}
 
 // ── Provider matching helpers ──────────────────────────────────────────────────
 
@@ -549,6 +581,21 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         const sharedUrl = sharedCampUrl ? domainCamps.every(c => c.websiteUrl === sharedCampUrl) : false;
         const listingUrl = preferredListingUrl ?? (sharedUrl ? sharedCampUrl : null);
         if (listingUrl) {
+          const refCamp = domainCamps[0] as unknown as { communitySlug: string; city: string | null; providerId: string | null };
+          if (LOOKOUT_RECRAWL_ENABLED) {
+            try {
+              const outcome = await runLookoutListingDiscovery(listingUrl, {
+                provider: extractionProvider,
+                store: snapshotStore,
+                repository: createDiscoveryPlaceholderRepository(pool, refCamp),
+                fetchOptions: options.fetchOptions,
+                requiresRender: domainCamps.some((camp) => (camp as unknown as { requiresRender: boolean }).requiresRender),
+              });
+              if (outcome.inserted > 0) console.log(`[crawl] Lookout discovery inserted ${outcome.inserted} new programs at ${listingUrl}`);
+            } catch (err) {
+              console.error(`[crawl] Lookout discovery failed for ${listingUrl}:`, err);
+            }
+          } else {
           const existingNames = domainCamps.map(c => c.name);
           const discovery = await discoverCampsFromUrl(listingUrl, {
             provider: extractionProvider,
@@ -563,7 +610,6 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
             if (newStubs.length > 0) {
               console.log(`[crawl] discovery found ${newStubs.length} new programs at ${listingUrl}`);
               // Resolve community/provider info from first camp in group
-              const refCamp = domainCamps[0] as unknown as { communitySlug: string; city: string | null; providerId: string | null };
               for (const stub of newStubs) {
                 try {
                   const campUrl = stub.detailUrl ?? listingUrl;
@@ -596,6 +642,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               }
             }
           }
+          }
         }
       }
 
@@ -624,7 +671,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
           const fieldSources = (camp as unknown as { fieldSources: Record<string, { approvedAt?: string }> }).fieldSources ?? {};
           const result: TraverseRecrawlResult = providerInitError
             ? providerUnavailableResult(providerInitError)
-            : await runTraverseRecrawlForCamp({
+            : await dispatchKnownCampRecrawl({
                 campId: camp.id,
                 websiteUrl: camp.websiteUrl,
                 campName: camp.name,
@@ -645,6 +692,16 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               });
           const durationMs = Date.now() - startMs;
           const displayModel = withModelOverrideNote(result.model, options.model);
+
+          // First Lookout enablement may classify byte-identical input while
+          // replay still finds a DB-current change. Record crawl freshness,
+          // then continue into the ordinary proposal sink exactly once.
+          if (result.ok && result.unchangedFreshness) {
+            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id, checkedAt: new Date() });
+            if (!freshnessUpdated) {
+              console.warn(`[crawl] freshness update skipped: camp ${camp.id} no longer exists (deleted between recrawl selection and freshness write)`);
+            }
+          }
 
           if (!result.ok) {
             const error = result.error ?? 'traverse-recrawl: unknown extraction failure';
@@ -693,7 +750,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
             let proposalId: string | null = null;
             let newProposalsDelta: 0 | 1 = 0;
             if (changesFound > 0) {
-              proposalId = await createProposal({
+              proposalId = await deliverRecrawlReview(result, () => createProposal({
                 campId: camp.id,
                 crawlRunId: runId,
                 sourceUrl: camp.websiteUrl,
@@ -703,7 +760,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                 extractionModel: result.model,
                 snapshotRef: result.snapshot.ref,
                 snapshotBodyHash: result.snapshot.bodyHash,
-              });
+              }));
               newProposalsDelta = 1;
             }
 

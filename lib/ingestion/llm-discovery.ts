@@ -27,6 +27,9 @@ export interface DiscoveryResult {
   unchanged?: boolean;
   warnings?: string[];
   error?: string;
+  /** Raw evidence retained for Lookout observation/event derivation. */
+  proposals?: readonly import("@kontourai/traverse").ExtractionProposal[];
+  sourceRef?: string;
 }
 
 export interface DiscoveryOptions {
@@ -87,6 +90,8 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
       stubs,
       model: result.extraction.raw?.model ?? model,
       warnings: [...(result.fetch.warnings ?? []), ...(result.extraction.warnings ?? []), ...grouped.warnings],
+      proposals: result.extraction.proposals,
+      sourceRef: result.sourceRef,
     };
   } catch (error) {
     return { isListingPage: false, stubs: [], model, error: `Discovery failed: ${error instanceof Error ? error.message : String(error)}` };
