@@ -52,7 +52,7 @@ import assert from "node:assert/strict";
 import {
   createInMemorySnapshotStore,
   fetchAndExtract,
-  type FetchLike,
+  type FetchSourceOptions,
 } from "@kontourai/traverse/fetch";
 import {
   runTraversePipelineForSource,
@@ -66,18 +66,22 @@ import { toIngestionReportEntry } from "../lib/ingestion/ingestion-runner";
 import { createStubProvider } from "../tests/fixtures/traverse/stub-provider";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS } from "../lib/ingestion/traverse-schema";
 import type { Camp } from "../lib/types";
+import {
+  createGuardedTraverseFetchOptions,
+  type EgressResponseOracle,
+  type EgressResolver,
+} from "../lib/security/egress-url-policy";
 
-function makeFixtureFetch(html: string): FetchLike {
-  return async (fetchUrl: string) => {
-    const isRobots = fetchUrl.endsWith("/robots.txt");
-    return {
-      status: 200,
-      headers: {
-        get: (n: string) =>
-          n.toLowerCase() === "content-type" ? (isRobots ? "text/plain" : "text/html; charset=utf-8") : null,
-      },
-      text: async () => (isRobots ? "User-agent: *\nDisallow:" : html),
-    };
+type OracleFetchOptions = FetchSourceOptions & { egressResponseOracle: EgressResponseOracle; egressResolver: EgressResolver };
+const fixtureResolver: EgressResolver = async () => [{ address: "93.184.216.34", family: 4 }];
+function makeFixtureFetchOptions(html: string): OracleFetchOptions {
+  return {
+    sleep: async () => {},
+    egressResolver: fixtureResolver,
+    egressResponseOracle: { responses: [
+      { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+      { status: 200, body: html, headers: { "content-type": "text/html; charset=utf-8" }, repeat: true },
+    ] },
   };
 }
 
@@ -158,7 +162,7 @@ async function testTotalTokensUsedSumsAcrossChunks() {
       store: createInMemorySnapshotStore(),
       sink: async () => null,
       mode: "live-with-capture",
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     }
   );
@@ -199,7 +203,7 @@ async function testProviderCallsRecordedInMetricsShape() {
     provider,
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
 
@@ -260,7 +264,7 @@ async function testCeilingHitStopsEarlyAndWarningSurfaces() {
       sink: async () => null,
       mode: "live-with-capture",
       maxProviderCalls: 1,
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     }
   );
@@ -291,7 +295,7 @@ async function testCeilingHitStopsEarlyAndWarningSurfaces() {
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
     maxProviderCalls: 1,
-    fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(html),
     log: () => {},
   });
   assert.equal(recrawlResult.providerCalls, 1, "maxProviderCalls: 1 must stop the re-crawl path after exactly one provider call");
@@ -354,7 +358,7 @@ async function testDefaultProviderCallCeilingIsAPureBackstop() {
       sink: async () => null,
       mode: "live-with-capture",
       // maxProviderCalls/maxTotalTokens deliberately NOT set.
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     }
   );
@@ -392,7 +396,7 @@ async function testDefaultProviderCallCeilingIsAPureBackstop() {
       mode: "live-with-capture",
       maxChunks: raisedMaxChunks,
       maxProviderCalls: DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: createGuardedTraverseFetchOptions(makeFixtureFetchOptions(html), "storedCrawlTarget"),
     }
   );
   assert.ok(directResult.extraction, "sanity: the direct fetchAndExtract call must have extracted something to check providerCalls/warnings on");
@@ -431,7 +435,7 @@ async function testMaxTotalTokensCeiling() {
       sink: async () => null,
       mode: "live-with-capture",
       maxTotalTokens: 250,
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     }
   );
@@ -469,7 +473,7 @@ async function testMaxTotalTokensCeiling() {
       // (450_000) doesn't truncate a page whose real total spend
       // (providerCalls * 500, well under 450_000 for a ~6-chunk page) is
       // nowhere near that backstop.
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     }
   );

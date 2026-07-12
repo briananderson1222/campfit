@@ -74,8 +74,9 @@ import {
 import {
   createInMemorySnapshotStore,
   replaySource,
-  type FetchLike,
+  type FetchSourceOptions,
 } from "@kontourai/traverse/fetch";
+import type { EgressResponseOracle, EgressResolver } from "../lib/security/egress-url-policy";
 
 const FIXTURE_DIR = path.join(
   path.dirname(url.fileURLToPath(import.meta.url)),
@@ -579,21 +580,17 @@ async function testExtractionFailureIsolation() {
 
 // ─── 6. Snapshot replay determinism + pipeline-level failure isolation ───
 
-function makeFixtureFetch(html: string, status = 200): FetchLike {
-  return async (fetchUrl: string) => {
-    const isRobots = fetchUrl.endsWith("/robots.txt");
-    return {
-      status: isRobots ? 200 : status,
-      headers: {
-        get: (n: string) =>
-          n.toLowerCase() === "content-type"
-            ? isRobots
-              ? "text/plain"
-              : "text/html; charset=utf-8"
-            : null,
-      },
-      text: async () => (isRobots ? "User-agent: *\nDisallow:" : html),
-    };
+type OracleFetchOptions = FetchSourceOptions & { egressResponseOracle: EgressResponseOracle; egressResolver: EgressResolver };
+const fixtureResolver: EgressResolver = async () => [{ address: "93.184.216.34", family: 4 }];
+
+function makeFixtureFetchOptions(html: string, status = 200): OracleFetchOptions {
+  return {
+    sleep: async () => {},
+    egressResolver: fixtureResolver,
+    egressResponseOracle: { responses: [
+      { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+      { status, body: html, headers: { "content-type": "text/html; charset=utf-8" }, repeat: true },
+    ] },
   };
 }
 
@@ -618,7 +615,7 @@ async function testSnapshotReplayDeterminism() {
       store,
       sink,
       mode: "live-with-capture",
-      fetchOptions: { fetch: makeFixtureFetch(html), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(html),
       log: () => {},
     }
   );
@@ -626,10 +623,9 @@ async function testSnapshotReplayDeterminism() {
   assert.equal(liveResult.itemCount, 1);
   assert.ok(liveResult.snapshotBodyHash);
 
-  // Replay: no network at all — fetchOptions.fetch would throw if ever called.
-  const throwingFetch: FetchLike = async () => {
-    throw new Error("network must not be reached in replay mode");
-  };
+  // Replay: the failure-only declarative oracle would fail any attempted
+  // egress, while replay preserves the options unchanged and reads the stored
+  // snapshot without inserting the live URL guard.
   const replayResult = await runTraversePipelineForSource(
     { key: "avid4", name: "Avid4 Adventure", url: "https://avid4.com/day-camps/colorado/" },
     {
@@ -637,7 +633,11 @@ async function testSnapshotReplayDeterminism() {
       store,
       sink,
       mode: "replay",
-      fetchOptions: { fetch: throwingFetch, sleep: async () => {} },
+      fetchOptions: {
+        sleep: async () => {},
+        egressResolver: fixtureResolver,
+        egressResponseOracle: { responses: [{ error: true, repeat: true }] },
+      } as OracleFetchOptions,
       log: () => {},
     }
   );
@@ -681,21 +681,14 @@ async function testPipelineFailureIsolation() {
       sink,
       mode: "live-with-capture",
       fetchOptions: {
-        // The dead source 404s; avid4 serves real HTML — a single FetchLike
-        // routes by URL so both sources share one injected fetch.
-        fetch: (async (fetchUrl: string, init: Parameters<FetchLike>[1]) => {
-          if (fetchUrl.includes("dead.example.test")) {
-            const isRobots = fetchUrl.endsWith("/robots.txt");
-            return {
-              status: isRobots ? 200 : 404,
-              headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/plain" : null) },
-              text: async () => (isRobots ? "User-agent: *\nDisallow:" : "Not Found"),
-            };
-          }
-          return makeFixtureFetch(healthyHtml)(fetchUrl, init);
-        }) as FetchLike,
         sleep: async () => {},
-      },
+        egressResolver: fixtureResolver,
+        egressResponseOracle: { responses: [
+          { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+          { urlSuffix: "/camps", status: 404, body: "Not Found", headers: { "content-type": "text/plain" }, repeat: true },
+          { urlSuffix: "/day-camps/colorado/", body: healthyHtml, headers: { "content-type": "text/html; charset=utf-8" }, repeat: true },
+        ] },
+      } as OracleFetchOptions,
       log: () => {},
     }
   );
