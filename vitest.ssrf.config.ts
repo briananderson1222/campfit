@@ -8,6 +8,9 @@ export default defineConfig({
   resolve: { alias: { "@": rootDir } },
   test: {
     environment: "node",
-    include: ["tests/integration/ssrf-egress-policy.test.ts"],
+    include: [
+      "tests/integration/ssrf-egress-policy.test.ts",
+      "tests/integration/scrape-script.test.ts",
+    ],
   },
 });

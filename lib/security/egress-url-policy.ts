@@ -128,10 +128,26 @@ function classifyAddress(address: string, profile: EgressPolicyProfile, safeHost
 
 const defaultResolver: EgressResolver = async (hostname) => dns.lookup(hostname, { all: true, verbatim: true });
 
+function normalizeTestLoopbackOrigins(origins: readonly string[]): ReadonlySet<string> {
+  return new Set(origins.map((rawOrigin) => {
+    const url = new URL(rawOrigin);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    if (
+      url.origin !== rawOrigin
+      || url.protocol !== "http:"
+      || url.port === ""
+      || (hostname !== "127.0.0.1" && hostname !== "::1")
+    ) {
+      throw new TypeError("testOnlyAllowedLoopbackOrigins entries must be exact loopback URL origins");
+    }
+    return url.origin;
+  }));
+}
+
 export async function evaluateEgressUrl(
   raw: string | URL,
   profile: EgressPolicyProfile,
-  deps: { resolver?: EgressResolver } = {},
+  deps: { resolver?: EgressResolver; testOnlyAllowedLoopbackOrigins?: readonly string[] } = {},
 ): Promise<{ url: URL; addresses: EgressAddress[] }> {
   const source = String(raw);
   let url: URL;
@@ -144,8 +160,10 @@ export async function evaluateEgressUrl(
   let hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (hostname.endsWith(".")) hostname = hostname.slice(0, -1);
   if (!hostname || hostname.includes("%") || METADATA_HOSTS.has(hostname) || hostname === "localhost" || hostname.endsWith(".localhost")) fail("DENIED_HOST", profile, hostname);
+  const testOnlyAllowedLoopbackOrigins = normalizeTestLoopbackOrigins(deps.testOnlyAllowedLoopbackOrigins ?? []);
+  const testOnlyLoopbackOriginAllowed = testOnlyAllowedLoopbackOrigins.has(url.origin);
   const explicitPort = url.port;
-  if ((url.protocol === "http:" && explicitPort && explicitPort !== "80") || (url.protocol === "https:" && explicitPort && explicitPort !== "443")) fail("INVALID_PORT", profile, hostname);
+  if (!testOnlyLoopbackOriginAllowed && ((url.protocol === "http:" && explicitPort && explicitPort !== "80") || (url.protocol === "https:" && explicitPort && explicitPort !== "443"))) fail("INVALID_PORT", profile, hostname);
   url.hostname = hostname;
   url.hash = "";
   let answers: Array<{ address: string; family?: number }>;
@@ -154,7 +172,9 @@ export async function evaluateEgressUrl(
     try { answers = await (deps.resolver ?? defaultResolver)(hostname); } catch { fail("DNS_FAILURE", profile, hostname); }
   }
   if (!answers.length) fail("DNS_FAILURE", profile, hostname);
-  const addresses = answers.map(({ address }) => classifyAddress(address, profile, hostname));
+  const addresses = answers.map(({ address }) => testOnlyLoopbackOriginAllowed
+    ? { address, family: isIP(address) as 4 | 6 }
+    : classifyAddress(address, profile, hostname));
   return { url, addresses };
 }
 
@@ -202,6 +222,7 @@ function validateResponseOracle(oracle: EgressResponseOracle): EgressResponseOra
 
 export function createGuardedFetch(options: {
   profile?: EgressPolicyProfile; resolver?: EgressResolver; responseOracle?: EgressResponseOracle;
+  testOnlyAllowedLoopbackOrigins?: readonly string[];
   maxRedirects?: number;
 } = {}): typeof fetch {
   const profile = options.profile ?? "operatorDiscovery";
@@ -241,7 +262,10 @@ export function createGuardedFetch(options: {
     let request = new Request(input, init);
     const seen = new Set<string>();
     for (let hop = 0; ; hop++) {
-      const evaluated = await evaluateEgressUrl(request.url, profile, { resolver: options.resolver });
+      const evaluated = await evaluateEgressUrl(request.url, profile, {
+        resolver: options.resolver,
+        testOnlyAllowedLoopbackOrigins: options.testOnlyAllowedLoopbackOrigins,
+      });
       if (seen.has(evaluated.url.href)) fail("REDIRECT_LOOP", profile, evaluated.url.hostname);
       seen.add(evaluated.url.href);
       let response: Response;
@@ -280,12 +304,17 @@ export function createGuardedFetch(options: {
 export function createGuardedTraverseFetchOptions(
   existing: FetchSourceOptions | undefined,
   profile: EgressPolicyProfile,
-  deps: { resolver?: EgressResolver; responseOracle?: EgressResponseOracle } = {},
+  deps: {
+    resolver?: EgressResolver;
+    responseOracle?: EgressResponseOracle;
+    testOnlyAllowedLoopbackOrigins?: readonly string[];
+  } = {},
 ): FetchSourceOptions {
   if (existing?.fetch) fail("UNTRUSTED_TRANSPORT", profile);
   const fixture = existing as (FetchSourceOptions & {
     egressResponseOracle?: EgressResponseOracle;
     egressResolver?: EgressResolver;
+    testOnlyAllowedLoopbackOrigins?: readonly string[];
   }) | undefined;
   // Executable caller transports were refused above. Deterministic fixtures
   // may supply only declarative response records; the guard still owns URL
@@ -294,8 +323,14 @@ export function createGuardedTraverseFetchOptions(
     profile,
     resolver: deps.resolver ?? fixture?.egressResolver,
     responseOracle: deps.responseOracle ?? fixture?.egressResponseOracle,
+    testOnlyAllowedLoopbackOrigins: deps.testOnlyAllowedLoopbackOrigins ?? fixture?.testOnlyAllowedLoopbackOrigins,
   });
-  const { egressResponseOracle: _oracle, egressResolver: _resolver, ...nonNetwork } = fixture ?? {};
+  const {
+    egressResponseOracle: _oracle,
+    egressResolver: _resolver,
+    testOnlyAllowedLoopbackOrigins: _testOnlyAllowedLoopbackOrigins,
+    ...nonNetwork
+  } = fixture ?? {};
   return {
     ...nonNetwork,
     fetch: (url, init) => guarded(url, init) as ReturnType<NonNullable<FetchSourceOptions["fetch"]>>,

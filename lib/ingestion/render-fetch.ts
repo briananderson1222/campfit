@@ -102,6 +102,22 @@ export function assertBrowserHostnameActivation(): never {
   throw new BrowserHostnameEgressUnavailableError();
 }
 
+function normalizeTestLoopbackOrigins(origins: readonly string[]): ReadonlySet<string> {
+  return new Set(origins.map((rawOrigin) => {
+    const url = new URL(rawOrigin);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    if (
+      url.origin !== rawOrigin
+      || url.protocol !== "http:"
+      || url.port === ""
+      || (hostname !== "127.0.0.1" && hostname !== "::1")
+    ) {
+      throw new TypeError("testOnlyAllowedLoopbackOrigins entries must be exact loopback URL origins");
+    }
+    return url.origin;
+  }));
+}
+
 function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = chromium.launch({ headless: true });
@@ -135,9 +151,15 @@ function isTimeoutError(err: unknown): boolean {
 export async function installGuardedPageNetwork(
   page: Page,
   resolver?: EgressResolver,
+  testOnlyAllowedLoopbackOrigins: readonly string[] = [],
 ): Promise<void> {
+  const allowedLoopbackOrigins = normalizeTestLoopbackOrigins(testOnlyAllowedLoopbackOrigins);
   await page.route("**/*", async (route) => {
     const requestUrl = new URL(route.request().url());
+    if (allowedLoopbackOrigins.has(requestUrl.origin)) {
+      await route.continue();
+      return;
+    }
     if (browserEgressRouteDecision(requestUrl.href) === "abort") {
       await route.abort("blockedbyclient");
       return;
@@ -172,13 +194,14 @@ export async function installGuardedPageNetwork(
 export async function renderPage(
   url: string,
   timeoutMs: number = DEFAULT_RENDER_TIMEOUT_MS,
+  testOnlyAllowedLoopbackOrigins: readonly string[] = [],
 ): Promise<CampfitRenderTelemetry> {
   const start = Date.now();
   const browser = await getBrowser();
   const page = await browser.newPage({ userAgent: RENDER_USER_AGENT, serviceWorkers: "block" });
 
   try {
-    await installGuardedPageNetwork(page);
+    await installGuardedPageNetwork(page, undefined, testOnlyAllowedLoopbackOrigins);
     let usedNetworkidleFallback = false;
     try {
       await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
@@ -201,6 +224,8 @@ export async function renderPage(
 export interface CreateCampfitRenderImplOptions {
   /** Hard per-attempt render timeout — see `renderPage()`. Defaults to DEFAULT_RENDER_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Exact loopback origins for local browser fixtures only. Production must leave this empty. */
+  testOnlyAllowedLoopbackOrigins?: readonly string[];
 }
 
 /**
@@ -243,12 +268,14 @@ export interface CreateCampfitRenderImplOptions {
  * needed the fallback.
  */
 export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {}): RenderImpl {
-  assertBrowserHostnameActivation();
+  const testOnlyAllowedLoopbackOrigins = opts.testOnlyAllowedLoopbackOrigins ?? [];
+  if (testOnlyAllowedLoopbackOrigins.length === 0) assertBrowserHostnameActivation();
+  normalizeTestLoopbackOrigins(testOnlyAllowedLoopbackOrigins);
   const fallbackTimeoutMs = opts.timeoutMs ?? DEFAULT_RENDER_TIMEOUT_MS;
 
   return async (url, renderOpts): Promise<RenderResult> => {
     const timeoutMs = renderOpts?.timeoutMs ?? fallbackTimeoutMs;
-    const result = await renderPage(url, timeoutMs);
+    const result = await renderPage(url, timeoutMs, testOnlyAllowedLoopbackOrigins);
 
     const warnings = result.usedNetworkidleFallback
       ? [`render: networkidle fallback used after networkidle timeout (${timeoutMs}ms)`]

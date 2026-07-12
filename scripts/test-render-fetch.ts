@@ -153,7 +153,7 @@ async function testRenderSeesHydratedContentPlainFetchMisses(baseUrl: string) {
   );
   assert.ok(plainHtml.includes("EMPTY_SHELL"), "plain fetch should see the unhydrated shell");
 
-  const rendered = await renderPage(pageUrl, DEFAULT_RENDER_TIMEOUT_MS);
+  const rendered = await renderPage(pageUrl, DEFAULT_RENDER_TIMEOUT_MS, [baseUrl]);
   assert.ok(
     rendered.html.includes(HYDRATED_MARKER),
     "renderPage() must see content hydrated by client-side script after load"
@@ -171,7 +171,7 @@ async function testNetworkidleFallback(baseUrl: string) {
   // Short timeout: the pending /never-responds fetch means networkidle can
   // never resolve, so this always exercises the fallback — keeps the test
   // fast without being flaky.
-  const rendered = await renderPage(pageUrl, 800);
+  const rendered = await renderPage(pageUrl, 800, [baseUrl]);
 
   assert.equal(rendered.usedNetworkidleFallback, true, "a page with a perpetually-pending request must fall back");
   assert.ok(rendered.html.includes("HANG_SHELL"), "the fallback should still return the already-parsed DOM content");
@@ -188,7 +188,7 @@ async function testNetworkidleFallback(baseUrl: string) {
 // doc) so it is not silently dropped end-to-end.
 
 async function testRenderImplSurfacesFallbackWarning(baseUrl: string) {
-  const renderImpl = createCampfitRenderImpl();
+  const renderImpl = createCampfitRenderImpl({ testOnlyAllowedLoopbackOrigins: [baseUrl] });
 
   const fallbackResult = await renderImpl(`${baseUrl}/hang-page`, {
     userAgent: "unused-by-campfit-renderer",
@@ -238,7 +238,7 @@ async function testRenderFlowsIntoTraversePipeline(baseUrl: string) {
     sink,
     mode: "live-with-capture",
     log: () => {},
-    fetchOptions: { renderImpl: createCampfitRenderImpl() },
+    fetchOptions: { renderImpl: createCampfitRenderImpl({ testOnlyAllowedLoopbackOrigins: [baseUrl] }) },
   });
 
   assert.equal(result.ok, true, `expected ok=true, got fetchError=${result.fetchError} extractionError=${result.extractionError}`);
@@ -289,7 +289,7 @@ async function testRenderTimeoutIsolatesFailureAndSweepContinues(baseUrl: string
     sink,
     mode: "live-with-capture",
     log: () => {},
-    fetchOptions: { renderImpl: createCampfitRenderImpl() },
+    fetchOptions: { renderImpl: createCampfitRenderImpl({ testOnlyAllowedLoopbackOrigins: [baseUrl] }) },
   });
 
   assert.equal(results.length, 2, "both sources should have been attempted despite the render timeout");

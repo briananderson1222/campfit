@@ -142,6 +142,44 @@ describe("server egress URL policy threat matrix", () => {
     },
   );
 
+  it("permits only an explicitly allowlisted exact loopback test origin", async () => {
+    const allowedOrigin = "http://127.0.0.1:43127";
+    const options = createGuardedTraverseFetchOptions(
+      { testOnlyAllowedLoopbackOrigins: [allowedOrigin] } as never,
+      "storedCrawlTarget",
+      { responseOracle: oracle({ body: "fixture" }) },
+    );
+    const init = {
+      method: "GET" as const,
+      headers: {},
+      redirect: "manual" as const,
+      signal: new AbortController().signal,
+    };
+
+    await expect(options.fetch!(`${allowedOrigin}/page`, init)).resolves.toMatchObject({ status: 200 });
+    await expect(options.fetch!("http://127.0.0.1:43128/page", init)).rejects.toMatchObject({ code: "INVALID_PORT" });
+    await expect(options.fetch!("http://127.0.0.1/page", init)).rejects.toMatchObject({ code: "DENIED_ADDRESS" });
+  });
+
+  it("rejects broad or non-canonical loopback test allowances", async () => {
+    for (const origin of ["http://127.0.0.1", "http://127.0.0.1:43127/", "https://127.0.0.1:43127", "http://localhost:43127"]) {
+      await expect(evaluateEgressUrl("http://127.0.0.1:43127/page", "storedCrawlTarget", {
+        testOnlyAllowedLoopbackOrigins: [origin],
+      })).rejects.toBeInstanceOf(TypeError);
+    }
+  });
+
+  it("keeps the exact-loopback test capability absent from every production Traverse guard", () => {
+    for (const path of [
+      "lib/ingestion/lookout-check-adapter.ts",
+      "lib/ingestion/llm-discovery.ts",
+      "lib/ingestion/traverse-pipeline.ts",
+      "lib/ingestion/aggregator/aggregator-extraction.ts",
+    ]) {
+      expect(readFileSync(path, "utf8"), path).not.toContain("testOnlyAllowedLoopbackOrigins");
+    }
+  });
+
   it("rejects mixed public/private DNS before connecting", async () => {
     const responseOracle = oracle({ body: "should-not-connect" });
     const guardedFetch = createGuardedFetch({ resolver: resolver({ "example.test": ["93.184.216.34", "10.0.0.1"] }), responseOracle });

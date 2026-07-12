@@ -119,6 +119,7 @@ describe('scripts/scrape.ts main()', () => {
     // campfit#53 (spa-ingestion, AC1/AC2): even the dry-run path wires a real
     // renderImpl — scripts/scrape.ts is the ONLY caller that constructs one.
     expect(createCampfitRenderImpl).toHaveBeenCalledTimes(1);
+    expect(createCampfitRenderImpl).toHaveBeenCalledWith();
     expect(deps.fetchOptions?.renderImpl).toBe(createCampfitRenderImpl.mock.results[0].value);
 
     expect(runCrawlPipeline).not.toHaveBeenCalled();
@@ -167,6 +168,7 @@ describe('scripts/scrape.ts main()', () => {
     // own file doc); every Vercel-route caller of runCrawlPipeline leaves
     // this unset (see the per-route doc notes added alongside this task).
     expect(createCampfitRenderImpl).toHaveBeenCalledTimes(1);
+    expect(createCampfitRenderImpl).toHaveBeenCalledWith();
     expect(opts.fetchOptions?.renderImpl).toBe(createCampfitRenderImpl.mock.results[0].value);
 
     // currentByItemNames actually queries the DB pool (not a dead passthrough).
