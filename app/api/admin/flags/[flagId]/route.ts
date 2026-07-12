@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getFlagCommunity } from '@/lib/admin/community-access';
+import { updateFlagStatus } from '@/lib/admin/flag-repository';
 
 export async function PATCH(request: Request, props: { params: Promise<{ flagId: string }> }) {
   const params = await props.params;
@@ -23,15 +23,5 @@ export async function PATCH(request: Request, props: { params: Promise<{ flagId:
       ? 'OPEN'
       : 'RESOLVED';
 
-  const { rows } = await getPool().query(
-    `UPDATE "ReviewFlag"
-     SET status = $2,
-         "resolvedBy" = CASE WHEN $2 = 'OPEN' THEN NULL ELSE $3 END,
-         "resolvedAt" = CASE WHEN $2 = 'OPEN' THEN NULL ELSE now() END
-     WHERE id = $1
-     RETURNING *`,
-    [params.flagId, status, auth.access.email],
-  );
-
-  return NextResponse.json(rows[0]);
+  return NextResponse.json(await updateFlagStatus(params.flagId, status, auth.access.email));
 }
