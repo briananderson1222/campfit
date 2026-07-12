@@ -1,8 +1,8 @@
 /**
- * seed.ts — CSV → Supabase seeder
+ * seed.ts — CSV → Postgres seeder
  *
- * Reads all 4 Denver Camps CSV files, normalizes each row using
- * CsvIngestionAdapter, then upserts into Supabase via pg.
+ * Reads the Denver Camps CSV files, normalizes each row using
+ * CsvIngestionAdapter, then upserts into any compatible Postgres via pg.
  *
  * Run with: npx tsx scripts/seed.ts
  */
@@ -45,7 +45,7 @@ function getClient(): Client {
     database: config.database,
     user: config.user,
     password: config.password,
-    ssl: { rejectUnauthorized: false },
+    ssl: config.ssl === false ? false : { rejectUnauthorized: false },
   });
 }
 
