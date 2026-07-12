@@ -7,6 +7,15 @@ export type AdminEntityType = 'CAMP' | 'PROVIDER' | 'PERSON';
 export type AiCapability = 'READ' | 'PROPOSE' | 'WRITE';
 export type AiActionStatus = 'REQUESTED' | 'CONFIRMED' | 'REJECTED' | 'COMPLETED' | 'FAILED';
 
+export async function deletePersonRole(roleType: 'camp' | 'provider', roleId: string): Promise<number | null> {
+  const table = roleType === 'camp' ? 'CampPersonRole' : 'ProviderPersonRole';
+  const { rowCount } = await getPool().query(
+    `DELETE FROM "${table}" WHERE id = $1`,
+    [roleId],
+  );
+  return rowCount;
+}
+
 type EntityRow = {
   id: string;
   name?: string | null;

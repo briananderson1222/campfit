@@ -4,7 +4,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
-import { getPool } from "@/lib/db";
+import { getSavedCampCalendarRows } from "@/lib/calendar-repository";
 
 function escapeIcs(str: string) {
   return str.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
@@ -24,30 +24,8 @@ export async function GET() {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const pool = getPool();
-
   // Get all saved camps with schedules for this user
-  const result = await pool.query(
-    `SELECT
-       c.id, c.slug, c.name, c.description, c.address, c."websiteUrl",
-       json_agg(
-         json_build_object(
-           'id', cs.id,
-           'startDate', cs."startDate"::text,
-           'endDate', cs."endDate"::text,
-           'startTime', cs."startTime",
-           'endTime', cs."endTime",
-           'label', cs.label
-         ) ORDER BY cs."startDate"
-       ) FILTER (WHERE cs.id IS NOT NULL) AS schedules
-     FROM "UserSave" us
-     JOIN "User" u ON u.id = us."userId"
-     JOIN "Camp" c ON c.id = us."campId"
-     LEFT JOIN "CampSchedule" cs ON cs."campId" = c.id
-     WHERE u."authId" = $1
-     GROUP BY c.id`,
-    [user.id]
-  );
+  const rows = await getSavedCampCalendarRows(user.id);
 
   const baseUrl = "https://camp.fit";
   const lines: string[] = [
@@ -60,7 +38,7 @@ export async function GET() {
     "X-WR-TIMEZONE:America/Denver",
   ];
 
-  for (const camp of result.rows) {
+  for (const camp of rows) {
     const schedules = camp.schedules || [];
     const description = [
       camp.description?.slice(0, 200),
