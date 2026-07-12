@@ -53,8 +53,10 @@
  * next) covers a render failure with no special-casing.
  */
 
-import { chromium, errors as playwrightErrors, type Browser } from "@playwright/test";
+import { chromium, errors as playwrightErrors, type Browser, type Page } from "@playwright/test";
 import type { RenderImpl, RenderResult } from "@kontourai/traverse/fetch";
+import { isIP } from "node:net";
+import { evaluateEgressUrl, type EgressResolver } from "@/lib/security/egress-url-policy";
 
 /** Sane default hard timeout for a single rendered source (~30s). */
 export const DEFAULT_RENDER_TIMEOUT_MS = 30_000;
@@ -110,6 +112,31 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 /**
+ * Install before navigation. Chromium offers no supported way to connect to a
+ * vetted IP while preserving hostname TLS/SNI, so hostname requests fail
+ * closed. Public IP literals can be proven free of DNS rebinding and every
+ * redirect/subresource request is re-evaluated by this route.
+ */
+export async function installGuardedPageNetwork(
+  page: Page,
+  resolver?: EgressResolver,
+): Promise<void> {
+  await page.route("**/*", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    if (!isIP(requestUrl.hostname.replace(/^\[|\]$/g, ""))) {
+      await route.abort("blockedbyclient");
+      return;
+    }
+    try {
+      await evaluateEgressUrl(requestUrl, "browserSubresource", { resolver });
+      await route.continue();
+    } catch {
+      await route.abort("blockedbyclient");
+    }
+  });
+}
+
+/**
  * Fetches `url`'s fully-rendered HTML via headless Chromium.
  *
  * Waits for `networkidle` (the safest signal that client-side data-fetching
@@ -133,9 +160,10 @@ export async function renderPage(
 ): Promise<CampfitRenderTelemetry> {
   const start = Date.now();
   const browser = await getBrowser();
-  const page = await browser.newPage({ userAgent: RENDER_USER_AGENT });
+  const page = await browser.newPage({ userAgent: RENDER_USER_AGENT, serviceWorkers: "block" });
 
   try {
+    await installGuardedPageNetwork(page);
     let usedNetworkidleFallback = false;
     try {
       await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });

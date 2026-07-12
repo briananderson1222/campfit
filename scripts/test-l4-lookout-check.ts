@@ -34,6 +34,43 @@ await runLookoutCheck(rendered, { store: { ...store, latest: async () => undefin
 } });
 assert.equal(renderAttempts, 1, "a classified rendered attempt runs exactly once");
 
+// E6 threat matrix: the common live CHECK boundary mediates the first attempt
+// (and therefore the shell-warning retry, which calls the same runner).
+for (const threat of [
+  { name: "private-literal", url: "http://127.0.0.1/", answers: {} },
+  { name: "dns-private", url: "https://private.test/", answers: { "private.test": [{ address: "10.0.0.8", family: 4 }] } },
+] as const) {
+  let forbiddenConnections = 0;
+  const threatSource = campToLookoutSource({ id: `threat-${threat.name}`, websiteUrl: threat.url });
+  const checked = await runLookoutCheck(threatSource, {
+    store: { ...store, latest: async () => undefined },
+    egressResolver: async (host) => [...(threat.answers[host as keyof typeof threat.answers] ?? [])],
+    fetchOptions: { fetch: async () => { forbiddenConnections++; return new Response("forbidden"); } },
+    fetchSource: async (config, fetchOptions) => {
+      try { await fetchOptions?.fetch?.(config.url, { method: "GET", headers: {}, redirect: "manual", signal: new AbortController().signal }); }
+      catch { return { error: { kind: "network", message: "policy-rejected" } }; }
+      return { error: { kind: "network", message: "unexpected-connection" } };
+    },
+  });
+  assert.equal(checked.kind, "error", `${threat.name} is rejected as a stable CHECK error`);
+  assert.equal(forbiddenConnections, 0, `${threat.name} makes zero forbidden connections`);
+}
+
+{
+  let calls = 0;
+  const redirectSource = campToLookoutSource({ id: "threat-redirect", websiteUrl: "https://public.test/" });
+  await runLookoutCheck(redirectSource, {
+    store: { ...store, latest: async () => undefined },
+    egressResolver: async (host) => host === "public.test" ? [{ address: "93.184.216.34", family: 4 }] : [],
+    fetchOptions: { fetch: async () => { calls++; return new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest" } }); } },
+    fetchSource: async (config, fetchOptions) => {
+      try { await fetchOptions?.fetch?.(config.url, { method: "GET", headers: {}, redirect: "manual", signal: new AbortController().signal }); } catch { return { error: { kind: "network", message: "policy-rejected" } }; }
+      return { error: { kind: "network", message: "unexpected" } };
+    },
+  });
+  assert.equal(calls, 1, "redirect-to-metadata is rejected before connection two");
+}
+
 const shellPolicy = campToLookoutSource({ id: "shell", websiteUrl: "https://shell.test" }, "on-shell-warning");
 await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => undefined }, fetchSource: async (config) => {
   assert.notEqual(config.render, true, "on-shell-warning must begin with a plain classified attempt");
