@@ -36,3 +36,11 @@ CREATE TABLE IF NOT EXISTS "CrawlSiteHint" (
 );
 CREATE INDEX IF NOT EXISTS "CrawlSiteHint_domain_idx"
   ON "CrawlSiteHint" ("domain") WHERE ("active" = TRUE);
+
+-- Camp.displayName: also present in prod but in no migration; referenced by 13
+-- code files, so a fresh rebuild without it breaks. Captured faithfully to prod
+-- (text NOT NULL DEFAULT 'Denver'). NOTE: the 'Denver' default on a column named
+-- displayName looks like a legacy/mislabeled default worth reviewing separately;
+-- this migration only tracks reality, it does not change prod (ADD COLUMN IF NOT
+-- EXISTS is a no-op there).
+ALTER TABLE "Camp" ADD COLUMN IF NOT EXISTS "displayName" TEXT NOT NULL DEFAULT 'Denver';
