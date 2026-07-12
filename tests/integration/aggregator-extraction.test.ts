@@ -2,11 +2,11 @@
  * tests/integration/aggregator-extraction.test.ts — campfit#93 Wave 3 Task
  * 3.1 acceptance suite for `runAggregatorDiscovery` (R1/R2, AC1/AC2).
  *
- * Uses the SAME fixture-`FetchLike` seam `scripts/test-recrawl-adapter.ts` /
- * `scripts/test-traverse-cost-guards.ts` already use for
- * `TraversePipelineDeps.fetchOptions.fetch` (a fake serving fixed HTML by
- * URL, with `/robots.txt` answered as "no restrictions"), forwarded here to
- * `crawlSource`'s own `CrawlOptions.fetchOptions.fetch` — no network, no
+ * Uses the SAME declarative `egressResponseOracle` seam
+ * `scripts/test-recrawl-adapter.ts` / `scripts/test-traverse-cost-guards.ts`
+ * use. The production guard still evaluates every URL and owns the transport;
+ * the fixture supplies inert response bytes and a deterministic public DNS
+ * answer, with `/robots.txt` answered as "no restrictions" — no network, no
  * timers (a `sleep: async () => {}` no-op keeps `crawlSource`'s per-host
  * politeness delay from slowing the suite down).
  *
@@ -29,8 +29,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { FetchLike } from "@kontourai/traverse/fetch";
-import { createInMemorySnapshotStore } from "@kontourai/traverse/fetch";
+import { createInMemorySnapshotStore, type FetchSourceOptions } from "@kontourai/traverse/fetch";
 
 import {
   createStubProvider,
@@ -50,6 +49,7 @@ import {
   ensureProviderCandidateSchema,
   getPendingCandidates,
 } from "@/lib/ingestion/discovery/candidate-repository";
+import type { EgressResolver, EgressResponseOracle } from "@/lib/security/egress-url-policy";
 
 import { assertTestDatabase, closeTestPool, getTestPool } from "./test-db";
 
@@ -141,26 +141,29 @@ const ALL_FIXTURE_CANDIDATES = [
   { name: "Trailhead Robotics Camp", websiteUrl: "https://trailhead.example", locale: "Wheat Ridge, CO", page: PAGE_B_URL },
 ];
 
-/** Fake `FetchLike` serving the fixture site by URL; `/robots.txt` fails open (no restrictions). */
-function makeFixtureFetch(calls: string[]): FetchLike {
-  return async (fetchUrl: string) => {
-    calls.push(fetchUrl);
-    if (fetchUrl.endsWith("/robots.txt")) {
-      return {
-        status: 200,
-        headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/plain" : null) },
-        text: async () => "User-agent: *\nDisallow:",
-      };
-    }
-    const html = PAGES[fetchUrl];
-    if (html === undefined) {
-      return { status: 404, headers: { get: () => null }, text: async () => "not found" };
-    }
-    return {
-      status: 200,
-      headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
-      text: async () => html,
-    };
+type OracleFetchOptions = FetchSourceOptions & {
+  egressResponseOracle: EgressResponseOracle;
+  egressResolver: EgressResolver;
+};
+
+function makeFixtureFetchOptions(calls: string[], pages: Record<string, string>): OracleFetchOptions {
+  return {
+    sleep: async () => {},
+    egressResolver: async (hostname) => {
+      calls.push(hostname);
+      return [{ address: "93.184.216.34", family: 4 }];
+    },
+    egressResponseOracle: {
+      responses: [
+        { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+        ...Object.entries(pages).map(([url, body]) => ({
+          urlSuffix: new URL(url).pathname,
+          body,
+          headers: { "content-type": "text/html; charset=utf-8" },
+          repeat: true,
+        })),
+      ],
+    },
   };
 }
 
@@ -218,7 +221,7 @@ function buildDeps(calls: string[]): AggregatorDiscoveryDeps {
     provider: createStubProvider(buildStubSpecs(), { model: "stub-aggregator" }),
     store: createInMemorySnapshotStore(),
     mode: "live-with-capture",
-    fetchOptions: { fetch: makeFixtureFetch(calls), sleep: async () => {} },
+    fetchOptions: makeFixtureFetchOptions(calls, PAGES),
     log: () => {},
   };
 }
@@ -369,27 +372,6 @@ describe("M fix — skipped-self structural backstop", () => {
     { name: "Aggregator's WWW-Variant Listing", websiteUrl: "https://www.selftest.example/promo" },
   ];
 
-  function selfTestFetch(calls: string[]): FetchLike {
-    return async (fetchUrl: string) => {
-      calls.push(fetchUrl);
-      if (fetchUrl.endsWith("/robots.txt")) {
-        return {
-          status: 200,
-          headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/plain" : null) },
-          text: async () => "User-agent: *\nDisallow:",
-        };
-      }
-      if (fetchUrl === SELF_SOURCE_URL) {
-        return {
-          status: 200,
-          headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
-          text: async () => SELF_TEST_HTML,
-        };
-      }
-      return { status: 404, headers: { get: () => null }, text: async () => "not found" };
-    };
-  }
-
   function selfTestStubSpecs(): StubProposalSpec[] {
     const specs: StubProposalSpec[] = [];
     SELF_TEST_CANDIDATES.forEach((candidate, i) => {
@@ -415,7 +397,7 @@ describe("M fix — skipped-self structural backstop", () => {
       provider: createStubProvider(selfTestStubSpecs(), { model: "stub-self-test" }),
       store: createInMemorySnapshotStore(),
       mode: "live-with-capture",
-      fetchOptions: { fetch: selfTestFetch(calls), sleep: async () => {} },
+      fetchOptions: makeFixtureFetchOptions(calls, { [SELF_SOURCE_URL]: SELF_TEST_HTML }),
       log: () => {},
     };
 

@@ -76,6 +76,7 @@ import type {
   SnapshotStore,
   SourceConfig,
 } from "@kontourai/traverse/fetch";
+import { createGuardedTraverseFetchOptions } from "@/lib/security/egress-url-policy";
 import {
   SHELL_WARNING_CODE,
   SHELL_WARNING_CODE_EMBEDDED,
@@ -471,7 +472,9 @@ async function runFetchAndExtractAttempt(
     // funnel through this one attempt function.
     maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
     maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
-    fetchOptions: deps.fetchOptions,
+    fetchOptions: mode === "replay"
+      ? deps.fetchOptions
+      : createGuardedTraverseFetchOptions(deps.fetchOptions, "storedCrawlTarget"),
   };
   // The revalidating path composes fetch->extract itself so a trustworthy 304
   // can return BEFORE extraction (zero provider calls). Every OTHER path stays

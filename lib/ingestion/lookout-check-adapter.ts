@@ -6,6 +6,7 @@ import type { Camp } from "@/lib/types";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import { runTraverseRecrawlForCamp, type TraverseRecrawlOptions, type TraverseRecrawlResult } from "./traverse-recrawl-adapter";
 import { createCampfitObservationStore, emitCampfitObservation, recoverPendingSurveyDelivery } from "./lookout-observation-store";
+import { createGuardedTraverseFetchOptions, type EgressResolver } from "@/lib/security/egress-url-policy";
 
 export { LOOKOUT_CADENCE_HINT, campToLookoutSource, listingToLookoutSource } from "./lookout-sources";
 import { campToLookoutSource } from "./lookout-sources";
@@ -13,6 +14,8 @@ import { campToLookoutSource } from "./lookout-sources";
 export interface RunLookoutCheckOptions extends Omit<CreateCheckRunnerOptions, "fetchSource"> {
   fetchSource: FetchSource;
   userAgent?: string;
+  /** Deterministic threat-fixture seam; production uses the canonical resolver. */
+  egressResolver?: EgressResolver;
 }
 
 /** Run the shipped classifier while restoring CampFit fetch policy omitted by Lookout 0.2.0. */
@@ -23,7 +26,12 @@ export async function runLookoutCheck(source: LookoutSource, options: RunLookout
     userAgent: options.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
     ...(source.renderPolicy === "always" ? { render: true, revalidate: false } : {}),
   }, fetchOptions);
-  return createCheckRunner({ ...options, fetchSource }).check(source);
+  const fetchOptions = createGuardedTraverseFetchOptions(
+    options.fetchOptions,
+    "storedCrawlTarget",
+    { resolver: options.egressResolver },
+  );
+  return createCheckRunner({ ...options, fetchOptions, fetchSource }).check(source);
 }
 
 export function isLookoutUnchanged(result: CheckResult): boolean {

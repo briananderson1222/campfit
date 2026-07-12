@@ -38,7 +38,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 
-const { requireAdminAccessMock } = vi.hoisted(() => ({ requireAdminAccessMock: vi.fn() }));
+const { requireAdminAccessMock, evaluateEgressUrlMock } = vi.hoisted(() => ({
+  requireAdminAccessMock: vi.fn(),
+  evaluateEgressUrlMock: vi.fn(),
+}));
 
 vi.mock('@/lib/admin/access', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/admin/access')>();
@@ -48,7 +51,13 @@ vi.mock('@/lib/admin/access', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/security/egress-url-policy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/security/egress-url-policy')>();
+  return { ...actual, evaluateEgressUrl: evaluateEgressUrlMock };
+});
+
 import { evaluateAdminAccess } from '@/lib/admin/access';
+import { EgressUrlPolicyError } from '@/lib/security/egress-url-policy';
 import { GET as listGET, POST as registerPOST } from '@/app/api/admin/aggregators/route';
 import { GET as detailGET } from '@/app/api/admin/aggregators/[id]/route';
 import { POST as tosDecisionPOST } from '@/app/api/admin/aggregators/[id]/tos-decision/route';
@@ -99,6 +108,11 @@ beforeAll(async () => {
 beforeEach(() => {
   requireAdminAccessMock.mockReset();
   requireAdminAccessMock.mockResolvedValue(ADMIN_ACCESS);
+  evaluateEgressUrlMock.mockReset();
+  evaluateEgressUrlMock.mockResolvedValue({
+    url: new URL('https://fixture-public.example/'),
+    addresses: ['93.184.216.34'],
+  });
 });
 
 afterEach(async () => {
@@ -144,6 +158,8 @@ describe('POST /api/admin/aggregators', () => {
     expect(data.communitySlug).toBe('denver');
     expect(data.createdBy).toBe('admin@campfit.test');
     expect(await aggregatorCount()).toBe(1);
+    expect(evaluateEgressUrlMock).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrlMock).toHaveBeenCalledWith('https://campfinder.example', 'operatorDiscovery');
   });
 
   it('rejects a missing name with 400 and creates no row', async () => {
@@ -184,6 +200,27 @@ describe('POST /api/admin/aggregators', () => {
       }),
     );
     expect(res.status).toBe(201);
+    expect(evaluateEgressUrlMock).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrlMock).toHaveBeenCalledWith('https://mod-agg.example', 'operatorDiscovery');
+  });
+
+  it('returns 422 and creates no row when the egress policy rejects registration', async () => {
+    evaluateEgressUrlMock.mockRejectedValueOnce(
+      new EgressUrlPolicyError('DENIED_ADDRESS', 'operatorDiscovery', 'blocked.example'),
+    );
+
+    const res = await registerPOST(
+      jsonRequest('http://localhost/api/admin/aggregators', 'POST', {
+        name: 'Blocked Aggregator',
+        url: 'https://blocked.example/private',
+      }),
+    );
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'url is not permitted for server-side discovery' });
+    expect(evaluateEgressUrlMock).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrlMock).toHaveBeenCalledWith('https://blocked.example/private', 'operatorDiscovery');
+    expect(await aggregatorCount()).toBe(0);
   });
 
   it('rejects a moderator NOT scoped to the requested community with 403 and creates no row', async () => {

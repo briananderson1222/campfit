@@ -36,6 +36,7 @@
 import type { Pool } from "pg";
 import { extract, type ExtractionProvider } from "@kontourai/traverse";
 import { crawlSource } from "@kontourai/traverse/fetch";
+import { createGuardedTraverseFetchOptions } from "@/lib/security/egress-url-policy";
 import type { FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetch";
 
 import { getPool } from "@/lib/db";
@@ -193,7 +194,9 @@ export async function runAggregatorDiscovery(
       maxDepth: source.maxDepth,
       store: deps.store ?? createCampfitSnapshotStore(),
       mode: deps.mode ?? "live-with-capture",
-      fetchOptions: deps.fetchOptions,
+      fetchOptions: (deps.mode ?? "live-with-capture") === "replay"
+        ? deps.fetchOptions
+        : createGuardedTraverseFetchOptions(deps.fetchOptions, "discoveredLink"),
     },
   );
 

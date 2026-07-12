@@ -5,6 +5,7 @@ import { DISCOVERY_FIELD_HINTS, DISCOVERY_TARGET_SCHEMA } from "./discovery-sche
 import { groupDiscoveryItems } from "./discovery-item-grouping";
 import { fetchAndExtractWithRevalidation } from "./traverse-fetch-extract";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
+import { createGuardedTraverseFetchOptions, type EgressPolicyProfile } from "@/lib/security/egress-url-policy";
 
 export interface DiscoveredCampStub {
   name: string;
@@ -41,6 +42,7 @@ export interface DiscoveryOptions {
   maxChars?: number;
   maxProviderCalls?: number;
   maxTotalTokens?: number;
+  egressProfile?: EgressPolicyProfile;
 }
 
 export async function discoverCampsFromUrl(url: string, options: DiscoveryOptions): Promise<DiscoveryResult> {
@@ -60,7 +62,9 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
         // lower either ceiling, but discovery is never silently unbounded.
         maxProviderCalls: options.maxProviderCalls ?? 40,
         maxTotalTokens: options.maxTotalTokens ?? 450_000,
-        fetchOptions: options.fetchOptions,
+        fetchOptions: (options.mode ?? "live-with-capture") === "replay"
+          ? options.fetchOptions
+          : createGuardedTraverseFetchOptions(options.fetchOptions, options.egressProfile ?? "storedCrawlTarget"),
       },
       options.revalidate === true,
     );
@@ -69,14 +73,13 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
       return { isListingPage: true, stubs: [], model, unchanged: true, warnings: result.fetch.warnings };
     }
     if (result.fetch.error || !result.fetch.snapshot) {
-      const detail = result.fetch.error?.message ?? "no snapshot returned";
-      return { isListingPage: false, stubs: [], model, error: `Fetch failed: ${detail}` };
+      return { isListingPage: false, stubs: [], model, error: "Upstream provider request failed" };
     }
     if (!result.extraction) {
       return { isListingPage: false, stubs: [], model, error: "Extraction failed: no extraction result" };
     }
     if (result.extraction.error) {
-      return { isListingPage: false, stubs: [], model, error: `Extraction failed: ${result.extraction.error}` };
+      return { isListingPage: false, stubs: [], model, error: "Upstream provider extraction failed" };
     }
     if (!result.sourceRef) {
       return { isListingPage: false, stubs: [], model, error: "Extraction failed: snapshot source ref missing" };

@@ -8,6 +8,8 @@ import { runLookoutRecrawlForCamp } from "../lib/ingestion/lookout-check-adapter
 import { eventsToProposedChanges, dbCurrentProposedChanges } from "../lib/ingestion/lookout-event-mapper";
 import { createStubProvider } from "../tests/fixtures/traverse/stub-provider";
 import type { Camp } from "../lib/types";
+import type { EgressResolver, EgressResponseOracle } from "../lib/security/egress-url-policy";
+import type { FetchSourceOptions } from "@kontourai/traverse/fetch";
 
 type Fixture = { sourceId: string; sourceUrl: string; snapshotRef: string; snapshotBodyHash: string; current: { name: string; city: string }; extracted: { city: string }; confidence: { city: number }; excerpts: { city: string } };
 const ROOT = process.cwd();
@@ -17,9 +19,17 @@ const at = "2026-07-11T00:00:00.000Z";
 function camp(f: Fixture): Camp {
   return { id: f.sourceId, slug: f.sourceId, name: f.current.name, websiteUrl: f.sourceUrl, city: f.current.city, fieldSources: {}, ageGroups: [], schedules: [], pricing: [], campTypes: [], categories: [] } as unknown as Camp;
 }
-function fixtureFetch(f: Fixture) {
+function fixtureFetchOptions(f: Fixture): FetchSourceOptions & { egressResolver: EgressResolver; egressResponseOracle: EgressResponseOracle } {
   const html = `<html><body><h1>${f.current.name}</h1><p>${f.excerpts.city}</p></body></html>`;
-  return async (url: string) => ({ status: 200, headers: { get: (name: string) => name.toLowerCase() === "content-type" ? (url.endsWith("robots.txt") ? "text/plain" : "text/html") : null }, text: async () => url.endsWith("robots.txt") ? "User-agent: *\nDisallow:" : html });
+  return {
+    sleep: async () => undefined,
+    now: () => Date.parse(at),
+    egressResolver: async () => [{ address: "93.184.216.34", family: 4 }],
+    egressResponseOracle: { responses: [
+      { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+      { body: html, headers: { "content-type": "text/html" }, repeat: true },
+    ] },
+  };
 }
 async function route(kind: "legacy" | "lookout", f: Fixture): Promise<TraverseRecrawlResult> {
   const current = camp(f);
@@ -28,7 +38,7 @@ async function route(kind: "legacy" | "lookout", f: Fixture): Promise<TraverseRe
       { fieldPath: "items[].name", candidateValue: current.name, needle: current.name },
       { fieldPath: "items[].city", candidateValue: f.extracted.city, needle: f.extracted.city, confidence: f.confidence.city },
     ]), store: createInMemorySnapshotStore(), mode: "live-with-capture" as const,
-    fetchOptions: { fetch: fixtureFetch(f), sleep: async () => undefined, now: () => Date.parse(at) }, now: () => Date.parse(at), fieldSources: {} };
+    fetchOptions: fixtureFetchOptions(f), now: () => Date.parse(at), fieldSources: {} };
   const original = Date.now; Date.now = () => Date.parse(at);
   try { return kind === "legacy" ? await runTraverseRecrawlForCamp(options) : await runLookoutRecrawlForCamp(options, { fetchSource, clock: () => at }); }
   finally { Date.now = original; }

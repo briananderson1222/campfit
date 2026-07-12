@@ -11,3 +11,4 @@ Numbered ADRs below are FROZEN immutable history (see the banner on each file). 
 | --- | --- | --- | --- |
 | 0001 | Session registration status is the domain truth | unknown | [0001-session-registration-status.md](./0001-session-registration-status.md) |
 | 0002 | Verified camps and sessions are aggregates of verified claims | unknown | [0002-verified-camp-session-claim-sets.md](./0002-verified-camp-session-claim-sets.md) |
+| 0003 | Server egress URLs require address-vetted, connection-pinned transports | 2026-07-12 | [0003-server-egress-url-policy.md](./0003-server-egress-url-policy.md) |

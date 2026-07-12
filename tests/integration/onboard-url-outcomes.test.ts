@@ -27,6 +27,11 @@ import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 // ── Import-boundary mocks (lib/ingestion/** untouched — only the import is stubbed) ──
 
 const discoverCampsFromUrl = vi.fn();
+const evaluateEgressUrl = vi.fn();
+const runCrawlPipeline = vi.fn(async (opts: { onProgress?: (event: unknown) => void }) => {
+  opts.onProgress?.({ type: 'started', runId: 'test-run-id' });
+  return { runId: 'test-run-id' };
+});
 const ROUTE_FIXTURE_SNAPSHOT_REF = 'traverse-snapshot:campfit-discovery%3Ahttps%3A%2F%2Ffixture.example%2Fprograms?url=https%3A%2F%2Ffixture.example%2Fprograms&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&fetchedAt=2026-07-10T00%3A00%3A00.000Z';
 
 vi.mock('@/lib/ingestion/llm-discovery', () => ({
@@ -56,10 +61,7 @@ vi.mock('@/lib/ingestion/traverse-snapshot-store', () => ({
 }));
 
 vi.mock('@/lib/ingestion/crawl-pipeline', () => ({
-  runCrawlPipeline: vi.fn(async (opts: { onProgress?: (event: unknown) => void }) => {
-    opts.onProgress?.({ type: 'started', runId: 'test-run-id' });
-    return { runId: 'test-run-id' };
-  }),
+  runCrawlPipeline: (...args: unknown[]) => runCrawlPipeline(...args as [never]),
 }));
 
 vi.mock('@/lib/admin/access', () => ({
@@ -74,7 +76,13 @@ vi.mock('@/lib/admin/access', () => ({
   })),
 }));
 
+vi.mock('@/lib/security/egress-url-policy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/security/egress-url-policy')>();
+  return { ...actual, evaluateEgressUrl: (...args: unknown[]) => evaluateEgressUrl(...args) };
+});
+
 import { POST } from '@/app/api/admin/crawl/onboard-url/route';
+import { EgressUrlPolicyError } from '@/lib/security/egress-url-policy';
 
 function postRequest(body: Record<string, unknown>): Request {
   return new Request('http://localhost/api/admin/crawl/onboard-url', {
@@ -155,6 +163,8 @@ describe('POST /api/admin/crawl/onboard-url — created/skipped breakdown (R5/AC
     expect(data.createdNames.sort()).toEqual(['Camp Alpha', 'Camp Beta']);
     expect(data.skipped).toBe(0);
     expect(data.skippedNames).toEqual([]);
+    expect(evaluateEgressUrl).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrl).toHaveBeenCalledWith('https://brand-new-domain.example/programs', 'operatorDiscovery');
 
     const { rows: providerRows } = await pool.query(
       `SELECT id FROM "Provider" WHERE domain = 'brand-new-domain.example'`,
@@ -209,6 +219,8 @@ describe('POST /api/admin/crawl/onboard-url — created/skipped breakdown (R5/AC
     expect(data.createdNames).toEqual(['Camp New']);
     expect(data.skipped).toBe(1);
     expect(data.skippedNames).toEqual(['Camp Existing']);
+    expect(evaluateEgressUrl).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrl).toHaveBeenCalledWith('https://existing-domain.example/programs', 'operatorDiscovery');
 
     // 1 pre-seeded + 1 newly created == 2.
     expect(await campCountForProvider(pool, providerId)).toBe(2);
@@ -244,23 +256,58 @@ describe('POST /api/admin/crawl/onboard-url — created/skipped breakdown (R5/AC
     expect(data.skippedNames).toEqual(['Camp Existing']);
     // No crawl triggered for the all-duplicate case.
     expect(data.runId).toBeUndefined();
+    expect(evaluateEgressUrl).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrl).toHaveBeenCalledWith('https://dup-domain.example/programs', 'operatorDiscovery');
 
     // No new Camp row was inserted — still just the one pre-seeded row.
     expect(await campCountForProvider(pool, providerId)).toBe(1);
   });
 
   it('keeps genuine discovery failures on their existing 422 error branch, distinguishable from the all-duplicate 200 case', async () => {
+    const upstreamSecret = 'Fetch failed: HTTP 404 secret=discovery-sentinel';
     discoverCampsFromUrl.mockResolvedValue({
       isListingPage: false,
       model: 'test',
       stubs: [],
-      error: 'Fetch failed: HTTP 404',
+      error: upstreamSecret,
     });
 
     const res = await POST(postRequest({ url: 'https://unreachable-domain.example/programs' }));
     expect(res.status).toBe(422);
     const data = await res.json();
-    expect(data.error).toBe('Fetch failed: HTTP 404');
+    expect(data.error).toBe('Discovery failed for that URL');
+    expect(JSON.stringify(data)).not.toContain(upstreamSecret);
     expect(data.created).toBeUndefined();
+  });
+
+  it.each([
+    ['missing discovery result', () => discoverCampsFromUrl.mockRejectedValue(new Error('missing result'))],
+    ['empty discovery result', () => discoverCampsFromUrl.mockResolvedValue({ isListingPage: false, model: 'test', stubs: [] })],
+  ])('keeps a %s on the generic no-camps 422 branch', async (_label, arrangeDiscovery) => {
+    arrangeDiscovery();
+
+    const res = await POST(postRequest({ url: 'https://empty-domain.example/programs' }));
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error: 'No camps found on that page. Try the camp\'s programs or schedule page.',
+    });
+  });
+
+  it('returns 422 before provider, discovery, or crawl work when egress policy rejects the URL', async () => {
+    evaluateEgressUrl.mockRejectedValueOnce(
+      new EgressUrlPolicyError('DENIED_ADDRESS', 'operatorDiscovery', 'blocked.example'),
+    );
+
+    const res = await POST(postRequest({ url: 'https://blocked.example/private' }));
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'URL is not permitted for server-side discovery.' });
+    expect(evaluateEgressUrl).toHaveBeenCalledOnce();
+    expect(evaluateEgressUrl).toHaveBeenCalledWith('https://blocked.example/private', 'operatorDiscovery');
+    expect(discoverCampsFromUrl).not.toHaveBeenCalled();
+    expect(runCrawlPipeline).not.toHaveBeenCalled();
+    expect(await pool.query(`SELECT COUNT(*)::int AS count FROM "Provider"`)).toMatchObject({ rows: [{ count: 0 }] });
+    expect(await pool.query(`SELECT COUNT(*)::int AS count FROM "Camp"`)).toMatchObject({ rows: [{ count: 0 }] });
   });
 });

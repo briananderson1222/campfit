@@ -6,6 +6,7 @@ import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-st
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { parseDomain } from '@/lib/admin/onboarding-validation';
+import { EgressUrlPolicyError, evaluateEgressUrl } from '@/lib/security/egress-url-policy';
 
 export const maxDuration = 300;
 
@@ -39,6 +40,15 @@ export async function POST(req: Request) {
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   if (!url) return NextResponse.json({ error: 'URL required' }, { status: 400 });
 
+  try {
+    await evaluateEgressUrl(url, 'operatorDiscovery');
+  } catch (error) {
+    if (error instanceof EgressUrlPolicyError) {
+      return NextResponse.json({ error: 'URL is not permitted for server-side discovery.' }, { status: 422 });
+    }
+    return NextResponse.json({ error: 'URL could not be validated for server-side discovery.' }, { status: 422 });
+  }
+
   const domain = parseDomain(url);
   if (!domain) return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
 
@@ -70,11 +80,18 @@ export async function POST(req: Request) {
   try {
     discoveryDeps = { provider: resolveExtractionProvider().provider, store: createCampfitSnapshotStore() };
   } catch (error) {
-    return NextResponse.json({ error: `Discovery provider unavailable: ${error instanceof Error ? error.message : String(error)}` }, { status: 422 });
+    console.error('[onboard-url] discovery provider unavailable:', error);
+    return NextResponse.json({ error: 'Discovery provider is unavailable.' }, { status: 422 });
   }
-  const discovery = await discoverCampsFromUrl(url, discoveryDeps).catch(() => null);
-  if (!discovery || discovery.error || !discovery.stubs.length) {
-    return NextResponse.json({ error: discovery?.error ?? 'No camps found on that page. Try the camp\'s programs or schedule page.' }, { status: 422 });
+  const discovery = await discoverCampsFromUrl(url, { ...discoveryDeps, egressProfile: 'operatorDiscovery' }).catch(() => null);
+  if (!discovery) {
+    return NextResponse.json({ error: 'No camps found on that page. Try the camp\'s programs or schedule page.' }, { status: 422 });
+  }
+  if (discovery.error) {
+    return NextResponse.json({ error: 'Discovery failed for that URL' }, { status: 422 });
+  }
+  if (!discovery.stubs.length) {
+    return NextResponse.json({ error: 'No camps found on that page. Try the camp\'s programs or schedule page.' }, { status: 422 });
   }
 
   // Filter against any existing camps from this domain
@@ -167,6 +184,7 @@ export async function POST(req: Request) {
       skippedNames,
     });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('[onboard-url] crawl start failed:', err);
+    return NextResponse.json({ error: 'The crawl could not be started.' }, { status: 500 });
   }
 }

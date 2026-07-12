@@ -13,6 +13,11 @@
 import type { CampCategory, CampType } from '@/lib/types';
 import { getPool } from '@/lib/db';
 import { stripHtmlToText } from '@/lib/ingestion/html-stripper';
+import {
+  createGuardedFetch,
+  EgressUrlPolicyError,
+  type EgressResolver,
+} from '@/lib/security/egress-url-policy';
 
 export interface HarvestedListing {
   name: string;
@@ -62,9 +67,17 @@ export function nameSimilarity(a: string, b: string): number {
 
 export abstract class BaseHarvester {
   readonly sourceName: string;
+  private readonly guardedFetch: typeof fetch;
 
-  constructor(sourceName: string) {
+  constructor(sourceName: string, egress: { resolver?: EgressResolver } = {}) {
+    if ("fetch" in egress || "connector" in egress) {
+      throw new EgressUrlPolicyError('UNTRUSTED_TRANSPORT', 'fixedHarvester');
+    }
     this.sourceName = sourceName;
+    this.guardedFetch = createGuardedFetch({
+      profile: 'fixedHarvester',
+      resolver: egress.resolver,
+    });
   }
 
   /**
@@ -75,7 +88,7 @@ export abstract class BaseHarvester {
 
   /** Fetch HTML from a URL with a browser-like User-Agent. */
   protected async fetchHtml(url: string): Promise<string> {
-    const res = await fetch(url, {
+    const res = await this.guardedFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         Accept: 'text/html,application/xhtml+xml,*/*',

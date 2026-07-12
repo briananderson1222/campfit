@@ -29,6 +29,7 @@ import {
   listAggregatorSources,
 } from '@/lib/ingestion/aggregator/aggregator-repository';
 import { ensureProviderCandidateSchema } from '@/lib/ingestion/discovery/candidate-repository';
+import { EgressUrlPolicyError, evaluateEgressUrl } from '@/lib/security/egress-url-policy';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -80,6 +81,14 @@ export async function POST(request: Request) {
   const url = typeof body.url === 'string' ? body.url.trim() : '';
   if (!url || !isValidHttpUrl(url)) {
     return NextResponse.json({ error: 'url must be a valid http(s) URL' }, { status: 400 });
+  }
+  try {
+    await evaluateEgressUrl(url, 'operatorDiscovery');
+  } catch (error) {
+    if (error instanceof EgressUrlPolicyError) {
+      return NextResponse.json({ error: 'url is not permitted for server-side discovery' }, { status: 422 });
+    }
+    return NextResponse.json({ error: 'url could not be validated for server-side discovery' }, { status: 422 });
   }
 
   const pool = getPool();

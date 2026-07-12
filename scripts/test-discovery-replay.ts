@@ -5,8 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtractionProposal, ExtractionProvider, ProviderExtractionOutput } from "@kontourai/traverse";
 import { prepareContent } from "@kontourai/traverse";
-import { createInMemorySnapshotStore, parseSnapshotSourceRef, replaySource, type FetchLike } from "@kontourai/traverse/fetch";
+import { createInMemorySnapshotStore, parseSnapshotSourceRef, replaySource, type FetchSourceOptions } from "@kontourai/traverse/fetch";
 import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from "../lib/ingestion/llm-discovery";
+import type { EgressResponseOracle, EgressResolver } from "../lib/security/egress-url-policy";
 import { groupDiscoveryItems } from "../lib/ingestion/discovery-item-grouping";
 import { createStubProvider, type StubProposalSpec } from "../tests/fixtures/traverse/stub-provider";
 
@@ -18,7 +19,6 @@ const SYNTHETIC = '<main><h1>Programs</h1><article><h2>River Makers</h2><p>Build
 
 function sha256(body: string) { return createHash("sha256").update(body).digest("hex"); }
 function fixtureBody(name: string) { return name.startsWith("inline:") ? SYNTHETIC : readFileSync(join(ROOT, name), "utf8"); }
-function hdrGet(values: Record<string, string>) { return { get: (name: string) => values[name.toLowerCase()] ?? null }; }
 function testDiceCoefficient(left: string, right: string): number {
   const toBigrams = (value: string) => {
     const normalized = value.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
@@ -35,13 +35,19 @@ function testDiceCoefficient(left: string, right: string): number {
   });
   return (2 * intersection) / (leftBigrams.size + rightBigrams.size);
 }
-function fixtureFetch(body: string, validators = false, return304 = false): FetchLike {
-  return (async (url: string, init?: { headers?: Record<string, string> }) => {
-    if (url.endsWith("/robots.txt")) return { status: 200, headers: hdrGet({ "content-type": "text/plain" }), text: async () => "User-agent: *\nDisallow:" };
-    const validated = init?.headers?.["If-None-Match"] === '"fixture-v1"';
-    if (return304 && validated) return { status: 304, headers: hdrGet({ etag: '"fixture-v1"', "content-type": "text/html" }), text: async () => { throw new Error("304 body read"); } };
-    return { status: 200, headers: hdrGet({ "content-type": "text/html", ...(validators ? { etag: '"fixture-v1"' } : {}) }), text: async () => body };
-  }) as FetchLike;
+type OracleFetchOptions = FetchSourceOptions & { egressResponseOracle: EgressResponseOracle; egressResolver: EgressResolver };
+const fixtureResolver: EgressResolver = async () => [{ address: "93.184.216.34", family: 4 }];
+function fixtureFetchOptions(body: string, validators = false, return304 = false): OracleFetchOptions {
+  const headers = { "content-type": "text/html", ...(validators ? { etag: '"fixture-v1"' } : {}) };
+  return {
+    sleep: async () => {},
+    egressResolver: fixtureResolver,
+    egressResponseOracle: { responses: [
+      { urlSuffix: "/robots.txt", body: "User-agent: *\nDisallow:", headers: { "content-type": "text/plain" }, repeat: true },
+      ...(return304 ? [{ status: 304, headers, whenHeaders: { "if-none-match": '"fixture-v1"' }, repeat: true }] : []),
+      { status: 200, headers, body, repeat: true },
+    ] },
+  };
 }
 function specs(row: (typeof corpus.fixtures)[number]): StubProposalSpec[] {
   const names = row.expectedNames;
@@ -68,7 +74,7 @@ async function characterizeCorpus() {
     assert.equal(sha256(body), row.bodySha256, `${row.fixture} bytes drifted`);
     const store = createInMemorySnapshotStore();
     const url = `https://example.test/listings/${index}`;
-    const live = await discoverCampsFromUrl(url, { provider: createStubProvider(specs(row)), store, fetchOptions: { fetch: fixtureFetch(body), sleep: async () => {} } });
+    const live = await discoverCampsFromUrl(url, { provider: createStubProvider(specs(row)), store, fetchOptions: fixtureFetchOptions(body) });
     assert.equal(live.error, undefined);
     assert.deepEqual(live.stubs.map(s => s.name), row.expectedNames);
     assert.equal(live.stubs.length, row.expectedCount);
@@ -94,7 +100,7 @@ async function characterizeCorpus() {
         );
       }
     }
-    const replay = await discoverCampsFromUrl(url, { provider: createStubProvider(specs(row)), store, mode: "replay", fetchOptions: { fetch: async () => { throw new Error("network reached in replay"); } } });
+    const replay = await discoverCampsFromUrl(url, { provider: createStubProvider(specs(row)), store, mode: "replay", fetchOptions: { sleep: async () => {}, egressResolver: fixtureResolver, egressResponseOracle: { responses: [{ error: true, repeat: true }] } } as OracleFetchOptions });
     assert.deepEqual(replay.stubs, live.stubs);
     const stored = await replaySource(store, `campfit-discovery:${url}`);
     assert.equal(stored.snapshot?.bodyHash, row.bodySha256);
@@ -111,15 +117,15 @@ async function faultAndBoundaryChecks() {
   const body = fixtureBody(row.fixture);
   const url = "https://example.test/listings/faults";
   const store = createInMemorySnapshotStore();
-  const live = await discoverCampsFromUrl(url, { provider: createStubProvider(specs(row)), store, fetchOptions: { fetch: fixtureFetch(body, true), sleep: async () => {} } });
+  const live = await discoverCampsFromUrl(url, { provider: createStubProvider(specs(row)), store, fetchOptions: fixtureFetchOptions(body, true) });
   assert.equal(live.stubs[0].detailUrl, "https://example.test/programs/river-makers");
   assert.equal(live.stubs[1].detailUrl, "https://example.test/programs/sky-studio");
 
   const unsafeSpecs = specs(row).map(s => s.fieldPath === "items[0].detailUrl" ? { ...s, candidateValue: "javascript:alert(1)" } : s);
-  const unsafe = await discoverCampsFromUrl("https://example.test/listings/unsafe", { provider: createStubProvider(unsafeSpecs), store: createInMemorySnapshotStore(), fetchOptions: { fetch: fixtureFetch(body), sleep: async () => {} } });
+  const unsafe = await discoverCampsFromUrl("https://example.test/listings/unsafe", { provider: createStubProvider(unsafeSpecs), store: createInMemorySnapshotStore(), fetchOptions: fixtureFetchOptions(body) });
   assert.equal(unsafe.stubs[0].detailUrl, null);
 
-  const bad = await discoverCampsFromUrl("https://example.test/listings/bad", { provider: createStubProvider([{ fieldPath: "items[0].name", candidateValue: "Ghost Camp", needle: "NOT PRESENT" }]), store: createInMemorySnapshotStore(), fetchOptions: { fetch: fixtureFetch(body), sleep: async () => {} } });
+  const bad = await discoverCampsFromUrl("https://example.test/listings/bad", { provider: createStubProvider([{ fieldPath: "items[0].name", candidateValue: "Ghost Camp", needle: "NOT PRESENT" }]), store: createInMemorySnapshotStore(), fetchOptions: fixtureFetchOptions(body) });
   assert.equal(bad.stubs.length, 0, "non-verbatim excerpt cannot become a stub");
   assert.throws(() => buildDiscoveryFieldSources({ ...live.stubs[0], excerpt: "" }), /lacks verified snapshot provenance/);
 
@@ -131,7 +137,7 @@ async function faultAndBoundaryChecks() {
 
   let calls = 0;
   const throwingProvider: ExtractionProvider = { name: "304-call-guard", async extract(): Promise<ProviderExtractionOutput> { calls++; throw new Error("provider called on 304"); } };
-  const unchanged = await discoverCampsFromUrl(url, { provider: throwingProvider, store, revalidate: true, fetchOptions: { fetch: fixtureFetch(body, true, true), sleep: async () => {} } });
+  const unchanged = await discoverCampsFromUrl(url, { provider: throwingProvider, store, revalidate: true, fetchOptions: fixtureFetchOptions(body, true, true) });
   assert.equal(unchanged.unchanged, true);
   assert.equal(unchanged.isListingPage, true, "trustworthy 304 is unchanged listing, never not-a-listing");
   assert.equal(unchanged.error, undefined);
@@ -205,7 +211,7 @@ async function discoveryDistinctnessContractCheck() {
         needle: name,
       }))),
       store: createInMemorySnapshotStore(),
-      fetchOptions: { fetch: fixtureFetch(body), sleep: async () => {} },
+      fetchOptions: fixtureFetchOptions(body),
     });
   };
 

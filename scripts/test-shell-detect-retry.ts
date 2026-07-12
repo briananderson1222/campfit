@@ -199,7 +199,10 @@ async function testShellDetectedAutoRetryRecoversMarker(baseUrl: string) {
     sink,
     mode: "live-with-capture",
     log: () => {},
-    fetchOptions: { renderImpl: createCampfitRenderImpl() },
+    fetchOptions: {
+      renderImpl: createCampfitRenderImpl({ testOnlyAllowedLoopbackOrigins: [baseUrl] }),
+      testOnlyAllowedLoopbackOrigins: [baseUrl],
+    } as never,
   });
 
   assert.equal(result.ok, true, `expected ok=true, got fetchError=${result.fetchError} extractionError=${result.extractionError}`);
@@ -243,6 +246,7 @@ async function testEmbeddedStateAvailableSkipsRender(baseUrl: string) {
     sink: async () => null,
     mode: "live-with-capture",
     log: () => {},
+    fetchOptions: { testOnlyAllowedLoopbackOrigins: [baseUrl] } as never,
   });
 
   assert.equal(result.ok, true, `expected ok=true, got fetchError=${result.fetchError} extractionError=${result.extractionError}`);
@@ -289,7 +293,10 @@ async function testRenderRetryFailureKeepsFirstAttempt(baseUrl: string) {
     sink,
     mode: "live-with-capture",
     log: () => {},
-    fetchOptions: { renderImpl: createCampfitRenderImpl() },
+    fetchOptions: {
+      renderImpl: createCampfitRenderImpl({ testOnlyAllowedLoopbackOrigins: [baseUrl] }),
+      testOnlyAllowedLoopbackOrigins: [baseUrl],
+    } as never,
   });
 
   assert.equal(result.ok, true, `expected ok=true (first attempt succeeded), got fetchError=${result.fetchError} extractionError=${result.extractionError}`);
@@ -338,7 +345,10 @@ async function testRenderTrueSourceNeverDoubleRetries(baseUrl: string, renderReq
     sink,
     mode: "live-with-capture",
     log: () => {},
-    fetchOptions: { renderImpl: createCampfitRenderImpl() },
+    fetchOptions: {
+      renderImpl: createCampfitRenderImpl({ testOnlyAllowedLoopbackOrigins: [baseUrl] }),
+      testOnlyAllowedLoopbackOrigins: [baseUrl],
+    } as never,
   });
 
   const after = renderRequestCounts.get("/shell-marker-page") ?? 0;
@@ -379,7 +389,9 @@ async function testShellSuspectedRetrySkippedWhenNoRendererConfigured(baseUrl: s
     sink: async () => null,
     mode: "live-with-capture",
     log: () => {},
-    // Deliberately no `fetchOptions` — mirrors every Vercel route today.
+    // No renderer is configured. The exact-origin capability permits only
+    // this process-local fixture's plain-fetch hop.
+    fetchOptions: { testOnlyAllowedLoopbackOrigins: [baseUrl] } as never,
   });
 
   assert.equal(result.ok, true, `expected ok=true (first attempt succeeded), got fetchError=${result.fetchError} extractionError=${result.extractionError}`);
