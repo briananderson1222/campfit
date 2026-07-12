@@ -6,12 +6,11 @@ import * as url from "node:url";
 import { computeDiff } from "../lib/ingestion/diff-engine";
 import {
   ageGroupDomainIdentity,
-  canonicalValueKey,
-  outerArrayChange,
   pricingDomainIdentity,
   scheduleDomainIdentity,
   type DomainIdentityResult,
-} from "../lib/ingestion/diff-kernel";
+} from "../lib/ingestion/diff-policy";
+import { compareRelation, compareValue } from "../lib/ingestion/lookout-diff-adapter";
 import type { Camp } from "../lib/types";
 import {
   D0_FIXED_NOW,
@@ -119,41 +118,29 @@ function makeCamp(overrides: Partial<Camp> = {}): Camp {
   } as Camp;
 }
 
-function testCanonicalEncoding(): void {
-  const key = (value: unknown) => {
-    const result = canonicalValueKey(value);
-    assert.equal(result.ok, true);
-    return result.ok ? result.key : "";
-  };
-
-  assert.notEqual(key({ a: undefined }), key({}));
-  assert.notEqual(key([undefined]), key([null]));
-  assert.notEqual(key(new Array(1)), key([undefined]));
-  assert.notEqual(key(Number.NaN), key(null));
-  assert.notEqual(key(Number.POSITIVE_INFINITY), key(null));
-  assert.notEqual(key(-0), key(0));
-  assert.equal(key({ b: { d: 2, c: 1 }, a: 0 }), key({ a: 0, b: { c: 1, d: 2 } }));
-  assert.notEqual(key(["a,b", "c"]), key(["a", "b,c"]));
-
+function testStructuralComparison(): void {
+  assert.equal(compareValue({ b: { d: 2, c: 1 }, a: 0 }, { a: 0, b: { c: 1, d: 2 } }).changed, false);
+  assert.equal(compareValue(["a,b", "c"], ["a", "b,c"]).changed, true);
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
-  assert.equal(canonicalValueKey(cyclic).ok, false);
-  assert.equal(canonicalValueKey(() => undefined).ok, false);
-  assert.equal(canonicalValueKey({ [Symbol("unsupported")]: 1 }).ok, false);
-  assert.equal(canonicalValueKey(Object.defineProperty({}, "value", {
+  assert.equal(compareValue(cyclic, {}).changed, true);
+  assert.equal(compareValue(() => undefined, null).changed, true);
+  assert.equal(compareValue({ [Symbol("unsupported")]: 1 }, {}).changed, true);
+  assert.equal(compareValue(Object.defineProperty({}, "value", {
     enumerable: true,
     get: () => { throw new Error("getter ran"); },
-  })).ok, false);
+  }), {}).changed, true);
   let getterReads = 0;
   const statefulGetter = Object.defineProperty({}, "value", {
     enumerable: true,
     get: () => ++getterReads,
   });
-  assert.equal(canonicalValueKey(statefulGetter).ok, false);
+  assert.equal(compareValue(statefulGetter, {}).changed, true);
   assert.equal(getterReads, 0, "canonical encoding must reject accessors without executing them");
   const cyclicOther: Record<string, unknown> = { label: "other" };
   cyclicOther.self = cyclicOther;
-  assert.notEqual(outerArrayChange([cyclic], [cyclicOther]), null, "canonical failures must fail closed as changed");
+  assert.equal(compareRelation([cyclic], [cyclicOther], () => { throw new Error("identity failed"); }).changed, true,
+    "canonical failures must fail closed as changed");
 }
 
 function testDomainIdentity(): void {
@@ -242,7 +229,7 @@ function testCanonicalHydrationShape(): void {
   );
 }
 
-testCanonicalEncoding();
+testStructuralComparison();
 testDomainIdentity();
 testRelationModesAndSuppression();
 testCanonicalHydrationShape();

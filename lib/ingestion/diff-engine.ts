@@ -2,13 +2,11 @@ import type { Camp } from '@/lib/types';
 import type { CampInput } from './adapter';
 import type { ProposedChanges, FieldDiff } from '@/lib/admin/types';
 import {
-  changeWhenDifferent,
-  outerArrayChange,
   projectProvenance,
   relationDomainIdentity,
-  relationFacts,
-  scalarChange,
-} from './diff-kernel';
+  normalizeScalar,
+} from './diff-policy';
+import { compareRelation, compareValue } from './lookout-diff-adapter';
 
 const MIN_CONFIDENCE = 0.3; // Skip fields below this threshold
 const SUPPRESS_DAYS = 30;  // Re-suppress recently-approved fields at low confidence
@@ -46,8 +44,8 @@ export function computeDiff(
 
     const currentVal = (current as unknown as Record<string, unknown>)[field];
 
-    const change = scalarChange(currentVal, extractedVal);
-    if (change) {
+    const comparison = compareValue(currentVal, extractedVal, normalizeScalar);
+    if (comparison.changed && comparison.change) {
       // Suppress re-proposals for recently-approved fields at low confidence
       const src = fieldSources[field];
       if (src?.approvedAt) {
@@ -57,7 +55,7 @@ export function computeDiff(
 
       const isEmpty = currentVal === null || currentVal === undefined || currentVal === '';
       changes[field] = {
-        ...change,
+        ...comparison.change,
         confidence: conf,
         mode: isEmpty ? 'populate' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
@@ -80,15 +78,8 @@ export function computeDiff(
     const currentArr = (current as unknown as Record<string, unknown>)[field];
     const currentItems = Array.isArray(currentArr) ? currentArr : [];
 
-    const sortedCurrent = [...currentItems].sort().join(',');
-    const sortedExtracted = [...(extractedVal as unknown[])].sort().join(',');
-
-    const change = changeWhenDifferent(
-      currentItems,
-      extractedVal,
-      () => sortedCurrent === sortedExtracted
-    );
-    if (change) {
+    const comparison = compareValue(currentItems, extractedVal, normalizeScalar);
+    if (comparison.changed && comparison.change) {
       const src = fieldSources[field];
       if (src?.approvedAt) {
         const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
@@ -97,7 +88,7 @@ export function computeDiff(
 
       const isEmpty = currentItems.length === 0;
       changes[field] = {
-        ...change,
+        ...comparison.change,
         confidence: conf,
         mode: isEmpty ? 'populate' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
@@ -117,8 +108,9 @@ export function computeDiff(
     const currentItems = Array.isArray(currentArr) ? currentArr : [];
     const identity = relationDomainIdentity(field);
 
-    const change = outerArrayChange(currentItems, extractedArr, identity);
-    if (change) {
+    // One Lookout multiset call supplies equality and additive/replace facts.
+    const relation = compareRelation(currentItems, extractedArr, identity);
+    if (relation.changed && relation.change) {
       // Suppress recently-approved array fields too
       const src = fieldSources[field];
       if (src?.approvedAt) {
@@ -127,14 +119,13 @@ export function computeDiff(
       }
 
       // Check if extracted is purely additive (all current items still present)
-      const { allCurrentRetained, hasNovelCandidate } = relationFacts(currentItems, extractedArr, identity);
       const isAdditive = currentItems.length > 0 &&
-        allCurrentRetained &&
+        relation.allCurrentRetained &&
         extractedArr.length > currentItems.length &&
-        hasNovelCandidate;
+        relation.hasNovelCandidate;
 
       changes[field] = {
-        ...change,
+        ...relation.change,
         confidence: conf,
         mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
