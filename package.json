@@ -49,6 +49,7 @@
     "test:d1-lookout-adapter": "node --import tsx scripts/test-d1-lookout-adapter.ts",
     "test:d0-identity-hydration": "node --import tsx scripts/test-d0-identity-hydration.ts",
     "report:d0-review-noise": "node --import tsx scripts/d0-review-noise-report.ts",
+    "report:d1-production-replay": "node --import tsx scripts/d1-production-replay.ts",
     "test:traverse-cost-guards": "tsx scripts/test-traverse-cost-guards.ts",
     "test:cutover-baseline": "tsx scripts/test-cutover-baseline.ts",
     "cutover:report": "tsx scripts/cutover-report.ts",
