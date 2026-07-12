@@ -18,13 +18,18 @@ type Classification = "below-confidence" | "missing-candidate" | "unchanged" | "
 const FILES = ["manifest.json", "crawl-run.json", "proposals.json", "camps.json"] as const;
 const FIELDS = ["name", "organizationName", "description", "registrationStatus", "registrationOpenDate", "registrationCloseDate", "lunchIncluded", "address", "neighborhood", "city", "websiteUrl", "applicationUrl", "contactEmail", "contactPhone", "socialLinks", "interestingDetails", "state", "zip", "campTypes", "categories", "ageGroups", "schedules", "pricing"] as const;
 const RELATIONS = new Set<string>(["ageGroups", "schedules", "pricing"]);
+const AUTHORITATIVE_LEGACY_SHA = "658946955f0f5017ed08d15c5df3a3ff624ba276";
+
+function invariant(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
 
 function object(value: unknown, label: string): JsonObject {
-  assert(value && typeof value === "object" && !Array.isArray(value), `${label}: expected object`);
+  invariant(value && typeof value === "object" && !Array.isArray(value), `${label}: object shape invalid`);
   return value as JsonObject;
 }
 function array(value: unknown, label: string): unknown[] {
-  assert(Array.isArray(value), `${label}: expected array`);
+  invariant(Array.isArray(value), `${label}: array shape invalid`);
   return value;
 }
 function within(root: string, candidate: string): boolean {
@@ -42,14 +47,23 @@ function gitShow(ref: string, file: string): string {
   return execFileSync("git", ["show", `${ref}:${file}`], { encoding: "utf8" });
 }
 
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== "object" || seen.has(value as object)) return value;
+  seen.add(value as object);
+  for (const nested of Object.values(value as JsonObject)) deepFreeze(nested, seen);
+  return Object.freeze(value);
+}
+
+async function main(): Promise<void> {
+
 const requested = path.resolve(process.argv[2] ?? ".d1-replay-sample");
 const root = fs.realpathSync(requested);
 const expectedDefault = fs.realpathSync(path.resolve(".d1-replay-sample"));
-assert.equal(root, expectedDefault, "sample root must be the repository's .d1-replay-sample directory");
+invariant(root === expectedDefault, "sample root rejected");
 for (const name of FILES) {
   const candidate = fs.realpathSync(path.join(root, name));
-  assert(within(root, candidate), `${name}: path escaped sample root`);
-  assert.equal(path.dirname(candidate), root, `${name}: nested/aliased input rejected`);
+  invariant(within(root, candidate), `${name}: path containment check failed`);
+  invariant(path.dirname(candidate) === root, `${name}: direct-file shape check failed`);
 }
 const beforeHashes = manifest(root);
 const parsed = Object.fromEntries(FILES.map((name) => [name, JSON.parse(fs.readFileSync(path.join(root, name), "utf8"))]));
@@ -57,24 +71,24 @@ const manifestJson = object(parsed["manifest.json"], "manifest");
 const run = object(parsed["crawl-run.json"], "crawl-run");
 const proposals = array(parsed["proposals.json"], "proposals").map((value, index) => object(value, `proposal[${index}]`));
 const camps = array(parsed["camps.json"], "camps").map((value, index) => object(value, `camp[${index}]`));
-assert.equal(proposals.length, 30, "proposal count mismatch");
-assert.equal(camps.length, 29, "camp count mismatch");
-assert.equal(run.id, manifestJson.crawlRunId, "crawl-run/manifest join mismatch");
-assert.equal((object(manifestJson.counts, "manifest.counts").proposals), proposals.length, "manifest proposal count mismatch");
-assert.equal((object(manifestJson.counts, "manifest.counts").camps), camps.length, "manifest camp count mismatch");
+invariant(proposals.length === 30, "proposal aggregate count mismatch");
+invariant(camps.length === 29, "camp aggregate count mismatch");
+invariant(run.id === manifestJson.crawlRunId, "crawl-run/manifest join failed");
+invariant(object(manifestJson.counts, "manifest.counts").proposals === proposals.length, "manifest proposal aggregate mismatch");
+invariant(object(manifestJson.counts, "manifest.counts").camps === camps.length, "manifest camp aggregate mismatch");
 const campsById = new Map(camps.map((camp) => [camp.id, camp]));
-assert.equal(new Set(camps.map((camp) => camp.id)).size, camps.length, "duplicate camp key");
+invariant(new Set(camps.map((camp) => camp.id)).size === camps.length, "camp join keys are not unique");
 for (const proposal of proposals) {
-  assert.equal(proposal.crawlRunId, run.id, "proposal/crawl-run join mismatch");
-  assert(campsById.has(proposal.campId), "proposal/camp join mismatch");
+  invariant(proposal.crawlRunId === run.id, "proposal/crawl-run join failed");
+  invariant(campsById.has(proposal.campId), "proposal/camp join failed");
   const raw = object(proposal.rawExtraction, "proposal.rawExtraction");
-  assert(Array.isArray(raw.proposals), "raw extraction proposal array missing");
+  invariant(Array.isArray(raw.proposals), "raw extraction proposal array shape invalid");
 }
 
 const legacyRefInput = process.env.D1_LEGACY_REF;
-assert(legacyRefInput, "D1_LEGACY_REF is required");
-const legacySha = execFileSync("git", ["rev-parse", `${legacyRefInput}^{commit}`], { encoding: "utf8" }).trim();
-assert.equal(legacySha, legacyRefInput, "D1_LEGACY_REF must be a full immutable commit SHA");
+invariant(!legacyRefInput || legacyRefInput === AUTHORITATIVE_LEGACY_SHA, "D1_LEGACY_REF does not match the authoritative baseline");
+const legacySha = execFileSync("git", ["rev-parse", `${AUTHORITATIVE_LEGACY_SHA}^{commit}`], { encoding: "utf8" }).trim();
+invariant(legacySha === AUTHORITATIVE_LEGACY_SHA, "authoritative legacy baseline is unavailable");
 const currentSha = execFileSync("git", ["rev-parse", "HEAD^{commit}"], { encoding: "utf8" }).trim();
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "campfit-d1-legacy-"));
 const ingestionRoot = path.join(tempRoot, "lib", "ingestion");
@@ -93,9 +107,61 @@ for (const name of ["diff-engine.ts", "diff-kernel.ts"]) fs.writeFileSync(path.j
 
 let writesAttempted = 0;
 const blocked = () => { writesAttempted += 1; throw new Error("WRITE_ISOLATION: replay write rejected"); };
-const guardedMethods = ["appendFile", "appendFileSync", "copyFile", "copyFileSync", "createWriteStream", "rename", "renameSync", "truncate", "truncateSync", "unlink", "unlinkSync", "write", "writeFile", "writeFileSync"] as const;
+// open/openSync are dual-use: Node's own fs.readFileSync (and therefore the ESM
+// loader importing the materialized legacy module) routes through fs.openSync
+// with read-only flags. Block only write-capable opens; pure reads pass through.
+const WRITE_OPEN_BITS =
+  fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_APPEND |
+  fs.constants.O_CREAT | fs.constants.O_TRUNC;
+const isReadOnlyOpenFlags = (flags: unknown): boolean => {
+  if (flags === undefined || flags === null) return true;
+  if (typeof flags === "string") return flags === "r" || flags === "rs" || flags === "sr";
+  if (typeof flags === "number") return (flags & WRITE_OPEN_BITS) === 0;
+  return false;
+};
+const guardOpen = (original: unknown) =>
+  function guardedOpen(this: unknown, ...args: unknown[]) {
+    if (!isReadOnlyOpenFlags(args[1])) return blocked();
+    return (original as (...a: unknown[]) => unknown).apply(this, args);
+  };
+const guardedMethods = [
+  "appendFile", "appendFileSync", "chmod", "chmodSync", "chown", "chownSync",
+  "copyFile", "copyFileSync", "cp", "cpSync", "createWriteStream", "fchmod",
+  "fchmodSync", "fchown", "fchownSync", "fdatasync", "fdatasyncSync", "ftruncate",
+  "ftruncateSync", "futimes", "futimesSync", "lchmod", "lchmodSync", "lchown",
+  "lchownSync", "link", "linkSync", "lutimes", "lutimesSync", "mkdir", "mkdirSync",
+  "mkdtemp", "mkdtempSync", "rename", "renameSync", "rm",
+  "rmSync", "rmdir", "rmdirSync", "symlink", "symlinkSync", "truncate",
+  "truncateSync", "unlink", "unlinkSync", "utimes", "utimesSync", "write",
+  "writeFile", "writeFileSync", "writeSync", "writev", "writevSync",
+] as const;
 const originals = new Map<string, unknown>();
-for (const method of guardedMethods) { originals.set(method, (fs as unknown as JsonObject)[method]); (fs as unknown as JsonObject)[method] = blocked; }
+for (const method of guardedMethods) {
+  if (typeof (fs as unknown as JsonObject)[method] !== "function") continue;
+  originals.set(method, (fs as unknown as JsonObject)[method]);
+  (fs as unknown as JsonObject)[method] = blocked;
+}
+for (const method of ["open", "openSync"] as const) {
+  originals.set(method, (fs as unknown as JsonObject)[method]);
+  (fs as unknown as JsonObject)[method] = guardOpen((fs as unknown as JsonObject)[method]);
+}
+const promiseGuardedMethods = [
+  "appendFile", "chmod", "chown", "copyFile", "cp", "lchmod", "lchown", "link",
+  "lutimes", "mkdir", "mkdtemp", "rename", "rm", "rmdir", "symlink",
+  "truncate", "unlink", "utimes", "writeFile",
+] as const;
+const promiseOriginals = new Map<string, unknown>();
+for (const method of promiseGuardedMethods) {
+  if (typeof (fs.promises as unknown as JsonObject)[method] !== "function") continue;
+  promiseOriginals.set(method, (fs.promises as unknown as JsonObject)[method]);
+  (fs.promises as unknown as JsonObject)[method] = blocked;
+}
+promiseOriginals.set("open", (fs.promises as unknown as JsonObject).open);
+(fs.promises as unknown as JsonObject).open = guardOpen((fs.promises as unknown as JsonObject).open);
+// Blocking fs.promises.open prevents this runtime from creating a FileHandle and
+// reaching write(), writeFile(), appendFile(), truncate(), or createWriteStream().
+// JavaScript cannot enumerate handles opened by unrelated code before this guard;
+// this script creates and retains no such handle.
 
 let legacyPathGuard = false;
 let currentPathGuard = false;
@@ -150,10 +216,10 @@ try {
     const raw = object(proposal.rawExtraction, "proposal.rawExtraction");
     const items = assembleItems(raw.proposals as ExtractionProposal[]);
     const itemIndex = raw.itemIndex;
-    assert(Number.isInteger(itemIndex), "captured item index missing");
+    invariant(Number.isInteger(itemIndex), "captured item index shape invalid");
     const item = items.find((candidate) => candidate.itemIndex === itemIndex) ?? (items.length === 1 ? items[0] : undefined);
-    assert(item, "captured item index not found in assembled extraction");
-    const inputs = assembledItemToDiffInputs(item);
+    invariant(item, "captured item index join failed");
+    const inputs = deepFreeze(assembledItemToDiffInputs(item));
     const campRecord = { ...campsById.get(proposal.campId) } as JsonObject;
     const capturedChanges = object(proposal.proposedChanges, "proposal.proposedChanges");
     for (const field of RELATIONS) {
@@ -162,9 +228,10 @@ try {
       const captured = capturedChanges[field];
       if (captured && typeof captured === "object" && Array.isArray((captured as JsonObject).old)) campRecord[field] = (captured as JsonObject).old;
     }
-    const fieldSources = (campRecord.fieldSources && typeof campRecord.fieldSources === "object" ? campRecord.fieldSources : {}) as Record<string, { approvedAt?: string }>;
+    const fieldSources = deepFreeze((campRecord.fieldSources && typeof campRecord.fieldSources === "object" ? campRecord.fieldSources : {}) as Record<string, { approvedAt?: string }>);
+    deepFreeze(campRecord);
     const now = new Date(proposal.createdAt as string).getTime();
-    assert(Number.isFinite(now), "proposal creation instant invalid");
+    invariant(Number.isFinite(now), "proposal creation instant shape invalid");
     const originalNow = Date.now;
     Date.now = () => now;
     try {
@@ -192,6 +259,7 @@ try {
   }
 } finally {
   for (const [method, original] of originals) (fs as unknown as JsonObject)[method] = original;
+  for (const [method, original] of promiseOriginals) (fs.promises as unknown as JsonObject)[method] = original;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }
 
@@ -208,3 +276,10 @@ assert.equal(unexplained, 0, "unexplained semantic divergence");
 assert.equal(newlySurfaced, 0, "newly surfaced proposal");
 assert.equal(notReplayable, 0, "NOT_REPLAYABLE field");
 assert.equal(proposalSetMismatches, 0, "proposal-set mismatch");
+}
+
+main().catch(() => {
+  // Never expose assertion actual/expected payloads or captured corpus strings.
+  console.error("D1 REPLAY FAILED: sanitized invariant failure; inspect aggregate counters only");
+  process.exitCode = 1;
+});

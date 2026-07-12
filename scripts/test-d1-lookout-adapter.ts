@@ -160,6 +160,19 @@ function characterizeScalarEnumAndProvenance(): void {
     },
     "enum relation and provenance presence must remain stable",
   );
+
+  // APPROVED intentional-kernel-correction (orchestrator ruling 2026-07-11,
+  // review M1): delimiter-collision equality was a defect; production replay
+  // demonstrates zero real-corpus impact.
+  assert.equal(
+    computeDiff(
+      makeCamp({ campTypes: ["a,b", "c"] as never }),
+      { campTypes: ["a", "b,c"] as never },
+      { campTypes: 0.9 },
+    ).campTypes?.mode,
+    "update",
+    "enum arrays that collide under legacy sort/join equality must emit an update",
+  );
   console.log("PASS scalar/enum boundaries and provenance omission/presence");
 }
 
