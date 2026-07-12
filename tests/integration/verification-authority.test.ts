@@ -877,6 +877,7 @@ describe("AC4 writers-recordEvidence", () => {
     // task's plan wording ("buildCampAttestationTrustInput's Claims/Evidence
     // go through recordEvidence(...), then refreshCampVerificationCache").
     await recordCampAttestationEvidence({
+      mode: 'override',
       campId,
       fields: [...VERIFIED_CAMP_FIELDS],
       actor: "reviewer@campfit.test",

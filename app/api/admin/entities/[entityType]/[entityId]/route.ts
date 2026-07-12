@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import {
   addCampAccreditation,
   addFieldAttestation,
+  AttestationValidationError,
   createReviewFlag,
   ensurePerson,
   getEntityContext,
   getEntityRelatedCamps,
   linkPersonToEntity,
+  isAllowedAttestationField,
   setEntityArchiveState,
   type AdminEntityType,
 } from '@/lib/admin/entity-admin-repository';
@@ -17,63 +19,6 @@ function parseEntityType(value: string): AdminEntityType | null {
   const upper = value.toUpperCase();
   if (upper === 'CAMP' || upper === 'PROVIDER' || upper === 'PERSON') return upper;
   return null;
-}
-
-const ENTITY_ATTESTATION_FIELDS: Record<AdminEntityType, string[]> = {
-  CAMP: [
-    'name',
-    'organizationName',
-    'description',
-    'websiteUrl',
-    'applicationUrl',
-    'contactEmail',
-    'contactPhone',
-    'socialLinks',
-    'interestingDetails',
-    'city',
-    'state',
-    'zip',
-    'neighborhood',
-    'address',
-    'lunchIncluded',
-    'registrationStatus',
-    'registrationOpenDate',
-    'registrationCloseDate',
-    'campTypes',
-    'categories',
-    'ageGroups',
-    'schedules',
-    'pricing',
-    'provider',
-  ],
-  PROVIDER: [
-    'name',
-    'websiteUrl',
-    'applicationUrl',
-    'contactEmail',
-    'contactPhone',
-    'socialLinks',
-    'city',
-    'neighborhood',
-    'address',
-    'notes',
-    'crawlRootUrl',
-    'people',
-    'accreditation',
-  ],
-  PERSON: [
-    'fullName',
-    'bio',
-    'contacts',
-  ],
-};
-
-function isAllowedAttestationField(entityType: AdminEntityType, fieldKey: string) {
-  if (ENTITY_ATTESTATION_FIELDS[entityType].includes(fieldKey)) return true;
-  if (entityType === 'CAMP') {
-    return fieldKey.startsWith('ageGroups:') || fieldKey.startsWith('schedules:') || fieldKey.startsWith('pricing:');
-  }
-  return false;
 }
 
 export async function GET(
@@ -170,10 +115,14 @@ export async function POST(
           if (typeof body.excerpt !== 'string' || !body.excerpt.trim()) {
             return NextResponse.json({ error: 'excerpt is required for source attestations' }, { status: 400 });
           }
+          if (body.sourceUrl.length > 4096 || body.excerpt.length > 100_000 || (typeof body.sourceLocator === 'string' && body.sourceLocator.length > 128)) {
+            return NextResponse.json({ error: 'sourceUrl or excerpt is too large' }, { status: 413 });
+          }
         }
         if (body.mode === 'override' && (typeof body.notes !== 'string' || !body.notes.trim())) {
           return NextResponse.json({ error: 'override reason is required for override attestations' }, { status: 400 });
         }
+        if (typeof body.notes === 'string' && body.notes.length > 10_000) return NextResponse.json({ error: 'notes is too large' }, { status: 413 });
         return NextResponse.json(await addFieldAttestation({
           entityType,
           entityId: params.entityId,
@@ -182,6 +131,7 @@ export async function POST(
           mode: body.mode,
           sourceUrl: typeof body.sourceUrl === 'string' ? body.sourceUrl : null,
           excerpt: typeof body.excerpt === 'string' ? body.excerpt : null,
+          sourceLocator: typeof body.sourceLocator === 'string' ? body.sourceLocator : null,
           notes: typeof body.notes === 'string' ? body.notes : null,
           valueSnapshot: body.valueSnapshot,
         }), { status: 201 });
@@ -233,6 +183,9 @@ export async function POST(
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Request failed' }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof AttestationValidationError ? error.message : 'Request failed' },
+      { status: error instanceof AttestationValidationError ? 422 : 500 },
+    );
   }
 }

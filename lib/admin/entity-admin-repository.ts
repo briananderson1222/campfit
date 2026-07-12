@@ -1,7 +1,11 @@
 import { getPool } from '@/lib/db';
+import type { Pool } from 'pg';
 import { buildCampAttestationTrustInput } from './trust-projection';
 import { recordEvidence, refreshCampVerificationCache } from './verification-authority';
 import { VERIFIED_CAMP_FIELDS } from './verification-policy';
+import { buildSnapshotSourceRef, parseSnapshotSourceRef } from '@kontourai/traverse/fetch';
+import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
+import { resolveReviewExcerpt } from './review-excerpt-resolution';
 
 export type AdminEntityType = 'CAMP' | 'PROVIDER' | 'PERSON';
 export type AiCapability = 'READ' | 'PROPOSE' | 'WRITE';
@@ -206,8 +210,20 @@ export async function recordCampAttestationEvidence(args: {
   attestedAt: string;
   notes?: string | null;
   values?: Record<string, unknown>;
+  mode: 'source' | 'override';
+  sourceRef?: string;
+  sourceLocator?: string;
+  excerpt?: string;
 }): Promise<void> {
   const pool = getPool();
+  await writeCampAttestationEvidence(pool, args);
+  await refreshCampVerificationCache(args.campId);
+}
+
+async function writeCampAttestationEvidence(pool: Pool, args: Parameters<typeof recordCampAttestationEvidence>[0]): Promise<void> {
+  if (args.mode === 'override' && !args.notes?.trim()) {
+    throw new AttestationValidationError('An override reason is required.');
+  }
   const trustBundle = buildCampAttestationTrustInput({
     campId: args.campId,
     fields: args.fields,
@@ -215,6 +231,10 @@ export async function recordCampAttestationEvidence(args: {
     attestedAt: args.attestedAt,
     notes: args.notes,
     values: args.values,
+    mode: args.mode,
+    sourceRef: args.sourceRef,
+    sourceLocator: args.sourceLocator,
+    excerpt: args.excerpt,
   });
 
   for (const claim of trustBundle.claims) {
@@ -228,7 +248,6 @@ export async function recordCampAttestationEvidence(args: {
     await recordEvidence(pool, { claim, evidence, event });
   }
 
-  await refreshCampVerificationCache(args.campId);
 }
 
 export async function addFieldAttestation(opts: {
@@ -239,13 +258,38 @@ export async function addFieldAttestation(opts: {
   mode: 'source' | 'override';
   sourceUrl?: string | null;
   excerpt?: string | null;
+  sourceLocator?: string | null;
   notes?: string | null;
   valueSnapshot?: unknown;
 }) {
   const pool = getPool();
+  if (opts.sourceLocator && opts.sourceLocator.length > 128) {
+    throw new AttestationValidationError('sourceLocator is too large.');
+  }
   const normalizedNotes = opts.mode === 'override'
     ? `Override attestation: ${opts.notes ?? 'Approved by admin review'}`
     : opts.notes ?? null;
+  let sourceCitation: { sourceRef: string; sourceLocator: string; excerpt: string } | undefined;
+  if (opts.mode === 'source') {
+    const sourceRef = opts.sourceUrl?.trim();
+    const excerpt = opts.excerpt?.trim();
+    const parsed = sourceRef ? parseSnapshotSourceRef(sourceRef) : undefined;
+    if (!sourceRef || !excerpt || !parsed) {
+      throw new AttestationValidationError('A valid snapshot sourceRef and excerpt are required for source attestations.');
+    }
+    const snapshot = await createCampfitSnapshotStore().get(parsed.sourceId, parsed.bodyHash);
+    if (!snapshot) throw new AttestationValidationError('The referenced snapshot is unavailable.');
+    if (!/^[a-f0-9]{64}$/i.test(parsed.bodyHash) || snapshot.bodyHash !== parsed.bodyHash) {
+      throw new AttestationValidationError('The snapshot reference must contain the exact full body hash.');
+    }
+    if (parsed.url && parsed.url !== snapshot.url) throw new AttestationValidationError('The snapshot URL does not match the stored snapshot.');
+    if (parsed.fetchedAt && parsed.fetchedAt !== snapshot.fetchedAt) throw new AttestationValidationError('The snapshot timestamp does not match the stored snapshot.');
+    const resolution = resolveReviewExcerpt(excerpt, snapshot.body, opts.sourceLocator);
+    if (resolution.state !== 'verified') {
+      throw new AttestationValidationError('The excerpt does not resolve uniquely against the referenced snapshot.');
+    }
+    sourceCitation = { sourceRef: buildSnapshotSourceRef(snapshot), sourceLocator: resolution.locator, excerpt };
+  }
 
   // V8 fix (MEDIUM, review-code.md): the reconciled Claim/Evidence/Event
   // write now runs BEFORE the legacy `FieldAttestation` INSERT, mirroring
@@ -258,16 +302,28 @@ export async function addFieldAttestation(opts: {
   // value (this insert has no idempotency guard). Reordering means: if this
   // call throws, nothing has been durably written yet, so the caller sees an
   // honest total failure and a retry is safe.
-  if (opts.entityType === 'CAMP' && VERIFIED_CAMP_CLAIM_SET_FIELDS.includes(opts.fieldKey)) {
-    await recordCampAttestationEvidence({
+  if (!isAllowedAttestationField(opts.entityType, opts.fieldKey)) {
+    throw new AttestationValidationError('fieldKey must be a known attestation target.');
+  }
+
+  const client = await pool.connect();
+  let inserted: any;
+  try {
+    await client.query('BEGIN');
+    if (opts.entityType === 'CAMP' && VERIFIED_CAMP_CLAIM_SET_FIELDS.includes(opts.fieldKey)) {
+      await writeCampAttestationEvidence(client as unknown as Pool, {
       campId: opts.entityId,
       fields: [opts.fieldKey],
       actor: opts.actor,
       attestedAt: new Date().toISOString(),
       notes: normalizedNotes,
       values: opts.valueSnapshot === undefined ? undefined : { [opts.fieldKey]: opts.valueSnapshot },
-    });
-  }
+      mode: opts.mode,
+      sourceRef: sourceCitation?.sourceRef,
+      sourceLocator: sourceCitation?.sourceLocator,
+      excerpt: sourceCitation?.excerpt,
+      });
+    }
 
   // Dual-write reconciliation (this task's plan wording): CAMP entities
   // attesting a Verified Camp Claim Set field ALSO record the same
@@ -278,7 +334,7 @@ export async function addFieldAttestation(opts: {
   // `ageGroups:0`) are unchanged: FieldAttestation-only, since neither has a
   // Verified Claim Set this slice defines (recorded gap, not a silent drop —
   // see this task's plan `verification-authority--deliver-plan.md` Wave 4).
-  const { rows } = await pool.query(
+    const { rows } = await client.query(
     `INSERT INTO "FieldAttestation"
        ("entityType", "entityId", "fieldKey", "valueSnapshot", excerpt, "sourceUrl", "approvedAt", "approvedBy", "lastRecheckedAt", notes)
      VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), $8)
@@ -294,7 +350,39 @@ export async function addFieldAttestation(opts: {
       normalizedNotes,
     ],
   );
-  return rows[0];
+    inserted = rows[0];
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  if (opts.entityType === 'CAMP' && VERIFIED_CAMP_CLAIM_SET_FIELDS.includes(opts.fieldKey)) {
+    try {
+      await refreshCampVerificationCache(opts.entityId);
+    } catch (error) {
+      console.error('Attestation committed but verification cache refresh requires reconciliation:', error);
+    }
+  }
+  return inserted;
+}
+
+export class AttestationValidationError extends Error {
+  readonly code = 'invalid_attestation_evidence';
+}
+
+const ALLOWED_ATTESTATION_FIELDS: Record<AdminEntityType, readonly string[]> = {
+  CAMP: ['name', 'organizationName', 'description', 'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks', 'interestingDetails', 'city', 'state', 'zip', 'neighborhood', 'address', 'lunchIncluded', 'registrationStatus', 'registrationOpenDate', 'registrationCloseDate', 'campTypes', 'categories', 'ageGroups', 'schedules', 'pricing', 'provider'],
+  PROVIDER: ['name', 'websiteUrl', 'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks', 'city', 'neighborhood', 'address', 'notes', 'crawlRootUrl', 'people', 'accreditation'],
+  PERSON: ['fullName', 'bio', 'contacts'],
+};
+
+export function isAllowedAttestationField(entityType: AdminEntityType, fieldKey: string): boolean {
+  if (ALLOWED_ATTESTATION_FIELDS[entityType].includes(fieldKey)) return true;
+  if (entityType !== 'CAMP') return false;
+  const [root, suffix, ...rest] = fieldKey.split(':');
+  return rest.length === 0 && Boolean(suffix) && ['ageGroups', 'schedules', 'pricing'].includes(root);
 }
 
 export async function ensurePerson(opts: {

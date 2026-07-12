@@ -26,6 +26,9 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   if (!Array.isArray(fields) || fields.length === 0) {
     return NextResponse.json({ error: 'fields must be a non-empty array' }, { status: 400 });
   }
+  if (typeof notes !== 'string' || !notes.trim()) {
+    return NextResponse.json({ error: 'notes is required as the override reason' }, { status: 400 });
+  }
 
   // Only allow attestation of Verified Camp Claim Set fields (verification-policy.ts).
   // `schedules` is deliberately NOT attestable here anymore: it was replaced by the
@@ -53,6 +56,7 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     actor: auth.access.email,
     attestedAt: now,
     notes,
+    mode: 'override',
   });
 
   // Build a fieldSources patch: one entry per field, attestedBy + approvedAt, no excerpt/sourceUrl

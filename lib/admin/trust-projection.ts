@@ -13,6 +13,7 @@ import {
 } from '@kontourai/survey';
 
 import type { FieldDiff, ProposedChanges } from './types';
+import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import {
   campfitVocabulary,
   type CampfitScalarClaimType,
@@ -32,6 +33,8 @@ export interface CampReviewTrustInputArgs {
   extractionModel?: string;
   reviewerNotes?: string | null;
   feedbackTags?: string[];
+  snapshotRef?: string;
+  snapshotBody?: string;
 }
 
 export interface CampAttestationTrustInputArgs {
@@ -41,6 +44,10 @@ export interface CampAttestationTrustInputArgs {
   attestedAt: string;
   notes?: string | null;
   values?: Record<string, unknown>;
+  mode?: 'source' | 'override';
+  sourceRef?: string;
+  sourceLocator?: string;
+  excerpt?: string;
 }
 
 export function buildCampReviewTrustInput(args: CampReviewTrustInputArgs): TrustBundle {
@@ -70,6 +77,8 @@ export function buildCampReviewSurveyInput(args: CampReviewTrustInputArgs): Surv
       extractionModel: args.extractionModel,
       reviewerNotes: args.reviewerNotes,
       feedbackTags: args.feedbackTags,
+      snapshotRef: args.snapshotRef,
+      snapshotBody: args.snapshotBody,
     }));
   }
 
@@ -90,23 +99,27 @@ export function buildCampAttestationTrustInput(args: CampAttestationTrustInputAr
       value,
       rawSource: manualEntrySource({
         id: `camp.${args.campId}.field.${field}.attestation.source`,
-        sourceRef: `admin:${args.actor}`,
+        sourceRef: args.mode === 'source' && args.sourceRef ? args.sourceRef : `admin:${args.actor}`,
         observedAt: args.attestedAt,
         metadata: {
           trustProducer: 'campfit.admin.attestation',
+          mode: args.mode ?? 'override',
+          reason: args.mode === 'override' ? args.notes ?? undefined : undefined,
           notes: args.notes ?? undefined,
         },
       }),
       extraction: {
         extractor: 'campfit-admin',
         extractedAt: args.attestedAt,
-        locator: `field:${field}`,
+        locator: args.mode === 'source' && args.sourceLocator ? args.sourceLocator : `field:${field}`,
+        excerpt: args.mode === 'source' ? args.excerpt : undefined,
         metadata: {
           reviewKind: 'manual-attestation',
+          mode: args.mode ?? 'override',
         },
       },
       reviewOutcome: {
-        status: 'assumed',
+        status: args.mode === 'source' ? 'verified' : 'assumed',
         actor: args.actor,
         reviewedAt: args.attestedAt,
         rationale: args.notes ?? 'Operator reviewed this field and attested the current value.',
@@ -114,17 +127,30 @@ export function buildCampAttestationTrustInput(args: CampAttestationTrustInputAr
       claim: campClaim({
         campId: args.campId,
         field,
-        status: 'assumed',
+        status: args.mode === 'source' ? 'verified' : 'assumed',
         collectedBy: 'campfit-admin',
         value,
         metadata: {
           reviewKind: 'manual-attestation',
+          mode: args.mode ?? 'override',
         },
       }),
     }));
   }
 
-  return validateTrustBundle(buildSurveyTrustBundle(builder.build()));
+  const bundle = buildSurveyTrustBundle(builder.build());
+  // A human may perform the extraction, but the canonical Evidence method
+  // remains attestation; producer identity is carried separately in metadata.
+  for (const evidence of bundle.evidence) {
+    evidence.method = 'attestation';
+    evidence.metadata = {
+      ...evidence.metadata,
+      mode: args.mode ?? 'override',
+      trustProducer: 'campfit.admin.attestation',
+      ...(args.mode === 'override' && args.notes ? { reason: args.notes } : {}),
+    };
+  }
+  return validateTrustBundle(bundle);
 }
 
 function campReviewResolution(args: {
@@ -140,6 +166,8 @@ function campReviewResolution(args: {
   extractionModel?: string;
   reviewerNotes?: string | null;
   feedbackTags?: string[];
+  snapshotRef?: string;
+  snapshotBody?: string;
 }) {
   const approved = args.status === 'verified';
   const decisionEffect = approved
@@ -293,18 +321,26 @@ function proposedCampReviewObservation(args: {
   reviewerNotes?: string | null;
   selected: boolean;
   decisionEffect: string;
+  snapshotRef?: string;
+  snapshotBody?: string;
 }): SurveyObservationInput {
   const rejectionReason = args.selected
     ? undefined
     : rejectedProposedCandidateReason(args.reviewerNotes);
 
+  const excerptResolution = args.diff.excerpt && args.snapshotBody
+    ? resolveReviewExcerpt(args.diff.excerpt, args.snapshotBody)
+    : undefined;
+  if (args.selected && (!args.snapshotRef || excerptResolution?.state !== 'verified')) {
+    throw new Error(`Approved crawl field "${args.field}" lacks an exact stored-snapshot citation.`);
+  }
   return fieldObservation({
     id: campObservationId(args.campId, args.field, args.proposalId, 'proposed'),
     field: args.field,
     value: args.diff.new,
     rawSource: webPageSource({
       id: `camp.${args.campId}.field.${args.field}.proposal.${args.proposalId}.source`,
-      sourceRef: args.sourceUrl,
+      sourceRef: args.snapshotRef ?? args.sourceUrl,
       observedAt: args.extractedAt,
       metadata: {
         proposalId: args.proposalId,
@@ -313,7 +349,7 @@ function proposedCampReviewObservation(args: {
     }),
     extraction: {
       confidence: args.diff.confidence,
-      locator: `field:${args.field}`,
+      locator: excerptResolution?.state === 'verified' ? excerptResolution.locator : `field:${args.field}`,
       excerpt: args.diff.excerpt,
       extractor: args.extractionModel ?? 'campfit-crawler',
       extractedAt: args.extractedAt,

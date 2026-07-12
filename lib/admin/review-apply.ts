@@ -44,6 +44,7 @@
  */
 import type { Pool, PoolClient } from 'pg';
 import type { ClaimDefinitionDraft, Evidence, TrustBundle, VerificationEvent } from '@kontourai/surface';
+import { parseSnapshotSourceRef } from '@kontourai/traverse/fetch';
 
 import { getPool } from '@/lib/db';
 import { getProposal, updateProposalStatus, partialApprove } from './review-repository';
@@ -63,6 +64,18 @@ import {
   SurveyReviewSessionStaleError,
 } from './survey-review-sessions';
 import type { CampChangeProposal, FieldDiff, ProposedChanges } from './types';
+import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
+
+async function exactProposalSnapshot(proposal: CampChangeProposal): Promise<{ snapshotRef: string; snapshotBody: string }> {
+  if (!proposal.snapshotRef) throw new Error(`Proposal ${proposal.id} has no immutable snapshot reference.`);
+  const parsed = parseSnapshotSourceRef(proposal.snapshotRef);
+  if (!parsed || !/^[a-f0-9]{64}$/i.test(parsed.bodyHash)) throw new Error(`Proposal ${proposal.id} has a malformed snapshot reference.`);
+  const snapshot = await createCampfitSnapshotStore().get(parsed.sourceId, parsed.bodyHash);
+  if (!snapshot || snapshot.bodyHash !== parsed.bodyHash || snapshot.url !== parsed.url || snapshot.fetchedAt !== parsed.fetchedAt) {
+    throw new Error(`Proposal ${proposal.id} snapshot identity does not match stored bytes.`);
+  }
+  return { snapshotRef: proposal.snapshotRef, snapshotBody: snapshot.body };
+}
 
 // Re-exported so callers (e.g. the route) can catch these alongside this
 // module's own typed errors without a separate import from
@@ -190,6 +203,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   }
 
   const decision = await deriveDecision({ proposal, reviewSessionId, keepPending, notes });
+  const proposalSnapshot = decision.approvedFields.length > 0 ? await exactProposalSnapshot(proposal) : {};
 
   const pool = getPool();
   const client: PoolClient = await pool.connect();
@@ -249,6 +263,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       extractionModel: proposal.extractionModel,
       reviewerNotes: decision.reviewerNotes,
       feedbackTags,
+      ...proposalSnapshot,
     });
 
     for (const field of appliedFields) {
@@ -565,6 +580,8 @@ async function applyBatchAcceptedFieldsForProposal(
   let newlyAppliedFields: string[] = [];
   let alreadyAppliedFields: Set<string> = new Set();
   let keepPending = false;
+  let reviewTrustBundle: TrustBundle | undefined;
+  let narrowedChanges: ProposedChanges = {};
 
   try {
     await client.query('BEGIN');
@@ -574,6 +591,27 @@ async function applyBatchAcceptedFieldsForProposal(
     // comment).
     alreadyAppliedFields = await lockAndCheckProposal(client, proposal.id);
     newlyAppliedFields = fields.filter((field) => !alreadyAppliedFields.has(field));
+
+    // Validate immutable snapshot identity and construct every canonical
+    // citation before the first Camp/proposal mutation. Any missing snapshot,
+    // excerpt mismatch, or malformed citation rolls back a mutation-free txn.
+    if (newlyAppliedFields.length > 0) {
+      narrowedChanges = pickFields(proposal.proposedChanges, newlyAppliedFields);
+      const proposalSnapshot = await exactProposalSnapshot(proposal);
+      reviewTrustBundle = buildCampReviewTrustInput({
+        proposalId: proposal.id,
+        campId: proposal.campId,
+        sourceUrl: proposal.sourceUrl,
+        proposedChanges: narrowedChanges,
+        approvedFields: newlyAppliedFields,
+        reviewer: actor,
+        reviewedAt,
+        proposalCreatedAt: proposal.createdAt,
+        extractionModel: proposal.extractionModel,
+        reviewerNotes: BATCH_ACCEPT_REVIEWER_NOTES,
+        ...proposalSnapshot,
+      });
+    }
 
     for (const field of newlyAppliedFields) {
       const diff = proposal.proposedChanges[field];
@@ -604,23 +642,7 @@ async function applyBatchAcceptedFieldsForProposal(
     return { outcomes, claims: [] };
   }
 
-  const narrowedChanges = pickFields(proposal.proposedChanges, newlyAppliedFields);
-  const reviewTrustBundle = buildCampReviewTrustInput({
-    proposalId: proposal.id,
-    campId: proposal.campId,
-    sourceUrl: proposal.sourceUrl,
-    proposedChanges: narrowedChanges,
-    // Every field in narrowedChanges is approved — this batch action never
-    // rejects a field; a not-yet-selected/not-yet-corroborated field simply
-    // stays out of narrowedChanges entirely (still PENDING for individual
-    // review), rather than being marked 'rejected' here.
-    approvedFields: newlyAppliedFields,
-    reviewer: actor,
-    reviewedAt,
-    proposalCreatedAt: proposal.createdAt,
-    extractionModel: proposal.extractionModel,
-    reviewerNotes: BATCH_ACCEPT_REVIEWER_NOTES,
-  });
+  if (!reviewTrustBundle) throw new Error('Batch apply committed without its prevalidated canonical Evidence bundle.');
 
   try {
     await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle);
