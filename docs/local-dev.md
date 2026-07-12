@@ -53,7 +53,63 @@ Running a DB-backed test against `campfit_local` erases any seed data in that da
 
 The complete admin browser flow still needs Supabase Auth, or a future compatible auth shim. Reproducing authentication is outside this DB-only environment. Data-layer jobs and tests that do not enter authenticated UI flows do not need Supabase credentials.
 
-## Migration note
+## Migration workflow
+
+CampFit uses `node-pg-migrate` to apply the raw SQL files in
+`prisma/migrations` and record them in `public.pgmigrations`. The historical
+`001_*.sql` through `020_*.sql` files remain the source of truth; they are not
+Prisma migrations. `prisma/migrations/001_z_admin_schema.sql` is a relative
+symlink to `scripts/sql/admin-schema.sql`, which places that existing SQL after
+001 and before 002 without copying it or maintaining another list.
+
+With `DATABASE_URL` set, use:
+
+```sh
+npm run db:migrate          # apply every pending migration
+npm run db:migrate:status   # print applied and pending migrations
+npm run db:migrate:new -- describe_the_change
+npm run db:migrate:down     # revert the most recent reversible migration
+```
+
+New migrations are created as timestamp-prefixed SQL files in
+`prisma/migrations`. Historical SQL files have no `-- Down Migration` section,
+so they are intentionally not reversible with `db:migrate:down`; use a forward
+fix or database restore rather than inventing destructive rollback SQL.
+
+The runner may print `Can't determine timestamp` for the historical three-digit
+prefixes. Version 8 then uses their numeric value, so the warning is harmless;
+the order is 001, admin, 002 through 020.
+
+### Baseline an existing database
+
+Baselining writes history rows without executing migration SQL. First inspect
+the target schema and identify only migrations whose effects are already
+present. Then pass their basenames (no `.sql`) explicitly:
+
+```sh
+export DATABASE_URL='postgresql://...'
+npm run db:migrate:baseline -- --confirm 001_initial_schema 003_camp_reports
+npm run db:migrate:status
+```
+
+Sparse, non-contiguous selections are supported because production history may
+contain gaps. Never infer presence from a migration number. The baseline command
+rejects unknown or duplicate names and requires `--confirm`. It is idempotent
+for names already recorded. Only after an owner reviews the status output
+should pending production migrations be applied.
+
+For a database independently verified to contain the complete current schema:
+
+```sh
+npm run db:migrate:baseline -- --confirm --all
+```
+
+`--all` is not a schema check; it only fakes all discovered migrations into
+`pgmigrations`. Both baseline forms require `DATABASE_URL`. The destructive test
+reset remains isolated to `TEST_DATABASE_URL` and internally runs the same
+migration runner before creating its test sentinel.
+
+## Portability note
 
 Application database access is raw `pg`, configured by `DATABASE_URL` or the existing `PG*` variables. The only Supabase coupling is authentication behind `lib/supabase/*`; there is no Supabase storage, RLS, or extension dependency in this local database. Running CampFit's schema, ingestion, discovery, and DB-backed tests on plain Postgres demonstrates that the data layer remains portable to another managed PostgreSQL provider.
 
