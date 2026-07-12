@@ -48,17 +48,15 @@
 
 import type { ExtractionProvider } from "@kontourai/traverse";
 import type { FetchMode, FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetch";
-import type { Camp, PricingUnit } from "@/lib/types";
+import type { Camp } from "@/lib/types";
 import type { ProposedChanges } from "@/lib/admin/types";
 import { runTraverseFetchAndAssemble } from "./traverse-pipeline";
 import { itemDisplayName } from "./traverse-extractor";
 import type { AssembledItem } from "./traverse-item-grouping";
-import { SCALAR_SCHEMA_PATHS } from "./traverse-schema";
+import { assembledItemToDiffInputs } from "./traverse-diff-inputs";
 import { computeDiff, computeOverallConfidence } from "./diff-engine";
-import type { CampInput } from "./adapter";
 import type { IngestionSourceConfig } from "./sources";
 
-const DEFAULT_PRICING_UNIT: PricingUnit = "PER_WEEK";
 
 export interface TraverseRecrawlOptions {
   /** the known camp's id. The adapter targets ONLY this camp — it never creates a new `Camp` row and never writes/proposes for any other camp, even when the page it fetches lists several. */
@@ -288,95 +286,6 @@ function selectTargetItem(items: AssembledItem[], campName: string): ItemSelecti
     reason: "ambiguous-multi-item",
     detail: `page has ${items.length} items and ${matches.length} name-matched "${campName}" — refusing to guess which one is this camp (shared listing page)`,
   };
-}
-
-function meanConfidence(values: number[]): number {
-  if (values.length === 0) return 0;
-  return Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 100) / 100;
-}
-
-/**
- * Map one matched item's scalar + nested-array + enum-array fields into the
- * `{extracted, confidence, excerpts}` shape `diff-engine.ts`'s `computeDiff`
- * accepts. Scalars are read via `SCALAR_SCHEMA_PATHS` (traverse-schema.ts) —
- * imported, not hardcoded, so this automatically tracks the field-parity
- * schema (traverse-recrawl-cutover plan Task 1.1) with zero changes here.
- * `campTypes`/`categories` are `AssembledItem`'s enum-array families
- * (traverse-item-grouping.ts's `EnumArrayEntry[]`, Task 1.1) — mirrored here
- * the same way `ageGroups`/`schedules`/`pricing` are, but flattened to bare
- * string arrays (mirrors `diff-engine.ts`'s `ENUM_ARRAY_FIELDS` shape:
- * `extracted[field]` is a string array, `confidence[field]` a single
- * whole-array score).
- */
-function assembledItemToDiffInputs(item: AssembledItem): {
-  extracted: Partial<CampInput>;
-  confidence: Record<string, number>;
-  excerpts: Record<string, string>;
-} {
-  const extracted: Record<string, unknown> = {};
-  const confidence: Record<string, number> = {};
-  const excerpts: Record<string, string> = {};
-
-  for (const path of SCALAR_SCHEMA_PATHS) {
-    const fp = item.scalars[path];
-    if (!fp) continue;
-    extracted[path] = fp.candidateValue;
-    confidence[path] = fp.confidence;
-    if (fp.excerpt) excerpts[path] = fp.excerpt;
-  }
-
-  if (item.ageGroups.length > 0) {
-    extracted.ageGroups = item.ageGroups.map((ag) => ({
-      label: ag.label,
-      minAge: ag.minAge,
-      maxAge: ag.maxAge,
-      minGrade: null,
-      maxGrade: null,
-    }));
-    confidence.ageGroups = meanConfidence(item.ageGroups.map((ag) => ag.confidence));
-    if (item.ageGroups[0]?.label) excerpts.ageGroups = item.ageGroups[0].label;
-  }
-
-  if (item.schedules.length > 0) {
-    extracted.schedules = item.schedules.map((s) => ({
-      label: s.label,
-      startDate: s.startDate ?? "",
-      endDate: s.endDate ?? "",
-      startTime: null,
-      endTime: null,
-      earlyDropOff: null,
-      latePickup: null,
-    }));
-    confidence.schedules = meanConfidence(item.schedules.map((s) => s.confidence));
-    if (item.schedules[0]?.label) excerpts.schedules = item.schedules[0].label;
-  }
-
-  if (item.pricing.length > 0) {
-    extracted.pricing = item.pricing.map((p) => ({
-      label: p.label,
-      amount: p.amount ?? 0,
-      unit: DEFAULT_PRICING_UNIT,
-      durationWeeks: null,
-      ageQualifier: null,
-      discountNotes: null,
-    }));
-    confidence.pricing = meanConfidence(item.pricing.map((p) => p.confidence));
-    if (item.pricing[0]?.label) excerpts.pricing = item.pricing[0].label;
-  }
-
-  if (item.campTypes.length > 0) {
-    extracted.campTypes = item.campTypes.map((c) => c.value);
-    confidence.campTypes = meanConfidence(item.campTypes.map((c) => c.confidence));
-    if (item.campTypes[0]?.excerpt) excerpts.campTypes = item.campTypes[0].excerpt;
-  }
-
-  if (item.categories.length > 0) {
-    extracted.categories = item.categories.map((c) => c.value);
-    confidence.categories = meanConfidence(item.categories.map((c) => c.confidence));
-    if (item.categories[0]?.excerpt) excerpts.categories = item.categories[0].excerpt;
-  }
-
-  return { extracted: extracted as Partial<CampInput>, confidence, excerpts };
 }
 
 /**

@@ -46,8 +46,10 @@
     "test:traverse-replay": "tsx scripts/test-traverse-replay.ts",
     "test:discovery-replay": "tsx scripts/test-discovery-replay.ts",
     "test:recrawl-adapter": "tsx scripts/test-recrawl-adapter.ts",
+    "test:d1-lookout-adapter": "node --import tsx scripts/test-d1-lookout-adapter.ts",
     "test:d0-identity-hydration": "node --import tsx scripts/test-d0-identity-hydration.ts",
     "report:d0-review-noise": "node --import tsx scripts/d0-review-noise-report.ts",
+    "report:d1-production-replay": "TSX_DISABLE_CACHE=1 node --permission --allow-fs-read=* --allow-fs-write=\"${TMPDIR:-/tmp}/campfit-d1-legacy-*\" --allow-child-process --allow-worker --import tsx scripts/d1-production-replay.ts",
     "test:traverse-cost-guards": "tsx scripts/test-traverse-cost-guards.ts",
     "test:cutover-baseline": "tsx scripts/test-cutover-baseline.ts",
     "cutover:report": "tsx scripts/cutover-report.ts",
@@ -56,6 +58,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "@kontourai/datum": "^0.3.0",
+    "@kontourai/lookout": "0.2.0",
     "@kontourai/surface": "^2.3.0",
     "@kontourai/survey": "^1.5.0",
     "@kontourai/traverse": "0.14.1",

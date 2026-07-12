@@ -38,7 +38,8 @@ import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import type { PricingUnit } from "@/lib/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
 import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
-import { changeWhenDifferent, projectProvenance } from "./diff-kernel";
+import { normalizeScalar, projectProvenance } from "./diff-policy";
+import { compareValue } from "./lookout-diff-adapter";
 
 export interface TraverseExtractOptions {
   /** Raw page content (html) or already-extracted text. */
@@ -84,11 +85,6 @@ export async function runTraverseExtraction(
 
 const DEFAULT_PRICING_UNIT: PricingUnit = "PER_WEEK";
 
-function normalizeScalar(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  return String(v).trim().toLowerCase();
-}
-
 function meanConfidence(values: number[]): number {
   if (values.length === 0) return 0;
   return Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 100) / 100;
@@ -126,16 +122,12 @@ export function itemToProposedChanges(
     const fp = item.scalars[scalarPath];
     if (!fp) continue;
     const currentVal = current[scalarPath];
-    const change = changeWhenDifferent(
-      currentVal,
-      fp.candidateValue,
-      (oldValue, newValue) => normalizeScalar(oldValue) === normalizeScalar(newValue)
-    );
-    if (!change) continue;
+    const comparison = compareValue(currentVal, fp.candidateValue, normalizeScalar);
+    if (!comparison.changed || !comparison.change) continue;
     const isEmpty = currentVal === null || currentVal === undefined || currentVal === "";
     const diff: FieldDiff = {
-      ...change,
-      old: (change.old as FieldDiff["old"]) ?? null,
+      ...comparison.change,
+      old: (comparison.change.old as FieldDiff["old"]) ?? null,
       confidence: fp.confidence,
       mode: isEmpty ? "populate" : "update",
       ...projectProvenance({ excerpt: fp.excerpt, sourceUrl, includeEmptyExcerpt: true }),
