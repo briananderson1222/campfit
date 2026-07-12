@@ -79,6 +79,12 @@ const SCHEMA_FILES = [
   // `ALTER TABLE "Provider" ADD COLUMN` on a table 002 already creates (and
   // which IS in this list) — no new #98 drift.
   "prisma/migrations/019_provider_requires_render.sql",
+  // 020 captures CommunityNeighborhood + CrawlSiteHint, which existed in
+  // production but in no migration (surfaced by the first faithful repo rebuild,
+  // 2026-07-12). Self-contained idempotent CREATE TABLE IF NOT EXISTS — safe to
+  // wire in directly; no new #98 drift. The crawl pipeline hard-depends on
+  // CommunityNeighborhood, so a rebuild without this cannot run a real crawl.
+  "prisma/migrations/020_community_neighborhood_and_crawl_site_hint.sql",
 ];
 
 /**

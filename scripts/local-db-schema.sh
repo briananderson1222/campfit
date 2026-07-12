@@ -31,7 +31,8 @@ for migration in \
   prisma/migrations/016_crawl_schedule.sql \
   prisma/migrations/017_aggregator_discovery.sql \
   prisma/migrations/018_review_batch_accept_audit.sql \
-  prisma/migrations/019_provider_requires_render.sql
+  prisma/migrations/019_provider_requires_render.sql \
+  prisma/migrations/020_community_neighborhood_and_crawl_site_hint.sql
 do
   apply_sql "$migration"
 done
