@@ -41,6 +41,42 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
   return { error: { kind: "network", message: "plain-fixture" } };
 } });
 
+// Production coordinator: a plain classified snapshot whose replay reports a
+// JS shell warning must cause exactly one second, rendered classification and
+// extract exclusively from that rendered classified ref.
+{
+  const sourceId = "shell-retry-camp";
+  const plain: Snapshot = { ...snapshot, sourceId, url: "https://shell-retry.test", body: "shell", bodyHash: "shell-hash", fetchedAt: "2026-07-11T03:00:00.000Z" };
+  const renderedSnapshot: Snapshot = { ...plain, body: "rendered", bodyHash: "rendered-hash", fetchedAt: "2026-07-11T03:01:00.000Z" };
+  let latestShell: Snapshot | undefined;
+  const shellStore: SnapshotStore = { latest: async () => latestShell, get: async () => latestShell, list: async () => latestShell ? [latestShell] : [], put: async (next) => { latestShell = next; } };
+  const classifiedModes: boolean[] = [];
+  const replayedRefs: string[] = [];
+  const result = await runLookoutRecrawlForCamp({
+    campId: sourceId, websiteUrl: plain.url, campName: "Shell Camp",
+    current: { id: sourceId, websiteUrl: plain.url, name: "Shell Camp" } as unknown as Camp,
+    provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) },
+    store: shellStore, fetchOptions: { renderImpl: async () => ({ html: "rendered" }) as never },
+  }, {
+    observationStore: createObservationStore({ root: path.join(await mkdtemp(path.join(os.tmpdir(), "campfit-shell-observation-")), "observations") }),
+    fetchSource: async (config) => {
+      const isRendered = config.render === true;
+      classifiedModes.push(isRendered);
+      return { snapshot: isRendered ? renderedSnapshot : plain };
+    },
+    replayCamp: async () => {
+      const ref = buildSnapshotSourceRef(latestShell!);
+      replayedRefs.push(ref);
+      const shell = latestShell?.bodyHash === plain.bodyHash;
+      return { ok: true, error: null, proposedChanges: {}, overallConfidence: 0, model: "fixture", rawExtraction: { itemIndex: 0, itemName: "Shell Camp", proposals: [{ fieldPath: "items[].name", candidateValue: "Shell Camp", confidence: 0.9, provenance: { excerpt: "Shell Camp", locator: "chars:0-10" }, extractor: "fixture", pathIndices: [0] }] }, matchedItemName: "Shell Camp", itemCount: 1, snapshot: { ref, bodyHash: latestShell!.bodyHash }, tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: shell ? ["js-shell-suspected:fixture"] : [] };
+    },
+  });
+  assert.equal(result.ok, true, result.error ?? "shell-warning retry failed");
+  assert.deepEqual(classifiedModes, [false, true], "shell warning causes exactly one second classified rendered attempt");
+  assert.equal(replayedRefs.at(-1), buildSnapshotSourceRef(renderedSnapshot), "extraction uses the rendered classified snapshot ref");
+  assert.equal(result.snapshot.ref, buildSnapshotSourceRef(renderedSnapshot), "coordinator returns the rendered classified extraction");
+}
+
 // First enablement can classify unchanged because Traverse already owns a
 // snapshot corpus. The coordinator must seed Lookout from that exact snapshot,
 // emit nothing, then let the next changed snapshot emit normally.

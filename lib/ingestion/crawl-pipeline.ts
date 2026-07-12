@@ -68,6 +68,21 @@ export async function deliverRecrawlReview(
   return sink();
 }
 
+/** Narrow, injectable seam for proving the process-boundary cutover flag
+ * selects exactly one production recrawl coordinator. */
+export async function dispatchKnownCampRecrawl(
+  options: Parameters<typeof runTraverseRecrawlForCamp>[0],
+  deps: {
+    legacy?: typeof runTraverseRecrawlForCamp;
+    lookout?: typeof runLookoutRecrawlForCamp;
+    enabled?: boolean;
+  } = {},
+): Promise<TraverseRecrawlResult> {
+  const legacy = deps.legacy ?? runTraverseRecrawlForCamp;
+  const lookout = deps.lookout ?? runLookoutRecrawlForCamp;
+  return (deps.enabled ?? LOOKOUT_RECRAWL_ENABLED) ? lookout(options) : legacy(options);
+}
+
 // ── Provider matching helpers ──────────────────────────────────────────────────
 
 function parseDomain(url: string): string | null {
@@ -656,7 +671,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
           const fieldSources = (camp as unknown as { fieldSources: Record<string, { approvedAt?: string }> }).fieldSources ?? {};
           const result: TraverseRecrawlResult = providerInitError
             ? providerUnavailableResult(providerInitError)
-            : await (LOOKOUT_RECRAWL_ENABLED ? runLookoutRecrawlForCamp : runTraverseRecrawlForCamp)({
+            : await dispatchKnownCampRecrawl({
                 campId: camp.id,
                 websiteUrl: camp.websiteUrl,
                 campName: camp.name,

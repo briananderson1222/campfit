@@ -5,8 +5,12 @@ import os from "node:os";
 import type { ProposalDiffEvent } from "@kontourai/lookout";
 import { createObservationStore } from "@kontourai/lookout";
 import type { ExtractionProposal } from "@kontourai/traverse";
+import { buildSnapshotSourceRef, type Snapshot, type SnapshotStore } from "@kontourai/traverse/fetch";
 import { eventsToProposedChanges } from "../lib/ingestion/lookout-event-mapper";
 import { emitCampfitObservation, persistSurveyInput } from "../lib/ingestion/lookout-observation-store";
+import { runLookoutRecrawlForCamp } from "../lib/ingestion/lookout-check-adapter";
+import type { TraverseRecrawlResult } from "../lib/ingestion/traverse-recrawl-adapter";
+import type { Camp } from "../lib/types";
 
 const evidence = { sourceId: "camp-1", snapshotRef: "traverse-snapshot:camp-1?url=https://camp.test&sha256=abc&fetchedAt=x", observedAt: "2026-07-11T00:00:00.000Z", entityKey: "camp-1", fieldKey: "name", value: "New", confidence: 0.91, provenance: { excerpt: "New", locator: "chars:0-3" }, extractor: "fixture", fieldPath: "name" };
 const events: ProposalDiffEvent[] = [
@@ -92,5 +96,38 @@ try {
   assert.equal(retried.ok, true, "retry recovers the committed pending delivery");
   assert.equal((await readdir(spoolRoot)).filter((name) => name.endsWith(".json")).length, 1, "recovery publishes exactly one Survey batch");
 } finally { await rm(failureRoot, { recursive: true, force: true }); }
+
+// Production-shaped crash-window proof for the named EVENTS gate. A changed
+// coordinator run stages a batch and advances the observation before failing
+// finalization. The next byte-identical (unchanged-hash) coordinator call must
+// publish that batch at entry, before its unchanged early return.
+const coordinatorRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-coordinator-recovery-"));
+try {
+  const sourceId = "camp-coordinator-recovery";
+  const base: Snapshot = { sourceId, url: "https://recovery.test", fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "Old", bodyHash: "old-hash" };
+  let latest: Snapshot = base;
+  const snapshotStore: SnapshotStore = { latest: async () => latest, get: async () => latest, list: async () => [latest], put: async (next) => { latest = next; } };
+  const observationStore = createObservationStore({ root: path.join(coordinatorRoot, "observations") });
+  const surveySpoolRoot = path.join(coordinatorRoot, "survey");
+  const proposal = (value: string): ExtractionProposal => ({ fieldPath: "items[].name", candidateValue: value, confidence: 0.9, provenance: { excerpt: value, locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0] });
+  const replayCamp = async (): Promise<TraverseRecrawlResult> => ({ ok: true, error: null, proposedChanges: {}, overallConfidence: 0, model: "fixture", rawExtraction: { itemIndex: 0, itemName: "Recovery Camp", proposals: [proposal(latest.body)] }, matchedItemName: "Recovery Camp", itemCount: 1, snapshot: { ref: buildSnapshotSourceRef(latest), bodyHash: latest.bodyHash }, tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: [] });
+  const options = { campId: sourceId, websiteUrl: base.url, campName: "Recovery Camp", current: { id: sourceId, websiteUrl: base.url, name: "Recovery Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
+
+  // Establish the native zero-event observation baseline.
+  await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: base }) });
+  const changed: Snapshot = { ...base, body: "New", bodyHash: "new-hash", fetchedAt: "2026-07-12T00:00:00.000Z" };
+  const staged = await runLookoutRecrawlForCamp(options, {
+    observationStore, surveySpoolRoot, replayCamp,
+    fetchSource: async () => ({ snapshot: changed }),
+    emissionFaults: { beforeSurveyFinalize: () => { throw new Error("injected production finalize failure"); } },
+  });
+  assert.equal(staged.ok, false, "production coordinator exposes the staged finalize failure");
+  latest = changed;
+  assert.equal((await readdir(surveySpoolRoot)).filter((name) => name.endsWith(".json")).length, 0, "staged batch is not yet consumer-visible");
+  const unchanged = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: changed }) });
+  assert.equal(unchanged.ok, true, unchanged.error ?? "unchanged production recovery failed");
+  assert.equal(unchanged.notModified, true, "recovery invocation follows the production unchanged path");
+  assert.equal((await readdir(surveySpoolRoot)).filter((name) => name.endsWith(".json")).length, 1, "coordinator-entry recovery publishes the staged batch before unchanged return");
+} finally { await rm(coordinatorRoot, { recursive: true, force: true }); }
 
 console.log("L4 Lookout event/removal/survey spool contracts passed");
