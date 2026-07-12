@@ -13,6 +13,22 @@ export interface CrawlPreviewCamp {
   priorityScore: number;
 }
 
+export async function getCampCrawlTarget(campId: string): Promise<{ id: string; websiteUrl: string | null } | undefined> {
+  const { rows } = await getPool().query<{ id: string; websiteUrl: string | null }>(
+    `SELECT id, "websiteUrl" FROM "Camp" WHERE id = $1`,
+    [campId]
+  );
+  return rows[0];
+}
+
+export async function skipPendingCampProposals(campId: string): Promise<void> {
+  await getPool().query(
+    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
+     WHERE "campId" = $1 AND status = 'PENDING'`,
+    [campId]
+  );
+}
+
 export async function getLatestCrawlRunsForAdmin(): Promise<CrawlRun[]> {
   const result = await getPool().query<CrawlRun>(
     `SELECT * FROM "CrawlRun" ORDER BY "startedAt" DESC LIMIT 50`

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { logAndMapPublicEgressError } from '@/lib/security/public-egress-error';
-import { getPool } from '@/lib/db';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProviderCommunitySlug } from '@/lib/admin/community-access';
+import { getProviderCrawlContext } from '@/lib/admin/provider-repository';
 
 export const maxDuration = 300;
 
@@ -17,28 +17,14 @@ export async function POST(req: Request, props: { params: Promise<{ providerId: 
   const discover: boolean = body.discover === true;
   const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
 
-  const pool = getPool();
-
   // Fetch provider info (for crawlRootUrl) and its camp IDs
-  const [providerRes, campsRes] = await Promise.all([
-    pool.query<{ id: string; crawlRootUrl: string | null; websiteUrl: string | null }>(
-      `SELECT id, "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
-      [params.providerId]
-    ),
-    pool.query<{ id: string }>(
-      `SELECT id FROM "Camp" WHERE "providerId" = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`,
-      [params.providerId]
-    ),
-  ]);
-
-  const campIds = campsRes.rows.map(r => r.id);
+  const { provider, campIds } = await getProviderCrawlContext(params.providerId);
 
   if (campIds.length === 0 && !discover) {
     return NextResponse.json({ error: 'No crawlable camps for this provider' }, { status: 400 });
   }
 
   // If doing discovery with no existing camps, we need at least a root URL to crawl
-  const provider = providerRes.rows[0];
   if (campIds.length === 0 && discover && !provider?.crawlRootUrl && !provider?.websiteUrl) {
     return NextResponse.json({ error: 'No camps and no website URL — cannot discover' }, { status: 400 });
   }

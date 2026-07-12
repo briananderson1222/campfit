@@ -21,6 +21,27 @@ function db() {
  */
 type Queryable = Pool | PoolClient;
 
+export async function getProviderCrawlContext(providerId: string): Promise<{
+  provider: { id: string; crawlRootUrl: string | null; websiteUrl: string | null } | undefined;
+  campIds: string[];
+}> {
+  const [providerRes, campsRes] = await Promise.all([
+    db().query<{ id: string; crawlRootUrl: string | null; websiteUrl: string | null }>(
+      `SELECT id, "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
+      [providerId]
+    ),
+    db().query<{ id: string }>(
+      `SELECT id FROM "Camp" WHERE "providerId" = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`,
+      [providerId]
+    ),
+  ]);
+
+  return {
+    provider: providerRes.rows[0],
+    campIds: campsRes.rows.map(r => r.id),
+  };
+}
+
 /** All providers with rollup stats, ordered by name. */
 export async function getProviders(
   communitySlug: string | string[] = 'denver',

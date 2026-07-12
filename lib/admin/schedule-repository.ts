@@ -12,6 +12,7 @@
  * are written.
  */
 import { getPool } from '@/lib/db';
+import type { CrawlRun } from './types';
 
 /** Cron-automation vocabulary only — mirrors the plan's explicit restriction
  * (never 'all'/'missing'/'coming_soon'/'specific'/'onboard_url', which need
@@ -30,6 +31,14 @@ export interface CrawlSchedule {
 }
 
 const SCHEDULE_ID = 'default';
+
+export async function getLastScheduledRun(): Promise<CrawlRun | null> {
+  const pool = getPool();
+  const result = await pool.query<CrawlRun>(
+    `SELECT * FROM "CrawlRun" WHERE trigger = 'SCHEDULED' ORDER BY "startedAt" DESC LIMIT 1`,
+  );
+  return result.rows[0] ?? null;
+}
 
 /** Always returns the singleton row — never null, given the migration's bootstrap insert. */
 export async function getSchedule(): Promise<CrawlSchedule> {
