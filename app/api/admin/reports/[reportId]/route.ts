@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getReportCommunitySlug } from '@/lib/admin/community-access';
+import { updateCampReportReview } from '@/lib/admin/report-repository';
 
 export async function PATCH(req: Request, props: { params: Promise<{ reportId: string }> }) {
   const params = await props.params;
@@ -13,11 +13,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ reportId: s
   const status = body.status === 'REVIEWED' ? 'REVIEWED' : 'DISMISSED';
   const adminNotes = typeof body.adminNotes === 'string' ? body.adminNotes.trim() || null : null;
 
-  const pool = getPool();
-  const { rowCount } = await pool.query(
-    `UPDATE "CampReport" SET status = $1, "adminNotes" = $2, "updatedAt" = now() WHERE id = $3`,
-    [status, adminNotes, params.reportId]
-  );
+  const rowCount = await updateCampReportReview(params.reportId, status, adminNotes);
 
   if (!rowCount) return NextResponse.json({ error: 'Report not found' }, { status: 404 });
   return NextResponse.json({ ok: true, status });

@@ -21,6 +21,27 @@ function db() {
  */
 type Queryable = Pool | PoolClient;
 
+export async function getProviderCrawlContext(providerId: string): Promise<{
+  provider: { id: string; crawlRootUrl: string | null; websiteUrl: string | null } | undefined;
+  campIds: string[];
+}> {
+  const [providerRes, campsRes] = await Promise.all([
+    db().query<{ id: string; crawlRootUrl: string | null; websiteUrl: string | null }>(
+      `SELECT id, "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
+      [providerId]
+    ),
+    db().query<{ id: string }>(
+      `SELECT id FROM "Camp" WHERE "providerId" = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != ''`,
+      [providerId]
+    ),
+  ]);
+
+  return {
+    provider: providerRes.rows[0],
+    campIds: campsRes.rows.map(r => r.id),
+  };
+}
+
 /** All providers with rollup stats, ordered by name. */
 export async function getProviders(
   communitySlug: string | string[] = 'denver',
@@ -182,6 +203,84 @@ export async function getProviderProposal(id: string): Promise<ProviderChangePro
   return rows[0] ?? null;
 }
 
+type ProviderProposalForApproval = {
+  id: string;
+  status: string;
+  providerId: string;
+  proposedChanges: Record<string, unknown> | null;
+  communitySlug: string;
+};
+
+export async function getProviderProposalForApproval(id: string): Promise<ProviderProposalForApproval | null> {
+  const { rows } = await db().query<ProviderProposalForApproval>(
+    `SELECT pcp.*, p."communitySlug"
+     FROM "ProviderChangeProposal" pcp
+     JOIN "Provider" p ON p.id = pcp."providerId"
+     WHERE pcp.id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+export async function getProviderProposalForRejection(
+  id: string,
+): Promise<{ id: string; status: string; communitySlug: string } | null> {
+  const { rows } = await db().query<{ id: string; status: string; communitySlug: string }>(
+    `SELECT pcp.id, pcp.status, p."communitySlug"
+     FROM "ProviderChangeProposal" pcp
+     JOIN "Provider" p ON p.id = pcp."providerId"
+     WHERE pcp.id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+export async function getProviderRecordForProposal(providerId: string): Promise<Record<string, unknown> | undefined> {
+  const { rows } = await db().query<Record<string, unknown>>(`SELECT * FROM "Provider" WHERE id = $1`, [providerId]);
+  return rows[0];
+}
+
+export async function applyProviderProposalFields(
+  providerId: string,
+  entries: [string, unknown][],
+): Promise<void> {
+  const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
+  await db().query(
+    `UPDATE "Provider" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
+    [providerId, ...entries.map(([, value]) => {
+      const diff = value as { new?: unknown };
+      return diff?.new ?? value ?? null;
+    })],
+  );
+}
+
+export async function markProviderProposalApproved(
+  id: string,
+  reviewedBy: string,
+  reviewerNotes: string | null,
+): Promise<void> {
+  await db().query(
+    `UPDATE "ProviderChangeProposal"
+     SET status = 'APPROVED', "reviewedAt" = now(), "reviewedBy" = $2, "reviewerNotes" = $3
+     WHERE id = $1`,
+    [id, reviewedBy, reviewerNotes],
+  );
+}
+
+export async function markProviderProposalRejected(
+  id: string,
+  reviewedBy: string,
+  reviewerNotes: string | null,
+): Promise<number | null> {
+  const { rowCount } = await db().query(
+    `UPDATE "ProviderChangeProposal"
+     SET status = 'REJECTED', "reviewedAt" = now(), "reviewedBy" = $2, "reviewerNotes" = $3
+     WHERE id = $1 AND status = 'PENDING'`,
+    [id, reviewedBy, reviewerNotes],
+  );
+  return rowCount;
+}
+
 export async function getPendingProviderProposalQueue(opts: {
   currentId: string;
   providerId?: string;
@@ -312,4 +411,3 @@ async function makeUniqueSlug(name: string, executor: Queryable = getPool()): Pr
     slug = `${base}-${attempt++}`;
   }
 }
-

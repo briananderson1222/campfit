@@ -16,10 +16,8 @@
  * cron-parsing dependency for a single fixed daily hour.
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
-import { getSchedule, updateSchedule, type CrawlSchedulePriority } from '@/lib/admin/schedule-repository';
-import type { CrawlRun } from '@/lib/admin/types';
+import { getLastScheduledRun, getSchedule, updateSchedule, type CrawlSchedulePriority } from '@/lib/admin/schedule-repository';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,14 +53,6 @@ function computeNextRun(from: Date): string {
     next.setUTCDate(next.getUTCDate() + 1);
   }
   return next.toISOString();
-}
-
-async function getLastScheduledRun(): Promise<CrawlRun | null> {
-  const pool = getPool();
-  const result = await pool.query<CrawlRun>(
-    `SELECT * FROM "CrawlRun" WHERE trigger = 'SCHEDULED' ORDER BY "startedAt" DESC LIMIT 1`,
-  );
-  return result.rows[0] ?? null;
 }
 
 export async function GET() {

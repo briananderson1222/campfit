@@ -1,38 +1,28 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getPool } from '@/lib/db';
 import { evaluateAdminAccess } from '@/lib/admin/access';
+import { getUserAccessProfile } from '@/lib/user-repository';
 
 export async function GET() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ isAdmin: false });
 
-  const pool = getPool();
-  const [userRows, assignmentRows] = await Promise.all([
-    pool.query(
-    `SELECT "isAdmin", tier FROM "User" WHERE id = $1`,
-    [user.id]
-    ),
-    pool.query(
-      `SELECT "communitySlug", role FROM "CommunityModeratorAssignment" WHERE "userId" = $1`,
-      [user.id]
-    ),
-  ]);
+  const { userRows, assignmentRows } = await getUserAccessProfile(user.id);
 
   // ADMIN_EMAILS env var grants admin regardless of DB row
   const adminEmails = (process.env.ADMIN_EMAILS ?? '').split(',').map(e => e.trim());
-  const isAdmin = adminEmails.includes(user.email ?? '') || userRows.rows[0]?.isAdmin === true;
-  const tier = userRows.rows[0]?.tier ?? 'FREE';
+  const isAdmin = adminEmails.includes(user.email ?? '') || userRows[0]?.isAdmin === true;
+  const tier = userRows[0]?.tier ?? 'FREE';
   const accessEval = evaluateAdminAccess({
     userId: user.id,
     email: user.email ?? '',
     isAdmin,
-    assignments: assignmentRows.rows as Array<{ communitySlug: string; role: 'ADMIN' | 'MODERATOR' }>,
+    assignments: assignmentRows,
     allowModerator: true,
   });
   const communities = 'access' in accessEval ? accessEval.access.communities : [];
-  const moderatorCommunities = assignmentRows.rows
+  const moderatorCommunities = assignmentRows
     .filter((row: any) => row.role === 'MODERATOR')
     .map((row: any) => row.communitySlug);
 

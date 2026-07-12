@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { logAndMapPublicEgressError } from '@/lib/security/public-egress-error';
-import { getPool } from '@/lib/db';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
+import { getCampCrawlTarget, skipPendingCampProposals } from '@/lib/admin/crawl-repository';
 
 export const maxDuration = 300;
 
@@ -16,21 +16,13 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   const body = await req.json().catch(() => ({}));
   const model: string | undefined = typeof body.model === 'string' ? body.model : undefined;
 
-  const pool = getPool();
-  const { rows } = await pool.query<{ id: string; websiteUrl: string | null }>(
-    `SELECT id, "websiteUrl" FROM "Camp" WHERE id = $1`,
-    [params.campId]
-  );
+  const camp = await getCampCrawlTarget(params.campId);
 
-  if (rows.length === 0) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
-  if (!rows[0].websiteUrl) return NextResponse.json({ error: 'Camp has no websiteUrl to crawl' }, { status: 400 });
+  if (!camp) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
+  if (!camp.websiteUrl) return NextResponse.json({ error: 'Camp has no websiteUrl to crawl' }, { status: 400 });
 
   // Skip any existing PENDING proposals so they fall out of the review queue
-  await pool.query(
-    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
-     WHERE "campId" = $1 AND status = 'PENDING'`,
-    [params.campId]
-  );
+  await skipPendingCampProposals(params.campId);
 
   // Fire-and-forget — same pattern as /api/admin/crawl/start
   let resolveRunId!: (id: string) => void;

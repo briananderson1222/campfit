@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getPool } from '@/lib/db';
+import { createCampReport, getCampIdForReport } from '@/lib/camp-report-repository';
 
 const VALID_TYPES = ['WRONG_INFO', 'MISSING_INFO', 'CAMP_CLOSED', 'OTHER'] as const;
 type ReportType = typeof VALID_TYPES[number];
@@ -22,20 +22,11 @@ export async function POST(req: Request, props: { params: Promise<{ slug: string
     return NextResponse.json({ error: 'Description too long (max 2000 characters)' }, { status: 400 });
   }
 
-  const pool = getPool();
-
   // Verify camp exists — slug param is the camp UUID (passed as campId from the UI)
-  const { rows: [camp] } = await pool.query<{ id: string }>(
-    `SELECT id FROM "Camp" WHERE id = $1`,
-    [params.slug]
-  );
+  const camp = await getCampIdForReport(params.slug);
   if (!camp) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
 
-  await pool.query(
-    `INSERT INTO "CampReport" ("campId", "userId", "userEmail", type, description)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [camp.id, user.id, user.email, type, description]
-  );
+  await createCampReport(camp.id, user.id, user.email, type, description);
 
   return NextResponse.json({ ok: true });
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { createModeratorAssignment, deleteModeratorAssignments, upsertAdminUser } from '@/lib/admin/user-repository';
 
 export async function PATCH(request: Request, props: { params: Promise<{ userId: string }> }) {
   const params = await props.params;
@@ -15,42 +15,18 @@ export async function PATCH(request: Request, props: { params: Promise<{ userId:
     assignments?: Array<{ communitySlug: string; role?: 'ADMIN' | 'MODERATOR' }>;
   };
 
-  const pool = getPool();
-
-  // $1 = id, $2 = email; update params start at $3
-  const queryValues: unknown[] = [params.userId, email ?? ''];
-  const updates: string[] = [];
-
-  if (tier !== undefined) {
-    queryValues.push(tier);
-    updates.push(`tier = $${queryValues.length}`);
-  }
-  if (isAdmin !== undefined) {
-    queryValues.push(isAdmin);
-    updates.push(`"isAdmin" = $${queryValues.length}`);
-  }
-
-  if (updates.length === 0) {
+  if (tier === undefined && isAdmin === undefined) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
   }
 
   // Upsert without referencing auth.users (pooler lacks permission)
-  await pool.query(
-    `INSERT INTO "User" (id, email, tier, "isAdmin")
-     VALUES ($1, $2, 'FREE', false)
-     ON CONFLICT (id) DO UPDATE SET ${updates.join(', ')}, "updatedAt" = now()`,
-    queryValues
-  );
+  await upsertAdminUser(params.userId, email ?? '', { tier, isAdmin });
 
   if (assignments) {
-    await pool.query(`DELETE FROM "CommunityModeratorAssignment" WHERE "userId" = $1`, [params.userId]);
+    await deleteModeratorAssignments(params.userId);
     for (const assignment of assignments) {
       if (!assignment.communitySlug) continue;
-      await pool.query(
-        `INSERT INTO "CommunityModeratorAssignment" ("userId", "communitySlug", role, "createdBy")
-         VALUES ($1, $2, $3, $4)`,
-        [params.userId, assignment.communitySlug, assignment.role ?? 'MODERATOR', auth.access.email],
-      );
+      await createModeratorAssignment(params.userId, assignment, auth.access.email);
     }
   }
 

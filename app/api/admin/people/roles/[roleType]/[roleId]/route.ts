@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { deletePersonRole } from '@/lib/admin/entity-admin-repository';
 
 export async function DELETE(
   _request: Request,
@@ -10,15 +10,12 @@ export async function DELETE(
   const auth = await requireAdminAccess();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const table = params.roleType === 'camp' ? 'CampPersonRole'
-    : params.roleType === 'provider' ? 'ProviderPersonRole'
+  const roleType = params.roleType === 'camp' ? 'camp'
+    : params.roleType === 'provider' ? 'provider'
       : null;
-  if (!table) return NextResponse.json({ error: 'Invalid role type' }, { status: 400 });
+  if (!roleType) return NextResponse.json({ error: 'Invalid role type' }, { status: 400 });
 
-  const { rowCount } = await getPool().query(
-    `DELETE FROM "${table}" WHERE id = $1`,
-    [params.roleId],
-  );
+  const rowCount = await deletePersonRole(roleType, params.roleId);
   if (!rowCount) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   return NextResponse.json({ ok: true });

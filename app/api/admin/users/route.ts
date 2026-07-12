@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { getAdminUserProfiles } from '@/lib/admin/user-repository';
 
 export async function GET() {
   const auth = await requireAdminAccess();
@@ -14,20 +14,7 @@ export async function GET() {
   const { data: { users: authUsers }, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const pool = getPool();
-  const { rows: profiles } = await pool.query(
-    `SELECT u.id, u.tier, u."isAdmin", u.name,
-      COALESCE(
-        json_agg(
-          json_build_object('communitySlug', cma."communitySlug", 'role', cma.role)
-        ) FILTER (WHERE cma.id IS NOT NULL),
-        '[]'::json
-      ) AS assignments,
-      COALESCE((SELECT COUNT(*) FROM "SavedCamp" sc WHERE sc."userId" = u.id), 0)::int AS "savedCount"
-     FROM "User" u
-     LEFT JOIN "CommunityModeratorAssignment" cma ON cma."userId" = u.id
-     GROUP BY u.id`
-  );
+  const profiles = await getAdminUserProfiles();
   const profileMap = Object.fromEntries(profiles.map((p: { id: string }) => [p.id, p]));
 
   const users = authUsers.map(u => ({
