@@ -277,6 +277,20 @@ function sourceGuard(): void {
   const kernelPath = "lib/ingestion/diff-kernel.ts";
   const adapterPath = "lib/ingestion/lookout-diff-adapter.ts";
   const policyPath = "lib/ingestion/diff-policy.ts";
+  const lookoutImportSeams = [
+    adapterPath,
+    policyPath,
+    "lib/ingestion/lookout-check-adapter.ts",
+    "lib/ingestion/lookout-discovery.ts",
+    "lib/ingestion/lookout-event-mapper.ts",
+    "lib/ingestion/lookout-observation-store.ts",
+    "lib/ingestion/lookout-sources.ts",
+    "scripts/test-d1-lookout-adapter.ts",
+    "scripts/test-l4-lookout-check.ts",
+    "scripts/test-l4-lookout-discovery.ts",
+    "scripts/test-l4-lookout-events.ts",
+    "scripts/l4-lookout-parity-report.ts",
+  ];
 
   if (fs.existsSync(path.join(ROOT, kernelPath))) violations.push(`${kernelPath} must be deleted`);
   if (!fs.existsSync(path.join(ROOT, adapterPath))) violations.push(`${adapterPath} must exist`);
@@ -291,9 +305,8 @@ function sourceGuard(): void {
       && /function\s+(?:canonicalValueKey|relationFacts|stableOuterArrayIdentity|segment)\s*\(/.test(source)) {
       violations.push(`${relative} locally defines retired structural helper`);
     }
-    if (/@kontourai\/lookout/.test(source)
-      && ![adapterPath, policyPath, "scripts/test-d1-lookout-adapter.ts"].includes(relative)) {
-      violations.push(`${relative} imports Lookout outside the D1 seam`);
+    if (/@kontourai\/lookout/.test(source) && !lookoutImportSeams.includes(relative)) {
+      violations.push(`${relative} imports Lookout outside the declared D1/L4 seams`);
     }
     if (/canonicalValueKey/.test(source)
       && ![adapterPath, policyPath, "scripts/test-d1-lookout-adapter.ts"].includes(relative)) {
