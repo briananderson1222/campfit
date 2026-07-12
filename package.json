@@ -56,6 +56,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "@kontourai/datum": "^0.3.0",
+    "@kontourai/lookout": "0.2.0",
     "@kontourai/surface": "^2.3.0",
     "@kontourai/survey": "^1.5.0",
     "@kontourai/traverse": "0.14.1",
