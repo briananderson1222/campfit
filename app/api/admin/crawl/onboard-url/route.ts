@@ -84,7 +84,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Discovery provider is unavailable.' }, { status: 422 });
   }
   const discovery = await discoverCampsFromUrl(url, { ...discoveryDeps, egressProfile: 'operatorDiscovery' }).catch(() => null);
-  if (!discovery || discovery.error || !discovery.stubs.length) {
+  if (!discovery) {
+    return NextResponse.json({ error: 'No camps found on that page. Try the camp\'s programs or schedule page.' }, { status: 422 });
+  }
+  if (discovery.error) {
+    return NextResponse.json({ error: 'Discovery failed for that URL' }, { status: 422 });
+  }
+  if (!discovery.stubs.length) {
     return NextResponse.json({ error: 'No camps found on that page. Try the camp\'s programs or schedule page.' }, { status: 422 });
   }
 
