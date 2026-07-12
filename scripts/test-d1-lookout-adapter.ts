@@ -13,7 +13,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 
+import { canonicalValueKey } from "@kontourai/lookout";
+
 import { computeDiff } from "../lib/ingestion/diff-engine";
+import {
+  compareRelation,
+  compareValue,
+} from "../lib/ingestion/lookout-diff-adapter";
+import {
+  normalizeScalar,
+  relationDomainIdentity,
+} from "../lib/ingestion/diff-policy";
 import type { Camp } from "../lib/types";
 import {
   D0_FIXED_NOW,
@@ -176,6 +186,63 @@ function mutationSensitivity(): void {
   console.log("PASS mutation sensitivity: identity projection, multiset multiplicity, fail-closed mapping, suppression threshold");
 }
 
+function characterizeLookoutSeam(): void {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+  const lockfile = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8")) as {
+    packages?: Record<string, { version?: string; dependencies?: Record<string, string> }>;
+  };
+  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.2.0", "manifest must exact-pin Lookout");
+  assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.2.0", "root lock entry must exact-pin Lookout");
+  assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.2.0", "installed lock entry must resolve Lookout 0.2.0");
+
+  assert.equal(compareValue(" Denver ", "denver", normalizeScalar).changed, false);
+  assert.equal(compareValue({ b: 2, a: 1 }, { a: 1, b: 2 }).changed, false);
+  assert.equal(compareValue(["SUMMER_DAY", "SCHOOL_BREAK"], ["SCHOOL_BREAK", "SUMMER_DAY"], normalizeScalar).changed, false);
+  assert.equal(compareValue(Symbol("unsupported"), "candidate").error?.kind, "unsupported-value");
+
+  const cyclic: unknown[] = [];
+  cyclic.push(cyclic);
+  assert.equal(compareValue(cyclic, []).error?.kind, "cyclic-value");
+  assert.equal(compareValue("old", "new", () => { throw new Error("synthetic callback failure"); }).error?.kind, "callback-threw");
+
+  const duplicateCurrent = [{ label: "A", minAge: 5 }, { label: "A", minAge: 5 }];
+  const duplicateCandidate = [{ label: "A", minAge: 5 }];
+  const duplicateDiff = compareRelation(duplicateCurrent, duplicateCandidate, relationDomainIdentity("ageGroups"));
+  assert.equal(duplicateDiff.changed, true, "multiset comparison must preserve duplicate multiplicity");
+  assert.equal(duplicateDiff.allCurrentRetained, false);
+  assert.equal(duplicateDiff.removals.length, 1);
+
+  const additive = compareRelation(
+    [{ label: "A", minAge: 5 }],
+    [{ label: "A", minAge: 5, id: "persistence-only" }, { label: "B", minAge: 7 }],
+    relationDomainIdentity("ageGroups"),
+  );
+  assert.equal(additive.changed, true);
+  assert.equal(additive.allCurrentRetained, true, "domain projection must exclude persistence-only fields");
+  assert.equal(additive.hasNovelCandidate, true);
+
+  const domainFailure = compareRelation(
+    [{ label: "Invalid", amount: Number.POSITIVE_INFINITY, unit: "PER_WEEK" }],
+    [{ label: "Invalid", amount: Number.POSITIVE_INFINITY, unit: "PER_WEEK" }],
+    relationDomainIdentity("pricing"),
+  );
+  assert.equal(domainFailure.changed, true, "domain validation failure must fail closed");
+  assert.equal(domainFailure.unchanged, false);
+  assert.equal(domainFailure.allCurrentRetained, false, "error mapping must never classify as additive");
+  assert.equal(domainFailure.error?.kind, "unsupported-value");
+
+  const callbackFailure = compareRelation(["old"], ["new"], () => {
+    throw new Error("synthetic identity failure");
+  });
+  assert.equal(callbackFailure.changed, true);
+  assert.equal(callbackFailure.error?.kind, "callback-threw");
+
+  assert.equal(canonicalValueKey(Symbol("unsupported")).ok, false, "root canonical export must resolve");
+  console.log("PASS Lookout seam: exact pin, root exports, semantic comparison, typed fail-closed errors");
+}
+
 function walkTypeScript(relativeRoot: string): string[] {
   const absoluteRoot = path.join(ROOT, relativeRoot);
   if (!fs.existsSync(absoluteRoot)) return [];
@@ -257,5 +324,6 @@ function sourceGuard(): void {
 characterizeRelations();
 characterizeScalarEnumAndProvenance();
 mutationSensitivity();
+characterizeLookoutSeam();
 sourceGuard();
 console.log("\nD1 Lookout adapter contract passed");
