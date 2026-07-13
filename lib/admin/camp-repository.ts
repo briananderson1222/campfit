@@ -8,9 +8,79 @@
 import { getPool } from '@/lib/db';
 import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPricing } from '@/lib/types';
 import { isValidHttpUrl } from './onboarding-validation';
+import { writeChangeLogs } from './changelog-repository';
+import { RepositoryConnectionError } from './repository-errors';
 
 function db() {
   return getPool();
+}
+
+const ADMIN_CAMP_EDITABLE_FIELDS = new Set([
+  'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes', 'interestingDetails',
+  'campType', 'category', 'campTypes', 'categories', 'registrationStatus', 'registrationOpenDate',
+  'lunchIncluded', 'city', 'neighborhood', 'address', 'state', 'zip',
+  'applicationUrl', 'contactEmail', 'contactPhone', 'socialLinks',
+]);
+
+export async function updateAdminCampFields(
+  campId: string,
+  updates: Array<[string, unknown]>,
+): Promise<Record<string, unknown> | null> {
+  for (const [field] of updates) {
+    if (!ADMIN_CAMP_EDITABLE_FIELDS.has(field)) throw new Error(`Invalid editable camp field: ${field}`);
+  }
+  const { rows } = await db().query<Record<string, unknown>>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]);
+  const current = rows[0];
+  if (!current) return null;
+  const setClauses = updates.map(([field], index) => `"${field}" = $${index + 2}`).join(', ');
+  await db().query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = NOW() WHERE id = $1`, [
+    campId,
+    ...updates.map(([, value]) => value ?? null),
+  ]);
+  return current;
+}
+
+export interface AgeGroupInput {
+  label: string;
+  minAge: number | null;
+  maxAge: number | null;
+  minGrade: number | null;
+  maxGrade: number | null;
+}
+
+export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGroupInput[], changedBy: string) {
+  const client = await db().connect().catch((error) => {
+    throw new RepositoryConnectionError(error);
+  });
+  try {
+    await client.query('BEGIN');
+    const previous = await client.query(
+      `SELECT label, "minAge", "maxAge", "minGrade", "maxGrade"
+       FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);
+    await client.query(`DELETE FROM "CampAgeGroup" WHERE "campId" = $1`, [campId]);
+    for (const ag of ageGroups) {
+      if (!ag.label?.trim()) continue;
+      await client.query(
+        `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
+         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6)`,
+        [campId, ag.label.trim(), ag.minAge ?? null, ag.maxAge ?? null, ag.minGrade ?? null, ag.maxGrade ?? null]);
+    }
+    await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [campId]);
+    await client.query('COMMIT');
+    await writeChangeLogs([{
+      campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous.rows,
+      newValue: ageGroups.filter((row) => row.label?.trim()),
+      changeType: previous.rows.length === 0 ? 'FIELD_POPULATED' : 'UPDATE',
+    }]).catch((error) => console.error('[age-groups PUT] writeChangeLogs failed:', error));
+    const { rows } = await client.query(
+      `SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);
+    return rows;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export type AdminCampDetail = Omit<Camp, 'organizationName' | 'providerId' | 'fieldSources' | 'registrationCloseDate'> & {

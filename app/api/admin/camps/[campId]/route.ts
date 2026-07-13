@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 import { writeChangeLogs } from '@/lib/admin/changelog-repository';
 import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
+import { updateAdminCampFields } from '@/lib/admin/camp-repository';
 
 // `dataConfidence`/`lastVerifiedAt` are deliberately excluded: they are
 // derived, cache-only columns whose sole writer is
@@ -41,17 +41,8 @@ export async function PATCH(req: Request, props: { params: Promise<{ campId: str
   const updates = Object.entries(body).filter(([k]) => EDITABLE_FIELDS.has(k));
   if (updates.length === 0) return NextResponse.json({ error: 'No valid fields' }, { status: 400 });
 
-  const pool = getPool();
-  const { rows: currentRows } = await pool.query<Record<string, unknown>>(
-    `SELECT * FROM "Camp" WHERE id = $1`,
-    [params.campId],
-  );
-  const current = currentRows[0];
+  const current = await updateAdminCampFields(params.campId, updates);
   if (!current) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
-
-  const setClauses = updates.map(([k], i) => `"${k}" = $${i + 2}`).join(', ');
-  const values = [params.campId, ...updates.map(([, v]) => v ?? null)];
-  await pool.query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = NOW() WHERE id = $1`, values);
 
   await writeChangeLogs(
     updates.map(([field, newValue]) => ({

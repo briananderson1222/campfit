@@ -10,25 +10,23 @@
  * `[id]/tos-decision/route.ts`, not here.
  *
  * `GET` includes a `pendingCandidateCount` rollup per row (mirrors
- * `getProviders`'s `ProviderWithStats` convention) computed HERE, in the
- * route, rather than inside `listAggregatorSources` itself: that repository
+ * `getProviders`'s `ProviderWithStats` convention) computed by a dedicated
+ * repository read-model function rather than inside `listAggregatorSources` itself: that repository
  * function is landed, tested substrate
  * (`tests/integration/aggregator-source-schema.test.ts` calls it directly
  * without ever provisioning the separate `ProviderCandidate` table), so
  * folding a `LEFT JOIN "ProviderCandidate"` into its own SQL would make that
  * existing, already-passing test depend on a table it never provisions.
- * Both schemas are ensured idempotently here before querying either.
+ * Both schemas are ensured idempotently by that read-model before querying either.
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { isValidHttpUrl } from '@/lib/admin/onboarding-validation';
 import {
   createAggregatorSource,
   ensureAggregatorSourceSchema,
-  listAggregatorSources,
+  listAggregatorSourcesWithPendingCandidateCounts,
 } from '@/lib/ingestion/aggregator/aggregator-repository';
-import { ensureProviderCandidateSchema } from '@/lib/ingestion/discovery/candidate-repository';
 import { EgressUrlPolicyError, evaluateEgressUrl } from '@/lib/security/egress-url-policy';
 
 export async function GET(request: Request) {
@@ -38,32 +36,7 @@ export async function GET(request: Request) {
   const auth = await requireAdminAccess({ communitySlug: community, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
-  await ensureProviderCandidateSchema(pool);
-
-  const sources = await listAggregatorSources(community, pool);
-  const ids = sources.map((s) => s.id);
-
-  const countRows = ids.length
-    ? (
-        await pool.query<{ aggregatorSourceId: string; count: string }>(
-          `SELECT "aggregatorSourceId", COUNT(*)::text AS count
-           FROM "ProviderCandidate"
-           WHERE "aggregatorSourceId" = ANY($1::text[]) AND status = 'PENDING'
-           GROUP BY "aggregatorSourceId"`,
-          [ids],
-        )
-      ).rows
-    : [];
-  const countMap = new Map(countRows.map((r) => [r.aggregatorSourceId, Number(r.count)]));
-
-  const withCounts = sources.map((source) => ({
-    ...source,
-    pendingCandidateCount: countMap.get(source.id) ?? 0,
-  }));
-
-  return NextResponse.json(withCounts);
+  return NextResponse.json(await listAggregatorSourcesWithPendingCandidateCounts(community));
 }
 
 export async function POST(request: Request) {
@@ -91,8 +64,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'url could not be validated for server-side discovery' }, { status: 422 });
   }
 
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
+  await ensureAggregatorSourceSchema();
 
   const maxPages = typeof body.maxPages === 'number' && Number.isFinite(body.maxPages)
     ? body.maxPages
@@ -103,7 +75,6 @@ export async function POST(request: Request) {
 
   const source = await createAggregatorSource(
     { name, url, communitySlug, maxPages, maxDepth, createdBy: auth.access.email },
-    pool,
   );
   return NextResponse.json(source, { status: 201 });
 }

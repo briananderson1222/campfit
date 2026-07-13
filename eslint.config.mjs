@@ -44,17 +44,10 @@ const config = [
     // BURN-DOWN LIST: migrate these into lib repositories and remove entries as you go; never ADD to this list.
     files: [
       "app/api/admin/aggregators/[id]/candidates/onboard/route.ts",
-      "app/api/admin/aggregators/[id]/candidates/route.ts",
       "app/api/admin/aggregators/[id]/discover/route.ts",
-      "app/api/admin/aggregators/[id]/route.ts",
       "app/api/admin/aggregators/[id]/tos-decision/route.ts",
-      "app/api/admin/aggregators/route.ts",
       "app/api/admin/assistant/route.ts",
-      "app/api/admin/camps/[campId]/age-groups/route.ts",
       "app/api/admin/camps/[campId]/attest/route.ts",
-      "app/api/admin/camps/[campId]/route.ts",
-      "app/api/admin/crawl/onboard-url/route.ts",
-      "app/api/admin/people/[personId]/route.ts",
       "app/api/admin/review/batch-accept/route.ts",
       "app/api/cron/notify/route.ts",
       "app/api/stripe/checkout/route.ts",

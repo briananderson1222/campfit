@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from '@/lib/ingestion/llm-discovery';
 import { resolveExtractionProvider } from '@/lib/ingestion/resolve-extraction-provider';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
@@ -7,6 +6,7 @@ import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { parseDomain } from '@/lib/admin/onboarding-validation';
 import { EgressUrlPolicyError, evaluateEgressUrl } from '@/lib/security/egress-url-policy';
+import { findOrCreateCrawlProvider, insertDiscoveredCampStub, listCampNamesForWebsiteDomain } from '@/lib/admin/crawl-onboarding-repository';
 
 export const maxDuration = 300;
 
@@ -18,16 +18,6 @@ function domainToName(domain: string): string {
   const base = domain.split('.')[0];
   return base.replace(/[-_]/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
     .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-}
-
-async function makeUniqueSlug(pool: any, name: string): Promise<string> {
-  const base = toSlug(name);
-  let slug = base, attempt = 2;
-  while (true) {
-    const { rows } = await pool.query('SELECT 1 FROM "Provider" WHERE slug = $1', [slug]);
-    if (rows.length === 0) return slug;
-    slug = `${base}-${attempt++}`;
-  }
 }
 
 export async function POST(req: Request) {
@@ -52,28 +42,10 @@ export async function POST(req: Request) {
   const domain = parseDomain(url);
   if (!domain) return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
 
-  const pool = getPool();
-
   // Find or create a provider for this domain
-  const { rows: existing } = await pool.query<{ id: string; name: string }>(
-    `SELECT id, name FROM "Provider" WHERE domain = $1 LIMIT 1`, [domain]
-  );
-
-  const providerCreated = existing.length === 0;
-  let providerId: string;
-  if (existing.length > 0) {
-    providerId = existing[0].id;
-  } else {
-    const name = domainToName(domain);
-    const slug = await makeUniqueSlug(pool, name);
-    const { rows: [created] } = await pool.query<{ id: string }>(
-      `INSERT INTO "Provider" (name, slug, "websiteUrl", domain, "crawlRootUrl", "communitySlug")
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (slug) DO UPDATE SET domain = EXCLUDED.domain RETURNING id`,
-      [name, slug, url, domain, url, communitySlug]
-    );
-    providerId = created.id;
-  }
+  const { providerId, providerCreated } = await findOrCreateCrawlProvider({
+    domain, name: domainToName(domain), url, communitySlug,
+  });
 
   // Run discovery on the URL
   let discoveryDeps: { provider: ReturnType<typeof resolveExtractionProvider>['provider']; store: ReturnType<typeof createCampfitSnapshotStore> };
@@ -95,10 +67,7 @@ export async function POST(req: Request) {
   }
 
   // Filter against any existing camps from this domain
-  const { rows: existingCamps } = await pool.query<{ name: string }>(
-    `SELECT name FROM "Camp" WHERE "websiteUrl" LIKE $1`, [`%${domain}%`]
-  );
-  const existingNames = existingCamps.map(r => r.name);
+  const existingNames = await listCampNamesForWebsiteDomain(domain);
   const newStubs = filterNewDiscoveries(discovery.stubs, existingNames);
 
   // R5/AC5 (campfit#90): every discovered program already existing is an
@@ -131,13 +100,15 @@ export async function POST(req: Request) {
     const campUrl = stub.detailUrl ?? url;
     const campSlug = toSlug(stub.name) + '-' + Math.random().toString(36).slice(2, 6);
     const fieldSources = buildDiscoveryFieldSources(stub);
-    const { rows: [camp] } = await pool.query<{ id: string }>(
-      `INSERT INTO "Camp" (name, slug, "websiteUrl", "communitySlug", "dataConfidence", "campType", category, "campTypes", "categories", "providerId", "fieldSources")
-       VALUES ($1, $2, $3, $4, 'PLACEHOLDER', 'SUMMER_DAY', 'OTHER', ARRAY['SUMMER_DAY'], ARRAY['OTHER'], $5, $6::jsonb)
-       ON CONFLICT (slug) DO NOTHING RETURNING id`,
-      [stub.name, campSlug, campUrl, communitySlug, providerId, JSON.stringify(fieldSources)]
-    );
-    if (camp) newCampIds.push(camp.id);
+    const campId = await insertDiscoveredCampStub({
+      name: stub.name,
+      slug: campSlug,
+      websiteUrl: campUrl,
+      communitySlug,
+      providerId,
+      fieldSourcesJson: JSON.stringify(fieldSources),
+    });
+    if (campId) newCampIds.push(campId);
   }
 
   if (newCampIds.length === 0) {

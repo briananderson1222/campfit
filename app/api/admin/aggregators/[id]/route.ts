@@ -10,7 +10,6 @@
  * (auth denial always wins over a 404).
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getAggregatorSourceCommunitySlug } from '@/lib/admin/community-access';
 import {
@@ -20,14 +19,13 @@ import {
 
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
+  await ensureAggregatorSourceSchema();
 
   const communitySlug = await getAggregatorSourceCommunitySlug(params.id);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const source = await getAggregatorSource(params.id, pool);
+  const source = await getAggregatorSource(params.id);
   if (!source) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   return NextResponse.json(source);
