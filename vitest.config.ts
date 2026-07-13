@@ -7,7 +7,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["tests/integration/**/*.test.ts"],
+    include: ["tests/integration/**/*.test.ts", "tests/unit/**/*.test.ts"],
     globalSetup: ["tests/integration/global-setup.ts"],
     // Every integration file shares the one throwaway Postgres and truncates
     // "Camp" between tests (e.g. review-apply.test.ts, verified-coverage-metric.test.ts).
