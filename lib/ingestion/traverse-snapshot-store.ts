@@ -9,15 +9,15 @@
  * (via the `traverse-snapshot:<id>?...sha256=<hash>` sourceRef) and lets a
  * future parity/adjudication run REPLAY the same page with no network.
  *
- * Location: `.kontourai/campfit/snapshots/` — under the repo's already
- * gitignored `.kontourai/` runtime-state prefix (see .gitignore), so captured
- * pages never enter version control and CI stays network-free (CI uses the
- * REPLAY path / stub provider and never calls fetchSource).
+ * Production uses the private `crawl-snapshots` Supabase Storage bucket when
+ * service-role credentials are present. Local development without those
+ * credentials keeps using `.kontourai/campfit/snapshots/`.
  */
 
 import * as path from "node:path";
 import { createFilesystemSnapshotStore } from "@kontourai/traverse/fetch";
 import type { SnapshotStore } from "@kontourai/traverse/fetch";
+import { createSupabaseSnapshotStore } from "@/lib/ingestion/supabase-snapshot-store";
 
 /** Root dir for captured snapshots — gitignored under `.kontourai/`. */
 export const SNAPSHOT_STORE_ROOT = path.join(
@@ -35,7 +35,18 @@ export const SNAPSHOT_STORE_ROOT = path.join(
 export const CAMPFIT_FETCH_USER_AGENT =
   "CampFitBot/1.0 (+https://campfit.app/bot; contact: hello@campfit.app)";
 
-/** Build the filesystem snapshot store CampFit's traverse fetch path writes to. */
+/**
+ * Build CampFit's shared snapshot store. Production/service-role contexts use
+ * durable Supabase Storage; environments without both credentials retain the
+ * existing local filesystem behavior. The optional root remains effective for
+ * filesystem callers and tests.
+ */
 export function createCampfitSnapshotStore(root: string = SNAPSHOT_STORE_ROOT): SnapshotStore {
+  if (
+    process.env.SUPABASE_SERVICE_ROLE_KEY &&
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+  ) {
+    return createSupabaseSnapshotStore();
+  }
   return createFilesystemSnapshotStore({ root });
 }
