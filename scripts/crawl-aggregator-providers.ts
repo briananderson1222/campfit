@@ -47,9 +47,14 @@ const limitRaw = flag('--limit');
 const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
 const community = flag('--community') ?? 'denver';
 const dryRun = args.includes('--dry-run');
+// --only <slug,slug,...>: crawl only these provider slugs (as produced by
+// sourceKey's slugifier). For resuming a partially-completed run without
+// re-crawling (and re-proposing) providers that already finished.
+const onlyRaw = flag('--only');
+const only = onlyRaw ? new Set(onlyRaw.split(',').map((s) => s.trim()).filter(Boolean)) : null;
 
 if (!source) {
-  console.error(`Usage: npm run crawl:providers -- --source <${knownSources()}> [--limit N] [--dry-run] [--community denver]`);
+  console.error(`Usage: npm run crawl:providers -- --source <${knownSources()}> [--limit N] [--only slug,slug] [--dry-run] [--community denver]`);
   process.exit(1);
 }
 
@@ -68,11 +73,16 @@ async function main() {
 
   log(`Discovering providers from ${source} (community=${community} limit=${limit ?? 'all'})…`);
   const listings = await harvester.fetchListings(community, limit);
-  const sources: IngestionSourceConfig[] = listings.map((l) => ({
+  let sources: IngestionSourceConfig[] = listings.map((l) => ({
     key: sourceKey(source!, l.name),
     name: l.name,
     url: l.websiteUrl,
   }));
+  if (only) {
+    sources = sources.filter((s) => only.has(s.key.split(':').pop()!));
+    const found = new Set(sources.map((s) => s.key.split(':').pop()!));
+    for (const slug of only) if (!found.has(slug)) log(`  WARNING: --only slug not found in discovery: ${slug}`);
+  }
   log(`Found ${sources.length} provider source(s).`);
 
   if (dryRun) {
