@@ -43,13 +43,6 @@ const config = [
   {
     // BURN-DOWN LIST: migrate these into lib repositories and remove entries as you go; never ADD to this list.
     files: [
-      "app/admin/camps/[campId]/page.tsx",
-      "app/admin/camps/page.tsx",
-      "app/admin/people/[personId]/page.tsx",
-      "app/admin/people/page.tsx",
-      "app/admin/providers/[providerId]/page.tsx",
-      "app/admin/trust/page.tsx",
-      "app/admin/users/page.tsx",
       "app/api/admin/aggregators/[id]/candidates/onboard/route.ts",
       "app/api/admin/aggregators/[id]/candidates/route.ts",
       "app/api/admin/aggregators/[id]/discover/route.ts",
@@ -67,7 +60,6 @@ const config = [
       "app/api/stripe/checkout/route.ts",
       "app/api/stripe/portal/route.ts",
       "app/api/stripe/webhook/route.ts",
-      "app/dashboard/page.tsx",
     ].map(literalGlob),
     rules: {
       "no-restricted-syntax": "off",

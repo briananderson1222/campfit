@@ -1,33 +1,13 @@
 import Link from 'next/link';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
+import { getAdminPeople } from '@/lib/admin/person-repository';
 
 export const dynamic = 'force-dynamic';
-
-async function getPeople() {
-  const pool = getPool();
-  const { rows } = await pool.query(`
-    SELECT
-      p.id,
-      p."fullName",
-      p.slug,
-      COUNT(DISTINCT cpr.id)::int AS "campRoles",
-      COUNT(DISTINCT ppr.id)::int AS "providerRoles",
-      COUNT(DISTINCT pcm.id)::int AS "contactCount"
-    FROM "Person" p
-    LEFT JOIN "CampPersonRole" cpr ON cpr."personId" = p.id
-    LEFT JOIN "ProviderPersonRole" ppr ON ppr."personId" = p.id
-    LEFT JOIN "PersonContactMethod" pcm ON pcm."personId" = p.id
-    GROUP BY p.id
-    ORDER BY p."fullName" ASC
-  `);
-  return rows;
-}
 
 export default async function AdminPeoplePage() {
   const auth = await requireAdminAccess();
   if ('error' in auth) return null;
-  const people = await getPeople().catch(() => []);
+  const people = await getAdminPeople().catch(() => []);
 
   return (
     <div>

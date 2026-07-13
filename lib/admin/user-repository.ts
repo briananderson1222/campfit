@@ -3,9 +3,9 @@ import { getPool } from '@/lib/db';
 export type AdminUserProfile = {
   id: string;
   name?: string;
-  tier: string;
+  tier: 'FREE' | 'PREMIUM' | null;
   isAdmin: boolean;
-  assignments: Array<{ communitySlug: string; role: string }>;
+  assignments: Array<{ communitySlug: string; role: 'ADMIN' | 'MODERATOR' }>;
   savedCount: number;
 };
 

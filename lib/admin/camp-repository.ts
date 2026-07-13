@@ -6,11 +6,108 @@
  * through node-pg-migrate (see `scripts/test-db-reset.ts`'s header comment).
  */
 import { getPool } from '@/lib/db';
-import type { Camp, CampType, CampCategory } from '@/lib/types';
+import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPricing } from '@/lib/types';
 import { isValidHttpUrl } from './onboarding-validation';
 
 function db() {
   return getPool();
+}
+
+export type AdminCampDetail = Omit<Camp, 'organizationName' | 'providerId' | 'fieldSources' | 'registrationCloseDate'> & {
+  organizationName: string | null;
+  providerId: string | null;
+  fieldSources: Exclude<Camp['fieldSources'], undefined>;
+  registrationCloseDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  ageGroups: CampAgeGroup[];
+  schedules: CampSchedule[];
+  pricing: CampPricing[];
+};
+
+export type AdminCampPendingProposal = {
+  id: string;
+  createdAt: string;
+  overallConfidence: number;
+  appliedFields: string[];
+  fieldCount: number | null;
+};
+
+export interface AdminCampRow {
+  id: string;
+  name: string;
+  slug: string;
+  websiteUrl: string | null;
+  dataConfidence: string;
+  lastVerifiedAt: string | null;
+  communitySlug: string;
+  registrationStatus: string;
+  scheduleCount: number;
+  missingFieldCount: number;
+  pendingProposals: number;
+}
+
+export async function getAdminCampDetail(campId: string): Promise<AdminCampDetail | null> {
+  type CampDatabaseRow = Omit<AdminCampDetail, 'ageGroups' | 'schedules' | 'pricing' | 'registrationOpenDate' | 'registrationCloseDate'> & {
+    registrationOpenDate: string | Date | null;
+    registrationCloseDate: string | Date | null;
+  };
+  const [campRes, ageRes, schedRes, priceRes] = await Promise.all([
+    db().query<CampDatabaseRow>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]),
+    db().query<CampAgeGroup>(`SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]),
+    db().query<CampSchedule>(`SELECT * FROM "CampSchedule" WHERE "campId" = $1 ORDER BY "startDate" ASC`, [campId]),
+    db().query<CampPricing>(`SELECT * FROM "CampPricing" WHERE "campId" = $1 ORDER BY amount ASC`, [campId]),
+  ]);
+  if (!campRes.rows[0]) return null;
+  const camp = campRes.rows[0];
+  if (camp.registrationOpenDate instanceof Date) {
+    camp.registrationOpenDate = camp.registrationOpenDate.toISOString().split('T')[0];
+  }
+  if (camp.registrationCloseDate instanceof Date) {
+    camp.registrationCloseDate = camp.registrationCloseDate.toISOString().split('T')[0];
+  }
+  if (!Array.isArray(camp.campTypes)) camp.campTypes = camp.campType ? [camp.campType] : [];
+  if (!Array.isArray(camp.categories)) camp.categories = camp.category ? [camp.category] : [];
+  return { ...camp, ageGroups: ageRes.rows, schedules: schedRes.rows, pricing: priceRes.rows } as AdminCampDetail;
+}
+
+export async function getAdminCampPendingProposals(campId: string): Promise<AdminCampPendingProposal[]> {
+  const { rows } = await db().query<AdminCampPendingProposal>(
+    `SELECT id, "createdAt", "overallConfidence", "appliedFields",
+            (SELECT count(*)::int FROM jsonb_object_keys("proposedChanges")) AS "fieldCount"
+     FROM "CampChangeProposal"
+     WHERE "campId" = $1 AND status = 'PENDING'
+     ORDER BY priority DESC, "createdAt" DESC`,
+    [campId],
+  );
+  return rows;
+}
+
+export async function getAdminCampsWithQuality(
+  archived: 'active' | 'archived' = 'active',
+  communitySlugs?: string[],
+): Promise<AdminCampRow[]> {
+  const values: unknown[] = [];
+  const communityClause = communitySlugs && communitySlugs.length > 0
+    ? `AND c."communitySlug" = ANY($1::text[])`
+    : '';
+  if (communityClause) values.push(communitySlugs);
+  const { rows } = await db().query<AdminCampRow>(`
+    SELECT c.id, c.name, c.slug, c."websiteUrl", c."dataConfidence", c."lastVerifiedAt",
+      c."communitySlug", c."registrationStatus",
+      (SELECT COUNT(*)::int FROM "CampSchedule" s WHERE s."campId" = c.id) AS "scheduleCount",
+      (CASE WHEN c.description = '' OR c.description IS NULL THEN 1 ELSE 0 END +
+       CASE WHEN c."websiteUrl" = '' OR c."websiteUrl" IS NULL THEN 1 ELSE 0 END +
+       CASE WHEN c.neighborhood = '' OR c.neighborhood IS NULL THEN 1 ELSE 0 END +
+       CASE WHEN c."registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
+      (SELECT COUNT(*)::int FROM "CampChangeProposal"
+       WHERE "campId" = c.id AND status = 'PENDING') AS "pendingProposals"
+    FROM "Camp" c
+    WHERE c."archivedAt" IS ${archived === 'archived' ? 'NOT NULL' : 'NULL'}
+      ${communityClause}
+    ORDER BY "missingFieldCount" DESC, "lastVerifiedAt" ASC NULLS FIRST
+  `, values);
+  return rows;
 }
 
 /**
