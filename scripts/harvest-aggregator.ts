@@ -15,9 +15,7 @@ config({ path: '.env.prod' });
 config({ path: '.env.local' });
 config({ path: '.env' });
 
-import { ActivitiesKidsHarvester } from '@/lib/ingestion/aggregator/activitieskids';
-import { CamperoniHarvester } from '@/lib/ingestion/aggregator/camperoni';
-import type { BaseHarvester } from '@/lib/ingestion/aggregator/base-harvester';
+import { HARVESTERS } from '@/lib/ingestion/aggregator/harvester-registry';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 
 function log(msg: string) { console.log(`[${new Date().toISOString()}] ${msg}`); }
@@ -45,13 +43,8 @@ if (!source) {
 
 // ── Source registry ──────────────────────────────────────────────────────────
 
-const HARVESTERS: Record<string, () => BaseHarvester> = {
-  activitieskids: () => new ActivitiesKidsHarvester(),
-  camperoni: () => new CamperoniHarvester(),
-  // Add more harvesters here:
-  // summercamphub: () => new SummerCampHubHarvester(),
-  // kidsindenver: () => new KidsInDenverHarvester(),
-};
+// Source registry lives in lib/ingestion/aggregator/harvester-registry.ts so
+// the provider source-crawl CLI resolves `--source` identically.
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 

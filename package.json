@@ -33,6 +33,7 @@
     "backfill:claim-store": "tsx scripts/backfill-claim-store.ts",
     "backfill:claim-store:dry": "tsx scripts/backfill-claim-store.ts --dry-run",
     "harvest": "tsx scripts/harvest-aggregator.ts",
+    "crawl:providers": "tsx scripts/crawl-aggregator-providers.ts",
     "seed": "tsx scripts/seed.ts",
     "scrape": "tsx scripts/scrape.ts",
     "scrape:dry": "tsx scripts/scrape.ts --dry-run",
