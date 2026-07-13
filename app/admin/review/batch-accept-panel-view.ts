@@ -14,6 +14,8 @@
  */
 import type { RankedProposal } from '@/lib/admin/review-repository';
 import type { TrustDisplay } from '@/lib/admin/trust-display';
+import { isBatchSelectableFieldClaim } from '@/lib/admin/proposal-classification';
+import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
 /** Same field-display-priority ordering `app/admin/review/page.tsx`'s own
  * `prioritizedFields` uses for the existing single-list proposal cards —
@@ -44,28 +46,55 @@ function prioritizedFields(fields: string[]): string[] {
 
 export interface FieldChip {
   field: string;
-  /** True iff `deriveFieldCorroboration` resolved `exact: true` for this
-   * field on this proposal — the ONLY chips the panel lets a reviewer
-   * check. This is defense-in-depth ONLY: the real gates are
+  /** True iff `deriveFieldCorroboration` resolved `exact: true` and the
+   * field is a real diff rather than a populate claim — the ONLY chips the
+   * panel lets a reviewer check. This is defense-in-depth ONLY: the real gates are
    * `applyBatchAcceptedClaims`'s server-side re-derivation and the route's
    * own community-scope re-check (both re-verify independently of this
    * flag, never trust it — see the plan's AC2 dual-layer requirement). */
   selectable: boolean;
   corroboratingCount: number;
+  excerpt: string | null;
+  excerptPreview: string | null;
+  sourceHref: string | undefined;
+  sourceHost: string | null;
+  confidence: number;
+}
+
+const EVIDENCE_EXCERPT_PREVIEW_LENGTH = 140;
+
+function excerptPreview(excerpt: string | undefined): string | null {
+  if (!excerpt) return null;
+  return excerpt.length > EVIDENCE_EXCERPT_PREVIEW_LENGTH
+    ? `${excerpt.slice(0, EVIDENCE_EXCERPT_PREVIEW_LENGTH).trimEnd()}…`
+    : excerpt;
+}
+
+function sourceHost(sourceUrl: string | undefined): { href: string | undefined; host: string | null } {
+  const href = safeExternalHref(sourceUrl);
+  if (!href) return { href: undefined, host: sourceUrl ? displayExternalUrl(sourceUrl, 60) : null };
+  return { href, host: new URL(href).host };
 }
 
 /** Which of a `RankedProposal`'s field chips are checkbox-selectable
- * (exact-corroborated) vs. plain (not batch-eligible, still requires the
- * existing single-proposal `applyProposalReview` flow). */
+ * (exact-corroborated real diffs) vs. plain (populate or uncorroborated;
+ * still requires the existing single-proposal `applyProposalReview` flow). */
 export function corroboratedFieldChips(
   proposal: Pick<RankedProposal, 'proposedChanges' | 'fieldCorroboration'>,
 ): FieldChip[] {
   return prioritizedFields(Object.keys(proposal.proposedChanges)).map((field) => {
     const corroboration = proposal.fieldCorroboration[field];
+    const diff = proposal.proposedChanges[field];
+    const source = sourceHost(diff?.sourceUrl);
     return {
       field,
-      selectable: corroboration?.exact === true,
+      selectable: isBatchSelectableFieldClaim(diff, corroboration?.exact === true),
       corroboratingCount: corroboration?.corroboratingProposalIds.length ?? 0,
+      excerpt: diff?.excerpt ?? null,
+      excerptPreview: excerptPreview(diff?.excerpt),
+      sourceHref: source.href,
+      sourceHost: source.host,
+      confidence: diff?.confidence ?? 0,
     };
   });
 }

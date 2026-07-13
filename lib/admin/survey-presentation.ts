@@ -1,10 +1,20 @@
 import type { ReviewPresentationAdapter } from '@kontourai/survey/review-workbench';
 import { formatCampDate } from '@/lib/date-format';
 
-export function createCampSurveyPresentationAdapter(fieldLabels: Record<string, string> = {}): ReviewPresentationAdapter {
+export function createCampSurveyPresentationAdapter(
+  fieldLabels: Record<string, string> = {},
+  options: { readonly newCamp?: boolean } = {},
+): ReviewPresentationAdapter {
   return {
     labelForTarget: (target) => fieldLabels[target] ?? humanizeFieldName(target),
-    summarizeValue: (value, context) => summarizeCampValue(context.item.spec.target, value),
+    labelForCandidateRole: (role) => (
+      options.newCamp && role === 'current' ? 'No existing value — new camp' : undefined
+    ),
+    summarizeValue: (value, context) => (
+      options.newCamp && context.candidate.role === 'current'
+        ? 'no existing value — new camp'
+        : summarizeCampValue(context.item.spec.target, value)
+    ),
     linkForReviewItem: (item) => {
       const campId = stringLabel(item.metadata.labels?.campId);
       return campId ? { href: `/admin/camps/${campId}`, label: 'Camp record' } : undefined;

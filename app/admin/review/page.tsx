@@ -6,6 +6,7 @@ import { ReportActions } from './report-actions';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { BatchAcceptPanel } from './batch-accept-panel';
 import { ShadowAutoAcceptBadge } from '@/components/admin/shadow-auto-accept-badge';
+import { NewCampMarker } from './new-camp-marker';
 
 export const dynamic = 'force-dynamic';
 
@@ -226,6 +227,7 @@ export default async function ReviewQueuePage(
                               {proposal.campName}
                             </h3>
                             <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
+                            <NewCampMarker proposedChanges={proposal.proposedChanges} />
                             <ShadowAutoAcceptBadge show={proposal.shadowAutoAccept} />
                           </div>
                           <p className="text-xs text-bark-400 mb-2">

@@ -20,11 +20,13 @@ import { formatCampDateTime } from '@/lib/date-format';
 
 export function SurveyReviewWorkbench({
   session,
+  isNewCamp = false,
   eventPersistence,
   onPersistedEventsChange,
   fieldLabels = {},
 }: {
   session: CampReviewQueueSession;
+  isNewCamp?: boolean;
   eventPersistence?: {
     readonly proposalId: string;
     readonly reviewSessionId: string;
@@ -36,7 +38,10 @@ export function SurveyReviewWorkbench({
   const workbenchRef = useRef<HTMLDivElement | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const storageKey = `campfit:${session.items.map((item) => item.metadata.name).join(',')}`;
-  const presentationAdapter = useMemo(() => createCampSurveyPresentationAdapter(fieldLabels), [fieldLabels]);
+  const presentationAdapter = useMemo(
+    () => createCampSurveyPresentationAdapter(fieldLabels, { newCamp: isNewCamp }),
+    [fieldLabels, isNewCamp],
+  );
 
   useEffect(() => {
     if (!workbenchRef.current) return;
@@ -128,7 +133,9 @@ export function SurveyReviewWorkbench({
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <CandidateCard tone="current" presentation={current} fieldName={fieldName} />
+          {isNewCamp
+            ? <NewCampCurrentState />
+            : <CandidateCard tone="current" presentation={current} fieldName={fieldName} />}
           <CandidateCard tone="proposed" presentation={proposed} fieldName={fieldName} />
         </div>
 
@@ -164,6 +171,23 @@ export function SurveyReviewWorkbench({
   );
 }
 
+function NewCampCurrentState() {
+  return (
+    <article
+      className="rounded-xl border border-cream-300/80 bg-cream-50/70 p-3 admin-surface"
+      data-new-camp-current-state="true"
+    >
+      <div className="mb-2 flex items-center gap-1.5">
+        <CircleDashed className="h-3.5 w-3.5 text-bark-300 admin-text-muted" />
+        <h4 className={cn('text-xs font-semibold uppercase tracking-wide text-bark-500', adminTheme.textSubtle)}>Current CampFit value</h4>
+      </div>
+      <p className={cn('rounded-lg bg-white/70 p-2 text-sm text-bark-500 admin-surface', adminTheme.text)}>
+        no existing value — new camp
+      </p>
+    </article>
+  );
+}
+
 function CandidateCard({
   tone,
   presentation,
@@ -185,7 +209,10 @@ function CandidateCard({
   const candidate = presentation.candidate;
 
   return (
-    <article className={`rounded-xl border p-3 admin-surface-raised ${isProposed ? 'border-pine-200/80 bg-pine-50/40' : 'border-cream-300/80 bg-cream-50/70'}`}>
+    <article
+      className={`rounded-xl border p-3 admin-surface-raised ${isProposed ? 'border-pine-200/80 bg-pine-50/40' : 'border-cream-300/80 bg-cream-50/70'}`}
+      data-candidate-role={tone}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           {isProposed ? <CheckCircle2 className="h-3.5 w-3.5 text-pine-600 admin-link" /> : <CircleDashed className="h-3.5 w-3.5 text-bark-300 admin-text-muted" />}

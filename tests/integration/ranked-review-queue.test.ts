@@ -80,7 +80,7 @@ async function insertProposal(pool: Pool, opts: {
 }
 
 function diff(newValue: unknown, sourceUrl = 'https://example.test/camp'): ProposedChanges {
-  return { city: { old: null, new: newValue, confidence: 0.8, sourceUrl } };
+  return { city: { old: 'Previous city', new: newValue, confidence: 0.8, sourceUrl } };
 }
 
 describe('getRankedReviewQueue', () => {
@@ -198,6 +198,48 @@ describe('getRankedReviewQueue', () => {
       ],
     });
     expect(direct.exact).toBe(proposalARow.fieldCorroboration.city.exact);
+  });
+
+  it('routes an all-populate fresh discovery to needsReview even when every field is exact-corroborated', async () => {
+    const pool = getTestPool();
+    const targetRun = await insertCrawlRun(pool);
+    const historyRun = await insertCrawlRun(pool);
+    const camp = await insertCamp(pool, { name: 'Fresh discovery placeholder' });
+    const proposedChanges: ProposedChanges = {
+      name: { old: null, new: 'Pine Ridge Camp', confidence: 0.96, mode: 'populate' },
+      city: { old: null, new: 'Denver', confidence: 0.92 },
+    };
+    const proposalId = await insertProposal(pool, { campId: camp, proposedChanges, overallConfidence: 0.94, crawlRunId: targetRun });
+    await insertProposal(pool, { campId: camp, proposedChanges, overallConfidence: 0.8, crawlRunId: historyRun, status: 'APPROVED' });
+
+    const { batchReady, needsReview } = await getRankedReviewQueue({});
+    expect(batchReady.some((proposal) => proposal.id === proposalId)).toBe(false);
+    const row = needsReview.find((proposal) => proposal.id === proposalId);
+    expect(row).toBeDefined();
+    expect(row?.fieldCorroboration.name.exact).toBe(true);
+    expect(row?.fieldCorroboration.city.exact).toBe(true);
+    expect(row?.batchEligibleFieldCount).toBe(0);
+  });
+
+  it('keeps a mixed proposal batchReady while counting only its corroborated diff field', async () => {
+    const pool = getTestPool();
+    const targetRun = await insertCrawlRun(pool);
+    const historyRun = await insertCrawlRun(pool);
+    const camp = await insertCamp(pool, { name: 'Mixed proposal camp' });
+    const proposedChanges: ProposedChanges = {
+      city: { old: 'Boulder', new: 'Denver', confidence: 0.9 },
+      description: { old: null, new: 'A newly found description', confidence: 0.85, mode: 'populate' },
+    };
+    const proposalId = await insertProposal(pool, { campId: camp, proposedChanges, overallConfidence: 0.9, crawlRunId: targetRun });
+    await insertProposal(pool, { campId: camp, proposedChanges, overallConfidence: 0.7, crawlRunId: historyRun, status: 'APPROVED' });
+
+    const { batchReady, needsReview } = await getRankedReviewQueue({});
+    expect(needsReview.some((proposal) => proposal.id === proposalId)).toBe(false);
+    const row = batchReady.find((proposal) => proposal.id === proposalId);
+    expect(row).toBeDefined();
+    expect(row?.fieldCorroboration.city.exact).toBe(true);
+    expect(row?.fieldCorroboration.description.exact).toBe(true);
+    expect(row?.batchEligibleFieldCount).toBe(1);
   });
 
   it('a corroborating row sharing the target\'s own crawlRunId does NOT count', async () => {

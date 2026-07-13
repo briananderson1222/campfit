@@ -30,6 +30,7 @@ import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 import { TrustBadge } from '@/components/trust-badge';
 import type { TrustDisplay } from '@/lib/admin/trust-display';
+import { isFreshDiscoveryProposal } from '@/lib/admin/proposal-classification';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Camp Name', organizationName: 'Organization', description: 'Description', campType: 'Camp Type',
@@ -94,6 +95,7 @@ export function ReviewPanel({
 }) {
   const router = useRouter();
   const hasSurveyReviewSession = Boolean(surveyReviewSession && surveyReviewSessionId);
+  const isNewCamp = isFreshDiscoveryProposal(proposal.proposedChanges);
   const [proposedChanges, setProposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
   // Fields already applied in previous partial-approval rounds
   const alreadyApplied = useMemo(() => new Set<string>(proposal.appliedFields ?? []), [proposal.appliedFields]);
@@ -438,6 +440,7 @@ export function ReviewPanel({
               />
               <SurveyReviewWorkbench
                 session={surveyReviewSession}
+                isNewCamp={isNewCamp}
                 eventPersistence={surveyEventPersistence}
                 onPersistedEventsChange={handlePersistedSurveyEventsChange}
                 fieldLabels={FIELD_LABELS}

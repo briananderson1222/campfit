@@ -32,7 +32,7 @@
  */
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Loader2, Quote, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { RankedProposal } from '@/lib/admin/review-repository';
 import {
@@ -148,34 +148,66 @@ export function BatchAcceptPanel({ proposals }: { proposals: RankedProposal[] })
             <p className="text-xs text-bark-400 mb-2">
               {changeCount} field{changeCount !== 1 ? 's' : ''} changed
             </p>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-1.5">
               {chips.map((chip) => {
                 const key = selectionKey(proposal.id, chip.field);
                 const result = results[key];
                 return (
-                  <label
-                    key={chip.field}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs',
-                      chip.selectable ? 'bg-pine-50 text-pine-700 border border-pine-200/60' : 'bg-cream-100 text-bark-400',
-                    )}
-                  >
-                    {chip.selectable && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(key)}
-                        onChange={() => toggle(proposal.id, chip.field)}
-                        disabled={state === 'running' || (result != null && result.status === 'applied')}
-                        className="w-3.5 h-3.5 accent-pine-600"
-                      />
-                    )}
-                    {chip.field}
-                    {result && (
-                      result.status === 'applied'
-                        ? <CheckCircle2 className="w-3 h-3 text-pine-600" />
-                        : <XCircle className="w-3 h-3 text-red-400" />
-                    )}
-                  </label>
+                  <div key={chip.field} className="rounded-lg border border-cream-300/60 bg-cream-50/50 px-2.5 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs',
+                          chip.selectable ? 'bg-pine-50 text-pine-700 border border-pine-200/60' : 'bg-cream-100 text-bark-400',
+                        )}
+                      >
+                        {chip.selectable && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(key)}
+                            onChange={() => toggle(proposal.id, chip.field)}
+                            disabled={state === 'running' || (result != null && result.status === 'applied')}
+                            className="w-3.5 h-3.5 accent-pine-600"
+                          />
+                        )}
+                        {chip.field}
+                        {result && (
+                          result.status === 'applied'
+                            ? <CheckCircle2 className="w-3 h-3 text-pine-600" />
+                            : <XCircle className="w-3 h-3 text-red-400" />
+                        )}
+                      </label>
+                      <span className="text-[11px] font-semibold text-bark-400">
+                        {Math.round(chip.confidence * 100)}% confidence
+                      </span>
+                      {chip.sourceHost && (
+                        chip.sourceHref ? (
+                          <a
+                            href={chip.sourceHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-pine-600 hover:text-pine-700"
+                          >
+                            {chip.sourceHost}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-bark-300">{chip.sourceHost}</span>
+                        )
+                      )}
+                    </div>
+                    <details className="mt-1.5 text-xs text-bark-400">
+                      <summary className="cursor-pointer select-none text-[11px] font-semibold text-bark-400 hover:text-pine-600">
+                        Evidence{chip.excerptPreview ? ` — “${chip.excerptPreview}”` : ' — no excerpt provided'}
+                      </summary>
+                      <div className="mt-2 flex items-start gap-1.5 rounded-md bg-white/70 px-2.5 py-2">
+                        <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                        <p className="italic leading-relaxed">
+                          {chip.excerpt ? `“${chip.excerpt}”` : 'No source excerpt was provided for this field.'}
+                        </p>
+                      </div>
+                    </details>
+                  </div>
                 );
               })}
             </div>
