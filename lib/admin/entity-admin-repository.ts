@@ -12,6 +12,77 @@ export type AdminEntityType = 'CAMP' | 'PROVIDER' | 'PERSON';
 export type AiCapability = 'READ' | 'PROPOSE' | 'WRITE';
 export type AiActionStatus = 'REQUESTED' | 'CONFIRMED' | 'REJECTED' | 'COMPLETED' | 'FAILED';
 
+export const ASSISTANT_CAMP_UPDATE_FIELDS = new Set([
+  'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes',
+  'interestingDetails', 'campType', 'category', 'campTypes', 'categories',
+  'registrationStatus', 'registrationOpenDate', 'lunchIncluded',
+  'city', 'neighborhood', 'address', 'state', 'zip', 'applicationUrl',
+  'contactEmail', 'contactPhone', 'socialLinks',
+]);
+
+export const ASSISTANT_PROVIDER_UPDATE_FIELDS = new Set([
+  'name', 'websiteUrl', 'logoUrl', 'address', 'city', 'neighborhood',
+  'contactEmail', 'contactPhone', 'notes', 'crawlRootUrl', 'applicationUrl', 'socialLinks',
+]);
+
+async function updateAssistantEntityFields(
+  table: 'Camp' | 'Provider',
+  id: string,
+  entries: [string, unknown][],
+  allowedFields: ReadonlySet<string>,
+): Promise<void> {
+  if (entries.some(([key]) => !allowedFields.has(key))) {
+    throw new Error(`Unsupported ${table.toLowerCase()} update field`);
+  }
+  const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
+  await getPool().query(
+    `UPDATE "${table}" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
+    [id, ...entries.map(([, value]) => value ?? null)],
+  );
+}
+
+export async function updateAssistantCampFields(campId: string, entries: [string, unknown][]): Promise<void> {
+  await updateAssistantEntityFields('Camp', campId, entries, ASSISTANT_CAMP_UPDATE_FIELDS);
+}
+
+export async function updateAssistantProviderFields(providerId: string, entries: [string, unknown][]): Promise<void> {
+  await updateAssistantEntityFields('Provider', providerId, entries, ASSISTANT_PROVIDER_UPDATE_FIELDS);
+}
+
+export async function prepareAssistantCampCrawl(campId: string): Promise<void> {
+  const pool = getPool();
+  const { rows } = await pool.query<{ id: string; websiteUrl: string | null }>(
+    `SELECT id, "websiteUrl" FROM "Camp" WHERE id = $1`,
+    [campId],
+  );
+  if (rows.length === 0) throw new Error('Camp not found');
+  if (!rows[0].websiteUrl) throw new Error('Camp has no websiteUrl to crawl');
+
+  await pool.query(
+    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
+     WHERE "campId" = $1 AND status = 'PENDING'`,
+    [campId],
+  );
+}
+
+export async function getAssistantProviderCrawlability(providerId: string): Promise<{
+  provider: { crawlRootUrl: string | null; websiteUrl: string | null } | undefined;
+  campIds: string[];
+}> {
+  const pool = getPool();
+  const [providerRes, campsRes] = await Promise.all([
+    pool.query<{ crawlRootUrl: string | null; websiteUrl: string | null }>(
+      `SELECT "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
+      [providerId],
+    ),
+    pool.query<{ id: string }>(
+      `SELECT id FROM "Camp" WHERE "providerId" = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != '' AND "archivedAt" IS NULL`,
+      [providerId],
+    ),
+  ]);
+  return { provider: providerRes.rows[0], campIds: campsRes.rows.map((row) => row.id) };
+}
+
 export async function deletePersonRole(roleType: 'camp' | 'provider', roleId: string): Promise<number | null> {
   const table = roleType === 'camp' ? 'CampPersonRole' : 'ProviderPersonRole';
   const { rowCount } = await getPool().query(
@@ -121,7 +192,7 @@ export async function getEntityContext(entityType: AdminEntityType, entityId: st
   };
 }
 
-export async function getEntityRelatedCamps(entityType: Extract<AdminEntityType, 'CAMP' | 'PROVIDER'>, entityId: string) {
+export async function getEntityRelatedCamps(entityType: AdminEntityType | null, entityId: string) {
   const pool = getPool();
   const providerId = entityType === 'PROVIDER'
     ? entityId

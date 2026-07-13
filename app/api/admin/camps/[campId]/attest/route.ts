@@ -10,7 +10,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
+import { updateCampAttestationAuditTrail } from '@/lib/admin/camp-repository';
 import { VERIFIED_CAMP_FIELDS } from '@/lib/admin/verification-policy';
 import { recordCampAttestationEvidence } from '@/lib/admin/entity-admin-repository';
 import { requireAdminAccess } from '@/lib/admin/access';
@@ -41,7 +41,6 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     return NextResponse.json({ error: `Fields not attestable: ${invalid.join(', ')}` }, { status: 400 });
   }
 
-  const pool = getPool();
   const now = new Date().toISOString();
 
   // Reconciled path (this slice's Wave 4 "reconcile behind one recordEvidence
@@ -73,13 +72,7 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     };
   }
 
-  await pool.query(
-    `UPDATE "Camp"
-     SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb,
-         "lastVerifiedAt" = now()
-     WHERE id = $2`,
-    [JSON.stringify(patch), params.campId]
-  );
+  await updateCampAttestationAuditTrail(params.campId, patch);
 
   return NextResponse.json({ attested: fields, at: now });
 }

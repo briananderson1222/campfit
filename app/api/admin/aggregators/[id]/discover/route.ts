@@ -32,7 +32,6 @@
  * not exist.
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getAggregatorSourceCommunitySlug } from '@/lib/admin/community-access';
 import {
@@ -54,15 +53,14 @@ const TOS_REQUIRED_MESSAGE = 'ToS decision required before discovery can run';
 
 export async function POST(_request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
-  await ensureProviderCandidateSchema(pool);
+  await ensureAggregatorSourceSchema();
+  await ensureProviderCandidateSchema();
 
   const communitySlug = await getAggregatorSourceCommunitySlug(params.id);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const source = await getAggregatorSource(params.id, pool);
+  const source = await getAggregatorSource(params.id);
   if (!source) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   // Route-level half of AC1's dual gate — returns BEFORE runAggregatorDiscovery
@@ -77,7 +75,6 @@ export async function POST(_request: Request, props: { params: Promise<{ id: str
       params.id,
       { performedBy: auth.access.email },
       { provider },
-      pool,
     );
     return NextResponse.json(summary);
   } catch (err) {

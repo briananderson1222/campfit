@@ -15,6 +15,19 @@ function db() {
   return getPool();
 }
 
+export async function updateCampAttestationAuditTrail(
+  campId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  await db().query(
+    `UPDATE "Camp"
+     SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb,
+         "lastVerifiedAt" = now()
+     WHERE id = $2`,
+    [JSON.stringify(patch), campId],
+  );
+}
+
 const ADMIN_CAMP_EDITABLE_FIELDS = new Set([
   'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes', 'interestingDetails',
   'campType', 'category', 'campTypes', 'categories', 'registrationStatus', 'registrationOpenDate',

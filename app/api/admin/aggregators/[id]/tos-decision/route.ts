@@ -10,7 +10,6 @@
  * strictly than a routine moderator action").
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getAggregatorSourceCommunitySlug } from '@/lib/admin/community-access';
 import {
@@ -23,15 +22,14 @@ const VALID_DECISIONS = new Set(['APPROVED', 'DECLINED']);
 
 export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
+  await ensureAggregatorSourceSchema();
 
   const communitySlug = await getAggregatorSourceCommunitySlug(params.id);
   // Admin-only — intentionally NOT allowModerator: true.
   const auth = await requireAdminAccess({ communitySlug });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const existing = await getAggregatorSource(params.id, pool);
+  const existing = await getAggregatorSource(params.id);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body = await request.json().catch(() => ({}));
@@ -44,7 +42,6 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
   const updated = await recordTosDecision(
     params.id,
     { decision: decision as 'APPROVED' | 'DECLINED', reviewedBy: auth.access.email, notes },
-    pool,
   );
   return NextResponse.json(updated);
 }
