@@ -13,7 +13,7 @@ export function parseCharsLocator(locator: string): { start: number; end: number
     : undefined;
 }
 
-/** Exact-only resolver. A locator wins when supplied; otherwise indexOf selects the first occurrence. */
+/** Exact-only resolver. Without a locator, the excerpt must occur exactly once. */
 export function resolveReviewExcerpt(
   excerpt: string,
   snapshotBody: string | null | undefined,
@@ -31,5 +31,8 @@ export function resolveReviewExcerpt(
 
   const start = snapshotBody.indexOf(excerpt);
   if (start < 0) return { state: 'approximate_stale', resolvedExcerpt: excerpt };
+  if (snapshotBody.indexOf(excerpt, start + 1) >= 0) {
+    return { state: 'approximate_stale', resolvedExcerpt: excerpt };
+  }
   return { state: 'verified', resolvedExcerpt: excerpt, locator: `chars:${start}-${start + excerpt.length}` };
 }

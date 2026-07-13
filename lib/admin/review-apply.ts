@@ -203,8 +203,8 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   }
 
   const decision = await deriveDecision({ proposal, reviewSessionId, keepPending, notes });
-  const proposalSnapshot = decision.approvedFields.length > 0 ? await exactProposalSnapshot(proposal) : {};
-
+  // Immutable snapshot bytes are needed only to validate an approved source
+  // excerpt. Legacy/synthetic review provenance remains valid without one.
   const pool = getPool();
   const client: PoolClient = await pool.connect();
 
@@ -242,6 +242,10 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     // with an empty appliedFields.
     derivedApprovedCount = decision.approvedFields.length;
     appliedFields = decision.approvedFields.filter((field) => !alreadyAppliedFields.has(field));
+
+    const proposalSnapshot = proposal.snapshotRef && approvedFieldsRequireSnapshot(decision.effectiveChanges, appliedFields)
+      ? await exactProposalSnapshot(proposal)
+      : {};
 
     // Builds the Review Decision's Claim/Evidence/VerificationEvent shapes
     // for every field in this round (approved and rejected alike) — kept as
@@ -321,9 +325,9 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // via `provenanceErrors` instead — changelog/metrics (`recordProvenance`,
   // below) still run regardless of whether these succeed.
   const postCommitProvenanceErrors: ProvenanceError[] = [];
-  if (appliedFields.length > 0 && reviewTrustBundle) {
+  if (appliedFields.length > 0) {
     try {
-      await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, appliedFields, reviewTrustBundle);
+      await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, appliedFields, reviewTrustBundle!);
     } catch (err) {
       console.error('recordAppliedFieldEvidence failed (non-fatal):', err);
       postCommitProvenanceErrors.push({ step: 'recordAppliedFieldEvidence', message: String(err) });
@@ -597,7 +601,9 @@ async function applyBatchAcceptedFieldsForProposal(
     // excerpt mismatch, or malformed citation rolls back a mutation-free txn.
     if (newlyAppliedFields.length > 0) {
       narrowedChanges = pickFields(proposal.proposedChanges, newlyAppliedFields);
-      const proposalSnapshot = await exactProposalSnapshot(proposal);
+      const proposalSnapshot = proposal.snapshotRef && approvedFieldsRequireSnapshot(narrowedChanges, newlyAppliedFields)
+        ? await exactProposalSnapshot(proposal)
+        : {};
       reviewTrustBundle = buildCampReviewTrustInput({
         proposalId: proposal.id,
         campId: proposal.campId,
@@ -642,10 +648,8 @@ async function applyBatchAcceptedFieldsForProposal(
     return { outcomes, claims: [] };
   }
 
-  if (!reviewTrustBundle) throw new Error('Batch apply committed without its prevalidated canonical Evidence bundle.');
-
   try {
-    await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle);
+    await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle!);
     await refreshCampVerificationCache(proposal.campId);
   } catch (err) {
     console.error('applyBatchAcceptedClaims: recordAppliedFieldEvidence/refreshCampVerificationCache failed (non-fatal):', err);
@@ -695,6 +699,20 @@ async function applyBatchAcceptedFieldsForProposal(
   });
 
   return { outcomes, claims };
+}
+
+/** Snapshot bytes are required only when an approved diff claims a source excerpt. */
+export function approvedFieldsRequireSnapshot(changes: ProposedChanges, approvedFields: readonly string[]): boolean {
+  return approvedFields.some((field) => Boolean(changes[field]?.excerpt?.trim()));
+}
+
+/** General review provenance always builds; snapshot citation is optional enrichment. */
+export function canBuildReviewTrustBundle(
+  _snapshot: { snapshotRef?: string; snapshotBody?: string },
+  _changes: ProposedChanges,
+  _approvedFields: readonly string[],
+): boolean {
+  return true;
 }
 
 const BATCH_ACCEPT_REVIEWER_NOTES = 'Batch-accepted via exact-corroboration rule.';

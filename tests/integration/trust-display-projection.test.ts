@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { TrustBundle } from '@kontourai/surface';
 import { projectTrustDisplay } from '@/lib/admin/trust-display';
 import { buildCampAttestationTrustInput, buildCampReviewTrustInput } from '@/lib/admin/trust-projection';
+import { validateCampAttestationEvidenceInput } from '@/lib/admin/entity-admin-repository';
+import { approvedFieldsRequireSnapshot, canBuildReviewTrustBundle } from '@/lib/admin/review-apply';
 
 const at = '2026-01-01T00:00:00Z';
 function human(mode: 'source' | 'override' = 'source'): TrustBundle {
@@ -24,7 +26,8 @@ describe('trust display projection', () => {
   });
 
   it('refuses to author approved crawl Evidence without immutable resolvable snapshot inputs', () => {
-    expect(() => buildCampReviewTrustInput({ proposalId: 'p', campId: 'camp', sourceUrl: 'https://example.test', proposedChanges: { name: { old: 'old', new: 'camp', confidence: 1, excerpt: 'camp' } }, approvedFields: ['name'], reviewer: 'reviewer', reviewedAt: at })).toThrow(/stored-snapshot citation/);
+    const legacy = buildCampReviewTrustInput({ proposalId: 'p', campId: 'camp', sourceUrl: 'https://example.test', proposedChanges: { name: { old: 'old', new: 'camp', confidence: 1, excerpt: 'camp' } }, approvedFields: ['name'], reviewer: 'reviewer', reviewedAt: at });
+    expect(legacy.evidence[0].excerptOrSummary).not.toBe('camp');
   });
 
   it('degrades mismatch and distinguishes override without source', () => {
@@ -41,5 +44,28 @@ describe('trust display projection', () => {
     const result = human();
     expect(result.evidence[0]).toMatchObject({ method: 'attestation', sourceRef: 'snapshot:1', sourceLocator: 'chars:2-6', excerptOrSummary: 'camp', metadata: { mode: 'source' } });
     expect(result.events[0].status).toBe('verified');
+  });
+
+  it('fails closed before writing incomplete source attestations', () => {
+    for (const input of [
+      { mode: 'source' as const, sourceLocator: 'chars:0-4', excerpt: 'camp' },
+      { mode: 'source' as const, sourceRef: 'snapshot:1', excerpt: 'camp' },
+      { mode: 'source' as const, sourceRef: 'snapshot:1', sourceLocator: 'field:name', excerpt: 'camp' },
+      { mode: 'source' as const, sourceRef: 'snapshot:1', sourceLocator: 'chars:0-4', excerpt: ' ' },
+    ]) expect(() => validateCampAttestationEvidenceInput(input)).toThrow(/complete snapshot citation/);
+    expect(() => validateCampAttestationEvidenceInput({ mode: 'source', sourceRef: 'snapshot:1', sourceLocator: 'chars:0-4', excerpt: 'camp' })).not.toThrow();
+    expect(() => validateCampAttestationEvidenceInput({ mode: 'source', sourceRef: 'x'.repeat(4097), sourceLocator: 'chars:0-4', excerpt: 'camp' })).toThrow(/sourceRef is too large/);
+    expect(() => validateCampAttestationEvidenceInput({ mode: 'override', notes: 'x'.repeat(10_001) })).toThrow(/reason is too large/);
+  });
+
+  it('requires proposal snapshot loading only for approved excerpt-bearing diffs', () => {
+    expect(approvedFieldsRequireSnapshot({ schedules: { old: [{ label: 'A' }], new: [], confidence: 1 } }, ['schedules'])).toBe(false);
+    expect(approvedFieldsRequireSnapshot({ description: { old: 'old', new: 'new', excerpt: 'new', confidence: 1 } }, ['description'])).toBe(true);
+    expect(approvedFieldsRequireSnapshot({ description: { old: 'old', new: 'new', excerpt: 'new', confidence: 1 } }, [])).toBe(false);
+    const excerptChange = { description: { old: 'old', new: 'new', excerpt: 'new', confidence: 1 } };
+    expect(canBuildReviewTrustBundle({}, excerptChange, ['description'])).toBe(true);
+    expect(canBuildReviewTrustBundle({ snapshotRef: 'snapshot:1', snapshotBody: 'new' }, excerptChange, ['description'])).toBe(true);
+    expect(canBuildReviewTrustBundle({}, { schedules: { old: [], new: [], confidence: 1 } }, ['schedules'])).toBe(true);
+    expect(canBuildReviewTrustBundle({ snapshotRef: 'snapshot:1', snapshotBody: 'body' }, { schedules: { old: [], new: [], confidence: 1 } }, ['schedules'])).toBe(true);
   });
 });

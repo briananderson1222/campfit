@@ -10,9 +10,10 @@ describe('Evidence resolution both-polarity', () => {
     expect(resolveReviewExcerpt('camp', 'a camp here')).toMatchObject({ state: 'verified', locator: 'chars:2-6' });
   });
 
-  it('fails closed for mismatch, malformed bounds, and missing body; indexOf selects the first repeat', () => {
+  it('fails closed for mismatch, malformed bounds, missing body, and an ambiguous locator-free repeat', () => {
     expect(resolveReviewExcerpt('camp', 'a changed page', 'chars:2-6').state).toBe('approximate_stale');
-    expect(resolveReviewExcerpt('camp', 'camp camp')).toMatchObject({ state: 'verified', locator: 'chars:0-4' });
+    expect(resolveReviewExcerpt('camp', 'camp camp').state).toBe('approximate_stale');
+    expect(resolveReviewExcerpt('camp', 'camp camp', 'chars:5-9')).toMatchObject({ state: 'verified', locator: 'chars:5-9' });
     expect(resolveReviewExcerpt('camp', undefined).state).toBe('unavailable');
     expect(parseCharsLocator('field:name')).toBeUndefined();
   });

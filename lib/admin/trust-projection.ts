@@ -331,7 +331,11 @@ function proposedCampReviewObservation(args: {
   const excerptResolution = args.diff.excerpt && args.snapshotBody
     ? resolveReviewExcerpt(args.diff.excerpt, args.snapshotBody)
     : undefined;
-  if (args.selected && (!args.snapshotRef || excerptResolution?.state !== 'verified')) {
+  // A present immutable snapshot opts this observation into source-citation
+  // enrichment and must resolve exactly. Snapshotless legacy proposals still
+  // record their general review provenance, but do not carry the excerpt as
+  // evidence (and therefore cannot be displayed as citation-verified).
+  if (args.selected && args.diff.excerpt && args.snapshotRef && excerptResolution?.state !== 'verified') {
     throw new Error(`Approved crawl field "${args.field}" lacks an exact stored-snapshot citation.`);
   }
   return fieldObservation({
@@ -350,7 +354,7 @@ function proposedCampReviewObservation(args: {
     extraction: {
       confidence: args.diff.confidence,
       locator: excerptResolution?.state === 'verified' ? excerptResolution.locator : `field:${args.field}`,
-      excerpt: args.diff.excerpt,
+      excerpt: excerptResolution?.state === 'verified' ? args.diff.excerpt : undefined,
       extractor: args.extractionModel ?? 'campfit-crawler',
       extractedAt: args.extractedAt,
       metadata: {
