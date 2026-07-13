@@ -9,6 +9,7 @@ import { CAMP_SCALAR_FIELDS } from './proposal-fields';
 import { deriveFieldCorroboration, type FieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { evaluateShadowAutoAccept } from './shadow-auto-accept';
 import { resolveProposalSnapshots } from './shadow-auto-accept-read';
+import { isBatchSelectableFieldClaim } from './proposal-classification';
 
 export async function createProposal(opts: {
   campId: string;
@@ -213,7 +214,7 @@ export async function getCampProposalHistoryBatch(pool: Pool, campIds: string[])
 /** A pending `CampChangeProposal`, annotated with its per-scalar-field exact-corroboration derivation. */
 export interface RankedProposal extends CampChangeProposal {
   fieldCorroboration: Record<string, FieldCorroboration>;
-  /** Count of this proposal's scalar fields with `fieldCorroboration[field].exact === true`. */
+  /** Count of this proposal's scalar, non-populate diff fields with exact corroboration. */
   batchEligibleFieldCount: number;
   /** Advisory shadow-mode result only. No review decision is written from it. */
   shadowAutoAccept: boolean;
@@ -226,10 +227,14 @@ export interface RankedProposal extends CampChangeProposal {
  * no new scoring engine. Splits the full pending set (within the given
  * community scope) into:
  *
- *  - `batchReady`: >=1 scalar field claim is exact-corroborated
- *    (`deriveFieldCorroboration`), sorted `priority DESC, overallConfidence
- *    DESC` — safest, fastest to dispose of first.
- *  - `needsReview`: 0 corroborated field claims, sorted `priority DESC,
+ *  - `batchReady`: >=1 scalar, non-populate diff field claim is
+ *    exact-corroborated (`deriveFieldCorroboration`). Populate claims
+ *    (`mode: "populate"` or `old == null`) never promote a proposal because
+ *    they have no existing value to corroborate against. Mixed proposals
+ *    remain here when at least one real diff qualifies. Sorted `priority
+ *    DESC, overallConfidence DESC` — safest, fastest to dispose of first.
+ *  - `needsReview`: 0 batch-selectable corroborated diff claims (including
+ *    every all-populate fresh-discovery proposal), sorted `priority DESC,
  *    overallConfidence ASC` — riskiest/lowest-confidence surfaced first, so
  *    limited reviewer attention lands on what most needs scrutiny.
  *
@@ -341,7 +346,9 @@ export async function getRankedReviewQueue(opts: {
         history,
       });
       fieldCorroboration[field] = corroboration;
-      if (corroboration.exact) batchEligibleFieldCount += 1;
+      if (isBatchSelectableFieldClaim(proposal.proposedChanges[field], corroboration.exact)) {
+        batchEligibleFieldCount += 1;
+      }
     }
     const snapshotResolved = snapshotResolutions[index] ?? false;
     const shadowAutoAccept = evaluateShadowAutoAccept({

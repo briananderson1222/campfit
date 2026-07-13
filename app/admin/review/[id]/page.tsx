@@ -9,6 +9,7 @@ import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
+import { ReviewDetailHeading } from './review-detail-heading';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,7 +68,7 @@ export default async function ReviewDetailPage(
       </Link>
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
-          <h1 className="font-display text-2xl font-extrabold text-bark-700">{proposal.campName}</h1>
+          <ReviewDetailHeading proposal={proposal} />
           <div className="mt-1 flex flex-wrap items-center gap-3 text-sm">
             <ExternalSourceLink url={proposal.sourceUrl} />
             <Link href={campHref} className="inline-flex items-center gap-1 text-bark-400 hover:text-pine-600">

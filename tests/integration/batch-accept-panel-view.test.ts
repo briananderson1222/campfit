@@ -64,7 +64,48 @@ describe('corroboratedFieldChips', () => {
   it('handles a field with no fieldCorroboration entry at all (defensive, not selectable)', () => {
     const p = proposal({ proposedChanges: { description: { old: '', new: 'x', confidence: 0.5 } }, fieldCorroboration: {} });
     const chips = corroboratedFieldChips(p);
-    expect(chips).toEqual([{ field: 'description', selectable: false, corroboratingCount: 0 }]);
+    expect(chips).toEqual([{
+      field: 'description',
+      selectable: false,
+      corroboratingCount: 0,
+      excerpt: null,
+      excerptPreview: null,
+      sourceHref: undefined,
+      sourceHost: null,
+      confidence: 0.5,
+    }]);
+  });
+
+  it('keeps an exact-corroborated populate field unselectable in a mixed proposal', () => {
+    const p = proposal({
+      proposedChanges: {
+        city: { old: 'Boulder', new: 'Austin', confidence: 0.9 },
+        name: { old: null, new: 'New Camp', confidence: 0.95, mode: 'populate' },
+      },
+      fieldCorroboration: {
+        city: { field: 'city', value: 'Austin', exact: true, corroboratingProposalIds: ['other'], corroboratingSourceUrls: ['https://a.test'], sameSourceUrl: false },
+        name: { field: 'name', value: 'New Camp', exact: true, corroboratingProposalIds: ['other'], corroboratingSourceUrls: ['https://a.test'], sameSourceUrl: false },
+      },
+    });
+
+    const chips = corroboratedFieldChips(p);
+    expect(chips.find((chip) => chip.field === 'city')?.selectable).toBe(true);
+    expect(chips.find((chip) => chip.field === 'name')?.selectable).toBe(false);
+  });
+
+  it('shapes safe, truncated evidence for the batch panel without fetching', () => {
+    const excerpt = 'A'.repeat(160);
+    const chips = corroboratedFieldChips(proposal({
+      proposedChanges: {
+        city: { old: 'Boulder', new: 'Austin', confidence: 0.87, excerpt, sourceUrl: 'https://evidence.example.test/camps/austin' },
+      },
+    }));
+
+    expect(chips[0]?.excerpt).toBe(excerpt);
+    expect(chips[0]?.excerptPreview).toBe(`${'A'.repeat(140)}…`);
+    expect(chips[0]?.sourceHref).toBe('https://evidence.example.test/camps/austin');
+    expect(chips[0]?.sourceHost).toBe('evidence.example.test');
+    expect(chips[0]?.confidence).toBe(0.87);
   });
 });
 

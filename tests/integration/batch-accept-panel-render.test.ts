@@ -48,7 +48,13 @@ function proposal(overrides: Partial<RankedProposal> = {}): RankedProposal {
     sourceUrl: 'https://example.test/camp',
     rawExtraction: {},
     proposedChanges: {
-      city: { old: '', new: 'Austin', confidence: 0.9 },
+      city: {
+        old: 'Boulder',
+        new: 'Austin',
+        confidence: 0.9,
+        excerpt: 'Austin day camp serving children across the community.',
+        sourceUrl: 'https://evidence.example.test/camps/austin',
+      },
     },
     overallConfidence: 0.9,
     extractionModel: 'test-model',
@@ -79,6 +85,11 @@ describe('BatchAcceptPanel — initial static render', () => {
     expect(html).toContain('city');
     expect(html).toContain('Batch accept (0 selected)');
     expect(html).toContain('type="checkbox"');
+    expect(html).toContain('Austin day camp serving children across the community.');
+    expect(html).toContain('evidence.example.test');
+    expect(html).toContain('90% confidence');
+    expect(html).toContain('<details');
+    expect(html).not.toContain('<details open=""');
   });
 
   it('renders the advisory shadow badge only for a shadow-pass proposal', () => {
@@ -87,5 +98,18 @@ describe('BatchAcceptPanel — initial static render', () => {
     expect(passHtml).toContain('data-shadow-auto-accept="true"');
     expect(passHtml).toContain('would auto-accept');
     expect(failHtml).not.toContain('data-shadow-auto-accept');
+  });
+
+  it.each(['javascript:alert(1)', 'not a valid URL'])('renders an unsafe evidence source as text, never a link: %s', (sourceUrl) => {
+    const html = renderWithRouter(createElement(BatchAcceptPanel, {
+      proposals: [proposal({
+        proposedChanges: {
+          city: { old: 'Boulder', new: 'Austin', confidence: 0.9, excerpt: 'Evidence excerpt', sourceUrl },
+        },
+      })],
+    }));
+
+    expect(html).toContain(sourceUrl);
+    expect(html).not.toContain(`href="${sourceUrl}"`);
   });
 });
