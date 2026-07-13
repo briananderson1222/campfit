@@ -58,15 +58,20 @@ vi.mock('@/lib/db', () => ({
 }));
 
 const closeRenderBrowser = vi.fn();
-const createCampfitRenderImpl = vi.fn();
+// Sentinel "render available" impl the try-helper hands back. scrape.ts now
+// calls tryCreateCampfitRenderImpl() (which degrades to undefined when safe
+// browser egress is unavailable — campfit#117); here we return a truthy
+// sentinel so this test exercises the render-available wiring shape.
+const renderImplSentinel = async () => ({ html: '' });
+const tryCreateCampfitRenderImpl = vi.fn((..._args: unknown[]) => renderImplSentinel);
 vi.mock('@/lib/ingestion/render-fetch', () => ({
   closeRenderBrowser: (...args: unknown[]) => closeRenderBrowser(...args),
-  // campfit#53 (spa-ingestion): scrape.ts now also imports this to construct
-  // the real Playwright renderImpl (the ONE place in the codebase that
-  // does). Stubbed to a fixed sentinel here (this test asserts scrape.ts's
-  // CALL SHAPE into runCrawlPipeline/runTraversePipeline, not the renderer
-  // itself — real Playwright coverage lives in scripts/test-render-fetch.ts).
-  createCampfitRenderImpl: (...args: unknown[]) => createCampfitRenderImpl(...args),
+  // scrape.ts imports this to construct the Playwright renderImpl for the
+  // shell-detection fallback, degrading to undefined when browser egress is
+  // unavailable. This test asserts scrape.ts's CALL SHAPE into
+  // runCrawlPipeline/runTraversePipeline, not the renderer itself (real
+  // Playwright coverage lives in scripts/test-render-fetch.ts).
+  tryCreateCampfitRenderImpl: (...args: unknown[]) => tryCreateCampfitRenderImpl(...args),
 }));
 
 import { main } from '@/scripts/scrape';
@@ -118,9 +123,9 @@ describe('scripts/scrape.ts main()', () => {
     await expect(deps.sink({}, {})).resolves.toBeNull();
     // campfit#53 (spa-ingestion, AC1/AC2): even the dry-run path wires a real
     // renderImpl — scripts/scrape.ts is the ONLY caller that constructs one.
-    expect(createCampfitRenderImpl).toHaveBeenCalledTimes(1);
-    expect(createCampfitRenderImpl).toHaveBeenCalledWith();
-    expect(deps.fetchOptions?.renderImpl).toBe(createCampfitRenderImpl.mock.results[0].value);
+    expect(tryCreateCampfitRenderImpl).toHaveBeenCalledTimes(1);
+    expect(tryCreateCampfitRenderImpl).toHaveBeenCalledWith();
+    expect(deps.fetchOptions?.renderImpl).toBe(tryCreateCampfitRenderImpl.mock.results[0].value);
 
     expect(runCrawlPipeline).not.toHaveBeenCalled();
     expect(poolQuery).not.toHaveBeenCalled();
@@ -167,9 +172,9 @@ describe('scripts/scrape.ts main()', () => {
     // execution context is the only place this is wired (see scrape.ts's
     // own file doc); every Vercel-route caller of runCrawlPipeline leaves
     // this unset (see the per-route doc notes added alongside this task).
-    expect(createCampfitRenderImpl).toHaveBeenCalledTimes(1);
-    expect(createCampfitRenderImpl).toHaveBeenCalledWith();
-    expect(opts.fetchOptions?.renderImpl).toBe(createCampfitRenderImpl.mock.results[0].value);
+    expect(tryCreateCampfitRenderImpl).toHaveBeenCalledTimes(1);
+    expect(tryCreateCampfitRenderImpl).toHaveBeenCalledWith();
+    expect(opts.fetchOptions?.renderImpl).toBe(tryCreateCampfitRenderImpl.mock.results[0].value);
 
     // currentByItemNames actually queries the DB pool (not a dead passthrough).
     const current = await opts.currentByItemNames('avid4', ['Some Camp']);

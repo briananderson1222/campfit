@@ -68,7 +68,7 @@ import {
   printReport,
   resolveFailureThreshold,
 } from "@/lib/ingestion/ingestion-runner";
-import { closeRenderBrowser, createCampfitRenderImpl } from "@/lib/ingestion/render-fetch";
+import { closeRenderBrowser, tryCreateCampfitRenderImpl } from "@/lib/ingestion/render-fetch";
 
 loadLocalEnv();
 
@@ -137,6 +137,18 @@ export async function main() {
 
   let results: TraversePipelineSourceResult[];
 
+  // Render impl for shell-detection fallback IF this context has safe browser
+  // egress; else undefined and the sweep runs plain-fetch-only. Constructed
+  // once and reused across the dry-run and live paths. (createCampfitRenderImpl
+  // fails closed until safe browser egress lands — see render-fetch.ts /
+  // campfit#117; a raw call would throw here and abort the whole sweep.)
+  const renderImpl = tryCreateCampfitRenderImpl();
+  if (!renderImpl) {
+    console.log(
+      "⚠️  Render fallback unavailable in this context (no safe browser egress) — plain fetch only. render:true sources will not render until safe browser egress lands.\n",
+    );
+  }
+
   if (dryRun) {
     // No DB, no CrawlRun — matches the pre-existing dry-run/no-op contract.
     // Bypasses the shared seam entirely: `runCrawlPipeline`'s `sources`
@@ -151,7 +163,7 @@ export async function main() {
       sink: noopSink,
       mode: "live-with-capture",
       currentByItemNames: () => new Map<string, Record<string, unknown>>(),
-      fetchOptions: { renderImpl: createCampfitRenderImpl() },
+      fetchOptions: renderImpl ? { renderImpl } : undefined,
     });
   } else {
     // Live sweep — converged onto the shared orchestration seam
@@ -186,7 +198,7 @@ export async function main() {
       // yet) is safe/cheap: renderPage()/the browser are lazily launched on
       // first actual render call (see render-fetch.ts's file doc), so a
       // sweep with zero rendered sources never launches a browser at all.
-      fetchOptions: { renderImpl: createCampfitRenderImpl() },
+      fetchOptions: renderImpl ? { renderImpl } : undefined,
     });
 
     results = collected;
