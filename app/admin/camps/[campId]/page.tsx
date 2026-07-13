@@ -1,4 +1,3 @@
-import { getPool } from '@/lib/db';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ExternalLink, ArrowLeft } from 'lucide-react';
@@ -8,54 +7,10 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 import { getCampFieldTimeline } from '@/lib/admin/field-metadata';
 import { coverageFromRollup, deriveCampVerification } from '@/lib/admin/verification-authority';
+import { getAdminCampDetail, getAdminCampPendingProposals } from '@/lib/admin/camp-repository';
+import { getAdminCampSiteHints } from '@/lib/admin/site-hint-repository';
 
 export const dynamic = 'force-dynamic';
-
-async function getCamp(campId: string) {
-  const pool = getPool();
-  const [campRes, ageRes, schedRes, priceRes] = await Promise.all([
-    pool.query(`SELECT * FROM "Camp" WHERE id = $1`, [campId]),
-    pool.query(`SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]),
-    pool.query(`SELECT * FROM "CampSchedule" WHERE "campId" = $1 ORDER BY "startDate" ASC`, [campId]),
-    pool.query(`SELECT * FROM "CampPricing" WHERE "campId" = $1 ORDER BY amount ASC`, [campId]),
-  ]);
-  if (!campRes.rows[0]) return null;
-  const c = campRes.rows[0];
-  // pg returns `date` columns as Date objects — normalize to YYYY-MM-DD string
-  // so it passes cleanly through EditableField's string display logic.
-  if (c.registrationOpenDate instanceof Date) {
-    c.registrationOpenDate = c.registrationOpenDate.toISOString().split('T')[0];
-  }
-  if (c.registrationCloseDate instanceof Date) {
-    c.registrationCloseDate = c.registrationCloseDate.toISOString().split('T')[0];
-  }
-  if (!Array.isArray(c.campTypes)) c.campTypes = c.campType ? [c.campType] : [];
-  if (!Array.isArray(c.categories)) c.categories = c.category ? [c.category] : [];
-  return { ...c, ageGroups: ageRes.rows, schedules: schedRes.rows, pricing: priceRes.rows };
-}
-
-async function getPendingProposals(campId: string) {
-  const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT id, "createdAt", "overallConfidence", "appliedFields",
-            (SELECT count(*)::int FROM jsonb_object_keys("proposedChanges")) AS "fieldCount"
-     FROM "CampChangeProposal"
-     WHERE "campId" = $1 AND status = 'PENDING'
-     ORDER BY priority DESC, "createdAt" DESC`,
-    [campId]
-  );
-  return rows;
-}
-
-async function getSiteHints(domain: string) {
-  if (!domain) return [];
-  const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT * FROM "CrawlSiteHint" WHERE domain = $1 ORDER BY "createdAt" ASC`,
-    [domain]
-  );
-  return rows;
-}
 
 function domainOf(url: string | null): string {
   if (!url) return '';
@@ -67,13 +22,13 @@ export default async function AdminCampDetailPage(props: { params: Promise<{ cam
   const communitySlug = await getCampCommunitySlug(params.campId);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) notFound();
-  const camp = await getCamp(params.campId).catch(() => null);
+  const camp = await getAdminCampDetail(params.campId).catch(() => null);
   if (!camp) notFound();
 
   const domain = domainOf(camp.websiteUrl);
   const [pendingProposals, siteHints, coverage] = await Promise.all([
-    getPendingProposals(params.campId).catch(err => { console.error('[admin/camps] getPendingProposals failed:', err); return []; }),
-    getSiteHints(domain).catch(err => { console.error('[admin/camps] getSiteHints failed:', err); return []; }),
+    getAdminCampPendingProposals(params.campId).catch(err => { console.error('[admin/camps] getPendingProposals failed:', err); return []; }),
+    getAdminCampSiteHints(domain).catch(err => { console.error('[admin/camps] getSiteHints failed:', err); return []; }),
     deriveCampVerification(params.campId)
       .then(rollup => coverageFromRollup(rollup, camp))
       .catch(err => { console.error('[admin/camps] deriveCampVerification failed:', err); return null; }),

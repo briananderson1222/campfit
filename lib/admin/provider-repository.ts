@@ -147,6 +147,24 @@ export async function getProviderPendingProposals(providerId: string) {
   return rows;
 }
 
+export async function getPendingProviderChangeProposals(providerId: string): Promise<Array<{
+  id: string;
+  createdAt: string;
+  overallConfidence: number | null;
+  proposedChanges: Record<string, unknown> | null;
+}>> {
+  const { rows } = await db().query<{
+    id: string; createdAt: string; overallConfidence: number | null; proposedChanges: Record<string, unknown> | null;
+  }>(
+    `SELECT id, "createdAt", "overallConfidence", "proposedChanges"
+     FROM "ProviderChangeProposal"
+     WHERE "providerId" = $1 AND status = 'PENDING'
+     ORDER BY "createdAt" DESC`,
+    [providerId],
+  );
+  return rows;
+}
+
 export async function getPendingProviderProposals(opts: {
   limit?: number;
   offset?: number;

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
-import { getPool } from "@/lib/db";
+import {
+  clearUserStripeSubscription,
+  initializeStripeRepository,
+  setUserStripeSubscription,
+} from "@/lib/stripe-repository";
 import type Stripe from "stripe";
 
 export async function POST(request: Request) {
@@ -23,7 +27,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  const pool = getPool();
+  initializeStripeRepository();
 
   switch (event.type) {
     case "customer.subscription.created":
@@ -33,12 +37,10 @@ export async function POST(request: Request) {
       const isActive = sub.status === "active" || sub.status === "trialing";
 
       if (userId) {
-        await pool.query(
-          `UPDATE "User" SET
-            tier = $1::"UserTier",
-            "stripeSubscriptionId" = $2
-           WHERE id = $3`,
-          [isActive ? "PREMIUM" : "FREE", sub.id, userId]
+        await setUserStripeSubscription(
+          userId,
+          sub.id,
+          isActive ? "PREMIUM" : "FREE",
         );
       }
       break;
@@ -49,10 +51,7 @@ export async function POST(request: Request) {
       const userId = sub.metadata.userId;
 
       if (userId) {
-        await pool.query(
-          `UPDATE "User" SET tier = 'FREE'::"UserTier", "stripeSubscriptionId" = NULL WHERE id = $1`,
-          [userId]
-        );
+        await clearUserStripeSubscription(userId);
       }
       break;
     }

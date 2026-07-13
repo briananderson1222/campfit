@@ -1,58 +1,9 @@
-import { getPool } from '@/lib/db';
 import Link from 'next/link';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { CampsTable } from './camps-table';
+import { getAdminCampsWithQuality, type AdminCampRow } from '@/lib/admin/camp-repository';
 
 export const dynamic = 'force-dynamic';
-
-interface CampRow {
-  id: string;
-  name: string;
-  slug: string;
-  websiteUrl: string | null;
-  dataConfidence: string;
-  lastVerifiedAt: string | null;
-  communitySlug: string;
-  registrationStatus: string;
-  scheduleCount: number;
-  missingFieldCount: number;
-  pendingProposals: number;
-}
-
-async function getCampsWithQuality(
-  archived: 'active' | 'archived' = 'active',
-  communitySlugs?: string[],
-): Promise<CampRow[]> {
-  const pool = getPool();
-  const values: unknown[] = [];
-  const communityClause = communitySlugs && communitySlugs.length > 0
-    ? `AND c."communitySlug" = ANY($1::text[])`
-    : '';
-  if (communityClause) values.push(communitySlugs);
-  const result = await pool.query<CampRow>(`
-    SELECT
-      c.id,
-      c.name,
-      c.slug,
-      c."websiteUrl",
-      c."dataConfidence",
-      c."lastVerifiedAt",
-      c."communitySlug",
-      c."registrationStatus",
-      (SELECT COUNT(*)::int FROM "CampSchedule" s WHERE s."campId" = c.id) AS "scheduleCount",
-      (CASE WHEN c.description = '' OR c.description IS NULL THEN 1 ELSE 0 END +
-       CASE WHEN c."websiteUrl" = '' OR c."websiteUrl" IS NULL THEN 1 ELSE 0 END +
-       CASE WHEN c.neighborhood = '' OR c.neighborhood IS NULL THEN 1 ELSE 0 END +
-       CASE WHEN c."registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
-      (SELECT COUNT(*)::int FROM "CampChangeProposal"
-       WHERE "campId" = c.id AND status = 'PENDING') AS "pendingProposals"
-    FROM "Camp" c
-    WHERE c."archivedAt" IS ${archived === 'archived' ? 'NOT NULL' : 'NULL'}
-      ${communityClause}
-    ORDER BY "missingFieldCount" DESC, "lastVerifiedAt" ASC NULLS FIRST
-  `, values);
-  return result.rows;
-}
 
 export default async function AdminCampsPage(
   props: {
@@ -63,10 +14,10 @@ export default async function AdminCampsPage(
   const auth = await requireAdminAccess({ allowModerator: true });
   if ('error' in auth) return null;
   const archived = searchParams.archived === '1' ? 'archived' : 'active';
-  const camps = await getCampsWithQuality(
+  const camps = await getAdminCampsWithQuality(
     archived,
     auth.access.isAdmin ? undefined : auth.access.communities,
-  ).catch(() => [] as CampRow[]);
+  ).catch(() => [] as AdminCampRow[]);
 
   return (
     <div>

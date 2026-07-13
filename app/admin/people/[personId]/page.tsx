@@ -2,52 +2,19 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { requireAdminAccess } from '@/lib/admin/access';
-import { getPool } from '@/lib/db';
 import { PersonEditor } from './person-editor';
 import { PersonRoleActions } from './person-role-actions';
 import { getPersonFieldTimeline } from '@/lib/admin/field-metadata';
+import { getAdminPersonDetail } from '@/lib/admin/person-repository';
 
 export const dynamic = 'force-dynamic';
-
-async function getPersonDetail(personId: string) {
-  const pool = getPool();
-  const [personRes, contactsRes, campRolesRes, providerRolesRes] = await Promise.all([
-    pool.query(`SELECT * FROM "Person" WHERE id = $1`, [personId]),
-    pool.query(`SELECT * FROM "PersonContactMethod" WHERE "personId" = $1 ORDER BY "createdAt" ASC`, [personId]),
-    pool.query(
-      `SELECT r.*, c.name AS "campName", c.slug AS "campSlug", c."communitySlug"
-       FROM "CampPersonRole" r
-       JOIN "Camp" c ON c.id = r."campId"
-       WHERE r."personId" = $1
-       ORDER BY c.name ASC`,
-      [personId],
-    ),
-    pool.query(
-      `SELECT r.*, p.name AS "providerName", p.slug AS "providerSlug", p."communitySlug"
-       FROM "ProviderPersonRole" r
-       JOIN "Provider" p ON p.id = r."providerId"
-       WHERE r."personId" = $1
-       ORDER BY p.name ASC`,
-      [personId],
-    ),
-  ]);
-
-  const person = personRes.rows[0];
-  if (!person) return null;
-  return {
-    person,
-    contacts: contactsRes.rows,
-    campRoles: campRolesRes.rows,
-    providerRoles: providerRolesRes.rows,
-  };
-}
 
 export default async function AdminPersonDetailPage(props: { params: Promise<{ personId: string }> }) {
   const params = await props.params;
   const auth = await requireAdminAccess();
   if ('error' in auth) return null;
 
-  const detail = await getPersonDetail(params.personId).catch(() => null);
+  const detail = await getAdminPersonDetail(params.personId).catch(() => null);
   if (!detail) notFound();
   const fieldTimeline = await getPersonFieldTimeline(params.personId).catch(() => ({}));
 

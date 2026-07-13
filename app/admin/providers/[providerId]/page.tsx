@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getProvider, getProviderCamps, getProviderPendingProposals } from '@/lib/admin/provider-repository';
-import { getPool } from '@/lib/db';
+import { getProvider, getProviderCamps, getProviderPendingProposals, getPendingProviderChangeProposals } from '@/lib/admin/provider-repository';
 import { cn } from '@/lib/utils';
 import { ExternalLink, Building2 } from 'lucide-react';
 import { CATEGORY_LABELS, STATUS_CONFIG } from '@/lib/types';
@@ -13,6 +12,7 @@ import { FirstCrawlOffer } from './first-crawl-offer';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProviderCommunitySlug } from '@/lib/admin/community-access';
 import { getProviderFieldTimeline } from '@/lib/admin/field-metadata';
+import { getProviderEditorSiteHints } from '@/lib/admin/site-hint-repository';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,23 +118,9 @@ export default async function ProviderDetailPage(
   const shouldOfferFirstCrawl = ((provider.campCount ?? 0) === 0 || searchParams.created === '1') && !!crawlUrl;
 
   // Fetch crawl site hints + provider proposals
-  const pool = getPool();
-  const [{ rows: siteHints }, { rows: providerChangeProposals }] = await Promise.all([
-    pool
-      .query<{ id: string; hint: string; active: boolean; createdAt: string }>(
-        `SELECT id, hint, active, "createdAt" FROM "CrawlSiteHint" WHERE domain = $1 ORDER BY "createdAt" ASC`,
-        [provider.domain]
-      )
-      .catch(() => ({ rows: [] as any[] })),
-    pool
-      .query(
-        `SELECT id, "createdAt", "overallConfidence", "proposedChanges"
-         FROM "ProviderChangeProposal"
-         WHERE "providerId" = $1 AND status = 'PENDING'
-         ORDER BY "createdAt" DESC`,
-        [providerId]
-      )
-      .catch(() => ({ rows: [] as any[] })),
+  const [siteHints, providerChangeProposals] = await Promise.all([
+    getProviderEditorSiteHints(provider.domain).catch(() => [] as any[]),
+    getPendingProviderChangeProposals(providerId).catch(() => [] as any[]),
   ]);
   const fieldTimeline = await getProviderFieldTimeline(providerId).catch(() => ({}));
 

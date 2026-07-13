@@ -26,6 +26,7 @@ import type {
   CreateAggregatorSourceInput,
   TosDecisionInput,
 } from "./types";
+import { ensureProviderCandidateSchema } from "../discovery/candidate-repository";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,21 @@ export async function listAggregatorSources(
     `SELECT * FROM "AggregatorSource" ORDER BY "createdAt" DESC`,
   );
   return rows;
+}
+
+export async function listAggregatorSourcesWithPendingCandidateCounts(communitySlug: string) {
+  const pool = getPool();
+  await ensureAggregatorSourceSchema(pool);
+  await ensureProviderCandidateSchema(pool);
+  const sources = await listAggregatorSources(communitySlug, pool);
+  const ids = sources.map((source) => source.id);
+  const countRows = ids.length ? (await pool.query<{ aggregatorSourceId: string; count: string }>(
+    `SELECT "aggregatorSourceId", COUNT(*)::text AS count
+     FROM "ProviderCandidate"
+     WHERE "aggregatorSourceId" = ANY($1::text[]) AND status = 'PENDING'
+     GROUP BY "aggregatorSourceId"`, [ids])).rows : [];
+  const countMap = new Map(countRows.map((row) => [row.aggregatorSourceId, Number(row.count)]));
+  return sources.map((source) => ({ ...source, pendingCandidateCount: countMap.get(source.id) ?? 0 }));
 }
 
 // ── Writes ────────────────────────────────────────────────────────────────

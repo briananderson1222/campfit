@@ -1,7 +1,5 @@
 import nextVitals from "eslint-config-next/core-web-vitals";
 
-const literalGlob = (path) => path.replaceAll("[", "[[]");
-
 const config = [
   ...nextVitals,
   {
@@ -38,39 +36,6 @@ const config = [
           message: "Database pool construction belongs in the lib repository/data-access layer, not app routes or pages.",
         },
       ],
-    },
-  },
-  {
-    // BURN-DOWN LIST: migrate these into lib repositories and remove entries as you go; never ADD to this list.
-    files: [
-      "app/admin/camps/[campId]/page.tsx",
-      "app/admin/camps/page.tsx",
-      "app/admin/people/[personId]/page.tsx",
-      "app/admin/people/page.tsx",
-      "app/admin/providers/[providerId]/page.tsx",
-      "app/admin/trust/page.tsx",
-      "app/admin/users/page.tsx",
-      "app/api/admin/aggregators/[id]/candidates/onboard/route.ts",
-      "app/api/admin/aggregators/[id]/candidates/route.ts",
-      "app/api/admin/aggregators/[id]/discover/route.ts",
-      "app/api/admin/aggregators/[id]/route.ts",
-      "app/api/admin/aggregators/[id]/tos-decision/route.ts",
-      "app/api/admin/aggregators/route.ts",
-      "app/api/admin/assistant/route.ts",
-      "app/api/admin/camps/[campId]/age-groups/route.ts",
-      "app/api/admin/camps/[campId]/attest/route.ts",
-      "app/api/admin/camps/[campId]/route.ts",
-      "app/api/admin/crawl/onboard-url/route.ts",
-      "app/api/admin/people/[personId]/route.ts",
-      "app/api/admin/review/batch-accept/route.ts",
-      "app/api/cron/notify/route.ts",
-      "app/api/stripe/checkout/route.ts",
-      "app/api/stripe/portal/route.ts",
-      "app/api/stripe/webhook/route.ts",
-      "app/dashboard/page.tsx",
-    ].map(literalGlob),
-    rules: {
-      "no-restricted-syntax": "off",
     },
   },
 ];

@@ -9,7 +9,6 @@
  * the safe default" discipline for read-only list routes.
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getAggregatorSourceCommunitySlug } from '@/lib/admin/community-access';
 import {
@@ -25,15 +24,14 @@ const VALID_STATUSES = new Set(['PENDING', 'APPROVED', 'REJECTED', 'ALL']);
 
 export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
-  await ensureProviderCandidateSchema(pool);
+  await ensureAggregatorSourceSchema();
+  await ensureProviderCandidateSchema();
 
   const communitySlug = await getAggregatorSourceCommunitySlug(params.id);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const source = await getAggregatorSource(params.id, pool);
+  const source = await getAggregatorSource(params.id);
   if (!source) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const { searchParams } = new URL(request.url);
@@ -44,6 +42,6 @@ export async function GET(request: Request, props: { params: Promise<{ id: strin
     | 'REJECTED'
     | 'ALL';
 
-  const candidates = await getCandidatesForAggregator(params.id, status, pool);
+  const candidates = await getCandidatesForAggregator(params.id, status);
   return NextResponse.json(candidates);
 }

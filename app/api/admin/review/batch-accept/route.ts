@@ -41,50 +41,16 @@
  * "successful" at the HTTP layer before this fix).
  */
 import { NextResponse } from 'next/server';
-import type { Pool } from 'pg';
-
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlugs } from '@/lib/admin/community-access';
-import { getCampProposalHistoryBatch } from '@/lib/admin/review-repository';
-import { applyBatchAcceptedClaims, type BatchAcceptOutcome, type BatchAcceptSelection } from '@/lib/admin/review-apply';
 import {
-  recordBatchAcceptAudit,
-  type BatchAcceptExclusion,
-  type BatchAcceptExclusionReason,
-} from '@/lib/admin/batch-accept-audit-repository';
-import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
-import type { TrustDisplay } from '@/lib/admin/trust-display';
-
-export const BATCH_ACCEPT_CRITERIA = 'exact-corroboration-v1';
-
-export type BatchAcceptRouteStatus = BatchAcceptOutcome['status'] | 'excluded_scope';
-
-export interface BatchAcceptRouteResult {
-  proposalId: string;
-  field: string;
-  status: BatchAcceptRouteStatus;
-  message?: string;
-  receipt?: TrustDisplay;
-}
-
-const EXCLUSION_REASON_BY_STATUS: Record<Exclude<BatchAcceptRouteStatus, 'applied'>, BatchAcceptExclusionReason> = {
-  excluded_not_pending: 'not_pending',
-  excluded_not_corroborated: 'not_corroborated',
-  excluded_scope: 'out_of_scope',
-  error: 'apply_error',
-};
-
-async function campIdsForProposals(pool: Pool, proposalIds: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
-  if (proposalIds.length === 0) return map;
-  const { rows } = await pool.query<{ id: string; campId: string }>(
-    `SELECT id, "campId" FROM "CampChangeProposal" WHERE id = ANY($1::text[])`,
-    [proposalIds],
-  );
-  for (const row of rows) map.set(row.id, row.campId);
-  return map;
-}
+  applyAuthorizedBatchAccept,
+  BATCH_ACCEPT_CRITERIA,
+  type BatchAcceptRouteResult,
+} from '@/lib/admin/batch-accept-repository';
+import type { BatchAcceptSelection } from '@/lib/admin/review-apply';
+export { BATCH_ACCEPT_CRITERIA } from '@/lib/admin/batch-accept-repository';
+export type { BatchAcceptRouteResult, BatchAcceptRouteStatus } from '@/lib/admin/batch-accept-repository';
 
 function parseSelections(body: unknown): BatchAcceptSelection[] | null {
   const selections = (body as { selections?: unknown } | null)?.selections;
@@ -115,8 +81,6 @@ export async function POST(request: Request) {
   if (selections.length === 0) {
     return NextResponse.json({ error: 'selections must be a non-empty array of { proposalId, field }' }, { status: 400 });
   }
-
-  const pool = getPool();
 
   // The #93 lesson: re-resolve and re-check EACH selected Proposal's
   // community individually — never a single up-front auth check against one
@@ -151,65 +115,13 @@ export async function POST(request: Request) {
       message: 'Proposal is outside the requester\'s community scope.',
     }));
 
-  const inScopeProposalIds = Array.from(new Set(inScopeSelections.map((s) => s.proposalId)));
-  const campIdByProposal = await campIdsForProposals(pool, inScopeProposalIds);
-  const campIds = Array.from(new Set(Array.from(campIdByProposal.values())));
-  const historyByCamp = await getCampProposalHistoryBatch(pool, campIds);
-
-  const applyResult = inScopeSelections.length > 0
-    ? await applyBatchAcceptedClaims(pool, { selections: inScopeSelections, actor: auth.access.email, historyByCamp })
-    : { outcomes: [], claims: [] };
-
-  const results: BatchAcceptRouteResult[] = [
-    ...scopeExclusionResults,
-    ...applyResult.outcomes.map((outcome) => ({ ...outcome, status: outcome.status as BatchAcceptRouteStatus })),
-  ];
-  // REVIEW M4 FIX (was: `if (applyResult.claims.length > 0)`, so a batch
-  // where EVERY selection was excluded — e.g. a moderator submitting a
-  // selection entirely outside their community scope, or a batch that
-  // turns out fully uncorroborated by the time it's re-checked
-  // server-side — left NO audit trace at all. That is exactly the scenario
-  // most worth an audit trail: a request attempting something (a
-  // scope-violation attempt, a stale-client resubmission of an already-
-  // resolved batch) that was correctly rejected in full. `results.length >
-  // 0` is true whenever this line is reached (the route already 400s
-  // above for an empty `selections` array, and every distinct selection
-  // resolves to exactly one entry in `results` — either
-  // `scopeExclusionResults` or `applyResult.outcomes` — so nothing here can
-  // be selections.length > 0 yet results.length === 0). `recordBatchAcceptAudit`
-  // already handles an empty `claims` array correctly (`appliedCount: 0` —
-  // see that function's own INSERT), so this is a pure gate widening, no
-  // schema/repository change needed.
-  const excluded: BatchAcceptExclusion[] = results
-    .filter((result): result is BatchAcceptRouteResult & { status: Exclude<BatchAcceptRouteStatus, 'applied'> } => result.status !== 'applied')
-    .map((result) => ({
-      proposalId: result.proposalId,
-      field: result.field,
-      reason: EXCLUSION_REASON_BY_STATUS[result.status],
-      message: result.message,
-    }));
-
-  const auditId = results.length > 0
-    ? await recordBatchAcceptAudit(pool, {
-        performedBy: auth.access.email,
-        criteria: BATCH_ACCEPT_CRITERIA,
-        requestedCount: selections.length,
-        claims: applyResult.claims,
-        excluded,
-      })
-    : null;
-
-  await Promise.all(results.map(async (result) => {
-    if (result.status !== 'applied') return;
-    const campId = campIdByProposal.get(result.proposalId);
-    if (!campId) return;
-    try {
-      result.receipt = (await loadCampTrustDisplays(campId, [result.field])).fields[result.field];
-    } catch (error) {
-      console.error('batch-accept receipt projection failed after apply/audit:', error);
-      result.receipt = { evidenceState: 'unverified', trustOrigin: 'none', label: 'Unverified', accessibleName: 'Unverified; receipt projection unavailable' };
-    }
-  }));
+  const { auditId, results } = await applyAuthorizedBatchAccept({
+    inScopeSelections,
+    scopeExclusionResults,
+    actor: auth.access.email,
+    requestedCount: selections.length,
+    criteria: BATCH_ACCEPT_CRITERIA,
+  });
 
   return NextResponse.json({ auditId, results });
 }

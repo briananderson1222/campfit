@@ -30,7 +30,6 @@
  * (AC1) already uses.
  */
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getAggregatorSourceCommunitySlug } from '@/lib/admin/community-access';
 import {
@@ -51,15 +50,14 @@ interface OnboardResultRow {
 
 export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const pool = getPool();
-  await ensureAggregatorSourceSchema(pool);
-  await ensureProviderCandidateSchema(pool);
+  await ensureAggregatorSourceSchema();
+  await ensureProviderCandidateSchema();
 
   const communitySlug = await getAggregatorSourceCommunitySlug(params.id);
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const source = await getAggregatorSource(params.id, pool);
+  const source = await getAggregatorSource(params.id);
   if (!source) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const body = await request.json().catch(() => ({}));
@@ -77,7 +75,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       // ever calling onboardProviderCandidate — the route's own auth check
       // only authorizes the requester against `params.id`'s community, not
       // against an arbitrary candidateId in the request body.
-      const candidate = await getCandidate(candidateId, pool);
+      const candidate = await getCandidate(candidateId);
       if (!candidate) {
         throw new Error(`Candidate ${candidateId} not found`);
       }
@@ -90,7 +88,6 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       const result = await onboardProviderCandidate(
         candidateId,
         { onboardedBy: auth.access.email, expectedAggregatorSourceId: params.id },
-        pool,
       );
       results.push({
         candidateId,

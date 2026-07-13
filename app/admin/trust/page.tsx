@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import { getPool } from '@/lib/db';
 import { cn } from '@/lib/utils';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { AttestationActions } from '@/components/admin/attestation-actions';
 import { ReviewFlagActions } from '@/components/admin/review-flag-actions';
+import { getTrustDashboard } from '@/lib/admin/trust-dashboard-repository';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,16 +12,6 @@ function entityHref(entityType: string, entityId: string) {
   if (entityType === 'PROVIDER') return `/admin/providers/${entityId}`;
   if (entityType === 'PERSON') return `/admin/people/${entityId}`;
   return null;
-}
-
-async function getTrustDashboard() {
-  const pool = getPool();
-  const [flags, attestations, aiActions] = await Promise.all([
-    pool.query(`SELECT * FROM "ReviewFlag" ORDER BY CASE status WHEN 'OPEN' THEN 0 ELSE 1 END, "createdAt" DESC LIMIT 50`),
-    pool.query(`SELECT * FROM "FieldAttestation" ORDER BY "createdAt" DESC LIMIT 50`),
-    pool.query(`SELECT * FROM "AiActionLog" ORDER BY "createdAt" DESC LIMIT 50`),
-  ]);
-  return { flags: flags.rows, attestations: attestations.rows, aiActions: aiActions.rows };
 }
 
 export default async function AdminTrustPage() {

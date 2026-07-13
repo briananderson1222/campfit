@@ -8,13 +8,19 @@ import {
   createReviewFlag,
   ensurePerson,
   getEntityContext,
+  getEntityRelatedCamps,
   getEntitySnapshot,
+  getAssistantProviderCrawlability,
   linkPersonToEntity,
   logAiAction,
   setEntityArchiveState,
+  prepareAssistantCampCrawl,
+  updateAssistantCampFields,
+  updateAssistantProviderFields,
+  ASSISTANT_CAMP_UPDATE_FIELDS,
+  ASSISTANT_PROVIDER_UPDATE_FIELDS,
   type AdminEntityType,
 } from '@/lib/admin/entity-admin-repository';
-import { getPool } from '@/lib/db';
 import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
@@ -66,13 +72,7 @@ function capabilityFor(action: AssistantAction) {
 // `VERIFIED` with zero backing Claim/Evidence/Event and no cache refresh
 // (V13, mirroring V5/security review SF1 in the sibling PATCH route). See
 // `tests/integration/editable-fields.test.ts`.
-export const CAMP_UPDATE_FIELDS = new Set([
-  'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes',
-  'interestingDetails', 'campType', 'category', 'campTypes', 'categories',
-  'registrationStatus', 'registrationOpenDate', 'lunchIncluded',
-  'city', 'neighborhood', 'address', 'state', 'zip', 'applicationUrl',
-  'contactEmail', 'contactPhone', 'socialLinks',
-]);
+export const CAMP_UPDATE_FIELDS = ASSISTANT_CAMP_UPDATE_FIELDS;
 
 /** Structural guardrail (V13/V5): fail loud if either derived column ever reappears here. */
 const FORBIDDEN_CAMP_UPDATE_FIELDS = ['dataConfidence', 'lastVerifiedAt'] as const;
@@ -85,10 +85,7 @@ for (const forbidden of FORBIDDEN_CAMP_UPDATE_FIELDS) {
   }
 }
 
-const PROVIDER_UPDATE_FIELDS = new Set([
-  'name', 'websiteUrl', 'logoUrl', 'address', 'city', 'neighborhood',
-  'contactEmail', 'contactPhone', 'notes', 'crawlRootUrl', 'applicationUrl', 'socialLinks',
-]);
+const PROVIDER_UPDATE_FIELDS = ASSISTANT_PROVIDER_UPDATE_FIELDS;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as {
@@ -185,21 +182,7 @@ export async function POST(request: Request) {
         break;
       case 'get_connected_camps': {
         if (!entityId) return NextResponse.json({ error: 'entityId required' }, { status: 400 });
-        const pool = getPool();
-        const providerId = entityType === 'PROVIDER'
-          ? entityId
-          : (await pool.query(`SELECT "providerId" FROM "Camp" WHERE id = $1`, [entityId])).rows[0]?.providerId;
-        if (!providerId) {
-          output = [];
-        } else {
-          output = (await pool.query(
-            `SELECT id, name, slug, city, state, "lastVerifiedAt"
-             FROM "Camp"
-             WHERE "providerId" = $1
-             ORDER BY name ASC`,
-            [providerId],
-          )).rows;
-        }
+        output = await getEntityRelatedCamps(entityType, entityId);
         reply = Array.isArray(output) && output.length > 0
           ? `Found ${output.length} related camp${output.length === 1 ? '' : 's'}.`
           : 'No related camps found.';
@@ -247,8 +230,7 @@ export async function POST(request: Request) {
         const updates = Object.fromEntries(Object.entries(payload.updates as Record<string, unknown>).filter(([key]) => CAMP_UPDATE_FIELDS.has(key)));
         const entries = Object.entries(updates);
         if (entries.length === 0) return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
-        const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
-        await getPool().query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`, [entityId, ...entries.map(([, value]) => value ?? null)]);
+        await updateAssistantCampFields(entityId, entries);
         output = await getEntitySnapshot('CAMP', entityId);
         reply = 'Updated camp fields.';
         break;
@@ -259,8 +241,7 @@ export async function POST(request: Request) {
         const updates = Object.fromEntries(Object.entries(payload.updates as Record<string, unknown>).filter(([key]) => PROVIDER_UPDATE_FIELDS.has(key)));
         const entries = Object.entries(updates);
         if (entries.length === 0) return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
-        const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
-        await getPool().query(`UPDATE "Provider" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`, [entityId, ...entries.map(([, value]) => value ?? null)]);
+        await updateAssistantProviderFields(entityId, entries);
         output = await getEntitySnapshot('PROVIDER', entityId);
         reply = 'Updated provider fields.';
         break;
@@ -593,38 +574,13 @@ function summarizeEntityContext(
 }
 
 async function startCampCrawl(campId: string, actor: string) {
-  const pool = getPool();
-  const { rows } = await pool.query<{ id: string; websiteUrl: string | null }>(
-    `SELECT id, "websiteUrl" FROM "Camp" WHERE id = $1`,
-    [campId],
-  );
-  if (rows.length === 0) throw new Error('Camp not found');
-  if (!rows[0].websiteUrl) throw new Error('Camp has no websiteUrl to crawl');
-
-  await pool.query(
-    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
-     WHERE "campId" = $1 AND status = 'PENDING'`,
-    [campId],
-  );
-
+  await prepareAssistantCampCrawl(campId);
   return startPipeline({ triggeredBy: actor, campIds: [campId] });
 }
 
 async function startProviderCrawl(providerId: string, actor: string) {
-  const pool = getPool();
-  const [providerRes, campsRes] = await Promise.all([
-    pool.query<{ crawlRootUrl: string | null; websiteUrl: string | null }>(
-      `SELECT "crawlRootUrl", "websiteUrl" FROM "Provider" WHERE id = $1`,
-      [providerId],
-    ),
-    pool.query<{ id: string }>(
-      `SELECT id FROM "Camp" WHERE "providerId" = $1 AND "websiteUrl" IS NOT NULL AND "websiteUrl" != '' AND "archivedAt" IS NULL`,
-      [providerId],
-    ),
-  ]);
-
-  const campIds = campsRes.rows.map((row) => row.id);
-  if (campIds.length === 0 && !providerRes.rows[0]?.crawlRootUrl && !providerRes.rows[0]?.websiteUrl) {
+  const { provider, campIds } = await getAssistantProviderCrawlability(providerId);
+  if (campIds.length === 0 && !provider?.crawlRootUrl && !provider?.websiteUrl) {
     throw new Error('No crawlable camps or provider root URL');
   }
 

@@ -8,6 +8,29 @@ export async function getSiteHints(domain: string) {
   return rows;
 }
 
+export async function getAdminCampSiteHints(domain: string) {
+  if (!domain) return [];
+  return getSiteHints(domain);
+}
+
+export async function getProviderEditorSiteHints(domain: string | null): Promise<Array<{
+  id: string;
+  hint: string;
+  active: boolean;
+  createdAt: string;
+}>> {
+  const { rows } = await getPool().query<{
+    id: string;
+    hint: string;
+    active: boolean;
+    createdAt: string;
+  }>(
+    `SELECT id, hint, active, "createdAt" FROM "CrawlSiteHint" WHERE domain = $1 ORDER BY "createdAt" ASC`,
+    [domain],
+  );
+  return rows;
+}
+
 export async function createSiteHint(input: {
   domain: string;
   hint: string;

@@ -7,8 +7,11 @@
  */
 
 import { NextResponse } from "next/server";
-import { getPool } from "@/lib/db";
 import { sendRegistrationAlert } from "@/lib/notifications/email";
+import {
+  getRegistrationAlertRecipients,
+  getUpcomingRegistrationCamps,
+} from "@/lib/notification-repository";
 
 export async function GET(request: Request) {
   // Verify the request comes from Vercel Cron
@@ -17,36 +20,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const pool = getPool();
-
   // Find camps with registration opening in the next 7 days
-  const campsResult = await pool.query(
-    `SELECT id, slug, name, "websiteUrl", "registrationOpenDate"
-     FROM "Camp"
-     WHERE "registrationOpenDate" BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
-     AND "registrationStatus" IN ('COMING_SOON', 'UNKNOWN')`
-  );
+  const camps = await getUpcomingRegistrationCamps();
 
-  if (campsResult.rows.length === 0) {
+  if (camps.length === 0) {
     return NextResponse.json({ sent: 0, message: "No upcoming registrations" });
   }
 
   let sent = 0;
   const errors: string[] = [];
 
-  for (const camp of campsResult.rows) {
+  for (const camp of camps) {
     // Find users who have saved this camp and have email notifications on
-    const usersResult = await pool.query(
-      `SELECT u.email
-       FROM "SavedCamp" sc
-       JOIN "User" u ON u.id = sc."userId"
-       WHERE sc."campId" = $1
-       AND sc."notifyEmail" = true
-       AND u.email != ''`,
-      [camp.id]
-    );
+    const users = await getRegistrationAlertRecipients(camp.id);
 
-    for (const user of usersResult.rows) {
+    for (const user of users) {
       try {
         await sendRegistrationAlert({
           to: user.email,
@@ -64,7 +52,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     sent,
-    camps: campsResult.rows.length,
+    camps: camps.length,
     errors: errors.length > 0 ? errors : undefined,
   });
 }
