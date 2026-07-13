@@ -16,6 +16,7 @@ config({ path: '.env.local' });
 config({ path: '.env' });
 
 import { ActivitiesKidsHarvester } from '@/lib/ingestion/aggregator/activitieskids';
+import { CamperoniHarvester } from '@/lib/ingestion/aggregator/camperoni';
 import type { BaseHarvester } from '@/lib/ingestion/aggregator/base-harvester';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 
@@ -37,8 +38,8 @@ const modelIdx  = args.indexOf('--model');
 const model     = modelIdx !== -1 ? args[modelIdx + 1] : undefined;
 
 if (!source) {
-  console.error('Usage: npm run harvest -- --source <activitieskids|...> [--limit N] [--dry-run] [--crawl-after]');
-  console.error('Available sources: activitieskids');
+  console.error('Usage: npm run harvest -- --source <activitieskids|camperoni|...> [--limit N] [--dry-run] [--crawl-after]');
+  console.error('Available sources: activitieskids, camperoni');
   process.exit(1);
 }
 
@@ -46,6 +47,7 @@ if (!source) {
 
 const HARVESTERS: Record<string, () => BaseHarvester> = {
   activitieskids: () => new ActivitiesKidsHarvester(),
+  camperoni: () => new CamperoniHarvester(),
   // Add more harvesters here:
   // summercamphub: () => new SummerCampHubHarvester(),
   // kidsindenver: () => new KidsInDenverHarvester(),
