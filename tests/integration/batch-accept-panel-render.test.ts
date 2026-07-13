@@ -62,6 +62,7 @@ function proposal(overrides: Partial<RankedProposal> = {}): RankedProposal {
       city: { field: 'city', value: 'Austin', exact: true, corroboratingProposalIds: ['other'], corroboratingSourceUrls: ['https://a.test'], sameSourceUrl: false },
     },
     batchEligibleFieldCount: 1,
+    shadowAutoAccept: false,
     ...overrides,
   };
 }
@@ -78,5 +79,13 @@ describe('BatchAcceptPanel — initial static render', () => {
     expect(html).toContain('city');
     expect(html).toContain('Batch accept (0 selected)');
     expect(html).toContain('type="checkbox"');
+  });
+
+  it('renders the advisory shadow badge only for a shadow-pass proposal', () => {
+    const passHtml = renderWithRouter(createElement(BatchAcceptPanel, { proposals: [proposal({ shadowAutoAccept: true })] }));
+    const failHtml = renderWithRouter(createElement(BatchAcceptPanel, { proposals: [proposal({ shadowAutoAccept: false })] }));
+    expect(passHtml).toContain('data-shadow-auto-accept="true"');
+    expect(passHtml).toContain('would auto-accept');
+    expect(failHtml).not.toContain('data-shadow-auto-accept');
   });
 });

@@ -11,8 +11,9 @@
  * distinct crawlRunId used below is a real inserted `CrawlRun` row
  * (`insertCrawlRun`), not an arbitrary string literal.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
+import { buildSnapshotSourceRef, createInMemorySnapshotStore, type Snapshot } from '@kontourai/traverse/fetch';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { getRankedReviewQueue } from '@/lib/admin/review-repository';
@@ -55,11 +56,13 @@ async function insertProposal(pool: Pool, opts: {
    * the row(s) actually under test.
    */
   status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SKIPPED';
+  snapshotRef?: string | null;
+  snapshotBodyHash?: string | null;
 }): Promise<string> {
   const result = await pool.query<{ id: string }>(
     `INSERT INTO "CampChangeProposal"
-       ("campId", "crawlRunId", "sourceUrl", "proposedChanges", "overallConfidence", "extractionModel", status, priority)
-     VALUES ($1, $2, $3, $4::jsonb, $5, 'test-extraction-model', $6, $7)
+       ("campId", "crawlRunId", "sourceUrl", "proposedChanges", "overallConfidence", "extractionModel", status, priority, "snapshotRef", "snapshotBodyHash")
+     VALUES ($1, $2, $3, $4::jsonb, $5, 'test-extraction-model', $6, $7, $8, $9)
      RETURNING id`,
     [
       opts.campId,
@@ -69,6 +72,8 @@ async function insertProposal(pool: Pool, opts: {
       opts.overallConfidence,
       opts.status ?? 'PENDING',
       opts.priority ?? 0,
+      opts.snapshotRef ?? null,
+      opts.snapshotBodyHash ?? null,
     ],
   );
   return result.rows[0]!.id;
@@ -90,6 +95,39 @@ describe('getRankedReviewQueue', () => {
 
   afterAll(async () => {
     await closeTestPool();
+  });
+
+  it('surfaces true for exact stored low-risk evidence and false for missing provenance', async () => {
+    const pool = getTestPool();
+    const store = createInMemorySnapshotStore();
+    const sourceUrl = 'https://shadow.example.test/camp';
+    const body = '<main>New description</main>';
+    const snapshot: Snapshot = {
+      sourceId: 'shadow-source', url: sourceUrl,
+      fetchedAt: '2026-07-13T12:00:00.000Z', status: 200, contentType: 'html', body,
+      bodyHash: createHash('sha256').update(body, 'utf8').digest('hex'),
+    };
+    await store.put(snapshot);
+    const passingId = await insertProposal(pool, {
+      campId: await insertCamp(pool),
+      crawlRunId: await insertCrawlRun(pool),
+      sourceUrl,
+      proposedChanges: { description: { old: '', new: 'New description', confidence: 0.99, excerpt: 'New description' } },
+      overallConfidence: 0.99,
+      snapshotRef: buildSnapshotSourceRef(snapshot),
+      snapshotBodyHash: snapshot.bodyHash,
+    });
+    const failingId = await insertProposal(pool, {
+      campId: await insertCamp(pool),
+      crawlRunId: await insertCrawlRun(pool),
+      proposedChanges: { description: { old: '', new: 'Missing snapshot', confidence: 0.99, excerpt: 'Missing snapshot' } },
+      overallConfidence: 0.99,
+    });
+
+    const queue = await getRankedReviewQueue({ snapshotStore: store });
+    const proposals = [...queue.batchReady, ...queue.needsReview];
+    expect(proposals.find((row) => row.id === passingId)).toHaveProperty('shadowAutoAccept', true);
+    expect(proposals.find((row) => row.id === failingId)).toHaveProperty('shadowAutoAccept', false);
   });
 
   it('(a)-(c) lane membership matches deriveFieldCorroboration, batchReady DESC, needsReview ASC', async () => {

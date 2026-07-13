@@ -5,6 +5,7 @@ import { ChevronRight, AlertTriangle, Clock, Flag } from 'lucide-react';
 import { ReportActions } from './report-actions';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { BatchAcceptPanel } from './batch-accept-panel';
+import { ShadowAutoAcceptBadge } from '@/components/admin/shadow-auto-accept-badge';
 
 export const dynamic = 'force-dynamic';
 
@@ -225,6 +226,7 @@ export default async function ReviewQueuePage(
                               {proposal.campName}
                             </h3>
                             <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
+                            <ShadowAutoAcceptBadge show={proposal.shadowAutoAccept} />
                           </div>
                           <p className="text-xs text-bark-400 mb-2">
                             {changeCount} field{changeCount !== 1 ? 's' : ''} changed
