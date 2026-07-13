@@ -41,6 +41,7 @@ import {
   corroboratedFieldChips,
   type BatchAcceptResultRow,
 } from './batch-accept-panel-view';
+import { TrustBadge } from '@/components/trust-badge';
 
 type SubmitState = 'idle' | 'running' | 'done' | 'error';
 
@@ -179,9 +180,11 @@ export function BatchAcceptPanel({ proposals }: { proposals: RankedProposal[] })
             {Object.entries(results)
               .filter(([resultKey]) => resultKey.startsWith(`${proposal.id}::`))
               .map(([resultKey, result]) => (
-                <p key={resultKey} className={cn('mt-1.5 text-xs', result.status === 'applied' ? 'text-pine-600' : 'text-red-500')}>
-                  {result.field}: {batchAcceptResultCopy(result)}
-                </p>
+                <div key={resultKey} className={cn('mt-1.5 text-xs flex flex-wrap items-center gap-2', result.status === 'applied' ? 'text-pine-600' : 'text-red-500')}>
+                  <span>{result.field}: {batchAcceptResultCopy(result)}</span>
+                  {result.receipt && <TrustBadge camp={{ dataConfidence: 'UNVERIFIED', lastVerifiedAt: null } as never} display={result.receipt} />}
+                  {result.receipt?.actor && <span>{[result.receipt.actor, result.receipt.at, result.receipt.reason].filter(Boolean).join(' · ')}</span>}
+                </div>
               ))}
           </div>
         );

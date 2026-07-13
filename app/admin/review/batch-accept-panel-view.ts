@@ -13,6 +13,7 @@
  * `candidates-panel-view.ts`'s exact split (campfit#93).
  */
 import type { RankedProposal } from '@/lib/admin/review-repository';
+import type { TrustDisplay } from '@/lib/admin/trust-display';
 
 /** Same field-display-priority ordering `app/admin/review/page.tsx`'s own
  * `prioritizedFields` uses for the existing single-list proposal cards —
@@ -115,6 +116,7 @@ export interface BatchAcceptResultRow {
   field: string;
   status: 'applied' | 'excluded_not_pending' | 'excluded_not_corroborated' | 'excluded_scope' | 'error';
   message?: string;
+  receipt?: TrustDisplay;
 }
 
 export type BatchAcceptFetchOutcome =

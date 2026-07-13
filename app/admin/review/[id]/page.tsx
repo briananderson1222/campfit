@@ -8,6 +8,7 @@ import { AdminCopilot } from '@/components/admin/admin-copilot';
 import { getSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
+import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +57,7 @@ export default async function ReviewDetailPage(
     proposalId: proposal.id,
     reviewSessionId: surveyReviewSessionRecord.id,
   });
+  const trustDisplays = await loadCampTrustDisplays(proposal.campId);
 
   return (
     <div>
@@ -104,6 +106,7 @@ export default async function ReviewDetailPage(
       </div>
       <ReviewPanel
         proposal={proposal}
+        trustDisplays={trustDisplays.fields}
         surveyReviewSession={surveyReviewSessionRecord.snapshot}
         surveyReviewSessionId={surveyReviewSessionRecord.id}
         surveyReviewEvents={surveyReviewEvents}

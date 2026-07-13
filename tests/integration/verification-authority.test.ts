@@ -877,6 +877,7 @@ describe("AC4 writers-recordEvidence", () => {
     // task's plan wording ("buildCampAttestationTrustInput's Claims/Evidence
     // go through recordEvidence(...), then refreshCampVerificationCache").
     await recordCampAttestationEvidence({
+      mode: 'override',
       campId,
       fields: [...VERIFIED_CAMP_FIELDS],
       actor: "reviewer@campfit.test",
@@ -933,9 +934,8 @@ describe("AC4 writers-recordEvidence", () => {
       entityId: campId,
       fieldKey: "description",
       actor: "reviewer@campfit.test",
-      mode: "source",
-      sourceUrl: "https://example.com/camp",
-      excerpt: "A great day camp downtown.",
+      mode: "override",
+      notes: "Confirmed by the reviewing administrator.",
     });
     expect(descriptionAttestation.fieldKey).toBe("description");
 

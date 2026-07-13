@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   addCampAccreditation,
   addFieldAttestation,
+  AttestationValidationError,
   createCampProposal,
   createProviderProposal,
   createReviewFlag,
@@ -327,6 +328,16 @@ export async function POST(request: Request) {
         if (payload.mode !== 'source' && payload.mode !== 'override') {
           return NextResponse.json({ error: 'payload.mode must be source or override' }, { status: 400 });
         }
+        if (payload.mode === 'source' &&
+          (typeof payload.sourceUrl !== 'string' || !payload.sourceUrl.trim() || typeof payload.excerpt !== 'string' || !payload.excerpt.trim())) {
+          return NextResponse.json({ error: 'payload.sourceUrl and payload.excerpt are required for source attestations' }, { status: 400 });
+        }
+        if ((typeof payload.sourceUrl === 'string' && payload.sourceUrl.length > 4096) || (typeof payload.excerpt === 'string' && payload.excerpt.length > 100_000) || (typeof payload.notes === 'string' && payload.notes.length > 10_000) || (typeof payload.sourceLocator === 'string' && payload.sourceLocator.length > 128)) {
+          return NextResponse.json({ error: 'attestation input is too large' }, { status: 413 });
+        }
+        if (payload.mode === 'override' && (typeof payload.notes !== 'string' || !payload.notes.trim())) {
+          return NextResponse.json({ error: 'payload.notes is required for override attestations' }, { status: 400 });
+        }
         output = await addFieldAttestation({
           entityType,
           entityId,
@@ -335,6 +346,7 @@ export async function POST(request: Request) {
           mode: payload.mode,
           sourceUrl: typeof payload.sourceUrl === 'string' ? payload.sourceUrl : null,
           excerpt: typeof payload.excerpt === 'string' ? payload.excerpt : null,
+          sourceLocator: typeof payload.sourceLocator === 'string' ? payload.sourceLocator : null,
           notes: typeof payload.notes === 'string' ? payload.notes : null,
           valueSnapshot: payload.valueSnapshot,
         });
@@ -405,7 +417,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, capability, output, actionLogId: log.id, ...(reply ? { reply } : {}) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Action failed';
+    const message = error instanceof AttestationValidationError ? error.message : 'Action failed';
     await logAiAction({
       capability,
       action: body.action,
@@ -417,7 +429,7 @@ export async function POST(request: Request) {
       error: message,
       status: 'FAILED',
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: error instanceof AttestationValidationError ? 422 : 500 });
   }
 }
 

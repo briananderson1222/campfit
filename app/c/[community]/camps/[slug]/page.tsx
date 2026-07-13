@@ -37,6 +37,7 @@ import { AdminCampBar } from "@/components/admin-camp-bar";
 import { routes } from "@/lib/routes";
 import { resolvePgConfig } from "@/lib/db-config";
 import { truncateAtWord, joinMetaDescription } from "@/lib/seo/meta-description";
+import { loadCampTrustDisplays } from "@/lib/admin/trust-display-read";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +115,7 @@ export default async function CommunityDetailPage(
   const camp = await getCampBySlug(params.slug);
 
   if (!camp) notFound();
+  const trustDisplay = await loadCampTrustDisplays(camp.id);
 
   const effectiveStatus = getEffectiveStatus(camp.registrationStatus, camp.registrationOpenDate, camp.registrationCloseDate ?? null);
   const status = STATUS_CONFIG[effectiveStatus];
@@ -206,7 +208,7 @@ export default async function CommunityDetailPage(
             {CAMP_TYPE_LABELS[campTypeVal]}
           </span>
           <span className={cn("badge", status.color)}>{status.label}</span>
-          <TrustBadge camp={camp} />
+          <TrustBadge camp={camp} display={trustDisplay.camp} />
         </div>
 
         <div className="flex items-start justify-between gap-4">
@@ -501,13 +503,7 @@ export default async function CommunityDetailPage(
               <DetailRow
                 icon={<ShieldCheck className="w-4 h-4 text-pine-400" />}
                 label="Data Status"
-                value={
-                  camp.dataConfidence === "VERIFIED" && camp.lastVerifiedAt
-                    ? `Verified ${new Date(camp.lastVerifiedAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`
-                    : camp.dataConfidence === "VERIFIED"
-                    ? "Verified (source pending)"
-                    : "Unverified — check camp website"
-                }
+                value={trustDisplay.camp.label}
               />
             </div>
           </section>

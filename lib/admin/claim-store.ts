@@ -756,13 +756,30 @@ export async function persistClaim(
   // already-locked transaction, never a second connection racing for the
   // same advisory lock.
   return withSubjectLock(pool, draft.subjectType, draft.subjectId, async (client) => {
-    const adapter = createPostgresClaimStoreAdapter({
-      pool,
-      subjectType: draft.subjectType,
-      subjectId: draft.subjectId,
-      producer: options.producer,
-      client,
-    });
+    return persistClaimOnLockedClient(pool, client, draft, options);
+  });
+}
+
+/**
+ * Persists a Claim while the caller already owns both a database transaction
+ * and this subject's advisory lock on `client`. This deliberately never
+ * connects, begins, commits, rolls back, or releases; those remain the
+ * caller's responsibility so a legacy dual-write can be atomic with the
+ * canonical ledger write.
+ */
+export async function persistClaimOnLockedClient(
+  pool: Pool,
+  client: PoolClient,
+  draft: ClaimDefinitionDraft,
+  options: { producer?: string; now?: Date | string } = {},
+): Promise<ClaimDefinition> {
+  const adapter = createPostgresClaimStoreAdapter({
+    pool,
+    subjectType: draft.subjectType,
+    subjectId: draft.subjectId,
+    producer: options.producer,
+    client,
+  });
 
     const store = await adapter.load();
     const claimId = draft.id ?? generateClaimId(draft.subjectId, draft.facet, draft.fieldOrBehavior);
@@ -794,7 +811,11 @@ export async function persistClaim(
 
     await adapter.save(storeToSave);
     return authored.claim;
-  });
+}
+
+/** Acquire the subject lock inside an already-open transaction. */
+export async function acquireSubjectAdvisoryLock(client: PoolClient, subjectType: string, subjectId: string): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [subjectLockKey(subjectType, subjectId)]);
 }
 
 /** Append-only insert of one `Evidence` row (migration 012: corrections are new rows, never mutations). */
@@ -891,9 +912,17 @@ export async function recordEvidence(
   pool: Pool,
   input: { claim: ClaimDefinitionDraft; evidence: Evidence; event?: VerificationEvent },
 ): Promise<void> {
-  const claim = await persistClaim(pool, input.claim);
+  await recordEvidenceUsing(pool, input, (draft) => persistClaim(pool, draft));
+}
+
+async function recordEvidenceUsing(
+  queryable: Queryable,
+  input: { claim: ClaimDefinitionDraft; evidence: Evidence; event?: VerificationEvent },
+  persist: (draft: ClaimDefinitionDraft) => Promise<ClaimDefinition>,
+): Promise<void> {
+  const claim = await persist(input.claim);
   const evidence: Evidence = { ...input.evidence, claimId: claim.id };
-  await appendEvidence(pool, evidence);
+  await appendEvidence(queryable, evidence);
 
   const event: VerificationEvent = input.event
     ? { ...input.event, claimId: claim.id }
@@ -906,5 +935,18 @@ export async function recordEvidence(
         evidenceIds: [evidence.id],
         createdAt: new Date().toISOString(),
       };
-  await appendEvent(pool, event);
+  await appendEvent(queryable, event);
+}
+
+/**
+ * Transaction-owning counterpart to `recordEvidence`. The caller must have
+ * acquired the Claim subject's advisory lock on `client`; no connection or
+ * transaction boundary is created here.
+ */
+export async function recordEvidenceOnLockedClient(
+  pool: Pool,
+  client: PoolClient,
+  input: { claim: ClaimDefinitionDraft; evidence: Evidence; event?: VerificationEvent },
+): Promise<void> {
+  await recordEvidenceUsing(client, input, (draft) => persistClaimOnLockedClient(pool, client, draft));
 }

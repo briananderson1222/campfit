@@ -53,6 +53,8 @@ import {
   type BatchAcceptExclusion,
   type BatchAcceptExclusionReason,
 } from '@/lib/admin/batch-accept-audit-repository';
+import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
+import type { TrustDisplay } from '@/lib/admin/trust-display';
 
 export const BATCH_ACCEPT_CRITERIA = 'exact-corroboration-v1';
 
@@ -63,6 +65,7 @@ export interface BatchAcceptRouteResult {
   field: string;
   status: BatchAcceptRouteStatus;
   message?: string;
+  receipt?: TrustDisplay;
 }
 
 const EXCLUSION_REASON_BY_STATUS: Record<Exclude<BatchAcceptRouteStatus, 'applied'>, BatchAcceptExclusionReason> = {
@@ -161,7 +164,6 @@ export async function POST(request: Request) {
     ...scopeExclusionResults,
     ...applyResult.outcomes.map((outcome) => ({ ...outcome, status: outcome.status as BatchAcceptRouteStatus })),
   ];
-
   // REVIEW M4 FIX (was: `if (applyResult.claims.length > 0)`, so a batch
   // where EVERY selection was excluded — e.g. a moderator submitting a
   // selection entirely outside their community scope, or a batch that
@@ -196,6 +198,18 @@ export async function POST(request: Request) {
         excluded,
       })
     : null;
+
+  await Promise.all(results.map(async (result) => {
+    if (result.status !== 'applied') return;
+    const campId = campIdByProposal.get(result.proposalId);
+    if (!campId) return;
+    try {
+      result.receipt = (await loadCampTrustDisplays(campId, [result.field])).fields[result.field];
+    } catch (error) {
+      console.error('batch-accept receipt projection failed after apply/audit:', error);
+      result.receipt = { evidenceState: 'unverified', trustOrigin: 'none', label: 'Unverified', accessibleName: 'Unverified; receipt projection unavailable' };
+    }
+  }));
 
   return NextResponse.json({ auditId, results });
 }

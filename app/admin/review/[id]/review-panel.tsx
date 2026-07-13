@@ -28,6 +28,8 @@ import { FieldProvenanceMarker, hasProvenance } from '@/components/admin/field-p
 import { SnapshotDrilldown } from '@/components/admin/snapshot-drilldown';
 import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
+import { TrustBadge } from '@/components/trust-badge';
+import type { TrustDisplay } from '@/lib/admin/trust-display';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Camp Name', organizationName: 'Organization', description: 'Description', campType: 'Camp Type',
@@ -71,12 +73,14 @@ const FIELD_PRIORITY: Record<string, number> = {
 
 export function ReviewPanel({
   proposal,
+  trustDisplays,
   surveyReviewSession,
   surveyReviewSessionId,
   surveyReviewEvents = [],
   queueContext,
 }: {
   proposal: CampChangeProposal;
+  trustDisplays: Record<string, TrustDisplay>;
   surveyReviewSession?: CampReviewQueueSession;
   surveyReviewSessionId?: string;
   surveyReviewEvents?: readonly ReviewSessionEvent[];
@@ -288,7 +292,6 @@ export function ReviewPanel({
     }
   };
 
-  const fieldSources = (campData.fieldSources ?? {}) as Record<string, { excerpt: string | null; sourceUrl: string; approvedAt: string }>;
   const fieldTimeline = (proposal.fieldTimeline ?? {}) as Record<string, { lastUpdatedAt: string | null; lastAttestedAt: string | null }>;
   const [proofOpen, setProofOpen] = useState<Set<string>>(new Set());
   const toggleProof = (f: string) => setProofOpen(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n; });
@@ -314,7 +317,7 @@ export function ReviewPanel({
               const isEditingCamp = campEditFields[field];
               if (!showAllMeta && (val === null || val === undefined || val === '' || val === false)) return null;
               const proposedVal = isChanged ? proposedChanges[field]?.new : undefined;
-              const proof = fieldSources[field];
+              const proof = trustDisplays[field];
               const isProofOpen = proofOpen.has(field);
 
               return (
@@ -328,10 +331,10 @@ export function ReviewPanel({
                     {proof ? (
                       <button
                         onClick={() => toggleProof(field)}
-                        title={`Verified ${formatCampDate(proof.approvedAt)} — click to ${isProofOpen ? 'hide' : 'show'} proof`}
-                        className="ml-1 text-pine-500 hover:text-pine-700"
+                        title={`${proof.accessibleName} — click to ${isProofOpen ? 'hide' : 'show'} detail`}
+                        className="ml-1"
                       >
-                        <ShieldCheck className="w-3 h-3" />
+                        <TrustBadge camp={campData as never} display={proof} variant="dot" />
                       </button>
                     ) : (val !== null && val !== undefined && val !== '') ? (
                       <span title="No proof citation yet"><ShieldAlert className="w-3 h-3 ml-1 text-amber-400" /></span>
@@ -379,9 +382,9 @@ export function ReviewPanel({
                   {/* Inline proof */}
                   {proof && isProofOpen && (
                     <div className="mt-1.5 rounded-lg bg-pine-50/60 border border-pine-200/50 px-2.5 py-2 space-y-1 admin-surface">
-                      <p className="text-xs text-pine-600 font-medium flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3" />
-                        Verified {formatCampDate(proof.approvedAt)}
+                      <TrustBadge camp={campData as never} display={proof} />
+                      <p className={cn('text-xs text-bark-400', adminTheme.textMuted)}>
+                        {[proof.actor, proof.at ? formatCampDate(proof.at) : null, proof.reason].filter(Boolean).join(' · ')}
                       </p>
                       {proof.excerpt && (
                         <p className={cn('text-xs text-bark-500 italic leading-relaxed', adminTheme.text)}>&quot;{proof.excerpt}&quot;</p>
@@ -389,7 +392,7 @@ export function ReviewPanel({
                       {!proof.excerpt && (
                         <p className={cn('text-xs text-bark-400 italic', adminTheme.textMuted)}>Admin attestation — no excerpt</p>
                       )}
-                      {proof.sourceUrl && <AdminSourceLink url={proof.sourceUrl} maxLength={60} />}
+                      {proof.sourceRef && <p className="text-[11px] text-bark-400 break-all">Source: {proof.sourceRef}</p>}
                     </div>
                   )}
                 </div>

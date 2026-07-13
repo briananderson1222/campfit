@@ -239,4 +239,25 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
       }
     }
   });
+
+  it('the atomic attestation path owns one connection and locked ClaimStore helpers never reconnect', () => {
+    const entitySource = fs.readFileSync(path.join(repoRoot, 'lib/admin/entity-admin-repository.ts'), 'utf8');
+    const attestationBody = entitySource.slice(
+      entitySource.indexOf('export async function recordCampAttestationEvidence'),
+      entitySource.indexOf('export function validateCampAttestationEvidenceInput'),
+    );
+    expect(attestationBody.match(/\.connect\(/g)).toHaveLength(1);
+    expect(attestationBody).toContain('recordEvidenceOnLockedClient(');
+
+    const storeSource = fs.readFileSync(path.join(repoRoot, 'lib/admin/claim-store.ts'), 'utf8');
+    const lockedPersistBody = storeSource.slice(
+      storeSource.indexOf('export async function persistClaimOnLockedClient'),
+      storeSource.indexOf('/** Acquire the subject lock'),
+    );
+    const lockedRecordBody = storeSource.slice(
+      storeSource.indexOf('export async function recordEvidenceOnLockedClient'),
+    );
+    expect(lockedPersistBody).not.toContain('.connect(');
+    expect(lockedRecordBody).not.toContain('.connect(');
+  });
 });
