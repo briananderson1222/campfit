@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe, STRIPE_PRICE_ID } from "@/lib/stripe";
-import { getPool } from "@/lib/db";
+import { getStripeCustomerId, setStripeCustomerId } from "@/lib/stripe-repository";
 
 export async function POST() {
   const supabase = await createClient();
@@ -12,14 +12,8 @@ export async function POST() {
   }
 
   const stripe = getStripe();
-  const pool = getPool();
-
   // Get or create Stripe customer
-  const userResult = await pool.query(
-    `SELECT "stripeCustomerId" FROM "User" WHERE id = $1`,
-    [user.id]
-  );
-  let customerId = userResult.rows[0]?.stripeCustomerId;
+  let customerId = await getStripeCustomerId(user.id);
 
   if (!customerId) {
     const customer = await stripe.customers.create({
@@ -27,10 +21,7 @@ export async function POST() {
       metadata: { userId: user.id },
     });
     customerId = customer.id;
-    await pool.query(
-      `UPDATE "User" SET "stripeCustomerId" = $1 WHERE id = $2`,
-      [customerId, user.id]
-    );
+    await setStripeCustomerId(user.id, customerId);
   }
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "https://camp.fit";

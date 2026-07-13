@@ -1,7 +1,5 @@
 import nextVitals from "eslint-config-next/core-web-vitals";
 
-const literalGlob = (path) => path.replaceAll("[", "[[]");
-
 const config = [
   ...nextVitals,
   {
@@ -38,18 +36,6 @@ const config = [
           message: "Database pool construction belongs in the lib repository/data-access layer, not app routes or pages.",
         },
       ],
-    },
-  },
-  {
-    // BURN-DOWN LIST: migrate these into lib repositories and remove entries as you go; never ADD to this list.
-    files: [
-      "app/api/cron/notify/route.ts",
-      "app/api/stripe/checkout/route.ts",
-      "app/api/stripe/portal/route.ts",
-      "app/api/stripe/webhook/route.ts",
-    ].map(literalGlob),
-    rules: {
-      "no-restricted-syntax": "off",
     },
   },
 ];

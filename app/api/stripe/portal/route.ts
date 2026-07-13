@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
-import { getPool } from "@/lib/db";
+import { getStripeCustomerId } from "@/lib/stripe-repository";
 
 export async function POST() {
   const supabase = await createClient();
@@ -11,12 +11,7 @@ export async function POST() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const pool = getPool();
-  const result = await pool.query(
-    `SELECT "stripeCustomerId" FROM "User" WHERE id = $1`,
-    [user.id]
-  );
-  const customerId = result.rows[0]?.stripeCustomerId;
+  const customerId = await getStripeCustomerId(user.id);
 
   if (!customerId) {
     return NextResponse.json({ error: "No subscription found" }, { status: 404 });
