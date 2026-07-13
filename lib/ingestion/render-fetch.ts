@@ -284,3 +284,26 @@ export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {
     return { html: result.html, warnings };
   };
 }
+
+/**
+ * Construct a render impl IF safe browser hostname egress is available in this
+ * execution context, else return `undefined` so callers can degrade to
+ * plain-fetch-only instead of crashing.
+ *
+ * Browser hostname egress is currently unavailable everywhere
+ * (`assertBrowserHostnameActivation` fails closed — no pinned Chromium
+ * transport yet), so this returns `undefined` today. When safe browser egress
+ * lands, it starts returning a real impl and every caller's render fallback
+ * lights up automatically. Only `BrowserHostnameEgressUnavailableError` is
+ * swallowed; any other construction error still throws.
+ */
+export function tryCreateCampfitRenderImpl(
+  opts: CreateCampfitRenderImplOptions = {},
+): RenderImpl | undefined {
+  try {
+    return createCampfitRenderImpl(opts);
+  } catch (err) {
+    if (err instanceof BrowserHostnameEgressUnavailableError) return undefined;
+    throw err;
+  }
+}

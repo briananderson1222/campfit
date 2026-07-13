@@ -32,26 +32,8 @@ config({ path: '.env' });
 import { getHarvester, knownSources } from '@/lib/ingestion/aggregator/harvester-registry';
 import type { IngestionSourceConfig } from '@/lib/ingestion/sources';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
-import type { RenderImpl } from '@kontourai/traverse/fetch';
-import { closeRenderBrowser, createCampfitRenderImpl } from '@/lib/ingestion/render-fetch';
+import { closeRenderBrowser, tryCreateCampfitRenderImpl } from '@/lib/ingestion/render-fetch';
 import { getPool } from '@/lib/db';
-
-/**
- * The headless-Chromium render impl for the shell-detection fallback, IF the
- * execution context has safe browser hostname egress (the pinned Chromium
- * transport). It currently fails closed everywhere (SSRF hardening, campfit#117
- * — safe browser egress to arbitrary hostnames is not yet built), so we
- * degrade to plain-fetch-only rather than crash. When the shared traverse/
- * lookout layer lands safe browser egress, this lights up automatically and
- * SPA providers get rendered on fallback.
- */
-function tryCreateRenderImpl(): { renderImpl: RenderImpl | undefined; available: boolean } {
-  try {
-    return { renderImpl: createCampfitRenderImpl(), available: true };
-  } catch {
-    return { renderImpl: undefined, available: false };
-  }
-}
 
 function log(msg: string) { console.log(`[${new Date().toISOString()}] ${msg}`); }
 
@@ -104,8 +86,8 @@ async function main() {
     process.exit(0);
   }
 
-  const { renderImpl, available: renderAvailable } = tryCreateRenderImpl();
-  if (renderAvailable) {
+  const renderImpl = tryCreateCampfitRenderImpl();
+  if (renderImpl) {
     log('Render fallback: available (SPA provider pages will render on shell detection).');
   } else {
     log('Render fallback: UNAVAILABLE in this context (no safe browser egress) — plain fetch only. SPA-only provider pages will yield 0 items until safe browser egress lands.');
