@@ -42,6 +42,7 @@ function proposal(overrides: Partial<RankedProposal> = {}): RankedProposal {
       name: { field: 'name', value: 'New Name', exact: false, corroboratingProposalIds: [], corroboratingSourceUrls: [], sameSourceUrl: false },
     },
     batchEligibleFieldCount: 1,
+    shadowAutoAccept: false,
     ...overrides,
   };
 }

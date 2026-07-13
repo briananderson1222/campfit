@@ -68,7 +68,8 @@
     "test:traverse-cost-guards": "tsx scripts/test-traverse-cost-guards.ts",
     "test:cutover-baseline": "tsx scripts/test-cutover-baseline.ts",
     "cutover:report": "tsx scripts/cutover-report.ts",
-    "review:throughput": "tsx scripts/review-throughput-report.ts"
+    "review:throughput": "tsx scripts/review-throughput-report.ts",
+    "report:shadow": "tsx scripts/shadow-precision-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

@@ -42,6 +42,7 @@ import {
   type BatchAcceptResultRow,
 } from './batch-accept-panel-view';
 import { TrustBadge } from '@/components/trust-badge';
+import { ShadowAutoAcceptBadge } from '@/components/admin/shadow-auto-accept-badge';
 
 type SubmitState = 'idle' | 'running' | 'done' | 'error';
 
@@ -139,6 +140,7 @@ export function BatchAcceptPanel({ proposals }: { proposals: RankedProposal[] })
             <div className="flex items-center gap-2 mb-1">
               <h3 className="font-semibold text-bark-700 truncate">{proposal.campName}</h3>
               <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
+              <ShadowAutoAcceptBadge show={proposal.shadowAutoAccept} />
               <span className="ml-auto text-xs font-semibold text-pine-600 shrink-0">
                 {Math.round(proposal.overallConfidence * 100)}%
               </span>

@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
+import type { SnapshotStore } from '@kontourai/traverse/fetch';
 
 import { getPool } from '@/lib/db';
 import type { CampChangeProposal, ProposedChanges, ProposalStatus } from './types';
@@ -6,6 +7,8 @@ import { communityScopeSql } from './community-access';
 import { getCampFieldTimeline } from './field-metadata';
 import { CAMP_SCALAR_FIELDS } from './proposal-fields';
 import { deriveFieldCorroboration, type FieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
+import { evaluateShadowAutoAccept } from './shadow-auto-accept';
+import { resolveProposalSnapshots } from './shadow-auto-accept-read';
 
 export async function createProposal(opts: {
   campId: string;
@@ -212,6 +215,8 @@ export interface RankedProposal extends CampChangeProposal {
   fieldCorroboration: Record<string, FieldCorroboration>;
   /** Count of this proposal's scalar fields with `fieldCorroboration[field].exact === true`. */
   batchEligibleFieldCount: number;
+  /** Advisory shadow-mode result only. No review decision is written from it. */
+  shadowAutoAccept: boolean;
 }
 
 /**
@@ -281,6 +286,8 @@ export async function getRankedReviewQueue(opts: {
    * Defaults to the real safety constant in production use.
    */
   safetyCap?: number;
+  /** Test seam for a real isolated SnapshotStore; production uses the shared filesystem store. */
+  snapshotStore?: SnapshotStore;
 }): Promise<{ batchReady: RankedProposal[]; needsReview: RankedProposal[]; total: number; rankedCount: number }> {
   const pool = getPool();
   const { limit, offset = 0, safetyCap = RANKED_QUEUE_SAFETY_CAP } = opts;
@@ -320,7 +327,8 @@ export async function getRankedReviewQueue(opts: {
   const campIds = Array.from(new Set(rows.map((row) => row.campId)));
   const historyByCamp = await getCampProposalHistoryBatch(pool, campIds);
 
-  const ranked: RankedProposal[] = rows.map((proposal) => {
+  const snapshotResolutions = await resolveProposalSnapshots(rows, { store: opts.snapshotStore });
+  const ranked: RankedProposal[] = rows.map((proposal, index) => {
     const history = historyByCamp.get(proposal.campId) ?? [];
     const fieldCorroboration: Record<string, FieldCorroboration> = {};
     let batchEligibleFieldCount = 0;
@@ -335,7 +343,13 @@ export async function getRankedReviewQueue(opts: {
       fieldCorroboration[field] = corroboration;
       if (corroboration.exact) batchEligibleFieldCount += 1;
     }
-    return { ...proposal, fieldCorroboration, batchEligibleFieldCount };
+    const snapshotResolved = snapshotResolutions[index] ?? false;
+    const shadowAutoAccept = evaluateShadowAutoAccept({
+      overallConfidence: proposal.overallConfidence,
+      proposedChanges: proposal.proposedChanges,
+      snapshotResolved,
+    }).wouldAutoAccept;
+    return { ...proposal, fieldCorroboration, batchEligibleFieldCount, shadowAutoAccept };
   });
 
   const batchReady = ranked
@@ -355,6 +369,26 @@ export async function getRankedReviewQueue(opts: {
     total: parseInt(countResult.rows[0]!.count, 10),
     rankedCount: batchReady.length + needsReview.length,
   };
+}
+
+export interface ReviewedShadowProposalRow {
+  readonly id: string;
+  readonly status: 'APPROVED' | 'REJECTED';
+  readonly overallConfidence: number | null;
+  readonly proposedChanges: ProposedChanges;
+  readonly snapshotRef: string | null;
+  readonly snapshotBodyHash: string | null;
+}
+
+/** Read-only source rows for the offline shadow precision report. */
+export async function getReviewedShadowProposals(): Promise<ReviewedShadowProposalRow[]> {
+  const { rows } = await getPool().query<ReviewedShadowProposalRow>(
+    `SELECT id, status, "overallConfidence", "proposedChanges", "snapshotRef", "snapshotBodyHash"
+     FROM "CampChangeProposal"
+     WHERE status IN ('APPROVED', 'REJECTED')
+     ORDER BY "createdAt" ASC, id ASC`,
+  );
+  return rows;
 }
 
 export async function getProposal(id: string): Promise<CampChangeProposal | null> {
