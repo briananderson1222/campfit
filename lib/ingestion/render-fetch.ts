@@ -36,12 +36,12 @@
  * browser) is therefore gone: `renderImpl` is now only ever called for the
  * actual target page.
  *
- * Browser lifecycle: a single Chromium instance is lazily launched on first
- * use and reused for every rendered source in the process (a "sweep" is one
- * `scripts/scrape.ts` invocation) — launching a browser per source would be
- * needlessly slow for a sweep with more than one rendered source. Callers
- * that own a sweep's lifetime (scripts/scrape.ts) call `closeRenderBrowser()`
- * once after the sweep finishes.
+ * Browser lifecycle: production hostname renders use a dedicated Chromium
+ * process because host-resolver rules are process-scoped; sharing that process
+ * across unrelated hostnames would destroy the pinning boundary. IP literals
+ * and explicit loopback fixtures retain the lazily launched shared browser.
+ * Callers that own a sweep's lifetime (scripts/scrape.ts) still call
+ * `closeRenderBrowser()` once to release that shared browser if it was used.
  *
  * Isolation: `renderPage()` throws (never swallows) on failure — including a
  * hard per-source timeout. `createCampfitRenderImpl()`'s `RenderImpl`
@@ -56,7 +56,12 @@
 import { chromium, errors as playwrightErrors, type Browser, type Page } from "@playwright/test";
 import type { RenderImpl, RenderResult } from "@kontourai/traverse/fetch";
 import { isIP } from "node:net";
-import { evaluateEgressUrl, type EgressResolver } from "@/lib/security/egress-url-policy";
+import {
+  EgressUrlPolicyError,
+  evaluateEgressUrl,
+  type EgressAddress,
+  type EgressResolver,
+} from "@/lib/security/egress-url-policy";
 
 /** Sane default hard timeout for a single rendered source (~30s). */
 export const DEFAULT_RENDER_TIMEOUT_MS = 30_000;
@@ -83,23 +88,68 @@ export interface CampfitRenderTelemetry {
   usedNetworkidleFallback: boolean;
 }
 
-// Module-level singleton: launched lazily on first `renderPage()` call, and
-// reused by every subsequent call in this process — see the file doc above.
+// Module-level singleton for IP-literal and explicit loopback-fixture renders.
+// Hostname renders cannot share it because their DNS pins are process-scoped.
 let browserPromise: Promise<Browser> | null = null;
 
 export class BrowserHostnameEgressUnavailableError extends Error {
   readonly name = "BrowserHostnameEgressUnavailableError";
   constructor() { super("Browser hostname egress unavailable: no pinned Chromium transport"); }
 }
-export function browserEgressRouteDecision(rawUrl: string): "abort" | "evaluate-ip" {
-  return isIP(new URL(rawUrl).hostname.replace(/^\[|\]$/g, "")) ? "evaluate-ip" : "abort";
+export function browserEgressRouteDecision(rawUrl: string): "pin-and-evaluate" | "evaluate-ip" {
+  return isIP(new URL(rawUrl).hostname.replace(/^\[|\]$/g, ""))
+    ? "evaluate-ip"
+    : "pin-and-evaluate";
 }
-export function assertBrowserHostnameActivation(): never {
+export function assertBrowserHostnameActivation(): void {
   // Readiness is derived from the exact routing policy, not a parallel flag.
-  if (browserEgressRouteDecision("https://activation-probe.invalid/") === "abort") {
+  if (browserEgressRouteDecision("https://activation-probe.invalid/") !== "pin-and-evaluate") {
     throw new BrowserHostnameEgressUnavailableError();
   }
-  throw new BrowserHostnameEgressUnavailableError();
+}
+
+export interface PinnedBrowserNavigation {
+  url: URL;
+  hostname: string;
+  address: EgressAddress;
+  /** Chromium process argument; absent for an IP-literal URL. */
+  hostResolverRule?: string;
+}
+
+/**
+ * Resolve once through the shared SSRF policy and freeze the first address
+ * only after the policy has classified every DNS answer as public. Chromium
+ * then receives an exact-host MAP rule, so it connects to this address while
+ * the original URL continues to supply the HTTP Host header and TLS SNI.
+ *
+ * The narrow DNS hostname grammar is also a command-argument boundary: commas
+ * and whitespace could otherwise inject additional host-resolver rules.
+ */
+export async function preparePinnedBrowserNavigation(
+  rawUrl: string,
+  resolver?: EgressResolver,
+): Promise<PinnedBrowserNavigation> {
+  const evaluated = await evaluateEgressUrl(rawUrl, "fixedHarvester", { resolver });
+  const hostname = evaluated.url.hostname.replace(/^\[|\]$/g, "");
+  const address = evaluated.addresses[0];
+  if (isIP(hostname)) return { url: evaluated.url, hostname, address };
+  if (
+    hostname.length > 253
+    || !hostname.split(".").every((label) => (
+      label.length >= 1
+      && label.length <= 63
+      && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label)
+    ))
+  ) {
+    throw new EgressUrlPolicyError("INVALID_HOST", "fixedHarvester", hostname);
+  }
+  const replacement = address.family === 6 ? `[${address.address}]` : address.address;
+  return {
+    url: evaluated.url,
+    hostname,
+    address,
+    hostResolverRule: `MAP ${hostname} ${replacement}`,
+  };
 }
 
 function normalizeTestLoopbackOrigins(origins: readonly string[]): ReadonlySet<string> {
@@ -143,15 +193,23 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 /**
- * Install before navigation. Chromium offers no supported way to connect to a
- * vetted IP while preserving hostname TLS/SNI, so hostname requests fail
- * closed. Public IP literals can be proven free of DNS rebinding and every
- * redirect/subresource request is re-evaluated by this route.
+ * Install before navigation. A production hostname render is bound to one
+ * policy-approved address by its Chromium process's host-resolver rule. This
+ * route permits only that hostname (re-evaluated against the already-pinned
+ * address, never DNS) plus independently evaluated public IP literals.
+ *
+ * Cross-host redirects are deliberately blocked: Chromium resolver rules are
+ * process-static, so following one would either use untrusted browser DNS or
+ * require a second process/navigation with subtly different redirect
+ * semantics. Cross-host subresources are blocked for the same reason. Same-
+ * host redirects and subresources remain pinned, and HTTPS-to-HTTP redirects
+ * are rejected before the request continues.
  */
 export async function installGuardedPageNetwork(
   page: Page,
   resolver?: EgressResolver,
   testOnlyAllowedLoopbackOrigins: readonly string[] = [],
+  pinnedNavigation?: PinnedBrowserNavigation,
 ): Promise<void> {
   const allowedLoopbackOrigins = normalizeTestLoopbackOrigins(testOnlyAllowedLoopbackOrigins);
   await page.route("**/*", async (route) => {
@@ -160,12 +218,33 @@ export async function installGuardedPageNetwork(
       await route.continue();
       return;
     }
-    if (browserEgressRouteDecision(requestUrl.href) === "abort") {
+    const requestHostname = requestUrl.hostname.replace(/^\[|\]$/g, "");
+    const redirectedFrom = route.request().redirectedFrom();
+    if (
+      redirectedFrom
+      && new URL(redirectedFrom.url()).protocol === "https:"
+      && requestUrl.protocol === "http:"
+    ) {
       await route.abort("blockedbyclient");
       return;
     }
     try {
-      await evaluateEgressUrl(requestUrl, "browserSubresource", { resolver });
+      if (pinnedNavigation) {
+        if (requestHostname !== pinnedNavigation.hostname) {
+          await route.abort("blockedbyclient");
+          return;
+        }
+        // Supplying the frozen answer avoids every subsequent DNS lookup,
+        // including requests produced by same-host redirects and SPA fetches.
+        await evaluateEgressUrl(requestUrl, "browserSubresource", {
+          resolver: async () => [pinnedNavigation.address],
+        });
+      } else if (browserEgressRouteDecision(requestUrl.href) === "evaluate-ip") {
+        await evaluateEgressUrl(requestUrl, "browserSubresource", { resolver });
+      } else {
+        await route.abort("blockedbyclient");
+        return;
+      }
       await route.continue();
     } catch {
       await route.abort("blockedbyclient");
@@ -195,29 +274,57 @@ export async function renderPage(
   url: string,
   timeoutMs: number = DEFAULT_RENDER_TIMEOUT_MS,
   testOnlyAllowedLoopbackOrigins: readonly string[] = [],
+  deps: {
+    resolver?: EgressResolver;
+    /** Unit-test seam. Production always uses Playwright's Chromium launcher. */
+    testOnlyBrowserLauncher?: typeof chromium.launch;
+  } = {},
 ): Promise<CampfitRenderTelemetry> {
   const start = Date.now();
-  const browser = await getBrowser();
-  const page = await browser.newPage({ userAgent: RENDER_USER_AGENT, serviceWorkers: "block" });
+  const isLoopbackFixture = testOnlyAllowedLoopbackOrigins.length > 0;
+  const pinnedNavigation = isLoopbackFixture
+    ? undefined
+    : await preparePinnedBrowserNavigation(url, deps.resolver);
+  const ownsBrowser = pinnedNavigation?.hostResolverRule !== undefined;
+  const browser = ownsBrowser
+    ? await (deps.testOnlyBrowserLauncher ?? chromium.launch)({
+        headless: true,
+        args: [
+          `--host-resolver-rules=${pinnedNavigation.hostResolverRule}`,
+          // A configured system proxy could resolve the original hostname
+          // itself and bypass Chromium's local DNS pin.
+          "--no-proxy-server",
+        ],
+      })
+    : await getBrowser();
+  let page: Page | undefined;
 
   try {
-    await installGuardedPageNetwork(page, undefined, testOnlyAllowedLoopbackOrigins);
+    page = await browser.newPage({ userAgent: RENDER_USER_AGENT, serviceWorkers: "block" });
+    await installGuardedPageNetwork(
+      page,
+      deps.resolver,
+      testOnlyAllowedLoopbackOrigins,
+      ownsBrowser ? pinnedNavigation : undefined,
+    );
     let usedNetworkidleFallback = false;
+    const navigationUrl = pinnedNavigation?.url.href ?? url;
     try {
-      await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
+      await page.goto(navigationUrl, { waitUntil: "networkidle", timeout: timeoutMs });
     } catch (err) {
       if (!isTimeoutError(err)) throw err;
       usedNetworkidleFallback = true;
       console.warn(
         `[render-fetch] networkidle wait timed out for ${url} after ${timeoutMs}ms; retrying with domcontentloaded`
       );
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+      await page.goto(navigationUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
     }
 
     const html = await page.content();
     return { html, durationMs: Date.now() - start, usedNetworkidleFallback };
   } finally {
-    await page.close().catch(() => {});
+    await page?.close().catch(() => {});
+    if (ownsBrowser) await browser.close().catch(() => {});
   }
 }
 
@@ -226,6 +333,10 @@ export interface CreateCampfitRenderImplOptions {
   timeoutMs?: number;
   /** Exact loopback origins for local browser fixtures only. Production must leave this empty. */
   testOnlyAllowedLoopbackOrigins?: readonly string[];
+  /** Deterministic policy seam for security tests. Production uses system DNS. */
+  resolver?: EgressResolver;
+  /** Unit-test seam. Production always uses Playwright's Chromium launcher. */
+  testOnlyBrowserLauncher?: typeof chromium.launch;
 }
 
 /**
@@ -275,7 +386,10 @@ export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {
 
   return async (url, renderOpts): Promise<RenderResult> => {
     const timeoutMs = renderOpts?.timeoutMs ?? fallbackTimeoutMs;
-    const result = await renderPage(url, timeoutMs, testOnlyAllowedLoopbackOrigins);
+    const result = await renderPage(url, timeoutMs, testOnlyAllowedLoopbackOrigins, {
+      resolver: opts.resolver,
+      testOnlyBrowserLauncher: opts.testOnlyBrowserLauncher,
+    });
 
     const warnings = result.usedNetworkidleFallback
       ? [`render: networkidle fallback used after networkidle timeout (${timeoutMs}ms)`]
@@ -290,12 +404,9 @@ export function createCampfitRenderImpl(opts: CreateCampfitRenderImplOptions = {
  * execution context, else return `undefined` so callers can degrade to
  * plain-fetch-only instead of crashing.
  *
- * Browser hostname egress is currently unavailable everywhere
- * (`assertBrowserHostnameActivation` fails closed — no pinned Chromium
- * transport yet), so this returns `undefined` today. When safe browser egress
- * lands, it starts returning a real impl and every caller's render fallback
- * lights up automatically. Only `BrowserHostnameEgressUnavailableError` is
- * swallowed; any other construction error still throws.
+ * Hostname egress is available through the pinned Chromium transport. Only a
+ * genuine activation failure is swallowed; policy and construction errors
+ * still surface normally.
  */
 export function tryCreateCampfitRenderImpl(
   opts: CreateCampfitRenderImplOptions = {},
