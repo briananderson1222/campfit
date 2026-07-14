@@ -57,11 +57,20 @@ test('persists Survey review decisions on a real pending proposal detail page', 
   const surveyPanel = page.getByTestId('real-proposal-survey-workbench');
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
 
-  // Accept the first field's proposed value via the workbench decision control.
-  await Promise.all([
-    waitForSurveyEventsPut(page),
-    surveyPanel.getByTestId('use-proposed').first().click(),
-  ]);
+  // A live proposal may already carry persisted decisions, so target a field that
+  // is still in the undecided "review" state — deciding an already-decided field
+  // is idempotent and would persist no new event.
+  const undecided = surveyPanel.locator('[data-testid="review-field"][data-state="review"]').first();
+  if (await undecided.count() === 0) {
+    test.skip(true, 'Every field on this live proposal is already decided.');
+  }
+
+  // Accept it; the persistent event store PUTs the decision to /survey-events.
+  const surveyEventsPut = waitForSurveyEventsPut(page);
+  await undecided.getByTestId('use-proposed').click();
+  await expect(undecided.getByTestId('decided-chip')).toBeVisible();
+  await surveyEventsPut;
+
   await expect(surveyPanel.getByTestId('survey-review-trail-result').first()).toBeVisible();
   await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Saved decision applies proposed value');
 
