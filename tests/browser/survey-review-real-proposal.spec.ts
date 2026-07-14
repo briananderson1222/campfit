@@ -1,5 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
+// These specs drive a real pending proposal, so they need a live dev server + DB
+// (.env.local) and run in campfit CI. The review surface is the single embedded
+// Survey workbench (1.12.0 field-diff cards + per-card audit); the saved-decision
+// trail remains as the audit ledger.
+
 test('renders Survey workbench on a real pending proposal detail page', async ({ page }) => {
   const consoleErrors = collectConsoleErrors(page);
 
@@ -21,12 +26,10 @@ test('renders Survey workbench on a real pending proposal detail page', async ({
   await expect(surveyPanel.getByTestId('survey-review-trail')).toBeVisible();
   await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Saved Survey decisions');
   await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Replay checked');
+  // The single review surface: the embedded field-diff workbench.
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
-  await expect(surveyPanel.getByTestId('review-queue')).toBeVisible();
-  await expect(surveyPanel.getByTestId('review-focus')).toBeVisible();
-  await expect(surveyPanel.getByTestId('surface-preview')).toContainText('Surface preview');
-  await expect(surveyPanel).toContainText('Projection summary');
-  await expect(surveyPanel).toContainText('IDs and trace links');
+  await expect(surveyPanel.getByTestId('review-fields')).toBeVisible();
+  await expect(surveyPanel.getByTestId('review-field').first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Hide Survey' }).click();
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeHidden();
@@ -53,14 +56,11 @@ test('persists Survey review decisions on a real pending proposal detail page', 
 
   const surveyPanel = page.getByTestId('real-proposal-survey-workbench');
   await expect(surveyPanel.locator('.survey-workbench-embed .workbench-shell')).toBeVisible();
-  const pendingItem = surveyPanel.getByTestId('review-queue').getByRole('button', { name: /pending/i }).first();
-  if (await pendingItem.count() > 0) {
-    await pendingItem.click();
-  }
 
+  // Accept the first field's proposed value via the workbench decision control.
   await Promise.all([
     waitForSurveyEventsPut(page),
-    surveyPanel.locator(".decision-column [data-decision='accept-proposed']").click(),
+    surveyPanel.getByTestId('use-proposed').first().click(),
   ]);
   await expect(surveyPanel.getByTestId('survey-review-trail-result').first()).toBeVisible();
   await expect(surveyPanel.getByTestId('survey-review-trail')).toContainText('Saved decision applies proposed value');
