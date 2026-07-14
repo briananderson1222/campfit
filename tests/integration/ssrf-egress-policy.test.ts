@@ -19,7 +19,13 @@ import { discoverCampsFromUrl } from "@/lib/ingestion/llm-discovery";
 import { runAggregatorDiscovery } from "@/lib/ingestion/aggregator/aggregator-extraction";
 import { runTraverseRecrawlForCamp } from "@/lib/ingestion/traverse-recrawl-adapter";
 import { runTraversePipelineForSource } from "@/lib/ingestion/traverse-pipeline";
-import { browserEgressRouteDecision, createCampfitRenderImpl } from "@/lib/ingestion/render-fetch";
+import {
+  browserEgressRouteDecision,
+  createCampfitRenderImpl,
+  installGuardedPageNetwork,
+  preparePinnedBrowserNavigation,
+  renderPage,
+} from "@/lib/ingestion/render-fetch";
 import { logAndMapPublicEgressError, publicEgressError, UpstreamProviderError } from "@/lib/security/public-egress-error";
 
 const routeHarness = vi.hoisted(() => ({
@@ -92,9 +98,96 @@ describe("server egress URL policy threat matrix", () => {
     expect(executed).toBe(false);
   });
   it("keeps browser hostname egress behind an executable pinned-transport gate", () => {
-    expect(browserEgressRouteDecision("https://safe.example/")).toBe("abort");
+    expect(browserEgressRouteDecision("https://safe.example/")).toBe("pin-and-evaluate");
     expect(browserEgressRouteDecision("https://93.184.216.34/")).toBe("evaluate-ip");
-    expect(() => createCampfitRenderImpl()).toThrow(/hostname egress unavailable/i);
+    expect(createCampfitRenderImpl()).toBeTypeOf("function");
+  });
+
+  it("pins Chromium to the one policy-validated answer and never performs rebinding DNS", async () => {
+    const dnsAnswers = ["93.184.216.34", "169.254.169.254"];
+    const calls: string[] = [];
+    const rebindingResolver: EgressResolver = async (hostname) => {
+      calls.push(hostname);
+      return [{ address: dnsAnswers[Math.min(calls.length - 1, dnsAnswers.length - 1)] }];
+    };
+    const launch = vi.fn(async (options?: { args?: string[] }) => ({
+      newPage: vi.fn(async () => ({
+        route: vi.fn(async () => undefined),
+        goto: vi.fn(async () => null),
+        content: vi.fn(async () => "<html>pinned</html>"),
+        close: vi.fn(async () => undefined),
+      })),
+      close: vi.fn(async () => undefined),
+      _options: options,
+    }));
+
+    const result = await renderPage("https://safe.example/camps", 100, [], {
+      resolver: rebindingResolver,
+      testOnlyBrowserLauncher: launch as never,
+    });
+
+    expect(result.html).toBe("<html>pinned</html>");
+    expect(calls).toEqual(["safe.example"]);
+    expect(launch).toHaveBeenCalledOnce();
+    expect(launch.mock.calls[0]?.[0]?.args).toContain(
+      "--host-resolver-rules=MAP safe.example 93.184.216.34",
+    );
+    expect(launch.mock.calls[0]?.[0]?.args).toContain("--no-proxy-server");
+  });
+
+  it("rejects resolver-rule grammar injection in a hostname before browser launch", async () => {
+    const launch = vi.fn();
+    await expect(renderPage("https://safe.example,map/", 100, [], {
+      resolver: async () => [{ address: "93.184.216.34" }],
+      testOnlyBrowserLauncher: launch as never,
+    })).rejects.toMatchObject({ code: "INVALID_HOST" });
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "169.254.169.254",
+    "127.0.0.1",
+    "10.23.45.67",
+    "::1",
+    "64:ff9b::7f00:1",
+  ])("refuses browser navigation resolving to non-public address %s", async (address) => {
+    const launch = vi.fn();
+    await expect(renderPage("https://safe.example/", 100, [], {
+      resolver: async () => [{ address }],
+      testOnlyBrowserLauncher: launch as never,
+    })).rejects.toBeInstanceOf(EgressUrlPolicyError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("blocks a cross-host redirect before private-target DNS or navigation", async () => {
+    const pinned = await preparePinnedBrowserNavigation(
+      "https://safe.example/start",
+      resolver({ "safe.example": ["93.184.216.34"] }),
+    );
+    const continueRequest = vi.fn();
+    const abortRequest = vi.fn();
+    let handler: ((route: {
+      request(): { url(): string; redirectedFrom(): { url(): string } };
+      continue(): Promise<void>;
+      abort(reason: string): Promise<void>;
+    }) => Promise<void>) | undefined;
+    const page = {
+      route: vi.fn(async (_pattern: string, callback: typeof handler) => { handler = callback; }),
+    };
+    const redirectResolver = vi.fn(async () => [{ address: "169.254.169.254" }]);
+    await installGuardedPageNetwork(page as never, redirectResolver, [], pinned);
+    await handler?.({
+      request: () => ({
+        url: () => "https://169.254.169.254/latest/meta-data/",
+        redirectedFrom: () => ({ url: () => "https://safe.example/start" }),
+      }),
+      continue: async () => { continueRequest(); },
+      abort: async (reason) => { abortRequest(reason); },
+    });
+
+    expect(abortRequest).toHaveBeenCalledWith("blockedbyclient");
+    expect(continueRequest).not.toHaveBeenCalled();
+    expect(redirectResolver).not.toHaveBeenCalled();
   });
 
   it("maps egress and provider failures to stable public messages", () => {
