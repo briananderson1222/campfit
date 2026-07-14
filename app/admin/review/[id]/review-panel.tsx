@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Quote, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
+import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CampChangeProposal, FieldDiff } from '@/lib/admin/types';
 import type { CampReviewQueueSession } from '@/lib/admin/survey-review-items';
@@ -15,16 +15,10 @@ import { SurveyReviewWorkbench } from '@/components/admin/survey-review-workbenc
 import { SurveyReviewTrail } from '@/components/admin/survey-review-trail';
 import { adminTheme } from '@/components/admin/theme';
 import {
-  CampArrayFieldEditor,
   CampFieldInput,
   CampFieldValue,
-  cloneEditableValue,
-  parseGradeInput,
 } from '@/components/admin/camp-field-controls';
 import { FieldTimelineNote } from '@/components/admin/field-timeline';
-import { FieldFormatBadge } from '@/components/admin/field-format-badge';
-import { checkFieldFormat } from '@/lib/admin/review-format-validation';
-import { FieldProvenanceMarker, hasProvenance } from '@/components/admin/field-provenance-marker';
 import { SnapshotDrilldown } from '@/components/admin/snapshot-drilldown';
 import { formatCampDate, formatCampDateTime } from '@/lib/date-format';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
@@ -96,7 +90,7 @@ export function ReviewPanel({
   const router = useRouter();
   const hasSurveyReviewSession = Boolean(surveyReviewSession && surveyReviewSessionId);
   const isNewCamp = isFreshDiscoveryProposal(proposal.proposedChanges);
-  const [proposedChanges, setProposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
+  const [proposedChanges] = useState<Record<string, FieldDiff>>(proposal.proposedChanges);
   // Fields already applied in previous partial-approval rounds
   const alreadyApplied = useMemo(() => new Set<string>(proposal.appliedFields ?? []), [proposal.appliedFields]);
   // Only show unapplied fields as selectable
@@ -106,14 +100,9 @@ export function ReviewPanel({
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState<'approve' | 'keep' | 'reject' | 'recrawl' | null>(null);
   const [recrawlMsg, setRecrawlMsg] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [surveyCollapsed, setSurveyCollapsed] = useState(false);
-  const [proposedCollapsed, setProposedCollapsed] = useState(false);
   const [snapshotCollapsed, setSnapshotCollapsed] = useState(true);
   const [showAllMeta, setShowAllMeta] = useState(false);
-  // editing state: { [field]: currentEditValue }
-  const [editing, setEditing] = useState<Record<string, unknown>>({});
-  const [arrayEditing, setArrayEditing] = useState<Record<string, Record<string, unknown>[]>>({});
   // direct camp field edits (bypassing proposal)
   const [campEdits, setCampEdits] = useState<Record<string, string>>({});
   const [campEditFields, setCampEditFields] = useState<Record<string, boolean>>({});
@@ -149,75 +138,6 @@ export function ReviewPanel({
   const [savingHint, setSavingHint] = useState(false);
   const [savedHints, setSavedHints] = useState(0);
   const changedFieldNames = new Set(fields.map(([k]) => k));
-
-  const toggleExpand = (field: string) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      if (next.has(field)) next.delete(field);
-      else next.add(field);
-      return next;
-    });
-  };
-
-  // Edit proposed value inline
-  const startEdit = (field: string, currentVal: unknown) => {
-    setEditing(prev => ({ ...prev, [field]: cloneEditableValue(currentVal) }));
-  };
-  const commitEdit = (field: string) => {
-    const val = editing[field];
-    if (val === undefined) return;
-    setProposedChanges(prev => ({
-      ...prev,
-      [field]: { ...prev[field], new: val },
-    }));
-    setEditing(prev => { const n = { ...prev }; delete n[field]; return n; });
-  };
-  const cancelEdit = (field: string) => {
-    setEditing(prev => { const n = { ...prev }; delete n[field]; return n; });
-  };
-  const startArrayEdit = (field: string, currentVal: unknown) => {
-    setArrayEditing((prev) => ({ ...prev, [field]: cloneArrayRows(currentVal) }));
-  };
-  const commitArrayEdit = (field: string) => {
-    const value = arrayEditing[field];
-    if (!value) return;
-    setProposedChanges((prev) => ({
-      ...prev,
-      [field]: { ...prev[field], new: sanitizeArrayRows(field, value) },
-    }));
-    setArrayEditing((prev) => {
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  };
-  const cancelArrayEdit = (field: string) => {
-    setArrayEditing((prev) => {
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  };
-  const updateArrayRow = (field: string, index: number, key: string, value: string) => {
-    setArrayEditing((prev) => ({
-      ...prev,
-      [field]: (prev[field] ?? []).map((row, rowIndex) => (
-        rowIndex === index ? { ...row, [key]: normalizeArrayFieldValue(field, key, value) } : row
-      )),
-    }));
-  };
-  const addArrayRow = (field: string) => {
-    setArrayEditing((prev) => ({
-      ...prev,
-      [field]: [...(prev[field] ?? []), createEmptyArrayRow(field)],
-    }));
-  };
-  const removeArrayRow = (field: string, index: number) => {
-    setArrayEditing((prev) => ({
-      ...prev,
-      [field]: (prev[field] ?? []).filter((_, rowIndex) => rowIndex !== index),
-    }));
-  };
 
   // Save a direct camp field edit (not via proposal)
   const saveCampField = async (field: string) => {
@@ -450,18 +370,13 @@ export function ReviewPanel({
         </section>
       )}
 
-      {/* ── Proposed Changes header (always visible) ── */}
+      {/* ── Review actions header (always visible) ── */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={() => setProposedCollapsed(v => !v)}
-          className="flex items-center gap-1.5 font-semibold text-bark-600 text-sm uppercase tracking-wide hover:text-bark-700 admin-text-strong"
-        >
-          {proposedCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-          Proposed Changes
-        </button>
+        <span className="font-semibold text-bark-600 text-sm uppercase tracking-wide admin-text-strong">
+          Review actions
+        </span>
         <span className="text-bark-300 ml-auto text-xs">
           {alreadyApplied.size > 0 && <span className="text-pine-500 mr-2">{alreadyApplied.size} applied</span>}
-          {!proposedCollapsed && <>{fields.length} remaining</>}
         </span>
         {/* Recrawl button */}
         <button
@@ -499,285 +414,142 @@ export function ReviewPanel({
         </div>
       )}
 
-      {!proposedCollapsed && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Proposed Changes list ─────────────────────────────── */}
-        <div className="lg:col-span-2 space-y-3">
+      {/* ── Actions sidebar ───────────────────────────────────── */}
+      <div className="max-w-2xl space-y-4">
+        <div className="glass-panel p-5 admin-surface-raised">
+          <h3 className={cn('font-semibold text-bark-600 mb-3', adminTheme.textStrong)}>Reviewer Notes</h3>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="Optional notes about this review..."
+            rows={4}
+            className="w-full text-sm border border-cream-400/60 rounded-xl p-3 focus:outline-none focus:border-pine-400 resize-none bg-cream-50 admin-surface"
+          />
 
-          {/* Already-applied fields (greyed out) */}
-          {alreadyApplied.size > 0 && (
-            <div className="space-y-2 opacity-60">
-              {Array.from(alreadyApplied).filter(f => proposal.proposedChanges[f]).map(field => (
-                <div key={field} className="rounded-2xl border border-pine-200/60 bg-pine-50/20 px-4 py-2.5 flex items-center gap-3 admin-surface">
-                  <BookmarkCheck className="w-4 h-4 text-pine-500 shrink-0" />
-                  <span className={cn('text-sm font-medium text-bark-500', adminTheme.text)}>{FIELD_LABELS[field] ?? field}</span>
-                  <span className="text-xs text-pine-500 font-medium ml-1">Applied</span>
-                  <div className={cn('ml-auto max-w-[240px] text-xs text-bark-300', adminTheme.textMuted)}>
-                    <CampFieldValue value={proposal.proposedChanges[field].new} field={field} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {fields.map(([field, diff]) => {
-            const isArray = Array.isArray(diff.new);
-            const isExpandable = isArray || String(diff.new).length > 120;
-            const isExpanded = expanded.has(field);
-            const conf = Math.round(diff.confidence * 100);
-            const isPopulate = diff.old === null || diff.old === '' || diff.old === undefined;
-            const isEditingProposed = editing[field] !== undefined;
-            const isEditingArray = arrayEditing[field] !== undefined;
-
-            return (
-              <div
-                key={field}
-                className="rounded-2xl border border-cream-300/60 bg-white/40 p-4 transition-colors admin-surface"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      <span className={cn('font-semibold text-bark-600 text-sm', adminTheme.textStrong)}>{FIELD_LABELS[field] ?? field}</span>
-                      <span className={cn(
-                        'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                        conf >= 80 ? 'bg-pine-100 text-pine-600 admin-chip' :
-                        conf >= 50 ? 'bg-amber-100 text-amber-600 dark:border dark:border-amber-300/30' :
-                        'bg-red-100 text-red-500 dark:border dark:border-red-300/30'
-                      )}>
-                        {conf}%
-                      </span>
-                      <span className={cn(
-                        'text-xs px-1.5 py-0.5 rounded-full font-medium',
-                        isPopulate ? 'bg-blue-100 text-blue-600 dark:bg-pine-800/70 dark:text-cream-200 dark:border dark:border-pine-500/30' : 'bg-amber-100 text-amber-700 dark:border dark:border-amber-300/30'
-                      )}>
-                        {isPopulate ? 'new data' : 'update'}
-                      </span>
-                      <FieldFormatBadge state={checkFieldFormat(field, diff.new)} />
-                    </div>
-                    <FieldTimelineNote timeline={fieldTimeline[field]} className={cn('mb-2 text-[11px] text-bark-300', adminTheme.textMuted)} />
-
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <p className={cn('text-xs text-bark-300 mb-1 uppercase tracking-wide', adminTheme.textMuted)}>Current</p>
-                        <CampFieldValue value={diff.old} field={field} expanded={isExpanded} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-pine-400 mb-1 uppercase tracking-wide flex items-center gap-1">
-                          Proposed
-                          {!isEditingProposed && !isEditingArray && (
-                            <button
-                              onClick={() => isArray ? startArrayEdit(field, diff.new) : startEdit(field, diff.new)}
-                              className="text-bark-300 hover:text-pine-500 ml-1"
-                              title="Edit proposed value"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                          )}
-                        </p>
-                        {isEditingArray ? (
-                          <div className="space-y-2">
-                            <CampArrayFieldEditor
-                              field={field}
-                              rows={arrayEditing[field] ?? []}
-                              onChange={updateArrayRow}
-                              onAdd={addArrayRow}
-                              onRemove={removeArrayRow}
-                            />
-                            <div className="flex items-center justify-end gap-1">
-                              <button onClick={() => commitArrayEdit(field)} className="p-1 text-pine-500 hover:text-pine-700 shrink-0"><Check className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => cancelArrayEdit(field)} className="p-1 text-bark-300 hover:text-red-400 shrink-0"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          </div>
-                        ) : isEditingProposed ? (
-                          <div className="flex items-start gap-1">
-                            <CampFieldInput
-                              field={field}
-                              value={editing[field] ?? ''}
-                              onChange={v => setEditing(prev => ({ ...prev, [field]: v }))}
-                              onCommit={() => commitEdit(field)}
-                              onCancel={() => cancelEdit(field)}
-                              className="border-pine-300 focus:border-pine-500"
-                            />
-                            <div className="flex flex-col gap-1">
-                              <button onClick={() => commitEdit(field)} className="text-pine-500 hover:text-pine-700 p-1 shrink-0"><Check className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => cancelEdit(field)} className="text-bark-300 hover:text-red-400 p-1 shrink-0"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          </div>
-                        ) : (
-                          <CampFieldValue value={diff.new} field={field} expanded={isExpanded} highlight />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Excerpt + source link, else an explicit "no provenance" marker (R3, campfit#91) */}
-                    {hasProvenance(diff) ? (
-                      <div className="mt-3 flex items-start gap-2 bg-amber-50/60 border border-amber-200/60 rounded-lg px-3 py-2 dark:bg-amber-500/15 dark:border-amber-300/30">
-                        <Quote className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          {diff.excerpt && (
-                            <p className="text-xs text-amber-800 italic leading-relaxed dark:text-amber-100">&quot;{diff.excerpt}&quot;</p>
-                          )}
-                          {diff.sourceUrl && <AdminSourceLink url={diff.sourceUrl} maxLength={70} className="mt-1" />}
-                        </div>
-                      </div>
-                    ) : (
-                      <FieldProvenanceMarker />
-                    )}
-
-                    {isExpandable && !isEditingProposed && (
-                      <button
-                        onClick={() => toggleExpand(field)}
-                        className="flex items-center gap-1 text-xs text-bark-300 hover:text-bark-500 mt-2"
-                      >
-                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                        {isExpanded ? 'Collapse' : 'Expand'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* ── Actions sidebar ───────────────────────────────────── */}
-        <div className="space-y-4">
-          <div className="glass-panel p-5 admin-surface-raised">
-            <h3 className={cn('font-semibold text-bark-600 mb-3', adminTheme.textStrong)}>Reviewer Notes</h3>
-            <textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              placeholder="Optional notes about this review..."
-              rows={4}
-              className="w-full text-sm border border-cream-400/60 rounded-xl p-3 focus:outline-none focus:border-pine-400 resize-none bg-cream-50 admin-surface"
-            />
-
-            <div className="space-y-2 mt-4">
-              {queueContext?.campHref && (
-                <Link href={queueContext.campHref} className="btn-secondary w-full gap-2">
-                  <ExternalLink className="w-4 h-4" />
-                  Open Camp Data
-                </Link>
-              )}
-              {queueContext?.providerHref && (
-                <Link href={queueContext.providerHref} className="btn-secondary w-full gap-2">
-                  <ExternalLink className="w-4 h-4" />
-                  Open Provider
-                </Link>
-              )}
-              <button
-                onClick={handleApprove}
-                disabled={loading !== null || !hasSurveyReviewSession || !canApplySurveyFull}
-                className="btn-primary w-full gap-2 disabled:opacity-50"
-                title="Apply saved Survey decisions for every ReviewItem and close this proposal"
-              >
-                {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                Apply & Resolve
-              </button>
-              <button
-                onClick={handleApproveAndNext}
-                disabled={loading !== null || !hasSurveyReviewSession || !canApplySurveyFull || !queueContext?.nextHref}
-                className="btn-secondary w-full gap-2 disabled:opacity-50"
-                title="Apply saved Survey decisions for every ReviewItem and move straight to the next proposal in this queue"
-              >
-                {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                Apply & Next
-              </button>
-              <button
-                onClick={handleKeep}
-                disabled={loading !== null || !hasSurveyReviewSession || !canApplySurveyPartial}
-                className="btn-secondary w-full gap-2 disabled:opacity-50"
-                title="Apply currently resolved Survey decisions but keep this proposal in queue for future review"
-              >
-                {loading === 'keep' ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookmarkCheck className="w-4 h-4" />}
-                Apply & Keep Reviewing
-              </button>
-              <button
-                onClick={handleReject}
-                disabled={loading !== null}
-                className="btn-secondary w-full gap-2 text-red-500 hover:bg-red-50 disabled:opacity-50"
-              >
-                {loading === 'reject' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
-                Reject All
-              </button>
-            </div>
-          </div>
-
-          <div className="glass-panel p-5 space-y-3 admin-surface-raised">
-            <h3 className={cn('font-semibold text-bark-600 mb-1 text-sm', adminTheme.textStrong)}>Source</h3>
-            <AdminSourceLink
-              url={proposal.sourceUrl}
-              icon="external"
-              className="flex items-start gap-1.5 text-xs leading-relaxed"
-            />
-
-            {proposal.crawlRunId && (
-              <a
-                href={`/admin/crawls?runId=${proposal.crawlRunId}`}
-                className="flex items-center gap-1.5 text-xs text-pine-500 hover:text-pine-700"
-              >
-                <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                View crawl run logs
-                {proposal.crawlStartedAt && (
-                  <span className="text-bark-300 ml-1">
-                    · {formatCampDateTime(proposal.crawlStartedAt, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                  </span>
-                )}
-              </a>
+          <div className="space-y-2 mt-4">
+            {queueContext?.campHref && (
+              <Link href={queueContext.campHref} className="btn-secondary w-full gap-2">
+                <ExternalLink className="w-4 h-4" />
+                Open Camp Data
+              </Link>
             )}
-
-            <div className={cn('border-t border-cream-300 pt-3 space-y-1 text-xs text-bark-400 dark:border-[var(--admin-border)]', adminTheme.textMuted)}>
-              <p>Model: <span className="font-mono">{proposal.extractionModel}</span></p>
-              <p>Proposed: {formatCampDateTime(proposal.createdAt)}</p>
-              {proposal.crawlTriggeredBy && <p>Triggered by: {proposal.crawlTriggeredBy}</p>}
-              <p>{fields.length + alreadyApplied.size} field{(fields.length + alreadyApplied.size) !== 1 ? 's' : ''} in proposal</p>
-            </div>
-
-            {/* Proposal-level "view source snapshot" drill-down (R2, campfit#91).
-                Absent for every real proposal today (snapshotRef is not yet
-                populated by the ingestion lane) — SnapshotDrilldown renders
-                nothing in that case, distinct from R3's per-field marker. */}
-            <SnapshotDrilldown proposalId={proposal.id} snapshotRef={proposal.snapshotRef} />
-          </div>
-
-          {/* Crawl hint */}
-          <div className="glass-panel p-4 admin-surface-raised">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-              <h3 className={cn('text-xs font-semibold text-bark-500 uppercase tracking-wide', adminTheme.textSubtle)}>Add Crawl Hint</h3>
-              {savedHints > 0 && <span className="ml-auto text-xs text-pine-500">{savedHints} saved</span>}
-            </div>
-            <p className={cn('text-xs text-bark-300 mb-2', adminTheme.textMuted)}>
-              Teach future crawls how to extract correctly from <span className="font-mono">{campDomain}</span>
-            </p>
-            <textarea
-              value={hintText}
-              onChange={e => setHintText(e.target.value)}
-              placeholder={`e.g. "Session Full means FULL status, not CLOSED"`}
-              rows={2}
-              className="w-full text-xs border border-cream-400/60 rounded-lg p-2 focus:outline-none focus:border-pine-400 resize-none bg-cream-50 dark:bg-bark-700 dark:border-bark-500 dark:text-cream-200"
-            />
+            {queueContext?.providerHref && (
+              <Link href={queueContext.providerHref} className="btn-secondary w-full gap-2">
+                <ExternalLink className="w-4 h-4" />
+                Open Provider
+              </Link>
+            )}
             <button
-              disabled={!hintText.trim() || savingHint}
-              onClick={async () => {
-                setSavingHint(true);
-                const res = await fetch('/api/admin/site-hints', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ domain: campDomain, hint: hintText, source: 'from_review', sourceId: proposal.id }),
-                });
-                if (res.ok) { setHintText(''); setSavedHints(n => n + 1); }
-                setSavingHint(false);
-              }}
-              className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 disabled:opacity-40 transition-colors dark:bg-amber-500/15 dark:border-amber-300/30 dark:text-amber-100"
+              onClick={handleApprove}
+              disabled={loading !== null || !hasSurveyReviewSession || !canApplySurveyFull}
+              className="btn-primary w-full gap-2 disabled:opacity-50"
+              title="Apply saved Survey decisions for every ReviewItem and close this proposal"
             >
-              {savingHint ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
-              Save hint for {campDomain}
+              {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Apply & Resolve
+            </button>
+            <button
+              onClick={handleApproveAndNext}
+              disabled={loading !== null || !hasSurveyReviewSession || !canApplySurveyFull || !queueContext?.nextHref}
+              className="btn-secondary w-full gap-2 disabled:opacity-50"
+              title="Apply saved Survey decisions for every ReviewItem and move straight to the next proposal in this queue"
+            >
+              {loading === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+              Apply & Next
+            </button>
+            <button
+              onClick={handleKeep}
+              disabled={loading !== null || !hasSurveyReviewSession || !canApplySurveyPartial}
+              className="btn-secondary w-full gap-2 disabled:opacity-50"
+              title="Apply currently resolved Survey decisions but keep this proposal in queue for future review"
+            >
+              {loading === 'keep' ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookmarkCheck className="w-4 h-4" />}
+              Apply & Keep Reviewing
+            </button>
+            <button
+              onClick={handleReject}
+              disabled={loading !== null}
+              className="btn-secondary w-full gap-2 text-red-500 hover:bg-red-50 disabled:opacity-50"
+            >
+              {loading === 'reject' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+              Reject All
             </button>
           </div>
         </div>
+
+        <div className="glass-panel p-5 space-y-3 admin-surface-raised">
+          <h3 className={cn('font-semibold text-bark-600 mb-1 text-sm', adminTheme.textStrong)}>Source</h3>
+          <AdminSourceLink
+            url={proposal.sourceUrl}
+            icon="external"
+            className="flex items-start gap-1.5 text-xs leading-relaxed"
+          />
+
+          {proposal.crawlRunId && (
+            <a
+              href={`/admin/crawls?runId=${proposal.crawlRunId}`}
+              className="flex items-center gap-1.5 text-xs text-pine-500 hover:text-pine-700"
+            >
+              <GitBranch className="w-3.5 h-3.5 shrink-0" />
+              View crawl run logs
+              {proposal.crawlStartedAt && (
+                <span className="text-bark-300 ml-1">
+                  · {formatCampDateTime(proposal.crawlStartedAt, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                </span>
+              )}
+            </a>
+          )}
+
+          <div className={cn('border-t border-cream-300 pt-3 space-y-1 text-xs text-bark-400 dark:border-[var(--admin-border)]', adminTheme.textMuted)}>
+            <p>Model: <span className="font-mono">{proposal.extractionModel}</span></p>
+            <p>Proposed: {formatCampDateTime(proposal.createdAt)}</p>
+            {proposal.crawlTriggeredBy && <p>Triggered by: {proposal.crawlTriggeredBy}</p>}
+            <p>{fields.length + alreadyApplied.size} field{(fields.length + alreadyApplied.size) !== 1 ? 's' : ''} in proposal</p>
+          </div>
+
+          {/* Proposal-level "view source snapshot" drill-down (R2, campfit#91).
+              Absent for every real proposal today (snapshotRef is not yet
+              populated by the ingestion lane) — SnapshotDrilldown renders
+              nothing in that case, distinct from R3's per-field marker. */}
+          <SnapshotDrilldown proposalId={proposal.id} snapshotRef={proposal.snapshotRef} />
+        </div>
+
+        {/* Crawl hint */}
+        <div className="glass-panel p-4 admin-surface-raised">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+            <h3 className={cn('text-xs font-semibold text-bark-500 uppercase tracking-wide', adminTheme.textSubtle)}>Add Crawl Hint</h3>
+            {savedHints > 0 && <span className="ml-auto text-xs text-pine-500">{savedHints} saved</span>}
+          </div>
+          <p className={cn('text-xs text-bark-300 mb-2', adminTheme.textMuted)}>
+            Teach future crawls how to extract correctly from <span className="font-mono">{campDomain}</span>
+          </p>
+          <textarea
+            value={hintText}
+            onChange={e => setHintText(e.target.value)}
+            placeholder={`e.g. "Session Full means FULL status, not CLOSED"`}
+            rows={2}
+            className="w-full text-xs border border-cream-400/60 rounded-lg p-2 focus:outline-none focus:border-pine-400 resize-none bg-cream-50 dark:bg-bark-700 dark:border-bark-500 dark:text-cream-200"
+          />
+          <button
+            disabled={!hintText.trim() || savingHint}
+            onClick={async () => {
+              setSavingHint(true);
+              const res = await fetch('/api/admin/site-hints', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain: campDomain, hint: hintText, source: 'from_review', sourceId: proposal.id }),
+              });
+              if (res.ok) { setHintText(''); setSavedHints(n => n + 1); }
+              setSavingHint(false);
+            }}
+            className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 disabled:opacity-40 transition-colors dark:bg-amber-500/15 dark:border-amber-300/30 dark:text-amber-100"
+          >
+            {savingHint ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
+            Save hint for {campDomain}
+          </button>
+        </div>
       </div>
-      )} {/* end !proposedCollapsed */}
 
       {/* ── Current Camp Data (collapsed by default) ─── */}
       <div>
@@ -799,42 +571,6 @@ function compareFieldPriority(fieldA: string, fieldB: string) {
   const priorityB = FIELD_PRIORITY[fieldB] ?? 100;
   if (priorityA !== priorityB) return priorityA - priorityB;
   return fieldA.localeCompare(fieldB);
-}
-
-function cloneArrayRows(value: unknown): Record<string, unknown>[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((row) => ({ ...(row as Record<string, unknown>) }));
-}
-
-function createEmptyArrayRow(field: string): Record<string, unknown> {
-  if (field === 'ageGroups') return { label: '', minAge: null, maxAge: null, minGrade: null, maxGrade: null };
-  if (field === 'schedules') return { label: '', startDate: null, endDate: null, startTime: null, endTime: null, earlyDropOff: null, latePickup: null };
-  if (field === 'pricing') return { label: '', amount: null, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null };
-  return {};
-}
-
-function normalizeArrayFieldValue(field: string, key: string, value: string) {
-  const nullableNumberKeys = new Set(['minAge', 'maxAge', 'minGrade', 'maxGrade', 'amount', 'durationWeeks']);
-  if (key === 'minGrade' || key === 'maxGrade') return parseGradeInput(value);
-  if (nullableNumberKeys.has(key)) return value === '' ? null : Number(value);
-  if (field === 'pricing' && key === 'unit') return value;
-  return value === '' ? null : value;
-}
-
-function sanitizeArrayRows(field: string, rows: Record<string, unknown>[]) {
-  return rows
-    .map((row) => {
-      const cleaned = Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key, value === '' ? null : value]),
-      );
-      return cleaned;
-    })
-    .filter((row) => {
-      if (field === 'ageGroups' || field === 'schedules' || field === 'pricing') {
-        return Boolean(row.label ?? row.startDate ?? row.amount);
-      }
-      return true;
-    });
 }
 
 function formatValue(val: unknown): string {
