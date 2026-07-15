@@ -48,21 +48,23 @@ describe('fresh-discovery review presentation', () => {
     expect(html).not.toContain('Review new camp: Discovery placeholder');
   });
 
-  it('replaces the meaningless null current candidate presentation with an honest new-camp state', () => {
+  it('mounts the themed workbench host for a new-camp session (field-diff is client-rendered)', () => {
     const session = buildCampSurveyReviewQueueSession(freshDiscoveryProposal(), {
       actorId: 'owner@campfit.test',
       reviewedAt: '2026-07-13T12:30:00.000Z',
     });
+    // The consolidated workbench mounts client-side (mountReviewWorkbench in a
+    // useEffect), so its server markup is the campfit-themed mount host. The
+    // new-camp current state is rendered inside that workbench — asserted against
+    // the actual Survey render in the next test.
     const html = renderToStaticMarkup(createElement(SurveyReviewWorkbench, { session, isNewCamp: true }));
 
-    expect(html).toContain('data-new-camp-current-state="true"');
-    expect(html).toContain('no existing value — new camp');
-    expect(html).not.toContain('data-candidate-role="current"');
-    expect(html).toContain('data-candidate-role="proposed"');
-    expect(html).toContain('Pine Ridge Camp');
+    expect(html).toContain('survey-workbench-embed');
+    expect(html).toContain('theme-campfit');
+    expect(html).toContain('aria-label="Survey review workbench"');
   });
 
-  it('adapts the actual mounted Survey workbench current candidates for a new camp', () => {
+  it('renders an honest new-camp current state (Not set + New) instead of a meaningless null', () => {
     const session = buildCampSurveyReviewQueueSession(freshDiscoveryProposal(), {
       actorId: 'owner@campfit.test',
       reviewedAt: '2026-07-13T12:30:00.000Z',
@@ -71,9 +73,13 @@ describe('fresh-discovery review presentation', () => {
       presentationAdapter: createCampSurveyPresentationAdapter({}, { newCamp: true }),
     });
 
-    expect(mountedHtml).toContain('No existing value — new camp');
-    expect(mountedHtml).toContain('no existing value — new camp');
+    // Survey 1.12.0 shows an empty current value as "Not set" and marks the field
+    // "New" — an honest new-camp representation, never a raw null/empty candidate.
+    expect(mountedHtml).toContain('Not set');
+    expect(mountedHtml).toContain('<span class="fkind">New</span>');
+    expect(mountedHtml).toContain('Pine Ridge Camp');
     expect(mountedHtml).not.toContain('>empty<');
+    expect(mountedHtml).not.toContain('>null<');
   });
 
   it('shows the needs-review New camp marker only for an all-populate proposal', () => {

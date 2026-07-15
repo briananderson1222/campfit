@@ -119,11 +119,14 @@ assert.equal(resultPresentation.targetLabel, 'Description');
 assert.equal(resultPresentation.selectedValueText, 'Outdoor day camp for ages 7-12.');
 assert.equal(resultPresentation.applyMeaning, 'Saved decision applies proposed value');
 
+// The consolidated workbench mounts client-side (mountReviewWorkbench runs in a
+// useEffect), so server markup is just the themed mount host — the field-diff,
+// candidate values, and trace links now render in the browser via the embedded
+// Survey workbench. Assert the host is present and branded; the value/trace
+// content is verified above at the data layer (items/session/presentation).
 const markup = renderToStaticMarkup(createElement(SurveyReviewWorkbench, { session }));
-assert.match(markup, /Survey queue payload/);
-assert.match(markup, /Outdoor day camp for ages 7-12/);
-assert.match(markup, /publisher_owned_page/);
-assert.match(markup, /Projection summary/);
-assert.match(markup, /IDs and trace links/);
+assert.match(markup, /aria-label="Survey review workbench"/);
+assert.match(markup, /survey-workbench-embed/);
+assert.match(markup, /theme-campfit/);
 
 console.log('survey review item verification passed');
