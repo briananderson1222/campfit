@@ -7,6 +7,7 @@ import {
 import {
   campfitVocabulary,
 } from '../trust-vocabulary';
+import { toReviewValueDescriptor } from './survey-value-descriptor';
 import type { CampChangeProposal, FieldDiff } from './types';
 
 export interface CampReviewQueueSession {
@@ -94,6 +95,7 @@ function buildCampSurveyReviewItem(
     },
     spec: {
       target: field,
+      valueDescriptor: toReviewValueDescriptor(field),
       selectedCandidateId: undefined,
       candidateSetStatus: 'needs-review',
       rationale: 'CampFit crawl proposal requires operator review before projecting a verified claim.',

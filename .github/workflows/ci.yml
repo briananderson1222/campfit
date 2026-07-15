@@ -41,6 +41,9 @@ jobs:
       - name: Traverse sources-strategy crawl frontier proof (campfit#133)
         run: npm run test:traverse-crawl
 
+      - name: Survey value-descriptor mapping proof (campfit#45)
+        run: npm run verify:survey-value-descriptor
+
   render_fetch_proof:
     name: Render-fetch proof (Playwright headless fetch, #41)
     runs-on: ubuntu-latest
