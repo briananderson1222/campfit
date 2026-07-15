@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // These specs drive a real pending proposal, so they need a live dev server + DB
 // (.env.local) and run in campfit CI. The review surface is the single embedded
@@ -66,8 +66,17 @@ test('persists Survey review decisions on a real pending proposal detail page', 
   }
 
   // Accept it; the persistent event store PUTs the decision to /survey-events.
+  //
+  // TYPED-VALUE GATING (survey 1.13.0): fields that carry a typed valueDescriptor
+  // (number/date/boolean/enum) BLOCK `use-proposed` when the crawl value doesn't
+  // conform — e.g. a mixed-case 'Waitlist' against an uppercase enum, or a
+  // non-YYYY-MM-DD date. On a live proposal the chosen undecided field's value
+  // may be non-conforming, so a naive click can be blocked (the field stays
+  // `data-state="review"` and `value-error` un-hides) and no event is persisted.
+  // Faithfully model the new reviewer behavior: try to accept, and if the field
+  // is gated, correct the typed editor to a guaranteed-valid value and retry.
   const surveyEventsPut = waitForSurveyEventsPut(page);
-  await undecided.getByTestId('use-proposed').click();
+  await acceptProposedCorrectingIfGated(undecided);
   await expect(undecided.getByTestId('decided-chip')).toBeVisible();
   await surveyEventsPut;
 
@@ -81,6 +90,55 @@ test('persists Survey review decisions on a real pending proposal detail page', 
 
   expect(consoleErrors).toEqual([]);
 });
+
+/**
+ * Click `use-proposed` on a field; if typed-value gating blocks the decision
+ * (survey 1.13.0), correct the typed editor to a guaranteed-valid value and
+ * retry. The decision stays `accept-proposed` either way — the reviewer is
+ * still accepting the proposed candidate, just with a corrected (conforming)
+ * value — so the trail still renders "Saved decision applies proposed value".
+ */
+async function acceptProposedCorrectingIfGated(field: Locator): Promise<void> {
+  await field.getByTestId('use-proposed').click();
+
+  // Not gated → the decision already went through; nothing to correct.
+  if (!(await field.getByTestId('value-error').isVisible())) return;
+
+  // Gated: the crawl value didn't conform to the field's typed descriptor.
+  // Correct the editor by its kind, then re-click `use-proposed`.
+  const editor = field.getByTestId('edit-proposed-value');
+  const tagName = await editor.evaluate((element) => element.tagName.toLowerCase());
+
+  if (tagName === 'select') {
+    // enum / boolean editor. Gating on a <select> means the current value is
+    // NOT among the declared options, so the workbench prepended a leading
+    // out-of-set <option> at index 0; every option after it is a declared,
+    // guaranteed-valid choice (an enumValue, or true/false for boolean). Read
+    // the option values, drop the empty/out-of-set leading entry, and pick the
+    // last declared one (a real enumValue, or "false" for a boolean field).
+    const optionValues = await editor
+      .locator('option')
+      .evaluateAll((nodes) =>
+        nodes
+          .map((node) => (node as HTMLOptionElement).value)
+          .filter((value) => value !== ''),
+      );
+    const declaredOptions = optionValues.slice(1);
+    const validOption = declaredOptions[declaredOptions.length - 1] ?? optionValues[optionValues.length - 1];
+    await editor.selectOption(validOption);
+  } else {
+    const inputType = await editor.getAttribute('type');
+    if (inputType === 'number') {
+      await editor.fill('1');
+    } else if (inputType === 'date') {
+      await editor.fill('2025-01-01');
+    }
+    // text / other editors belong to untyped fields, which are never gated, so
+    // there is nothing to correct — retry as-is.
+  }
+
+  await field.getByTestId('use-proposed').click();
+}
 
 async function waitForSurveyEventsPut(page: Page) {
   const response = await page.waitForResponse((candidate) =>

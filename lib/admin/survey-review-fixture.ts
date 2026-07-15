@@ -30,6 +30,12 @@ export const surveyReviewFixtureProposal: CampChangeProposal = {
       sourceUrl: 'https://maplearts.example/summer-camps#sessions',
       mode: 'add_items',
     },
+    // registrationStatus carries a typed enum descriptor (schema vocab is
+    // uppercase OPEN/FULL/WAITLIST/CLOSED/COMING_SOON/UNKNOWN). The proposed
+    // value 'Waitlist' is INTENTIONALLY non-canonical (mixed-case) so it does
+    // NOT conform to that vocab — this exercises survey 1.13.0 typed-value
+    // gating: `use-proposed` is blocked until the reviewer corrects it to a
+    // declared value (e.g. 'WAITLIST'). See survey-review-fixture.spec.ts.
     registrationStatus: {
       old: 'Open',
       new: 'Waitlist',
@@ -44,7 +50,12 @@ export const surveyReviewFixtureProposal: CampChangeProposal = {
   reviewerNotes: null,
   feedbackTags: ['schedule-delta', 'eligibility-impact', 'registration-risk'],
   priority: 0,
-  appliedFields: ['registrationStatus'],
+  // registrationStatus is left UNapplied so it renders as an undecided, typed
+  // enum review field (its non-canonical 'Waitlist' value exercises typed-value
+  // gating). The fixture page already passes includeAppliedFields:true, so this
+  // is safe for all consumers; keeping it out of appliedFields also makes it a
+  // genuinely pending review field rather than one shown as already-applied.
+  appliedFields: [],
   campName: 'Maple Arts Studio Camp',
   campSlug: 'maple-arts-studio-camp',
   communitySlug: 'denver',
