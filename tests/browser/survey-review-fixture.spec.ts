@@ -36,6 +36,37 @@ test('renders the embedded Survey workbench and records reviewer decisions', asy
   expect(consoleErrors).toEqual([]);
 });
 
+test('gates a non-conforming typed field until the value is corrected', async ({ page }) => {
+  // TYPED-VALUE GATING (survey 1.13.0): the fixture's registrationStatus field
+  // carries a typed enum descriptor (OPEN/FULL/WAITLIST/...) but a deliberately
+  // non-canonical crawl value ('Waitlist'), so its editor renders a <select> and
+  // `use-proposed` must be BLOCKED until the value is corrected to a declared
+  // enumValue. This is the deterministic (controlled-data) counterpart to the
+  // live-proposal robustness in survey-review-real-proposal.spec.ts.
+  await loadFixture(page);
+
+  // Pin the field by its STABLE `data-field` (registrationStatus). The workbench
+  // removes the proposed-value editor once a field is decided, so a
+  // `filter({ has: select })` locator would stop matching after acceptance and
+  // the post-decision assertions would find nothing.
+  const typedField = page.locator('[data-testid="review-field"][data-field="registrationStatus"]');
+  await expect(typedField).toBeVisible();
+  // While undecided it renders the typed enum editor (a <select>), not free-text.
+  await expect(typedField.locator('select[data-testid="edit-proposed-value"]')).toBeVisible();
+
+  // Accepting the non-conforming value is blocked: the error un-hides and the
+  // field stays undecided (no decision persisted).
+  await typedField.getByTestId('use-proposed').click();
+  await expect(typedField.getByTestId('value-error')).toBeVisible();
+  await expect(typedField).toHaveAttribute('data-state', 'review');
+
+  // Correct to a declared enum value, then accept — the decision goes through.
+  await typedField.getByTestId('edit-proposed-value').selectOption('WAITLIST');
+  await typedField.getByTestId('use-proposed').click();
+  await expect(typedField).toHaveAttribute('data-state', 'accepted');
+  await expect(typedField.getByTestId('decided-chip')).toHaveText('Accepted');
+});
+
 test('keeps Survey embed styles contained inside the CampFit fixture shell', async ({ page }) => {
   await loadFixture(page);
 
