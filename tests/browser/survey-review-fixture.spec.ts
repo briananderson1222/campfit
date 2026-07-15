@@ -45,13 +45,14 @@ test('gates a non-conforming typed field until the value is corrected', async ({
   // live-proposal robustness in survey-review-real-proposal.spec.ts.
   await loadFixture(page);
 
-  // Locate the one typed field by its editor kind (a <select>); the untyped
-  // ageRange/sessions fields render text/other editors.
-  const typedField = page
-    .locator('[data-testid="review-field"]')
-    .filter({ has: page.locator('select[data-testid="edit-proposed-value"]') })
-    .first();
+  // Pin the field by its STABLE `data-field` (registrationStatus). The workbench
+  // removes the proposed-value editor once a field is decided, so a
+  // `filter({ has: select })` locator would stop matching after acceptance and
+  // the post-decision assertions would find nothing.
+  const typedField = page.locator('[data-testid="review-field"][data-field="registrationStatus"]');
   await expect(typedField).toBeVisible();
+  // While undecided it renders the typed enum editor (a <select>), not free-text.
+  await expect(typedField.locator('select[data-testid="edit-proposed-value"]')).toBeVisible();
 
   // Accepting the non-conforming value is blocked: the error un-hides and the
   // field stays undecided (no decision persisted).
@@ -62,8 +63,8 @@ test('gates a non-conforming typed field until the value is corrected', async ({
   // Correct to a declared enum value, then accept — the decision goes through.
   await typedField.getByTestId('edit-proposed-value').selectOption('WAITLIST');
   await typedField.getByTestId('use-proposed').click();
-  await expect(typedField.getByTestId('decided-chip')).toHaveText('Accepted');
   await expect(typedField).toHaveAttribute('data-state', 'accepted');
+  await expect(typedField.getByTestId('decided-chip')).toHaveText('Accepted');
 });
 
 test('keeps Survey embed styles contained inside the CampFit fixture shell', async ({ page }) => {

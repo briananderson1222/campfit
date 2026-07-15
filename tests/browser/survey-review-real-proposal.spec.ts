@@ -65,6 +65,14 @@ test('persists Survey review decisions on a real pending proposal detail page', 
     test.skip(true, 'Every field on this live proposal is already decided.');
   }
 
+  // Pin the chosen field by its STABLE `data-field` before deciding it. A
+  // `[data-state="review"]` locator is not stable: once we accept the field its
+  // `data-state` flips to `accepted`, so re-resolving the review-state locator
+  // would drift to a different still-undecided card and assert against the wrong
+  // decided-chip.
+  const fieldName = await undecided.getAttribute('data-field');
+  const field = surveyPanel.locator(`[data-testid="review-field"][data-field="${fieldName}"]`);
+
   // Accept it; the persistent event store PUTs the decision to /survey-events.
   //
   // TYPED-VALUE GATING (survey 1.13.0): fields that carry a typed valueDescriptor
@@ -76,8 +84,8 @@ test('persists Survey review decisions on a real pending proposal detail page', 
   // Faithfully model the new reviewer behavior: try to accept, and if the field
   // is gated, correct the typed editor to a guaranteed-valid value and retry.
   const surveyEventsPut = waitForSurveyEventsPut(page);
-  await acceptProposedCorrectingIfGated(undecided);
-  await expect(undecided.getByTestId('decided-chip')).toBeVisible();
+  await acceptProposedCorrectingIfGated(field);
+  await expect(field.getByTestId('decided-chip')).toBeVisible();
   await surveyEventsPut;
 
   await expect(surveyPanel.getByTestId('survey-review-trail-result').first()).toBeVisible();
