@@ -52,9 +52,18 @@ const dryRun = args.includes('--dry-run');
 // re-crawling (and re-proposing) providers that already finished.
 const onlyRaw = flag('--only');
 const only = onlyRaw ? new Set(onlyRaw.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+// Bounded link-following crawl (campfit#133): provider camps live on a
+// `/camps`|`/programs`|`/schedule` subpage, not the seeded homepage. This
+// script exists to reach them, so it opts into a bounded same-host crawl by
+// DEFAULT (maxPages 6 / maxDepth 1) — overridable per run. `--max-pages 1`
+// (or `--max-depth 0`) restores the legacy single-page fetch.
+const maxPagesRaw = flag('--max-pages');
+const maxDepthRaw = flag('--max-depth');
+const maxPages = maxPagesRaw !== undefined ? Math.max(1, parseInt(maxPagesRaw, 10) || 1) : 6;
+const maxDepth = maxDepthRaw !== undefined ? Math.max(0, parseInt(maxDepthRaw, 10) || 0) : 1;
 
 if (!source) {
-  console.error(`Usage: npm run crawl:providers -- --source <${knownSources()}> [--limit N] [--only slug,slug] [--dry-run] [--community denver]`);
+  console.error(`Usage: npm run crawl:providers -- --source <${knownSources()}> [--limit N] [--only slug,slug] [--max-pages 6] [--max-depth 1] [--dry-run] [--community denver]`);
   process.exit(1);
 }
 
@@ -77,13 +86,15 @@ async function main() {
     key: sourceKey(source!, l.name),
     name: l.name,
     url: l.websiteUrl,
+    maxPages,
+    maxDepth,
   }));
   if (only) {
     sources = sources.filter((s) => only.has(s.key.split(':').pop()!));
     const found = new Set(sources.map((s) => s.key.split(':').pop()!));
     for (const slug of only) if (!found.has(slug)) log(`  WARNING: --only slug not found in discovery: ${slug}`);
   }
-  log(`Found ${sources.length} provider source(s).`);
+  log(`Found ${sources.length} provider source(s). Crawl bound: maxPages=${maxPages}, maxDepth=${maxDepth}${maxPages <= 1 && maxDepth <= 0 ? ' (single-page)' : ' (link-following)'}.`);
 
   if (dryRun) {
     for (const s of sources) log(`  would crawl: ${s.name} — ${s.url}`);

@@ -45,6 +45,27 @@ export interface IngestionSourceConfig {
    * `lib/ingestion/render-fetch.ts`'s `DEFAULT_RENDER_TIMEOUT_MS` (~30s).
    */
   renderTimeoutMs?: number;
+  /**
+   * Opt this source into a BOUNDED link-following crawl (campfit#133) instead
+   * of a single-page fetch: many providers list camps on a `/camps`|`/programs`
+   * subpage, not the seeded homepage. When either `maxPages > 1` or
+   * `maxDepth > 0` is set, `runTraversePipelineForSource` uses traverse's
+   * `crawlSource` frontier (same-host BFS, robots-honored, egress-guarded via
+   * the `discoveredLink` SSRF profile — the exact mechanism aggregator-discovery
+   * already uses), extracting across every crawled page. `maxPages` bounds the
+   * pages FETCHED (traverse clamps to `[0, 500]`); `maxDepth` bounds link
+   * discovery depth from the seed (seed is depth 0; clamped to `[0, 10]`).
+   *
+   * DEFAULT-OFF: absent (or `maxPages <= 1` with `maxDepth` unset/0) preserves
+   * today's exact single-page behavior — the scheduled sweep is byte-unchanged
+   * unless a source opts in. Crawl mode is plain-fetch only: the single-page
+   * shell-detection render retry does NOT run per crawled page (render was
+   * shown not to be the lever for the sources this closes; a render+crawl combo
+   * is out of scope for this slice).
+   */
+  maxPages?: number;
+  /** See {@link maxPages} — link-discovery depth from the seed (seed is depth 0). */
+  maxDepth?: number;
 }
 
 export const INGESTION_SOURCES: IngestionSourceConfig[] = [
