@@ -67,7 +67,7 @@
  *    rendered) — never more than one render per source per run.
  */
 
-import { fetchAndExtract } from "@kontourai/traverse/fetch";
+import { fetchAndExtract, crawlSource } from "@kontourai/traverse/fetch";
 import type {
   FetchAndExtractOptions,
   FetchAndExtractResult,
@@ -78,6 +78,7 @@ import type {
 } from "@kontourai/traverse/fetch";
 import { createGuardedTraverseFetchOptions } from "@/lib/security/egress-url-policy";
 import {
+  extract,
   SHELL_WARNING_CODE,
   SHELL_WARNING_CODE_EMBEDDED,
   type EmbeddedState,
@@ -710,6 +711,188 @@ async function runCoreFetchAndExtract(
 }
 
 /**
+ * True when a source opted into a bounded link-following crawl (campfit#133) —
+ * i.e. it wants MORE than the seed page. Absent bounds (or `maxPages <= 1` with
+ * `maxDepth` unset/0) means the legacy single-page path, byte-for-byte.
+ */
+function isCrawlSource(src: IngestionSourceConfig): boolean {
+  return (src.maxPages ?? 1) > 1 || (src.maxDepth ?? 0) > 0;
+}
+
+/**
+ * Crawl-mode sibling of {@link runTraversePipelineForSource} (campfit#133):
+ * many providers list their camps on a `/camps`|`/programs` SUBPAGE, not the
+ * seeded homepage, so this drives traverse's bounded, same-host `crawlSource`
+ * frontier (robots-honored, per-host politeness threaded across the frontier)
+ * and extracts across every crawled page, routing each page's grouped items
+ * through the SAME `deps.sink` as the single-page path.
+ *
+ * Egress: followed links pass through the exact SSRF guard aggregator-discovery
+ * uses — `createGuardedTraverseFetchOptions(deps.fetchOptions, "discoveredLink")`
+ * (resolve-once, deny private/loopback/link-local/metadata, pin the vetted IP,
+ * re-validate every redirect hop). Same-host scope + the page/depth caps bound
+ * cost and defeat frontier blow-up; `crawlSource` never throws.
+ *
+ * Per-page isolation mirrors `runAggregatorDiscovery`: a fetch or extraction
+ * failure on one crawled page is recorded on `warnings` and the loop continues.
+ * Telemetry (`tokensUsed`/`providerCalls`) accumulates across pages; the SEED
+ * page (depth 0) is the canonical snapshot for provenance
+ * (`snapshotRef`/`snapshotBodyHash`).
+ *
+ * SCOPE: plain-fetch only — the single-page shell-detection render retry does
+ * not run per crawled page (render was shown not to be the lever for the
+ * sources this closes; a render+crawl combo is out of scope for this slice). A
+ * source that also sets `render` gets a disclosed `warnings` note rather than a
+ * silent render.
+ */
+async function runTraverseCrawlPipelineForSource(
+  src: IngestionSourceConfig,
+  deps: TraversePipelineDeps
+): Promise<TraversePipelineSourceResult> {
+  const log = deps.log ?? ((m: string) => console.log(m));
+  const now = deps.now ?? (() => Date.now());
+  const mode = deps.mode ?? "live-with-capture";
+  const startedAt = now();
+
+  const result: TraversePipelineSourceResult = {
+    source: src.key,
+    url: src.url,
+    ok: false,
+    itemCount: 0,
+    routedProposalIds: [],
+    routedFieldCount: 0,
+    snapshotRef: null,
+    snapshotBodyHash: null,
+    fetchError: null,
+    extractionError: null,
+    warnings: [],
+    tokensUsed: null,
+    providerCalls: 0,
+    model: null,
+    latencyMs: 0,
+  };
+
+  if (src.render) {
+    result.warnings.push(
+      "render is not applied in crawl mode (campfit#133 crawl is plain-fetch only) — the source was crawled unrendered"
+    );
+  }
+
+  const manifest = await crawlSource(
+    { id: src.key, url: src.url, userAgent: deps.userAgent ?? CAMPFIT_FETCH_USER_AGENT },
+    {
+      maxPages: src.maxPages,
+      maxDepth: src.maxDepth,
+      store: deps.store,
+      mode,
+      // Replay never re-fetches, so it must not be given an executable guarded
+      // fetch (which the guard would reject as UNTRUSTED_TRANSPORT anyway) —
+      // mirrors runFetchAndExtractAttempt's own replay branch.
+      fetchOptions: mode === "replay"
+        ? deps.fetchOptions
+        : createGuardedTraverseFetchOptions(deps.fetchOptions, "discoveredLink"),
+    }
+  );
+
+  result.warnings.push(...manifest.warnings);
+  if (manifest.truncated) {
+    result.warnings.push(`crawl reached its page budget (maxPages=${src.maxPages ?? "default"}) with links still undiscovered`);
+  }
+
+  // The seed page (depth 0) is the source's canonical snapshot for provenance.
+  const seedPage = manifest.pages[0];
+  if (seedPage?.fetch.snapshot) {
+    result.snapshotRef = seedPage.sourceRef ?? null;
+    result.snapshotBodyHash = seedPage.fetch.snapshot.bodyHash;
+  } else if (seedPage?.fetch.error) {
+    result.fetchError = `${seedPage.fetch.error.kind}: ${seedPage.fetch.error.message}`;
+  }
+
+  const snapshotPages = manifest.pages.filter((page) => page.fetch.snapshot);
+  let extractionErrors = 0;
+
+  for (const page of manifest.pages) {
+    if (!page.fetch.snapshot) {
+      if (page.fetch.error) {
+        result.warnings.push(`[crawl ${page.url}] fetch ${page.fetch.error.kind}: ${page.fetch.error.message}`);
+      }
+      continue;
+    }
+
+    const snapshot = page.fetch.snapshot;
+    const extraction = await extract({
+      content: snapshot.body,
+      contentType: snapshot.contentType,
+      sourceRef: page.sourceRef ?? `traverse-crawl:${src.key}:${page.url}`,
+      targetSchema: CAMP_TARGET_SCHEMA,
+      fieldHints: mergeFieldHints(deps),
+      provider: deps.provider,
+      maxContentChars: deps.maxContentChars,
+      // Per-page cost ceiling, exactly as the single-page path applies it — the
+      // page/depth caps bound the number of pages, so total spend stays bounded.
+      maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
+      maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
+    });
+
+    result.providerCalls += extraction.providerCalls;
+    result.tokensUsed = (result.tokensUsed ?? 0) + (extraction.totalTokensUsed ?? 0);
+    if (!result.model && extraction.raw?.model) result.model = extraction.raw.model;
+    result.warnings.push(...(extraction.warnings ?? []).map((w) => `[crawl ${page.url}] ${w}`));
+
+    if (extraction.error) {
+      extractionErrors++;
+      result.warnings.push(`[crawl ${page.url}] extraction ${extraction.error}`);
+      continue;
+    }
+
+    const items = assembleItems(extraction.proposals);
+    if (items.length === 0) continue;
+
+    const itemNames = items.map((item) => itemDisplayName(item));
+    const currentByItemName = deps.currentByItemNames
+      ? await deps.currentByItemNames(src.key, itemNames)
+      : undefined;
+    const records = buildTraverseItemProposalRecords(extraction, {
+      sourceUrl: snapshot.url,
+      currentByItemName,
+    });
+    result.itemCount += records.length;
+
+    for (const record of records) {
+      result.routedFieldCount += Object.keys(record.proposedChanges).length;
+      const proposalId = await deps.sink(record, {
+        sourceKey: src.key,
+        sourceUrl: record.sourceUrl,
+        snapshotRef: page.sourceRef ?? null,
+        snapshotBodyHash: snapshot.bodyHash,
+      });
+      result.routedProposalIds.push(proposalId);
+    }
+  }
+
+  result.latencyMs = now() - startedAt;
+  // ok mirrors the single-page contract: fetch reached at least one page AND
+  // extraction did not fail on EVERY fetched page.
+  if (snapshotPages.length === 0) {
+    result.ok = false;
+  } else if (extractionErrors === snapshotPages.length) {
+    result.extractionError = `all ${extractionErrors} crawled page(s) failed extraction`;
+    result.ok = false;
+  } else {
+    result.ok = true;
+  }
+
+  log(
+    `[traverse-pipeline] ${src.key}: crawled ${manifest.pages.length} page(s) ` +
+      `(${snapshotPages.length} fetched), ${result.itemCount} item(s), ${result.routedFieldCount} field(s) routed ` +
+      `(${result.routedProposalIds.filter((id) => id !== null).length} proposal(s) created)` +
+      `${result.tokensUsed !== null ? `, ${result.tokensUsed} tokens` : ""}, ${result.latencyMs}ms` +
+      `${manifest.truncated ? " [truncated]" : ""}`
+  );
+  return result;
+}
+
+/**
  * Run one source through the full pipeline: fetch + extract (via
  * {@link runCoreFetchAndExtract}), group into `AssembledItem`s
  * (traverse-item-grouping.ts), map EVERY item to a `ProposedChanges` review
@@ -727,6 +910,13 @@ export async function runTraversePipelineForSource(
   deps: TraversePipelineDeps
 ): Promise<TraversePipelineSourceResult> {
   const log = deps.log ?? ((m: string) => console.log(m));
+
+  // campfit#133: a source that opted into a bounded crawl (maxPages/maxDepth)
+  // follows same-host links to reach camps on subpages. Absent those bounds,
+  // the single-page path below is byte-for-byte unchanged.
+  if (isCrawlSource(src)) {
+    return runTraverseCrawlPipelineForSource(src, deps);
+  }
 
   const { far, core } = await runCoreFetchAndExtract(src, deps);
   const result: TraversePipelineSourceResult = { ...core, itemCount: 0, routedProposalIds: [], routedFieldCount: 0 };
