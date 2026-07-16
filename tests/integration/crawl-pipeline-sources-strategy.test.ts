@@ -68,6 +68,23 @@ vi.mock('@/lib/ingestion/traverse-pipeline', async (importOriginal) => {
   };
 });
 
+// campfit#134: `runLookoutCheck` would otherwise attempt a real network
+// fetch — stubbed at the import boundary exactly like
+// `runTraversePipelineForSource` above. `isLookoutUnchanged` (a pure
+// function crawl-pipeline.ts also imports from this module) stays the REAL
+// implementation via `importOriginal` passthrough, so `driftGate`'s
+// `isLookoutUnchanged(checkResult)` call exercises real classification logic
+// against whatever `CheckResult` shape this mock returns.
+const runLookoutCheckMock = vi.fn();
+
+vi.mock('@/lib/ingestion/lookout-check-adapter', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ingestion/lookout-check-adapter')>();
+  return {
+    ...actual,
+    runLookoutCheck: (...args: unknown[]) => runLookoutCheckMock(...args),
+  };
+});
+
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { getCrawlRun } from '@/lib/admin/crawl-repository';
 import type { IngestionSourceConfig } from '@/lib/ingestion/sources';
@@ -149,6 +166,7 @@ beforeAll(async () => {
 afterEach(async () => {
   await pool.query(`TRUNCATE "CrawlRun", "Camp" CASCADE`);
   runTraversePipelineForSource.mockReset();
+  runLookoutCheckMock.mockReset();
 });
 
 afterAll(async () => {
@@ -252,5 +270,62 @@ describe('runCrawlPipeline({ sources }) — additive source-sweep strategy (camp
     expect(stored!.status).toBe('FAILED');
     expect(stored!.errorLog).toHaveLength(2);
     expect(stored!.errorLog.every((e) => e.campId === 'source:failing-source')).toBe(true);
+  });
+
+  it('campfit#134 driftGate: an unchanged Lookout CHECK skips extraction entirely (no runTraversePipelineForSource call, zero proposals, a no_changes campLog outcome)', async () => {
+    runLookoutCheckMock.mockResolvedValue({
+      kind: 'unchanged-hash',
+      sourceId: 'agg:fixture:drift-source',
+      sourceUrl: 'https://example.test/drift-source',
+      checkedAt: '2026-07-11T00:00:00.000Z',
+      warnings: [],
+      priorSnapshotRef: 'traverse-snapshot:stub-prior',
+      currentSnapshotRef: 'traverse-snapshot:stub-current',
+    });
+
+    const run = await runCrawlPipeline({
+      triggeredBy: 'test:sources-sweep-drift-gate',
+      trigger: 'MANUAL',
+      driftGate: true,
+      sources: [
+        { key: 'agg:fixture:drift-source', name: 'Drift Source', url: 'https://example.test/drift-source' },
+      ],
+    });
+
+    // The CHECK was consulted, and — since it's unchanged — extraction never ran.
+    expect(runLookoutCheckMock).toHaveBeenCalledTimes(1);
+    expect(runTraversePipelineForSource).not.toHaveBeenCalled();
+
+    // No CampChangeProposal/Camp row was created — nothing was ever routed.
+    const { rows: proposalRows } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM "CampChangeProposal"`
+    );
+    expect(proposalRows[0].count).toBe('0');
+
+    const stored = await getCrawlRun(run.id);
+    expect(stored).not.toBeNull();
+    // recordItemOutcome({ status: 'no_changes', ... }) lands in campLog, not
+    // errorLog (only status: 'error' pushes to errorLog — crawl-run-tracker.ts).
+    expect(stored!.campLog).toHaveLength(1);
+    expect(stored!.campLog[0].status).toBe('no_changes');
+    expect(stored!.campLog[0].campId).toBe('source:agg:fixture:drift-source');
+    expect(stored!.errorLog).toHaveLength(0);
+    expect(stored!.newProposals).toBe(0);
+    expect(stored!.status).toBe('COMPLETED');
+  });
+
+  it('campfit#134 driftGate: absent (default off) still calls runTraversePipelineForSource for every source — the curated INGESTION_SOURCES sweep is unchanged', async () => {
+    runTraversePipelineForSource.mockImplementation(stubSourceResult);
+
+    await runCrawlPipeline({
+      triggeredBy: 'test:sources-sweep-no-drift-gate',
+      trigger: 'MANUAL',
+      sources: [
+        { key: 'succeeding-source', name: 'Succeeding Source', url: 'https://example.test/succeeding' },
+      ],
+    });
+
+    expect(runLookoutCheckMock).not.toHaveBeenCalled();
+    expect(runTraversePipelineForSource).toHaveBeenCalledTimes(1);
   });
 });

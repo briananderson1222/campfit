@@ -35,8 +35,10 @@
 import { getPool } from '@/lib/db';
 import type { ExtractionProvider } from '@kontourai/traverse';
 import type { FetchSourceOptions, SnapshotStore } from '@kontourai/traverse/fetch';
+import { fetchSource as traverseFetchSource } from '@kontourai/traverse/fetch';
 import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
-import { runLookoutRecrawlForCamp } from './lookout-check-adapter';
+import { runLookoutCheck, runLookoutRecrawlForCamp, isLookoutUnchanged } from './lookout-check-adapter';
+import { providerSourceToLookoutSource } from './lookout-sources';
 import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
 import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
@@ -411,6 +413,19 @@ export interface CrawlOptions {
    * see `traverse-recrawl-adapter.ts`).
    */
   fetchOptions?: FetchSourceOptions;
+  /**
+   * Opt-in drift gate for the `sources` strategy (campfit#134): before
+   * extracting a source, run a Lookout CHECK (`runLookoutCheck`,
+   * lookout-check-adapter.ts) against the source's page. An
+   * `unchanged-304`/`unchanged-hash` result skips extraction entirely for
+   * that source (zero LLM calls, a `no_changes` tracker outcome) — a
+   * `changed`/`error` result proceeds to extraction exactly as today. Off by
+   * default so the curated `INGESTION_SOURCES` sweep (`scripts/scrape.ts`)
+   * is byte-for-byte unchanged when this is absent. Ignored by the camp
+   * strategy (which has its own, separately-flagged `LOOKOUT_RECRAWL_ENABLED`
+   * drift path — see `dispatchKnownCampRecrawl`).
+   */
+  driftGate?: boolean;
 }
 
 export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun> {
@@ -891,18 +906,27 @@ async function runSourceSweepStrategy(
       // campId becomes available for a routed item.
       const sink: TraverseProposalSink = async (record, meta) => {
         const campId = await ensureAnchorCamp(pool, record.itemName, meta.sourceUrl);
-        const proposalId = await createProposal({
-          campId,
-          crawlRunId: runId,
-          sourceUrl: meta.sourceUrl,
-          rawExtraction: record.rawExtraction,
-          proposedChanges: record.proposedChanges,
-          overallConfidence: record.overallConfidence,
-          extractionModel: record.extractionModel,
-          snapshotRef: meta.snapshotRef,
-          snapshotBodyHash: meta.snapshotBodyHash,
-        });
         const changesFound = Object.keys(record.proposedChanges).length;
+        // campfit#134 bugfix: an empty-diff item must never produce a
+        // `CampChangeProposal` row — mirrors the camp strategy's own
+        // `changesFound > 0` gate above (line ~752). Unconditional (applies
+        // whether or not `driftGate` is set — this was always wrong, flag or
+        // no flag). `ensureAnchorCamp` still runs unconditionally so the
+        // item's camp stays anchored/discoverable even with zero changes.
+        let proposalId: string | null = null;
+        if (changesFound > 0) {
+          proposalId = await createProposal({
+            campId,
+            crawlRunId: runId,
+            sourceUrl: meta.sourceUrl,
+            rawExtraction: record.rawExtraction,
+            proposedChanges: record.proposedChanges,
+            overallConfidence: record.overallConfidence,
+            extractionModel: record.extractionModel,
+            snapshotRef: meta.snapshotRef,
+            snapshotBodyHash: meta.snapshotBodyHash,
+          });
+        }
         await tracker.recordItemOutcome({
           status: changesFound > 0 ? 'ok' : 'no_changes',
           campId, campName: record.itemName, url: meta.sourceUrl,
@@ -916,6 +940,35 @@ async function runSourceSweepStrategy(
         itemsProcessed++;
         return proposalId;
       };
+
+      // campfit#134: opt-in drift gate — run a Lookout CHECK against this
+      // source's page BEFORE extracting. An unchanged CHECK skips extraction
+      // entirely (zero LLM calls); a changed/error CHECK falls through to the
+      // normal extraction path below exactly as if `driftGate` were unset
+      // (fail OPEN to extraction on a CHECK error, never closed). Reuses the
+      // SAME `snapshotStore` the sweep already resolved above — no second
+      // store instance.
+      if (options.driftGate) {
+        const checkResult = await runLookoutCheck(providerSourceToLookoutSource(src), {
+          store: snapshotStore!,
+          fetchSource: traverseFetchSource,
+          fetchOptions: options.fetchOptions,
+        });
+        if (isLookoutUnchanged(checkResult)) {
+          // Mirrors the "zero items resolved for this source" shape below
+          // (result.itemCount === 0) — no item/campId exists yet at this
+          // point in the loop, so this uses the same sourceFailureCampId
+          // placeholder convention, not a resolved anchor camp.
+          await tracker.recordItemOutcome({
+            status: 'no_changes',
+            campId: sourceFailureCampId(src.key), campName: src.name, url: src.url,
+            model: 'lookout-check', fieldsChanged: [], durationMs: Date.now() - startMs,
+            proposalId: null, confidence: 0, newProposalsDelta: 0,
+          });
+          itemsProcessed++;
+          continue;
+        }
+      }
 
       const result = await runTraversePipelineForSource(src, {
         provider: extractionProvider!,

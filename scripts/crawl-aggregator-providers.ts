@@ -34,6 +34,8 @@ import type { IngestionSourceConfig } from '@/lib/ingestion/sources';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { closeRenderBrowser, tryCreateCampfitRenderImpl } from '@/lib/ingestion/render-fetch';
 import { getPool } from '@/lib/db';
+import { slugify } from '@/lib/ingestion/slug';
+import type { Pool } from 'pg';
 
 function log(msg: string) { console.log(`[${new Date().toISOString()}] ${msg}`); }
 
@@ -71,6 +73,31 @@ if (!source) {
 function sourceKey(sourceName: string, name: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60);
   return `agg:${sourceName}:${slug}`;
+}
+
+// ─── Per-item current-value lookup (campfit#134) ──────────────────────────
+//
+// Mirrors scripts/scrape.ts's `lookupCurrentBySlug`/`CURRENT_VALUE_COLUMNS`
+// convention EXACTLY (same slug keying, same column set) — without this, the
+// sources strategy's scalar populate-vs-update diffing
+// (`itemToProposedChanges`, via `buildTraverseItemProposalRecords`) always
+// diffed against `{}` (empty), so every scalar field always looked changed
+// (campfit#134 bug 2), and this script's `driftGate: true` opt-in below would
+// otherwise pair a real "unchanged" CHECK with a still-always-populate
+// extraction diff on the sources that DO extract.
+
+const CURRENT_VALUE_COLUMNS =
+  `name, description, category, "registrationStatus", "applicationUrl", "websiteUrl", city, neighborhood, address`;
+
+/** Look up an existing Camp's current field values by `slugify(itemName)`, if any. */
+async function lookupCurrentBySlug(pool: Pool, itemName: string): Promise<Record<string, unknown> | null> {
+  const slug = slugify(itemName);
+  if (!slug) return null;
+  const { rows } = await pool.query(
+    `SELECT id, ${CURRENT_VALUE_COLUMNS} FROM "Camp" WHERE slug = $1`,
+    [slug]
+  );
+  return rows[0] ?? null;
 }
 
 async function main() {
@@ -122,8 +149,21 @@ async function main() {
       sources,
       triggeredBy: 'crawl-aggregator-providers',
       trigger: 'MANUAL',
-      // Fresh discovery: treat every extracted item as new (surface all to review).
-      currentByItemNames: async () => new Map(),
+      // campfit#134: opt-in drift gate — a Lookout CHECK runs against each
+      // provider source's page before extraction; an unchanged page is
+      // skipped entirely (zero LLM calls). Paired with the real
+      // currentByItemNames resolver below so an extraction that DOES run
+      // diffs against actual current Camp values instead of always treating
+      // every scalar as new.
+      driftGate: true,
+      currentByItemNames: async (_sourceKey, itemNames) => {
+        const out = new Map<string, Record<string, unknown>>();
+        for (const name of itemNames) {
+          const current = await lookupCurrentBySlug(pool, name);
+          if (current) out.set(name, current);
+        }
+        return out;
+      },
       onSourceResult: (result: unknown) => {
         const r = result as { source?: string; itemCount?: number; routedProposalIds?: (string | null)[]; ok?: boolean };
         const proposals = (r.routedProposalIds ?? []).filter(Boolean).length;
