@@ -62,6 +62,7 @@
     "test:l4-lookout-check": "node --import tsx scripts/test-l4-lookout-check.ts",
     "test:l4-lookout-events": "node --import tsx scripts/test-l4-lookout-events.ts",
     "test:l4-lookout-discovery": "node --import tsx scripts/test-l4-lookout-discovery.ts",
+    "test:l4-provider-drift": "node --import tsx scripts/test-l4-provider-drift.ts",
     "report:l4-lookout-parity": "node --import tsx scripts/l4-lookout-parity-report.ts",
     "test:d0-identity-hydration": "node --import tsx scripts/test-d0-identity-hydration.ts",
     "report:d0-review-noise": "node --import tsx scripts/d0-review-noise-report.ts",
