@@ -272,15 +272,16 @@ describe('runCrawlPipeline({ sources }) — additive source-sweep strategy (camp
     expect(stored!.errorLog.every((e) => e.campId === 'source:failing-source')).toBe(true);
   });
 
-  it('campfit#134 driftGate: an unchanged Lookout CHECK skips extraction entirely (no runTraversePipelineForSource call, zero proposals, a no_changes campLog outcome)', async () => {
+  it('campfit#134 driftGate: an authoritative unchanged-304 CHECK skips extraction entirely (no runTraversePipelineForSource call, zero proposals, a no_changes campLog outcome)', async () => {
+    // Only an authoritative server 304 (validator match) is render-independent
+    // and safe to skip on — see the crawl-pipeline.ts driftGate comment.
     runLookoutCheckMock.mockResolvedValue({
-      kind: 'unchanged-hash',
+      kind: 'unchanged-304',
       sourceId: 'agg:fixture:drift-source',
       sourceUrl: 'https://example.test/drift-source',
       checkedAt: '2026-07-11T00:00:00.000Z',
       warnings: [],
-      priorSnapshotRef: 'traverse-snapshot:stub-prior',
-      currentSnapshotRef: 'traverse-snapshot:stub-current',
+      snapshotRef: 'traverse-snapshot:stub-304',
     });
 
     const run = await runCrawlPipeline({
@@ -292,7 +293,7 @@ describe('runCrawlPipeline({ sources }) — additive source-sweep strategy (camp
       ],
     });
 
-    // The CHECK was consulted, and — since it's unchanged — extraction never ran.
+    // The CHECK was consulted, and — since it's an authoritative 304 — extraction never ran.
     expect(runLookoutCheckMock).toHaveBeenCalledTimes(1);
     expect(runTraversePipelineForSource).not.toHaveBeenCalled();
 
@@ -311,6 +312,44 @@ describe('runCrawlPipeline({ sources }) — additive source-sweep strategy (camp
     expect(stored!.campLog[0].campId).toBe('source:agg:fixture:drift-source');
     expect(stored!.errorLog).toHaveLength(0);
     expect(stored!.newProposals).toBe(0);
+    expect(stored!.status).toBe('COMPLETED');
+  });
+
+  it('campfit#134 driftGate: an unchanged-HASH CHECK does NOT skip — extraction still runs (JS-shell safety: a byte-identical plain fetch cannot prove rendered content is unchanged)', async () => {
+    // The safety-critical property behind the campfit#134 HIGH fix: a plain
+    // fetch `unchanged-hash` must fall through to the shell-aware extraction,
+    // NEVER skip — otherwise an invariant JS-shell provider page would be
+    // skipped permanently after the first run.
+    runLookoutCheckMock.mockResolvedValue({
+      kind: 'unchanged-hash',
+      sourceId: 'succeeding-source',
+      sourceUrl: 'https://example.test/succeeding',
+      checkedAt: '2026-07-11T00:00:00.000Z',
+      warnings: [],
+      priorSnapshotRef: 'traverse-snapshot:stub-prior',
+      currentSnapshotRef: 'traverse-snapshot:stub-current',
+    });
+    runTraversePipelineForSource.mockImplementation(stubSourceResult);
+
+    const run = await runCrawlPipeline({
+      triggeredBy: 'test:sources-sweep-drift-gate-hash',
+      trigger: 'MANUAL',
+      driftGate: true,
+      sources: [
+        { key: 'succeeding-source', name: 'Succeeding Source', url: 'https://example.test/succeeding' },
+      ],
+    });
+
+    // CHECK ran and returned unchanged-hash, but extraction STILL ran (not skipped).
+    expect(runLookoutCheckMock).toHaveBeenCalledTimes(1);
+    expect(runTraversePipelineForSource).toHaveBeenCalledTimes(1);
+
+    // The stub routes a real item with a non-empty diff, so a proposal WAS created.
+    const stored = await getCrawlRun(run.id);
+    expect(stored).not.toBeNull();
+    expect(stored!.campLog).toHaveLength(1);
+    expect(stored!.campLog[0].status).toBe('ok');
+    expect(stored!.newProposals).toBe(1);
     expect(stored!.status).toBe('COMPLETED');
   });
 

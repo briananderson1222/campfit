@@ -37,7 +37,7 @@ import type { ExtractionProvider } from '@kontourai/traverse';
 import type { FetchSourceOptions, SnapshotStore } from '@kontourai/traverse/fetch';
 import { fetchSource as traverseFetchSource } from '@kontourai/traverse/fetch';
 import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
-import { runLookoutCheck, runLookoutRecrawlForCamp, isLookoutUnchanged } from './lookout-check-adapter';
+import { runLookoutCheck, runLookoutRecrawlForCamp } from './lookout-check-adapter';
 import { providerSourceToLookoutSource } from './lookout-sources';
 import type { TraverseRecrawlResult } from './traverse-recrawl-adapter';
 import { resolveExtractionProvider } from './resolve-extraction-provider';
@@ -942,19 +942,38 @@ async function runSourceSweepStrategy(
       };
 
       // campfit#134: opt-in drift gate — run a Lookout CHECK against this
-      // source's page BEFORE extracting. An unchanged CHECK skips extraction
-      // entirely (zero LLM calls); a changed/error CHECK falls through to the
-      // normal extraction path below exactly as if `driftGate` were unset
-      // (fail OPEN to extraction on a CHECK error, never closed). Reuses the
-      // SAME `snapshotStore` the sweep already resolved above — no second
-      // store instance.
+      // source's page BEFORE extracting. An authoritative server 304 skips
+      // extraction entirely (zero LLM calls); a changed/hash-unchanged/error
+      // CHECK falls through to the normal extraction path below exactly as if
+      // `driftGate` were unset (fail OPEN, never closed). Reuses the SAME
+      // `snapshotStore` the sweep already resolved above — no second store
+      // instance.
       if (options.driftGate) {
         const checkResult = await runLookoutCheck(providerSourceToLookoutSource(src), {
           store: snapshotStore!,
           fetchSource: traverseFetchSource,
           fetchOptions: options.fetchOptions,
         });
-        if (isLookoutUnchanged(checkResult)) {
+        // Observability (campfit#134): a persistently broken CHECK layer must
+        // be visible in logs rather than silently degrading to always-extract.
+        if (checkResult.kind === 'error') {
+          console.warn(
+            `[crawl] ${src.key}: driftGate CHECK error (${checkResult.origin}:${checkResult.error.kind}: ${checkResult.error.message}) — falling through to extraction (fail-open)`
+          );
+        }
+        // Skip extraction ONLY on an authoritative server 304 (validator
+        // match). `unchanged-hash` on a plain fetch is NOT trustworthy here —
+        // the extraction path (runTraversePipelineForSource) renders JS-shell
+        // provider pages, but this CHECK does a plain fetch, so byte-identical
+        // plain-fetch bodies can't prove the RENDERED content is unchanged
+        // (an invariant JS shell would be skipped permanently after run 1 —
+        // exactly the SPA provider population this feature targets). Only an
+        // authoritative server 304 is render-independent and safe to skip on.
+        // A hash-unchanged page falls through to the shell-aware extraction,
+        // which produces zero proposals if genuinely unchanged (the sink's
+        // `changesFound > 0` gate). Render-aware hash-based CHECK is a P1
+        // follow-up.
+        if (checkResult.kind === 'unchanged-304') {
           // Mirrors the "zero items resolved for this source" shape below
           // (result.itemCount === 0) — no item/campId exists yet at this
           // point in the loop, so this uses the same sourceFailureCampId

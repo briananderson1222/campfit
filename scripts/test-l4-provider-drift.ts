@@ -30,19 +30,36 @@
  * composed setup (a raw injected `fetch` is refused by the guard as
  * UNTRUSTED_TRANSPORT, so the oracle is the only network-free path in).
  *
+ * The skip is gated on `unchanged-304` ONLY (campfit#134 HIGH fix), NOT
+ * `unchanged-hash`: this CHECK does a PLAIN fetch, but the extraction path
+ * renders JS-shell provider pages — so a byte-identical plain-fetch body
+ * (`unchanged-hash`) can't prove the RENDERED content is unchanged, and an
+ * invariant JS shell would otherwise be skipped permanently. Only an
+ * authoritative server 304 (validator match) is render-independent and safe
+ * to skip on. A `unchanged-hash` result falls through to the shell-aware
+ * extraction, which produces zero proposals if genuinely unchanged (the
+ * sink's `changesFound > 0` gate). This harness can't drive a real
+ * `unchanged-304` (the in-memory fixture serves no ETag/Last-Modified
+ * validators, so the fetch layer never issues a conditional request) — the
+ * authoritative-304-skips path is covered by the DB-backed integration test
+ * (`tests/integration/crawl-pipeline-sources-strategy.test.ts`, which mocks
+ * a `unchanged-304` CheckResult). This script proves the safety-critical
+ * half: `unchanged-hash` does NOT skip.
+ *
  * Asserts:
  *  1. Run 1 (cold, no prior snapshot): both fixture provider sources CHECK
  *     as "changed" -> extraction runs for both -> one proposal record per
  *     source's single item.
  *  2. Run 2 (identical content, no mutation): both sources CHECK as
- *     "unchanged-hash" -> extraction is skipped entirely for both — ZERO
- *     `extract()` calls, ZERO new proposals.
+ *     "unchanged-hash" -> extraction is NOT skipped (the shell-safety
+ *     property) -> extract() DOES run for both -> but ZERO new proposals,
+ *     because the re-extracted content is unchanged vs. current DB values.
  *  3. Run 3 (only provider A's page changes — one new item, one changed
- *     scalar on the existing item): provider A CHECKs "changed" (extraction
- *     runs, exactly one new `extract()` call) and yields exactly the
- *     expected delta (one populate record for the new item, one update
- *     record for the existing item's single changed field); provider B
- *     still CHECKs unchanged (zero `extract()` calls, zero new proposals).
+ *     scalar on the existing item): provider A CHECKs "changed" and yields
+ *     exactly the expected delta (one populate record for the new item, one
+ *     update record for the existing item's single changed field); provider
+ *     B CHECKs "unchanged-hash" — its extraction re-runs (not skipped) but
+ *     yields zero proposals (unchanged vs. current DB values).
  */
 
 import assert from "node:assert/strict";
@@ -54,7 +71,7 @@ import {
 } from "@kontourai/traverse/fetch";
 import type { ExtractionProposal, ExtractionProvider } from "@kontourai/traverse";
 import { providerSourceToLookoutSource } from "../lib/ingestion/lookout-sources";
-import { runLookoutCheck, isLookoutUnchanged } from "../lib/ingestion/lookout-check-adapter";
+import { runLookoutCheck } from "../lib/ingestion/lookout-check-adapter";
 import {
   runTraversePipelineForSource,
   type TraverseProposalSink,
@@ -153,13 +170,6 @@ interface FakeProposal {
 const fakeCamps = new Map<string, Record<string, unknown>>(); // keyed by slug
 const proposals: FakeProposal[] = [];
 
-/** Mirrors ensureAnchorCamp: create-if-absent, PLACEHOLDER-shaped row. */
-function fakeEnsureAnchorCamp(itemName: string): void {
-  const slug = slugify(itemName) || `item-${itemName}`;
-  if (fakeCamps.has(slug)) return;
-  fakeCamps.set(slug, { name: itemName, registrationStatus: "UNKNOWN", description: "", category: "OTHER" });
-}
-
 /** Mirrors lookupCurrentBySlug (scripts/crawl-aggregator-providers.ts / scripts/scrape.ts). */
 async function fakeCurrentByItemNames(_sourceKey: string, itemNames: string[]): Promise<Map<string, Record<string, unknown>>> {
   const out = new Map<string, Record<string, unknown>>();
@@ -171,11 +181,24 @@ async function fakeCurrentByItemNames(_sourceKey: string, itemNames: string[]): 
   return out;
 }
 
-/** Mirrors crawl-pipeline.ts's fixed sink: anchor unconditionally, propose only when changesFound > 0 (campfit#134 bug 3). */
+/**
+ * Mirrors crawl-pipeline.ts's fixed sink (campfit#134 bug 3): anchor
+ * unconditionally, create a proposal ONLY when changesFound > 0. Also applies
+ * the proposed scalar values onto the fake camp, modelling the populated /
+ * post-approval steady state — so a later IDENTICAL extraction diffs to zero
+ * against current DB values (the review-noise property the
+ * `unchanged-hash`-falls-through-to-extraction path relies on: extraction
+ * re-runs but produces no proposals when nothing actually changed).
+ */
 const fakeSink: TraverseProposalSink = async (record, meta) => {
-  fakeEnsureAnchorCamp(record.itemName);
+  const slug = slugify(record.itemName) || `item-${record.itemName}`;
+  const camp = fakeCamps.get(slug) ?? { name: record.itemName };
+  fakeCamps.set(slug, camp); // ensureAnchorCamp: unconditional
   const changesFound = Object.keys(record.proposedChanges).length;
   if (changesFound === 0) return null;
+  for (const [field, diff] of Object.entries(record.proposedChanges)) {
+    camp[field] = (diff as { new?: unknown }).new;
+  }
   proposals.push({ sourceKey: meta.sourceKey, itemName: record.itemName, fieldsChanged: Object.keys(record.proposedChanges) });
   return `fake-proposal-${proposals.length}`;
 };
@@ -197,7 +220,11 @@ async function runOneSourceThroughDriftGate(
     fetchSource: traverseFetchSource,
     fetchOptions,
   });
-  if (isLookoutUnchanged(checkResult)) {
+  // Mirrors crawl-pipeline.ts's driftGate branch EXACTLY (campfit#134 HIGH
+  // fix): skip extraction ONLY on an authoritative server 304, never on a
+  // plain-fetch `unchanged-hash` (which can't prove rendered content is
+  // unchanged).
+  if (checkResult.kind === "unchanged-304") {
     return { skipped: true, checkKind: checkResult.kind };
   }
   const result = await runTraversePipelineForSource(src, {
@@ -242,9 +269,12 @@ const store = createInMemorySnapshotStore();
   assert.ok(proposals.some((p) => p.sourceKey === beaconSrc.key && p.itemName === "Beacon Art"));
 }
 
-// ─── Run 2: identical content, no mutation — both sources must be skipped,
-// zero extract() calls, zero new proposals. This is the drift gate's core
-// acceptance bar (campfit#134 bug 1). ───────────────────────────────────────
+// ─── Run 2: identical content, no mutation — the SAFETY-CRITICAL regression
+// guard for the campfit#134 HIGH (JS-shell permanent-skip). A byte-identical
+// plain-fetch body is `unchanged-hash`, NOT an authoritative 304, so it must
+// NOT skip: extraction re-runs (proving a JS-shell page would still be
+// re-rendered/re-extracted every cycle), and — because the content is
+// unchanged vs. current DB values — yields ZERO new proposals. ───────────────
 
 {
   const proposalsBefore = proposals.length;
@@ -252,21 +282,21 @@ const store = createInMemorySnapshotStore();
   const beaconCallsBefore = beacon.state.calls;
 
   const rAlder = await runOneSourceThroughDriftGate(alderSrc, store, alder.provider, pageHtml(alderItemsRef.current));
-  assert.equal(rAlder.skipped, true, "run 2: identical content must be skipped");
-  assert.equal(rAlder.checkKind, "unchanged-hash");
+  assert.equal(rAlder.checkKind, "unchanged-hash", "run 2: identical plain-fetch body is unchanged-hash, not 304");
+  assert.equal(rAlder.skipped, false, "run 2: unchanged-hash must NOT skip — a JS shell would otherwise be skipped permanently (campfit#134 HIGH)");
 
   const rBeacon = await runOneSourceThroughDriftGate(beaconSrc, store, beacon.provider, pageHtml(beaconItemsRef.current));
-  assert.equal(rBeacon.skipped, true, "run 2: identical content must be skipped");
   assert.equal(rBeacon.checkKind, "unchanged-hash");
+  assert.equal(rBeacon.skipped, false, "run 2: unchanged-hash must NOT skip");
 
-  assert.equal(alder.state.calls, alderCallsBefore, "run 2: zero alder extract() calls for an unchanged source");
-  assert.equal(beacon.state.calls, beaconCallsBefore, "run 2: zero beacon extract() calls for an unchanged source");
-  assert.equal(proposals.length, proposalsBefore, "run 2: zero new proposals for an unchanged run");
+  assert.equal(alder.state.calls, alderCallsBefore + 1, "run 2: alder extraction re-ran (hash-unchanged falls through to the shell-aware extraction)");
+  assert.equal(beacon.state.calls, beaconCallsBefore + 1, "run 2: beacon extraction re-ran");
+  assert.equal(proposals.length, proposalsBefore, "run 2: re-extraction of unchanged content yields zero new proposals (currentByItemNames diff + changesFound gate)");
 }
 
 // ─── Run 3: only provider A's page changes (one new item + one changed
-// scalar field on the existing item). Provider B is untouched and must stay
-// gated. ─────────────────────────────────────────────────────────────────
+// scalar field on the existing item). Provider B is untouched: its extraction
+// re-runs (unchanged-hash, not skipped) but yields zero proposals. ──────────
 
 {
   alderItemsRef.current = [
@@ -284,13 +314,13 @@ const store = createInMemorySnapshotStore();
   assert.equal(alder.state.calls, alderCallsBefore + 1, "run 3: exactly one new alder extract() call");
 
   const rBeacon = await runOneSourceThroughDriftGate(beaconSrc, store, beacon.provider, pageHtml(beaconItemsRef.current));
-  assert.equal(rBeacon.skipped, true, "run 3: beacon's untouched page must still be skipped");
   assert.equal(rBeacon.checkKind, "unchanged-hash");
-  assert.equal(beacon.state.calls, beaconCallsBefore, "run 3: zero beacon extract() calls — provider B was never touched");
+  assert.equal(rBeacon.skipped, false, "run 3: beacon's untouched page is unchanged-hash → NOT skipped (re-extracts)");
+  assert.equal(beacon.state.calls, beaconCallsBefore + 1, "run 3: beacon extraction re-ran (unchanged-hash falls through)");
 
   const newProposals = proposals.slice(proposalsBefore);
-  assert.equal(newProposals.length, 2, "run 3: exactly one update record + one populate record");
-  assert.ok(newProposals.every((p) => p.sourceKey === alderSrc.key), "run 3: no proposal belongs to provider B");
+  assert.equal(newProposals.length, 2, "run 3: exactly one update record + one populate record — the untouched provider B contributes nothing");
+  assert.ok(newProposals.every((p) => p.sourceKey === alderSrc.key), "run 3: no proposal belongs to provider B (re-extracted but unchanged)");
 
   const existingItemProposal = newProposals.find((p) => p.itemName === "Alder Hiking");
   assert.ok(existingItemProposal, "run 3: the existing item's changed scalar produced a proposal");
@@ -301,4 +331,4 @@ const store = createInMemorySnapshotStore();
   assert.deepEqual([...newItemProposal!.fieldsChanged].sort(), ["name", "registrationStatus"], "run 3: a never-before-seen item populates every scalar it has");
 }
 
-console.log("PASS L4 provider drift gate: cold CHECK extracts; unchanged CHECK skips extraction (zero LLM calls); a changed source re-extracts and yields exactly its delta while an untouched sibling source stays gated.");
+console.log("PASS L4 provider drift gate: cold CHECK extracts; a plain-fetch unchanged-hash does NOT skip (JS-shell safety — extraction re-runs, zero proposals); a changed source yields exactly its delta while an unchanged sibling re-extracts to zero proposals. (Authoritative-304 skip covered by the DB integration test.)");
