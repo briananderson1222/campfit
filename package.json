@@ -1,6 +1,7 @@
 {
   "name": "camp-fit",
   "version": "0.1.0",
+  "description": "Denver kids-camp discovery platform for parents",
   "private": true,
   "engines": {
     "node": ">=22"

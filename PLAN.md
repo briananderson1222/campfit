@@ -1,5 +1,12 @@
 # CampFit — Denver Kids Camp Discovery Platform
 
+> **HISTORICAL FOUNDING DOCUMENT.** This is the original design/planning
+> document for CampFit. It captures the product vision and early data-model
+> thinking, but several implementation details below (ORM choice, Next.js
+> version, some phase status) are out of date. For the current architecture
+> and setup, see **[`README.md`](./README.md)**, **[`CONTEXT-MAP.md`](./CONTEXT-MAP.md)**,
+> and **[`docs/`](./docs/)**.
+
 ## Vision
 A PWA for Denver parents to discover, compare, save, and get notified about kids' camps. Seeded from curated CSV data, architected for automated web scraping and multi-city expansion.
 
@@ -427,7 +434,7 @@ camp/
 7. "New camps matching your preferences" matching engine — deferred to Phase 5
    - ⚠️ **TODO**: Add env vars in Vercel: STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET, RESEND_API_KEY, RESEND_FROM_EMAIL, CRON_SECRET
    - ⚠️ **TODO**: Create Stripe product + price, set STRIPE_PRICE_ID
-   - ⚠️ **TODO**: Register Stripe webhook endpoint: https://camp-scout-pied.vercel.app/api/stripe/webhook
+   - ⚠️ **TODO**: Register Stripe webhook endpoint: https://camp.fit/api/stripe/webhook
 
 ### Phase 4 — Dynamic Data Pipeline ✅ DONE (framework)
 1. ~~DataIngestionAdapter interface~~ DONE (Phase 1)
@@ -467,10 +474,10 @@ These require special attention in the CSV adapter:
 
 | Layer | Choice | Reason |
 |-------|--------|--------|
-| Framework | Next.js 14 (App Router) | SSR/SEO, PWA support, Vercel-native |
+| Framework | Next.js 16 (App Router) | SSR/SEO, PWA support, Vercel-native |
 | Styling | Tailwind CSS + shadcn/ui | Fast, accessible, consistent |
 | Database | Supabase (PostgreSQL) | Hosted Postgres, built-in auth, free tier |
-| ORM | Prisma | Type-safe, migrations, great DX |
+| DB access | Raw `pg` + `node-pg-migrate` | Type-safe SQL, plain migrations, no ORM lock-in |
 | Auth | Supabase Auth | Google OAuth + email, row-level security |
 | Payments | Stripe | Industry standard, good Next.js integration |
 | Email | Resend | Modern API, generous free tier |
