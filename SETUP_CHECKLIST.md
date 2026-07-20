@@ -2,7 +2,7 @@
 
 ## ✅ Done Automatically
 - Supabase DB schema + 158 camps seeded
-- Vercel deployment (https://camp-scout-pied.vercel.app)
+- Vercel deployment (https://camp.fit)
 - Auth (email signup/login working)
 - Saves, dashboard, calendar all live
 
@@ -22,7 +22,7 @@
 2. Create a Product: "CampFit Premium" → Price: $8/month recurring
 3. Copy the Price ID (starts with `price_...`)
 4. Go to Stripe → Developers → Webhooks → Add endpoint:
-   - URL: `https://camp-scout-pied.vercel.app/api/stripe/webhook`
+   - URL: `https://camp.fit/api/stripe/webhook`
    - Events: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`
    - Copy the Signing Secret (starts with `whsec_...`)
 5. Add to Vercel → Settings → Environment Variables (Production):
@@ -62,6 +62,7 @@
 3. Add optional service secrets if those features are enabled:
    - `ANTHROPIC_API_KEY`
    - `GEMINI_API_KEY`
+   - `ZAI_API_KEY` (required by `scrape.yml` — resolves the traverse extraction provider via `@kontourai/datum`'s `extraction-default` role)
    - `RESEND_API_KEY`
    - `STRIPE_SECRET_KEY`
    - `STRIPE_WEBHOOK_SECRET`
@@ -74,16 +75,16 @@
    - `VERCEL_ORG_ID`
 5. Add deploy secret:
    - `VERCEL_TOKEN`
-6. `CI` runs Prisma validation and `tsc` on every push/PR, then runs `next build` and `npm run verify:admin` when the required secrets are present
+6. `CI` (`ci.yml`) runs content-boundary and decision-registry checks, `tsc --noEmit`, and traverse replay/crawl proofs on every push/PR; when the required secrets are present it also runs a production `next build`, the Survey review proof, `npm run verify:admin`, and a Postgres-backed Vitest job. There is no Prisma step — the DB layer is raw `pg` + `node-pg-migrate`.
 7. `Deploy` runs on pushes to `main` and deploys the production build to Vercel
-8. The scraper runs every Monday at 6am UTC automatically
+8. The scraper runs every Monday at 6am UTC automatically (`scrape.yml`), running the full traverse ingestion pipeline against every registered source
 9. To test locally: `npm run scrape:dry` (no DB writes)
-10. To add a new camp site scraper, create a new file in `lib/ingestion/scrapers/` following the Avid4 pattern, then register it in `scripts/scrape.ts`
+10. To add a new camp source, register it in `lib/ingestion/sources.ts` (`INGESTION_SOURCES`) — there are no per-site scraper files anymore; every source is fetched and extracted the same way via the traverse pipeline (see `docs/traverse-ingestion.md`)
 
 ---
 
 ## 📋 Future Work (in PLAN.md)
-- Phase 4: Web scraper to auto-update camp data
+- Phase 4 (web ingestion to auto-update camp data) is **done** — the traverse pipeline runs weekly via `scrape.yml`, see `docs/traverse-ingestion.md`
 - Phase 5: Map view, camp comparison, SEO, calendar export
 - Web Push + SMS notifications (deferred)
 - "New camps matching your preferences" digest
