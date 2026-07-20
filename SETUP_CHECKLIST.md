@@ -75,7 +75,7 @@
    - `VERCEL_ORG_ID`
 5. Add deploy secret:
    - `VERCEL_TOKEN`
-6. `CI` (`ci.yml`) runs content-boundary and decision-registry checks, `tsc --noEmit`, and traverse replay/crawl proofs on every push/PR; when the required secrets are present it also runs a production `next build`, the Survey review proof, `npm run verify:admin`, and a Postgres-backed Vitest job. There is no Prisma step — the DB layer is raw `pg` + `node-pg-migrate`.
+6. `CI` (`ci.yml`) runs content-boundary and decision-registry checks, `tsc --noEmit`, traverse replay/crawl proofs, the core Survey review proof, and a Postgres-backed Vitest job (self-contained `postgres:16` service container) on every push/PR; when repo secrets are present it additionally runs a production `next build`, `npm run verify:admin`, and the Survey proof's browser-integration step. There is no Prisma step — the DB layer is raw `pg` + `node-pg-migrate`.
 7. `Deploy` runs on pushes to `main` and deploys the production build to Vercel
 8. The scraper runs every Monday at 6am UTC automatically (`scrape.yml`), running the full traverse ingestion pipeline against every registered source
 9. To test locally: `npm run scrape:dry` (no DB writes)

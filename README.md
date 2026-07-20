@@ -85,10 +85,12 @@ a guide to the current architecture.
 ## CI & deploy
 
 - **CI** (`.github/workflows/ci.yml`): on every push/PR, runs content-boundary
-  and decision-registry checks, a TypeScript compile check, and traverse
-  replay/crawl proofs; when the required secrets are present it also runs a
-  production `next build`, the Survey review proof, and admin-platform
-  verification (`verify:admin`), plus a Postgres-backed Vitest job.
+  and decision-registry checks, a TypeScript compile check, traverse
+  replay/crawl proofs, the core Survey review proof, and a Postgres-backed
+  Vitest job (its own `postgres:16` service container — no secrets needed);
+  when repo secrets are present it additionally runs a production
+  `next build`, admin-platform verification (`verify:admin`), and the
+  browser-integration step of the Survey proof.
 - **Deploy** (`.github/workflows/deploy.yml`): on push to `main`, builds and
   deploys the production build to Vercel.
 - **Scrape** (`.github/workflows/scrape.yml`): runs the traverse ingestion
