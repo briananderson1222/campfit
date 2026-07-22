@@ -1,6 +1,6 @@
 /**
  * resolve-extraction-provider.ts — datum-backed resolution of the traverse
- * Anthropic-compatible extraction provider, for LIVE (non-CI) paths only.
+ * Relay-backed extraction provider, for LIVE (non-CI) paths only.
  *
  * `@kontourai/datum@^0.3.0`'s `resolve(ref)` reads `.datum/config.json`
  * (repo, committed — see that file for the `zai` / `anthropic` providers and
@@ -61,8 +61,13 @@
  * `ExtractionProvider` (tests/fixtures/traverse/stub-provider.ts), so CI needs
  * no datum config and no key.
  */
+import { appendFileSync, mkdirSync } from "node:fs";
+import path from "node:path";
 import { resolve } from "@kontourai/datum";
-import { createAnthropicExtractionProvider } from "@kontourai/traverse/anthropic";
+import { createDispatchRuntime, type DispatchReceipt } from "@kontourai/dispatch";
+import type { ModelRuntime } from "@kontourai/relay";
+import { createModelRuntimeProfile, parseModelRuntimeProfile } from "@kontourai/relay/runtime-profile";
+import { createRelayExtractionProvider } from "@kontourai/traverse/relay";
 import type { ExtractionProvider } from "@kontourai/traverse";
 
 /**
@@ -88,6 +93,12 @@ export interface ResolvedExtractionProvider {
   maxTokens: number;
 }
 
+function persistDispatchReceipt(receiptPath: string, receipt: DispatchReceipt): void {
+  const resolved = path.resolve(receiptPath);
+  mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
+  appendFileSync(resolved, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
 /**
  * Resolve the extraction provider for a live traverse run via datum. Throws
  * `DatumError` (see `@kontourai/datum`'s `DatumErrorCode`) when no role/config
@@ -105,12 +116,71 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
     ? Number(process.env.TRAVERSE_MAX_TOKENS)
     : DEFAULT_EXTRACTION_MAX_TOKENS;
 
-  const provider = createAnthropicExtractionProvider({
-    apiKey: resolved.apiKey,
-    model,
-    maxTokens,
-    ...(baseUrl ? { baseUrl } : {}),
+  const configuredProfiles = (process.env.TRAVERSE_RUNTIME_PROFILES || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const profileValues = configuredProfiles.length > 0
+    ? configuredProfiles
+    : [`anthropic:${model}`];
+  const allowPromptedStructuredOutput = process.env.TRAVERSE_ALLOW_PROMPTED_STRUCTURED_OUTPUT === "true";
+  const candidates = profileValues.map((value, index) => {
+    const spec = parseModelRuntimeProfile(value);
+    const runtime = createModelRuntimeProfile({
+      ...spec,
+      cwd: process.cwd(),
+      allowPromptedStructuredOutput,
+      ...(spec.profile === "anthropic" ? { apiKey: resolved.apiKey, ...(baseUrl ? { baseUrl } : {}) } : {}),
+    });
+    return { id: `candidate-${index}`, runtime };
   });
+  const receiptPath = process.env.TRAVERSE_DISPATCH_RECEIPT_PATH;
+  const maxAttemptsValue = process.env.TRAVERSE_DISPATCH_MAX_ATTEMPTS;
+  const maxAttempts = maxAttemptsValue ? Number(maxAttemptsValue) : undefined;
+  if (maxAttempts !== undefined && (!Number.isInteger(maxAttempts) || maxAttempts < 1)) {
+    throw new Error("TRAVERSE_DISPATCH_MAX_ATTEMPTS must be a positive integer");
+  }
+  const runtime = candidates.length === 1 && !receiptPath && maxAttempts === undefined
+    ? candidates[0]!.runtime
+    : createCampfitDispatchRuntime(candidates, {
+        allowPromptedStructuredOutput,
+        ...(receiptPath ? { receiptPath } : {}),
+        ...(maxAttempts === undefined ? {} : { maxAttempts }),
+      });
+  const provider = createRelayExtractionProvider({ runtime, maxTokens });
 
   return { provider, ref, datumProvider: resolved.provider, model, baseUrl, maxTokens };
+}
+
+function createCampfitDispatchRuntime(
+  candidates: readonly { id: string; runtime: ModelRuntime }[],
+  options: { allowPromptedStructuredOutput: boolean; receiptPath?: string; maxAttempts?: number },
+): ModelRuntime {
+  const runtimes = new Map(candidates.map(({ id, runtime }) => [id, runtime]));
+  return createDispatchRuntime({
+    id: "campfit-extraction-dispatch",
+    capabilities: { structuredTools: true, streaming: false, abort: true, usage: true },
+    runtimes,
+    plan: {
+      schemaVersion: 1,
+      role: "campfit-extraction",
+      candidates: candidates.map(({ id, runtime }) => ({
+        id,
+        runtimeId: id,
+        evidence: {
+          level: "declared" as const,
+          capabilities: ["structured-tools", "abort", "usage"],
+          structuredToolsFidelity: runtime.capabilities().structuredToolsFidelity,
+        },
+      })),
+      budget: { maxAttempts: options.maxAttempts ?? candidates.length },
+      policy: {
+        retryRuntimeFailures: true,
+        minimumStructuredToolsFidelity: options.allowPromptedStructuredOutput ? "prompted" : "native",
+      },
+    },
+    ...(options.receiptPath
+      ? { onReceipt: (receipt: DispatchReceipt) => persistDispatchReceipt(options.receiptPath!, receipt) }
+      : {}),
+  });
 }

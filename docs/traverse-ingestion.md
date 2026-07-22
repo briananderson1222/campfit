@@ -7,11 +7,11 @@ the `docs/traverse-adjudication-2026-07.md` PILOT-era state; see
 [`docs/cutover-report-2026-07.md`](./cutover-report-2026-07.md) for the
 before/after cutover measurement.
 
-Package: [`@kontourai/traverse@0.4.0`](https://www.npmjs.com/package/@kontourai/traverse),
-Anthropic adapter via `@kontourai/traverse/anthropic`, fetch/snapshot side via
-`@kontourai/traverse/fetch`. Provider/model/key resolution goes through
-[`@kontourai/datum@0.3.0`](https://www.npmjs.com/package/@kontourai/datum)
-(`.datum/config.json`'s `extraction-default` role).
+Package: [`@kontourai/traverse@0.20.0`](https://www.npmjs.com/package/@kontourai/traverse),
+with model invocation through `@kontourai/traverse/relay` and fetch/snapshot
+support through `@kontourai/traverse/fetch`. The default hosted binding still
+resolves through [`@kontourai/datum@0.7.0`](https://www.npmjs.com/package/@kontourai/datum)
+and `.datum/config.json`'s `extraction-default` role.
 
 ## Pipeline
 
@@ -66,9 +66,13 @@ Survey review workflow (human review; unchanged)
 - **`lib/ingestion/traverse-snapshot-store.ts`** — the shared filesystem
   snapshot store (`.kontourai/campfit/snapshots/`, gitignored) + honest fetch
   User-Agent. Every live fetch is captured for byte-identical replay.
-- **`lib/ingestion/resolve-extraction-provider.ts`** — datum-backed provider
-  resolution for LIVE (non-CI) paths. `TRAVERSE_MAX_TOKENS` overrides the
-  Anthropic adapter's output token budget (default 2048 — see the module doc
+- **`lib/ingestion/resolve-extraction-provider.ts`** — application-owned Relay
+  composition. Datum remains the default hosted model and credential binding;
+  `TRAVERSE_RUNTIME_PROFILES` can select the same Traverse definition through
+  Claude Code, Codex, OpenCode, or hosted execution. Multiple candidates opt
+  into Dispatch fallback, budgets, and optional secret-free receipts.
+  `TRAVERSE_MAX_TOKENS` overrides the extraction output token budget (default
+  2048 — see the module doc
   for why raising it made glm-5.2-via-Z.AI extraction *worse*, not better).
 
 ## Running it
@@ -79,6 +83,24 @@ npm run scrape                   # full sweep, writes CampChangeProposals
 npm run scrape:dry                # extract only, no DB write
 npx tsx scripts/scrape.ts --source avid4   # single source
 ```
+
+The extraction definition is independent of where it runs:
+
+```sh
+# Use the locally authenticated Codex harness.
+TRAVERSE_RUNTIME_PROFILES=codex:gpt-5 npm run scrape:dry
+
+# Ordered fallback; OpenCode prompted JSON requires explicit consent.
+TRAVERSE_RUNTIME_PROFILES=claude-code:sonnet,opencode:zai/glm-5 \
+TRAVERSE_ALLOW_PROMPTED_STRUCTURED_OUTPUT=true \
+TRAVERSE_DISPATCH_RECEIPT_PATH=.kontourai/campfit/dispatch-receipts.ndjson \
+npm run scrape:dry
+```
+
+The receipt file contains routing outcomes and opaque runtime identifiers, not
+source content, prompts, endpoints, or credentials. Without multiple candidates,
+an attempt ceiling, or a receipt path, Campfit invokes the selected Relay runtime
+directly.
 
 ## Rendered (SPA / JS-rendered) provider pages
 
