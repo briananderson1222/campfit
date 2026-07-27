@@ -284,12 +284,16 @@ function sourceGuard(): void {
     "lib/ingestion/lookout-discovery.ts",
     "lib/ingestion/lookout-event-mapper.ts",
     "lib/ingestion/lookout-observation-store.ts",
+    // The Survey authoring Lookout 0.3.0 stopped doing, ported in-repo for the
+    // cutover; its golden test pins the output byte-identical to 0.2.0.
+    "lib/ingestion/lookout-survey-authoring.ts",
     "lib/ingestion/lookout-sources.ts",
     "scripts/test-d1-lookout-adapter.ts",
     "scripts/test-l4-lookout-check.ts",
     "scripts/test-l4-lookout-discovery.ts",
     "scripts/test-l4-lookout-events.ts",
     "scripts/l4-lookout-parity-report.ts",
+    "scripts/test-lookout-survey-authoring.ts",
   ];
 
   if (fs.existsSync(path.join(ROOT, kernelPath))) violations.push(`${kernelPath} must be deleted`);

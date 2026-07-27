@@ -3,7 +3,7 @@ import type { FetchSource, CreateCheckRunnerOptions } from "@kontourai/lookout";
 import type { ExtractionProposal } from "@kontourai/traverse";
 import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
 import { fetchSource as forageFetchSource } from "@kontourai/forage/fetch";
-import { createGuardedFetch } from "@kontourai/forage/egress";
+import { createGuardedFetch, type EgressResponseOracle } from "@kontourai/forage/egress";
 import type { Camp } from "@/lib/types";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import { runTraverseRecrawlForCamp, type TraverseRecrawlOptions, type TraverseRecrawlResult } from "./traverse-recrawl-adapter";
@@ -58,8 +58,19 @@ export async function runLookoutCheck(source: LookoutSource, options: RunLookout
     revalidate: source.renderPolicy !== "always",
     ...(source.renderPolicy === "always" ? { render: true } : {}),
   }, fetchOptions);
-  const fetchOptions = options.egressResolver
-    ? { ...(options.fetchOptions ?? {}), fetch: createGuardedFetch({ resolver: options.egressResolver }) }
+  // Deterministic seams may arrive top-level (egressResolver) or riding on the
+  // fetch options (egressResolver / egressResponseOracle), which is how the
+  // fixture reports inject canned DNS and responses. Both routes end at
+  // forage's own guarded fetch, so the fixtures exercise the same egress
+  // classification production uses instead of a parallel one.
+  const carried = (options.fetchOptions ?? {}) as {
+    egressResolver?: EgressResolver;
+    egressResponseOracle?: EgressResponseOracle;
+  } & NonNullable<typeof options.fetchOptions>;
+  const { egressResolver: carriedResolver, egressResponseOracle, ...plainFetchOptions } = carried;
+  const resolver = options.egressResolver ?? carriedResolver;
+  const fetchOptions = resolver || egressResponseOracle
+    ? { ...plainFetchOptions, fetch: createGuardedFetch({ ...(resolver ? { resolver } : {}), ...(egressResponseOracle ? { responseOracle: egressResponseOracle } : {}) }) }
     : options.fetchOptions;
   return createCheckRunner({ ...options, fetchOptions, fetchSource }).check(source);
 }

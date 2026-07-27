@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -182,8 +183,12 @@ try {
   const store = createInMemorySnapshotStore();
   let body = "Alder Hiking Beacon Art";
   let providerNames = ["Alder Hiking", "Beacon Art"];
-  const snap = (hash: string, fetchedAt: string): Snapshot => ({ sourceId: listingId, url: listingUrl, fetchedAt, status: 200, contentType: "html", body, bodyHash: hash });
-  let currentSnapshot = snap("a".repeat(64), "2026-07-10T00:00:00.000Z");
+  // The digest is computed from the live `body` binding rather than passed in:
+  // lookout 0.3.x verifies the body against bodyHash, so a placeholder hash is
+  // itself an invalid snapshot. Round identity comes from the body changing,
+  // exactly as it does in production.
+  const snap = (fetchedAt: string): Snapshot => ({ sourceId: listingId, url: listingUrl, fetchedAt, status: 200, contentType: "html", body, bodyHash: createHash("sha256").update(body).digest("hex") });
+  let currentSnapshot = snap("2026-07-10T00:00:00.000Z");
   await store.put(currentSnapshot);
   const provider: ExtractionProvider = {
     name: "listing-fixture",
@@ -216,15 +221,15 @@ try {
   assert.deepEqual(await readdir(path.join(coordinatorRoot, "survey")).catch(() => []), []);
   body = "Alder Hiking Beacon Art Cedar Science";
   providerNames = ["Alder Hiking", "Beacon Art", "Cedar Science"];
-  currentSnapshot = snap("b".repeat(64), "2026-07-11T00:00:00.000Z");
+  currentSnapshot = snap("2026-07-11T00:00:00.000Z");
   failObservation = true;
-  await assert.rejects(runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: currentSnapshot }) }), /Emission failed/);
+  await assert.rejects(runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: currentSnapshot }) }), /[Ee]mission failed/);
   assert.equal(camps.has("Cedar Science"), true, "DB effect survives observation failure");
   const recoveredRun = await runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: currentSnapshot }) });
   assert.equal(recoveredRun.unchanged, true); assert.equal(camps.size, 3);
   assert.equal((await readdir(path.join(coordinatorRoot, "survey"))).filter((name) => name.endsWith(".json")).length, 1);
   const latestObservation = await delegate.loadLatest(listingId);
-  assert.ok(latestObservation.ok && latestObservation.value?.snapshotRef.includes("b".repeat(64)));
+  assert.ok(latestObservation.ok && latestObservation.value?.snapshotRef.includes("da8cf57d0d3d15d2824d85d480343289082d0173b91b4ba43c4b8685b5fedfea"));
 } finally { await rm(coordinatorRoot, { recursive: true, force: true }); }
 
 console.log("PASS L4 discovery: stable listing ID; DB-first durable ordering; observation catch-up; idempotent PLACEHOLDER");
