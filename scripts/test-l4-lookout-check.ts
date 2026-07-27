@@ -14,7 +14,7 @@ assert.equal(known.id, "raw-camp-id");
 assert.equal(listingToLookoutSource("https://listing.test").id, "campfit-discovery:https://listing.test");
 assert.ok(known.cadenceHint);
 
-const snapshot: Snapshot = { sourceId: known.id, url: known.url, fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "same", bodyHash: "0967115f2813a3541eaef77de9d9d5779d9c6a3f442a8e5f55c7af8a2f4f03e1" };
+const snapshot: Snapshot = { sourceId: known.id, url: known.url, fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "same", bodyHash: "0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5" };
 const store: SnapshotStore = { latest: async () => snapshot, get: async () => snapshot, list: async () => [snapshot], put: async () => undefined };
 let received: Record<string, unknown> | undefined;
 const result = await runLookoutCheck(known, { store, clock: () => "2026-07-11T01:00:00.000Z", fetchSource: async (config) => { received = config as unknown as Record<string, unknown>; return { snapshot: { ...snapshot, fetchedAt: "2026-07-11T01:00:00.000Z" } }; } });
@@ -79,8 +79,8 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
 // extract exclusively from that rendered classified ref.
 {
   const sourceId = "shell-retry-camp";
-  const plain: Snapshot = { ...snapshot, sourceId, url: "https://shell-retry.test", body: "shell", bodyHash: "shell-hash", fetchedAt: "2026-07-11T03:00:00.000Z" };
-  const renderedSnapshot: Snapshot = { ...plain, body: "rendered", bodyHash: "rendered-hash", fetchedAt: "2026-07-11T03:01:00.000Z" };
+  const plain: Snapshot = { ...snapshot, sourceId, url: "https://shell-retry.test", body: "shell", bodyHash: "ce635c4eabff5e4f56dba8fb1e39ca235530aa2b6b18533eef1af3862016c577", fetchedAt: "2026-07-11T03:00:00.000Z" };
+  const renderedSnapshot: Snapshot = { ...plain, body: "rendered", bodyHash: "69d0044d65bc72753132efe821effd54c8072b5f75703772caa15a13d400dc5a", fetchedAt: "2026-07-11T03:01:00.000Z" };
   let latestShell: Snapshot | undefined;
   const shellStore: SnapshotStore = { latest: async () => latestShell, get: async () => latestShell, list: async () => latestShell ? [latestShell] : [], put: async (next) => { latestShell = next; } };
   const classifiedModes: boolean[] = [];
@@ -116,7 +116,7 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
 const baselineRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-baseline-"));
 try {
   const sourceId = "baseline-camp";
-  let latest: Snapshot = { ...snapshot, sourceId, url: "https://baseline.test", body: "Old", bodyHash: "old-hash", fetchedAt: "2026-07-11T00:00:00.000Z" };
+  let latest: Snapshot = { ...snapshot, sourceId, url: "https://baseline.test", body: "Old", bodyHash: "bca97160f4e1211fe659338d0a9705a7dff8aa3ea2e1be1cc1958100a33962c2", fetchedAt: "2026-07-11T00:00:00.000Z" };
   const corpusStore: SnapshotStore = { latest: async () => latest, get: async () => latest, list: async () => [latest], put: async (next) => { latest = next; } };
   let phase: "baseline" | "changed" | "recovery" = "baseline";
   let replayCalls = 0;
@@ -157,7 +157,7 @@ try {
   assert.equal(unchangedAgain.ok, true);
   assert.equal(replayCalls, 1, "a seeded unchanged baseline skips replay/provider work and does not rebaseline");
   phase = "changed";
-  const next: Snapshot = { ...latest, body: "New", bodyHash: "new-hash", fetchedAt: "2026-07-12T00:00:00.000Z" };
+  const next: Snapshot = { ...latest, body: "New", bodyHash: "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359", fetchedAt: "2026-07-12T00:00:00.000Z" };
   const changed = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
     fetchSource: async () => ({ snapshot: next }), clock: () => "2026-07-12T01:00:00.000Z",
@@ -169,7 +169,7 @@ try {
   // but fails publication, then a byte-identical unchanged run must publish the
   // pending batch before taking its early return.
   phase = "recovery";
-  const recoverySnapshot: Snapshot = { ...next, body: "Recovery", bodyHash: "recovery-hash", fetchedAt: "2026-07-12T02:00:00.000Z" };
+  const recoverySnapshot: Snapshot = { ...next, body: "Recovery", bodyHash: "48f6a8d5688b0cf59fb8109b7903507ed9d2e1580be2ad7ae169df659e1ddeea", fetchedAt: "2026-07-12T02:00:00.000Z" };
   const failedFinalize = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
     fetchSource: async () => ({ snapshot: recoverySnapshot }), clock: () => "2026-07-12T03:00:00.000Z",
@@ -192,7 +192,7 @@ try {
       { fieldPath: "items[].name", candidateValue: "Two", confidence: 0.9, provenance: { excerpt: "Two", locator: "chars:4-7" }, extractor: "fixture", pathIndices: [1] },
     ], itemIndex: 0, itemName: "Baseline Camp" },
   });
-  const ambiguousSnapshot = { ...next, body: "Ambiguous", bodyHash: "ambiguous-hash", fetchedAt: "2026-07-13T00:00:00.000Z" };
+  const ambiguousSnapshot = { ...next, body: "Ambiguous", bodyHash: "70a8b6912f2ef82fd38f1658b8533a40d079abde48449368ad17d26f3f3fa589", fetchedAt: "2026-07-13T00:00:00.000Z" };
   const ambiguous = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp: ambiguousReplay,
     fetchSource: async () => ({ snapshot: ambiguousSnapshot }), clock: () => "2026-07-13T01:00:00.000Z",

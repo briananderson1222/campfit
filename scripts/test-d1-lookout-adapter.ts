@@ -206,8 +206,8 @@ function characterizeLookoutSeam(): void {
   const lockfile = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8")) as {
     packages?: Record<string, { version?: string; dependencies?: Record<string, string> }>;
   };
-  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.2.0", "manifest must exact-pin Lookout");
-  assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.2.0", "root lock entry must exact-pin Lookout");
+  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.3.4", "manifest must exact-pin Lookout");
+  assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.3.4", "root lock entry must exact-pin Lookout");
   assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.2.0", "installed lock entry must resolve Lookout 0.2.0");
 
   assert.equal(compareValue(" Denver ", "denver", normalizeScalar).changed, false);

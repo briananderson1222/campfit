@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { SurveyInput } from "@kontourai/survey";
-import { createObservationStore, createSurveyEmitter, type LookoutSource, type ObservationStore, type ProposalSetObservation } from "@kontourai/lookout";
+import { createDriftEmitter, createObservationStore, diffProposalSets, type LookoutSource, type ObservationStore, type ProposalSetObservation, type StoredProposalObservationV1 } from "@kontourai/lookout";
+import { authorDriftSurveyInput } from "./lookout-survey-authoring";
 import type { ExtractionProposal } from "@kontourai/traverse";
 
 export const LOOKOUT_OBSERVATION_ROOT = path.join(process.cwd(), ".kontourai", "campfit", "lookout-observations");
@@ -123,8 +124,21 @@ export async function emitCampfitObservation(input: {
   }
   let authored: SurveyInput | null = null;
   let pendingPath: string | null = null;
+  // Lookout 0.3.x emits neutral drift and no longer authors the trust record,
+  // so the pieces it used to hold internally are captured here instead: the
+  // prior observation as it is loaded, and the events as they are diffed.
+  // Both are needed before commit, because commit stages the survey first.
+  let prior: StoredProposalObservationV1 | null = null;
+  const nowFn = input.now ?? (() => new Date().toISOString());
+  // Read once and reused for the observation record and the authored record, as
+  // Lookout did. Calling a real clock twice would let them disagree.
+  const recordedAt = nowFn();
   const orderedStore: ObservationStore = {
-    loadLatest: (sourceId) => delegate.loadLatest(sourceId),
+    loadLatest: async (sourceId) => {
+      const loaded = await delegate.loadLatest(sourceId);
+      if (loaded.ok) prior = loaded.value;
+      return loaded;
+    },
     commit: async (record, expectedPriorId) => {
       if (authored) pendingPath = await stageSurvey({ sourceId: input.source.id, snapshotRef: input.observation.snapshotRef, survey: authored }, spoolRoot);
       input.faults?.beforeObservationCommit?.();
@@ -140,19 +154,31 @@ export async function emitCampfitObservation(input: {
       return committed;
     },
   };
-  const emitter = createSurveyEmitter<readonly ExtractionProposal[]>({
+  const emitter = createDriftEmitter<readonly ExtractionProposal[]>({
     store: orderedStore,
-    now: input.now,
-    transformSurveyInput: (survey) => {
-      const mapped = {
-        ...survey,
-        claims: survey.claims.map((claim) => ({ ...claim, subjectType: "campfit.camp", subjectId: input.entityKey })),
-      } as SurveyInput;
-      authored = mapped;
-      return mapped;
+    now: () => recordedAt,
+    diff: (diffInput) => {
+      const result = diffProposalSets(diffInput);
+      // Authored here rather than after emit(): the ordered commit stages the
+      // survey before the observation pointer advances, and that ordering is
+      // what makes a retry unable to lose the event or duplicate a batch.
+      if (result.ok && prior) {
+        authored = authorDriftSurveyInput({
+          source: input.source,
+          prior: { observationId: prior.observationId, snapshotRef: prior.snapshotRef },
+          current: { snapshotRef: input.observation.snapshotRef, observedAt: input.observation.observedAt },
+          events: result.value.events,
+          generatedAt: recordedAt,
+          transform: (survey) => ({
+            ...survey,
+            claims: survey.claims.map((claim) => ({ ...claim, subjectType: "campfit.camp", subjectId: input.entityKey })),
+          }) as SurveyInput,
+        });
+      }
+      return result;
     },
   });
-  return emitter.emit({
+  const emitted = await emitter.emit({
     source: input.source,
     current: input.observation,
     check: { checkedAt: input.checkedAt, resultKind: input.resultKind ?? "changed", currentSnapshotRef: input.observation.snapshotRef },
@@ -163,4 +189,8 @@ export async function emitCampfitObservation(input: {
       fieldIdentity: (_proposals, proposal) => proposal.fieldPath.replace(/^items\[\]\./, ""),
     },
   });
+  // Lookout's own result no longer carries the trust record. Callers here still
+  // read `surveyInput` — including the baseline assertion that a first
+  // enablement authors none — so it is restored from what this module authored.
+  return emitted.ok ? { ...emitted, value: { ...emitted.value, surveyInput: authored } } : emitted;
 }

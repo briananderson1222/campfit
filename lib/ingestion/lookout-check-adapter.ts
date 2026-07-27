@@ -1,7 +1,9 @@
-import { createCheckRunner, type CheckResult, type LookoutSource, type RenderPolicy, type ObservationStore, type ProposalSetObservation } from "@kontourai/lookout";
+import { createCheckRunner, type CheckResult, type ExtractableLookoutSource, type LookoutSource, type RenderPolicy, type ObservationStore, type ProposalSetObservation } from "@kontourai/lookout";
 import type { FetchSource, CreateCheckRunnerOptions } from "@kontourai/lookout";
 import type { ExtractionProposal } from "@kontourai/traverse";
-import { fetchSource as traverseFetchSource } from "@kontourai/traverse/fetch";
+import { toForageFetchOptions } from "@kontourai/traverse/fetch";
+import { fetchSource as forageFetchSource } from "@kontourai/forage/fetch";
+import { createGuardedFetch } from "@kontourai/forage/egress";
 import type { Camp } from "@/lib/types";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import { runTraverseRecrawlForCamp, type TraverseRecrawlOptions, type TraverseRecrawlResult } from "./traverse-recrawl-adapter";
@@ -18,19 +20,47 @@ export interface RunLookoutCheckOptions extends Omit<CreateCheckRunnerOptions, "
   egressResolver?: EgressResolver;
 }
 
-/** Run the shipped classifier while restoring CampFit fetch policy omitted by Lookout 0.2.0. */
+/**
+ * Run the shipped classifier while restoring the CampFit fetch policy Lookout
+ * does not carry: our user agent, and forced render when the source demands it.
+ *
+ * Since 0.3.1 Lookout fetches through forage rather than Traverse (lookout#11),
+ * which changes two things here.
+ *
+ * SSRF guarding is no longer ours to bolt on. forage takes `egress` as a
+ * first-class field on the source config and guards the resolved address family
+ * itself, so `createGuardedTraverseFetchOptions` is not wrapped around this
+ * path any more — the deterministic resolver seam is injected as a guarded
+ * fetch instead, which keeps the threat fixtures working against the same
+ * classification forage uses in production.
+ *
+ * `contentType: "html"` is dropped rather than translated. forage's SourceConfig
+ * has no equivalent, and it never affected this path: the field told Traverse's
+ * prep layer how to parse a body for extraction, while a CHECK only compares
+ * validators and hashes to decide whether anything moved. Extraction still
+ * declares its own content type on the replay path.
+ *
+ * `revalidate: false` on a forced render survives the cutover. forage had no
+ * such field until 0.5.0, which was added for this (forage#33) rather than
+ * dropping the policy and quietly regressing the render path.
+ */
 export async function runLookoutCheck(source: LookoutSource, options: RunLookoutCheckOptions): Promise<CheckResult> {
   const fetchSource: FetchSource = (config, fetchOptions) => options.fetchSource({
     ...config,
-    contentType: "html",
     userAgent: options.userAgent ?? CAMPFIT_FETCH_USER_AGENT,
-    ...(source.renderPolicy === "always" ? { render: true, revalidate: false } : {}),
+    egress: { guarded: true },
+    // Stated in both directions rather than relying on forage's default: a
+    // rendered attempt must not carry HTTP validators, because a conditional
+    // request can answer 304 with no body and leave the render nothing to
+    // render (forage#33 added the field for exactly this). A plain classified
+    // attempt should revalidate, which is how an unchanged-304 is reached at
+    // all. Leaving either to a default would make the policy invisible here.
+    revalidate: source.renderPolicy !== "always",
+    ...(source.renderPolicy === "always" ? { render: true } : {}),
   }, fetchOptions);
-  const fetchOptions = createGuardedTraverseFetchOptions(
-    options.fetchOptions,
-    "storedCrawlTarget",
-    { resolver: options.egressResolver },
-  );
+  const fetchOptions = options.egressResolver
+    ? { ...(options.fetchOptions ?? {}), fetch: createGuardedFetch({ resolver: options.egressResolver }) }
+    : options.fetchOptions;
   return createCheckRunner({ ...options, fetchOptions, fetchSource }).check(source);
 }
 
@@ -65,8 +95,8 @@ export async function runLookoutRecrawlForCamp(
   }
   let checked = await runLookoutCheck(source, {
     store: options.store,
-    fetchSource: deps.fetchSource ?? traverseFetchSource,
-    fetchOptions: options.fetchOptions,
+    fetchSource: deps.fetchSource ?? forageFetchSource,
+    fetchOptions: toForageFetchOptions(options.fetchOptions),
     clock: deps.clock,
   });
   if (checked.kind === "error") {
@@ -118,10 +148,10 @@ export async function runLookoutRecrawlForCamp(
   }
   const shellWarning = replayed.warnings.some((warning) => warning.startsWith("js-shell-suspected:"));
   if (policy === "on-shell-warning" && shellWarning && options.fetchOptions?.renderImpl) {
-    checked = await runLookoutCheck({ ...source, renderPolicy: "always" }, {
+    checked = await runLookoutCheck({ ...(source as ExtractableLookoutSource), renderPolicy: "always" }, {
       store: options.store,
-      fetchSource: deps.fetchSource ?? traverseFetchSource,
-      fetchOptions: options.fetchOptions,
+      fetchSource: deps.fetchSource ?? forageFetchSource,
+      fetchOptions: toForageFetchOptions(options.fetchOptions),
       clock: deps.clock,
     });
     if (checked.kind !== "changed") {

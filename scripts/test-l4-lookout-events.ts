@@ -104,7 +104,7 @@ try {
 const coordinatorRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-coordinator-recovery-"));
 try {
   const sourceId = "camp-coordinator-recovery";
-  const base: Snapshot = { sourceId, url: "https://recovery.test", fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "Old", bodyHash: "old-hash" };
+  const base: Snapshot = { sourceId, url: "https://recovery.test", fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "Old", bodyHash: "bca97160f4e1211fe659338d0a9705a7dff8aa3ea2e1be1cc1958100a33962c2" };
   let latest: Snapshot = base;
   const snapshotStore: SnapshotStore = { latest: async () => latest, get: async () => latest, list: async () => [latest], put: async (next) => { latest = next; } };
   const observationStore = createObservationStore({ root: path.join(coordinatorRoot, "observations") });
@@ -115,7 +115,7 @@ try {
 
   // Establish the native zero-event observation baseline.
   await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: base }) });
-  const changed: Snapshot = { ...base, body: "New", bodyHash: "new-hash", fetchedAt: "2026-07-12T00:00:00.000Z" };
+  const changed: Snapshot = { ...base, body: "New", bodyHash: "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359", fetchedAt: "2026-07-12T00:00:00.000Z" };
   const staged = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot, replayCamp,
     fetchSource: async () => ({ snapshot: changed }),

@@ -1,0 +1,190 @@
+{
+  "note": "Produced by @kontourai/lookout@0.2.0's createSurveyEmitter via emitCampfitObservation, before the 0.3.x cutover. Pins the published record's identity across the migration.",
+  "spooledSurveyInput": {
+    "candidateSets": [
+      {
+        "candidates": [
+          {
+            "confidence": 0.91,
+            "extractionId": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.extraction",
+            "id": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.candidate",
+            "metadata": null,
+            "rejectionReason": null,
+            "sourceRank": null,
+            "value": {
+              "changeKind": "value-updated",
+              "currentValue": "New",
+              "entityKey": "camp-1",
+              "fieldKey": "name",
+              "kind": "field-changed",
+              "priorValue": "Old"
+            }
+          }
+        ],
+        "id": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.candidates",
+        "metadata": {
+          "changeKind": "value-updated",
+          "currentSnapshotRef": "snapshot:two",
+          "eventKind": "field-changed",
+          "evidence": [
+            {
+              "excerpt": "Old",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:one"
+            },
+            {
+              "excerpt": "New",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:two"
+            }
+          ],
+          "priorObservationId": "f2e896cd217e961ffad4a06af5836a2e008587bc5a066760202367c9065657a1",
+          "priorSnapshotRef": "snapshot:one",
+          "sourceId": "camp-1"
+        },
+        "rationale": null,
+        "selectedCandidateId": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.candidate",
+        "status": "needs-review",
+        "target": "lookout:camp-1:name"
+      }
+    ],
+    "claims": [
+      {
+        "candidateId": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.candidate",
+        "candidateSetId": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.candidates",
+        "claimType": "lookout.field-changed",
+        "collectedBy": "@kontourai/lookout",
+        "createdAt": "2026-07-11T12:00:00.000Z",
+        "evidenceMethod": "observation",
+        "facet": "lookout.source-change",
+        "fieldOrBehavior": "name",
+        "id": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832",
+        "impactLevel": "low",
+        "metadata": {
+          "changeKind": "value-updated",
+          "currentSnapshotRef": "snapshot:two",
+          "eventKind": "field-changed",
+          "evidence": [
+            {
+              "excerpt": "Old",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:one"
+            },
+            {
+              "excerpt": "New",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:two"
+            }
+          ],
+          "priorObservationId": "f2e896cd217e961ffad4a06af5836a2e008587bc5a066760202367c9065657a1",
+          "priorSnapshotRef": "snapshot:one",
+          "sourceId": "camp-1"
+        },
+        "status": "proposed",
+        "subjectId": "camp-1",
+        "subjectType": "campfit.camp",
+        "value": {
+          "changeKind": "value-updated",
+          "currentValue": "New",
+          "entityKey": "camp-1",
+          "fieldKey": "name",
+          "kind": "field-changed",
+          "priorValue": "Old"
+        }
+      }
+    ],
+    "contractVersion": "1",
+    "escalations": null,
+    "extractions": [
+      {
+        "confidence": 0.91,
+        "excerpt": "New",
+        "extractedAt": "2026-07-11T12:00:00.000Z",
+        "extractor": "fixture",
+        "id": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.extraction",
+        "locator": "chars:0-3",
+        "metadata": {
+          "changeKind": "value-updated",
+          "currentSnapshotRef": "snapshot:two",
+          "eventKind": "field-changed",
+          "evidence": [
+            {
+              "excerpt": "Old",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:one"
+            },
+            {
+              "excerpt": "New",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:two"
+            }
+          ],
+          "priorObservationId": "f2e896cd217e961ffad4a06af5836a2e008587bc5a066760202367c9065657a1",
+          "priorSnapshotRef": "snapshot:one",
+          "sourceId": "camp-1"
+        },
+        "sourceId": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.source",
+        "target": "lookout:camp-1:name",
+        "value": {
+          "changeKind": "value-updated",
+          "currentValue": "New",
+          "entityKey": "camp-1",
+          "fieldKey": "name",
+          "kind": "field-changed",
+          "priorValue": "Old"
+        }
+      }
+    ],
+    "generatedAt": "2026-07-11T12:00:00.000Z",
+    "interpretations": null,
+    "rawSources": [
+      {
+        "id": "lookout-413dd621f20f6b5bd2e9790cf5258c0079a529aadddda954d680ae3309f45832.source",
+        "kind": "web-page",
+        "locatorScheme": "html",
+        "metadata": {
+          "changeKind": "value-updated",
+          "currentSnapshotRef": "snapshot:two",
+          "eventKind": "field-changed",
+          "evidence": [
+            {
+              "excerpt": "Old",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:one"
+            },
+            {
+              "excerpt": "New",
+              "extractor": "fixture",
+              "fieldPath": "items[].name",
+              "locator": "chars:0-3",
+              "snapshotRef": "snapshot:two"
+            }
+          ],
+          "priorObservationId": "f2e896cd217e961ffad4a06af5836a2e008587bc5a066760202367c9065657a1",
+          "priorSnapshotRef": "snapshot:one",
+          "sourceId": "camp-1"
+        },
+        "observedAt": "2026-07-11T01:00:00.000Z",
+        "resolution": "observation",
+        "sourceRef": "snapshot:two"
+      }
+    ],
+    "reviewOutcomes": [],
+    "source": "@kontourai/lookout"
+  },
+  "eventCount": 1
+}

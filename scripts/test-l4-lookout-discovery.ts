@@ -56,7 +56,7 @@ assert.equal(diff.value.events[0]?.kind, "new-entity-appeared");
 
 const source = listingToLookoutSource(url);
 assert.equal(source.id, `campfit-discovery:${url}`, "listing ID must preserve the exact legacy lineage");
-assert.deepEqual(source.targetSchema.map((field) => field.path), ["items[].name", "items[].detailUrl", "items[].snippet"]);
+assert.deepEqual((source.targetSchema ?? []).map((field) => field.path), ["items[].name", "items[].detailUrl", "items[].snippet"]);
 
 // E7 has its own listing-source fixture even though it intentionally shares
 // the canonical runLookoutCheck boundary with E6.

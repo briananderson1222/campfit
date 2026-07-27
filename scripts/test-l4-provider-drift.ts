@@ -71,6 +71,8 @@ import {
 } from "@kontourai/traverse/fetch";
 import type { ExtractionProposal, ExtractionProvider } from "@kontourai/traverse";
 import { providerSourceToLookoutSource } from "../lib/ingestion/lookout-sources";
+import { fetchSource as forageFetchSource } from "@kontourai/forage/fetch";
+import { toForageFetchOptions } from "@kontourai/traverse/fetch";
 import { runLookoutCheck } from "../lib/ingestion/lookout-check-adapter";
 import {
   runTraversePipelineForSource,
@@ -217,8 +219,10 @@ async function runOneSourceThroughDriftGate(
   const fetchOptions = buildFetchOptions(html);
   const checkResult = await runLookoutCheck(providerSourceToLookoutSource(src), {
     store,
-    fetchSource: traverseFetchSource,
-    fetchOptions,
+    // Lookout fetches through forage since 0.3.1; the fixture's Traverse-shaped
+    // seams are translated at the boundary (traverse#115).
+    fetchSource: forageFetchSource,
+    fetchOptions: toForageFetchOptions(fetchOptions as never),
   });
   // Mirrors crawl-pipeline.ts's driftGate branch EXACTLY (campfit#134 HIGH
   // fix): skip extraction ONLY on an authoritative server 304, never on a

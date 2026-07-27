@@ -35,7 +35,8 @@
 import { getPool } from '@/lib/db';
 import type { ExtractionProvider } from '@kontourai/traverse';
 import type { FetchSourceOptions, SnapshotStore } from '@kontourai/traverse/fetch';
-import { fetchSource as traverseFetchSource } from '@kontourai/traverse/fetch';
+import { fetchSource as traverseFetchSource, toForageFetchOptions } from '@kontourai/traverse/fetch';
+import { fetchSource as forageFetchSource } from '@kontourai/forage/fetch';
 import { runTraverseRecrawlForCamp } from './traverse-recrawl-adapter';
 import { runLookoutCheck, runLookoutRecrawlForCamp } from './lookout-check-adapter';
 import { providerSourceToLookoutSource } from './lookout-sources';
@@ -951,8 +952,10 @@ async function runSourceSweepStrategy(
       if (options.driftGate) {
         const checkResult = await runLookoutCheck(providerSourceToLookoutSource(src), {
           store: snapshotStore!,
-          fetchSource: traverseFetchSource,
-          fetchOptions: options.fetchOptions,
+          // Lookout fetches through forage since 0.3.1; Traverse-shaped options
+          // are translated at the boundary rather than cast (traverse#115).
+          fetchSource: forageFetchSource,
+          fetchOptions: toForageFetchOptions(options.fetchOptions),
         });
         // Observability (campfit#134): a persistently broken CHECK layer must
         // be visible in logs rather than silently degrading to always-extract.
