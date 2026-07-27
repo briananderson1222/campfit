@@ -7,7 +7,12 @@ import {
   hashReviewSessionSnapshot,
   StaleServerReviewSessionError,
 } from '@kontourai/survey/review-workbench/server-review-session';
-import { defaultReviewSessionName } from '@kontourai/survey/review-workbench';
+import {
+  bindReviewQueue,
+  defaultReviewSessionName,
+  validateReviewQueueBinding,
+  type ReviewQueueBinding,
+} from '@kontourai/survey/review-workbench';
 import { buildCampSurveyReviewQueueSession, type CampReviewQueueSession } from './survey-review-items';
 import type { CampChangeProposal } from './types';
 
@@ -17,6 +22,16 @@ export interface SurveyReviewSessionRecord {
   readonly sessionName: string;
   readonly snapshot: CampReviewQueueSession;
   readonly snapshotHash: string;
+  /**
+   * Queue-binding attestation (survey 2.4.0): taken ONCE, by
+   * `getOrCreateSurveyReviewSessionForProposal`, when the round opens, and
+   * persisted beside the queue in the same transaction. Never recomputed on a
+   * later write — a digest a writer recomputes as it saves attests nothing.
+   * `null` only for legacy rows opened before migration 021; those are
+   * treated as stale (recreated on open, refused at read/apply), never
+   * silently trusted.
+   */
+  readonly binding: ReviewQueueBinding | null;
   readonly proposalStatus: string;
   readonly createdBy: string | null;
   readonly createdAt: string;
@@ -67,13 +82,18 @@ export async function getOrCreateSurveyReviewSessionForProposal(
       includeAppliedFields: true,
     });
     const snapshotHash = hashSurveyReviewSnapshot(snapshot);
+    // Queue-binding attestation: the binding's authority is its ORIGIN — it
+    // is taken here, exactly once, as the round opens, and lands in the same
+    // transaction as the queue row itself. Every later read/apply validates
+    // against this stored record; nothing ever re-binds a live round.
+    const binding = bindReviewQueue(snapshot, { sessionName });
     const inserted = await client.query<SurveyReviewSessionRow>(
       `INSERT INTO "SurveyReviewSession"
-         ("proposalId", "sessionName", snapshot, "snapshotHash", "proposalStatus", "createdBy")
-       VALUES ($1, $2, $3::jsonb, $4, $5, $6)
-       RETURNING id, "proposalId", "sessionName", snapshot, "snapshotHash", "proposalStatus",
+         ("proposalId", "sessionName", snapshot, "snapshotHash", binding, "proposalStatus", "createdBy")
+       VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7)
+       RETURNING id, "proposalId", "sessionName", snapshot, "snapshotHash", binding, "proposalStatus",
                  "createdBy", "createdAt", "updatedAt", "appliedAt"`,
-      [proposal.id, sessionName, JSON.stringify(snapshot), snapshotHash, proposal.status, opts.actorId],
+      [proposal.id, sessionName, JSON.stringify(snapshot), snapshotHash, JSON.stringify(binding), proposal.status, opts.actorId],
     );
 
     await client.query('COMMIT');
@@ -91,13 +111,17 @@ export async function getSurveyReviewSessionForProposal(opts: {
   readonly reviewSessionId: string;
 }): Promise<SurveyReviewSessionRecord | null> {
   const result = await getPool().query<SurveyReviewSessionRow>(
-    `SELECT id, "proposalId", "sessionName", snapshot, "snapshotHash", "proposalStatus",
+    `SELECT id, "proposalId", "sessionName", snapshot, "snapshotHash", binding, "proposalStatus",
             "createdBy", "createdAt", "updatedAt", "appliedAt"
      FROM "SurveyReviewSession"
      WHERE id = $1 AND "proposalId" = $2`,
     [opts.reviewSessionId, opts.proposalId],
   );
-  return result.rows[0] ? toSurveyReviewSessionRecord(result.rows[0]) : null;
+  const record = result.rows[0] ? toSurveyReviewSessionRecord(result.rows[0]) : null;
+  // Refused at READ: a stored queue the open-time binding does not attest
+  // (or an unbound legacy row) is never served to the events or apply paths.
+  if (record) assertStoredQueueBinding(record);
+  return record;
 }
 
 export function assertSurveyReviewSessionFreshForProposal(
@@ -117,6 +141,12 @@ function isSurveyReviewSessionFresh(record: SurveyReviewSessionRecord, proposal:
   if (record.proposalId !== proposal.id) return false;
   if (record.proposalStatus !== proposal.status) return false;
   if (record.snapshotHash !== hashReviewSessionSnapshot(record.snapshot)) return false;
+  // Queue-binding attestation: a session whose stored queue the open-time
+  // binding does not attest — including a binding swapped in from a different
+  // session, which the two hash comparisons above cannot see — is not fresh.
+  // Legacy rows with no binding (pre-migration-021) are not fresh either, so
+  // the next open recreates them with one.
+  if (storedQueueBindingIssues(record).length > 0) return false;
 
   const current = buildCampSurveyReviewQueueSession(proposal, {
     actorId: record.snapshot.actorId,
@@ -140,13 +170,40 @@ function isSurveyReviewSessionFresh(record: SurveyReviewSessionRecord, proposal:
   }
 }
 
+/**
+ * Issues preventing the stored binding from attesting the stored queue.
+ * Validation always runs against the STORED binding — never one recomputed
+ * from the bytes being checked, which would agree with anything.
+ */
+function storedQueueBindingIssues(record: SurveyReviewSessionRecord): string[] {
+  if (!record.binding) {
+    return ['Survey review session has no stored queue binding (opened before queue-binding adoption).'];
+  }
+  return validateReviewQueueBinding(record.binding, record.snapshot, { sessionName: record.sessionName })
+    .map((issue) => issue.message);
+}
+
+/**
+ * Refuses (as the same `SurveyReviewSessionStaleError` the staleness paths
+ * already throw, so routes surface it identically) a session whose stored
+ * queue is not attested by the binding taken when the round opened.
+ */
+function assertStoredQueueBinding(record: SurveyReviewSessionRecord): void {
+  const issues = storedQueueBindingIssues(record);
+  if (issues.length > 0) {
+    throw new SurveyReviewSessionStaleError(
+      `Survey review session queue is not attested by its stored binding: ${issues.join(' ')}`,
+    );
+  }
+}
+
 async function findSurveyReviewSession(opts: {
   readonly proposalId: string;
   readonly sessionName: string;
 }, client?: PoolClient): Promise<SurveyReviewSessionRecord | null> {
   const queryable = client ?? getPool();
   const result = await queryable.query<SurveyReviewSessionRow>(
-    `SELECT id, "proposalId", "sessionName", snapshot, "snapshotHash", "proposalStatus",
+    `SELECT id, "proposalId", "sessionName", snapshot, "snapshotHash", binding, "proposalStatus",
             "createdBy", "createdAt", "updatedAt", "appliedAt"
      FROM "SurveyReviewSession"
      WHERE "proposalId" = $1 AND "sessionName" = $2`,
@@ -162,6 +219,7 @@ function toSurveyReviewSessionRecord(row: SurveyReviewSessionRow): SurveyReviewS
     sessionName: row.sessionName,
     snapshot: row.snapshot as CampReviewQueueSession,
     snapshotHash: row.snapshotHash,
+    binding: (row.binding ?? null) as ReviewQueueBinding | null,
     proposalStatus: row.proposalStatus,
     createdBy: row.createdBy,
     createdAt: toIsoString(row.createdAt),
@@ -180,6 +238,7 @@ interface SurveyReviewSessionRow {
   readonly sessionName: string;
   readonly snapshot: unknown;
   readonly snapshotHash: string;
+  readonly binding: unknown;
   readonly proposalStatus: string;
   readonly createdBy: string | null;
   readonly createdAt: string | Date;
