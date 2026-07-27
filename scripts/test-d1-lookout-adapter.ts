@@ -206,9 +206,9 @@ function characterizeLookoutSeam(): void {
   const lockfile = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8")) as {
     packages?: Record<string, { version?: string; dependencies?: Record<string, string> }>;
   };
-  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.2.0", "manifest must exact-pin Lookout");
-  assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.2.0", "root lock entry must exact-pin Lookout");
-  assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.2.0", "installed lock entry must resolve Lookout 0.2.0");
+  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.3.4", "manifest must exact-pin Lookout");
+  assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.3.4", "root lock entry must exact-pin Lookout");
+  assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.3.4", "installed lock entry must resolve Lookout 0.2.0");
 
   assert.equal(compareValue(" Denver ", "denver", normalizeScalar).changed, false);
   assert.equal(compareValue({ b: 2, a: 1 }, { a: 1, b: 2 }).changed, false);
@@ -284,12 +284,16 @@ function sourceGuard(): void {
     "lib/ingestion/lookout-discovery.ts",
     "lib/ingestion/lookout-event-mapper.ts",
     "lib/ingestion/lookout-observation-store.ts",
+    // The Survey authoring Lookout 0.3.0 stopped doing, ported in-repo for the
+    // cutover; its golden test pins the output byte-identical to 0.2.0.
+    "lib/ingestion/lookout-survey-authoring.ts",
     "lib/ingestion/lookout-sources.ts",
     "scripts/test-d1-lookout-adapter.ts",
     "scripts/test-l4-lookout-check.ts",
     "scripts/test-l4-lookout-discovery.ts",
     "scripts/test-l4-lookout-events.ts",
     "scripts/l4-lookout-parity-report.ts",
+    "scripts/test-lookout-survey-authoring.ts",
   ];
 
   if (fs.existsSync(path.join(ROOT, kernelPath))) violations.push(`${kernelPath} must be deleted`);

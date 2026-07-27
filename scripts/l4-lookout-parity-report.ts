@@ -40,7 +40,7 @@ async function route(kind: "legacy" | "lookout", f: Fixture): Promise<TraverseRe
     ]), store: createInMemorySnapshotStore(), mode: "live-with-capture" as const,
     fetchOptions: fixtureFetchOptions(f), now: () => Date.parse(at), fieldSources: {} };
   const original = Date.now; Date.now = () => Date.parse(at);
-  try { return kind === "legacy" ? await runTraverseRecrawlForCamp(options) : await runLookoutRecrawlForCamp(options, { fetchSource, clock: () => at }); }
+  try { return kind === "legacy" ? await runTraverseRecrawlForCamp(options) : await runLookoutRecrawlForCamp(options, { fetchSource: fetchSource as never, clock: () => at }); }
   finally { Date.now = original; }
 }
 

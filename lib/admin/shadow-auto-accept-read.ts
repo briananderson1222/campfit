@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { parseSnapshotSourceRef, type Snapshot, type SnapshotStore } from '@kontourai/traverse/fetch';
+import { parseAnySnapshotSourceRef, type Snapshot, type SnapshotStore } from '@kontourai/traverse/fetch';
 
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 
@@ -36,7 +36,7 @@ async function resolveWithStore(
 ): Promise<boolean> {
   try {
     if (!proposal.snapshotRef || !proposal.snapshotBodyHash) return false;
-    const parsed = parseSnapshotSourceRef(proposal.snapshotRef);
+    const parsed = parseAnySnapshotSourceRef(proposal.snapshotRef);
     if (!parsed
       || !/^[a-f0-9]{64}$/i.test(parsed.bodyHash)
       || parsed.bodyHash !== proposal.snapshotBodyHash) return false;

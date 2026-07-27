@@ -4,7 +4,7 @@ import { buildCampAttestationTrustInput } from './trust-projection';
 import { refreshCampVerificationCache } from './verification-authority';
 import { acquireSubjectAdvisoryLock, recordEvidenceOnLockedClient } from './claim-store';
 import { VERIFIED_CAMP_FIELDS } from './verification-policy';
-import { buildSnapshotSourceRef, parseSnapshotSourceRef } from '@kontourai/traverse/fetch';
+import { buildSnapshotSourceRef, parseAnySnapshotSourceRef } from '@kontourai/traverse/fetch';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 import { parseCharsLocator, resolveReviewExcerpt } from './review-excerpt-resolution';
 
@@ -409,7 +409,7 @@ function serializeBoundedValueSnapshot(value: unknown): string | null {
 async function resolveStoredSourceCitation(citation: ValidatedSourceCitation): Promise<ValidatedSourceCitation> {
   const sourceRef = citation.sourceRef.trim();
   const excerpt = citation.excerpt.trim();
-  const parsed = parseSnapshotSourceRef(sourceRef);
+  const parsed = parseAnySnapshotSourceRef(sourceRef);
   if (!parsed) throw new AttestationValidationError('A valid snapshot sourceRef is required for source attestations.');
   const snapshot = await createCampfitSnapshotStore().get(parsed.sourceId, parsed.bodyHash);
   if (!snapshot) throw new AttestationValidationError('The referenced snapshot is unavailable.');
@@ -461,7 +461,7 @@ export async function addFieldAttestation(opts: {
   if (opts.mode === 'source') {
     const sourceRef = opts.sourceUrl?.trim();
     const excerpt = opts.excerpt?.trim();
-    const parsed = sourceRef ? parseSnapshotSourceRef(sourceRef) : undefined;
+    const parsed = sourceRef ? parseAnySnapshotSourceRef(sourceRef) : undefined;
     if (!sourceRef || !excerpt || !parsed) {
       throw new AttestationValidationError('A valid snapshot sourceRef and excerpt are required for source attestations.');
     }

@@ -1,6 +1,6 @@
 /** Traverse-backed listing discovery. */
 import type { ExtractionProvider } from "@kontourai/traverse";
-import { parseSnapshotSourceRef, type FetchMode, type FetchSourceOptions, type SnapshotStore } from "@kontourai/traverse/fetch";
+import { parseAnySnapshotSourceRef, type FetchMode, type FetchSourceOptions, type SnapshotStore } from "@kontourai/traverse/fetch";
 import { DISCOVERY_FIELD_HINTS, DISCOVERY_TARGET_SCHEMA } from "./discovery-schema";
 import { groupDiscoveryItems } from "./discovery-item-grouping";
 import { fetchAndExtractWithRevalidation } from "./traverse-fetch-extract";
@@ -143,7 +143,9 @@ export function buildDiscoveryFieldSources(stub: DiscoveredCampStub): Record<str
     || !/^chars:\d+-\d+$/.test(stub.locator)
     || !stub.nameExcerpt
     || !/^chars:\d+-\d+$/.test(stub.nameLocator)
-    || !parseSnapshotSourceRef(stub.sourceRef)
+    // Either scheme is verified provenance: Lookout emits forage-snapshot:
+    // references since 0.3.1, while replay still produces traverse-snapshot:.
+    || !parseAnySnapshotSourceRef(stub.sourceRef)
   ) {
     throw new Error(`Discovery stub "${stub.name}" lacks verified snapshot provenance`);
   }

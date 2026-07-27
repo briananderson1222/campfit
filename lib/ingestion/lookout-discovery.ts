@@ -4,7 +4,10 @@ import type { FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetc
 import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { createSurveyEmitter, diffProposalSets, extractionProposalIdentity } from "@kontourai/lookout";
+import { createDriftEmitter, diffProposalSets, extractionProposalIdentity } from "@kontourai/lookout";
+import type { ExtractableLookoutSource, StoredProposalObservationV1 } from "@kontourai/lookout";
+import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
+import { authorDriftSurveyInput } from "./lookout-survey-authoring";
 import type { FetchSource, LookoutSource, NewEntityAppearedEvent, ProposalDiffEvent } from "@kontourai/lookout";
 import { groupDiscoveryItems } from "./discovery-item-grouping";
 import {
@@ -230,10 +233,14 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   const observationStore = options.observationStore ?? defaultListingObservationStore;
   const pendingRoot = options.pendingRoot ?? DEFAULT_LISTING_PENDING_ROOT;
   const recovered = await reconcileListingDeliveries(source.id, pendingRoot, options.repository, observationStore, options.surveyRoot);
+  // Lookout fetches through forage since 0.3.1, so Traverse-shaped options are
+  // translated at the boundary rather than cast (traverse#115).
+  const listingFetchOptions = toForageFetchOptions(options.fetchOptions);
+  const listingFetchSource = (options.fetchSource ?? (await import("@kontourai/forage/fetch")).fetchSource) as FetchSource;
   let checked = await runLookoutCheck(source, {
     store: options.store,
-    fetchSource: options.fetchSource ?? (await import("@kontourai/traverse/fetch")).fetchSource,
-    fetchOptions: options.fetchOptions,
+    fetchSource: listingFetchSource,
+    fetchOptions: listingFetchOptions,
   });
   if (checked.kind === "error") throw new Error(`lookout-listing:${checked.origin}:${checked.error.kind}: ${checked.error.message}`);
   const unchangedEnablement = checked.kind === "unchanged-304" || checked.kind === "unchanged-hash";
@@ -249,29 +256,42 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   let snapshotRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
   let discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay" });
   if (discovery.error || !discovery.proposals) throw new Error(discovery.error ?? "Lookout listing replay returned no proposals");
-  if (discovery.sourceRef !== snapshotRef) {
+  if (!isSameSnapshotRef(discovery.sourceRef ?? '', snapshotRef)) {
     throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
   }
   const shellWarning = discovery.warnings?.some((warning) => warning.startsWith("js-shell-suspected:")) ?? false;
   if (!unchangedEnablement && !options.requiresRender && shellWarning && options.fetchOptions?.renderImpl) {
-    checked = await runLookoutCheck({ ...source, renderPolicy: "always" }, {
+    // renderPolicy exists only on extractable sources in 0.3.x's discriminated
+    // union, so the re-check keeps the narrowed variant rather than spreading
+    // the union and losing which arm it is.
+    checked = await runLookoutCheck({ ...(source as ExtractableLookoutSource), renderPolicy: "always" }, {
       store: options.store,
-      fetchSource: options.fetchSource ?? (await import("@kontourai/traverse/fetch")).fetchSource,
-      fetchOptions: options.fetchOptions,
+      fetchSource: listingFetchSource,
+      fetchOptions: listingFetchOptions,
     });
     if (checked.kind !== "changed") throw new Error(`lookout-listing:render-retry-${checked.kind}`);
     snapshotRef = checked.currentSnapshotRef;
     discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay" });
     if (discovery.error || !discovery.proposals) throw new Error(discovery.error ?? "Lookout listing rendered replay returned no proposals");
-    if (discovery.sourceRef !== snapshotRef) throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
+    if (!isSameSnapshotRef(discovery.sourceRef ?? '', snapshotRef)) throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
   }
 
   let authored: SurveyInput | null = null;
   let derivedEvents: readonly ProposalDiffEvent[] = [];
   let persisted = { inserted: 0, ignored: 0 };
-  const emitter = createSurveyEmitter<ProposalEntity>({
+  // Lookout 0.3.x no longer authors the trust record, so the prior observation
+  // is captured as it loads and the record is authored from the diff — both
+  // before commit, which stages the survey alongside the observation.
+  let prior: StoredProposalObservationV1 | null = null;
+  const recordedAt = new Date().toISOString();
+  const emitter = createDriftEmitter<ProposalEntity>({
+    now: () => recordedAt,
     store: {
-      loadLatest: (sourceId) => observationStore.loadLatest(sourceId),
+      loadLatest: async (sourceId) => {
+        const loaded = await observationStore.loadLatest(sourceId);
+        if (loaded.ok) prior = loaded.value;
+        return loaded;
+      },
       commit: async (record, expectedPriorId) => {
         const { inputs, ignored } = discoveryEventInputs(derivedEvents, url);
         const delivery: PendingListingDelivery = { sourceId: source.id, snapshotRef, record, expectedPriorId, survey: authored, inputs, ignored };
@@ -285,10 +305,20 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
     },
     diff: (input) => {
       const result = diffProposalSets(input);
-      if (result.ok) derivedEvents = result.value.events;
+      if (result.ok) {
+        derivedEvents = result.value.events;
+        if (prior) {
+          authored = authorDriftSurveyInput({
+            source,
+            prior: { observationId: prior.observationId, snapshotRef: prior.snapshotRef },
+            current: { snapshotRef, observedAt: checked.checkedAt },
+            events: result.value.events,
+            generatedAt: recordedAt,
+          });
+        }
+      }
       return result;
     },
-    transformSurveyInput: (survey) => { authored = survey; return survey; },
   });
   const emitted = await emitter.emit({
     source,
