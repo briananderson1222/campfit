@@ -6,7 +6,7 @@ import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { createDriftEmitter, diffProposalSets, extractionProposalIdentity } from "@kontourai/lookout";
 import type { ExtractableLookoutSource, StoredProposalObservationV1 } from "@kontourai/lookout";
-import { toForageFetchOptions } from "@kontourai/traverse/fetch";
+import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
 import { authorDriftSurveyInput } from "./lookout-survey-authoring";
 import type { FetchSource, LookoutSource, NewEntityAppearedEvent, ProposalDiffEvent } from "@kontourai/lookout";
 import { groupDiscoveryItems } from "./discovery-item-grouping";
@@ -256,7 +256,7 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   let snapshotRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
   let discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay" });
   if (discovery.error || !discovery.proposals) throw new Error(discovery.error ?? "Lookout listing replay returned no proposals");
-  if (discovery.sourceRef !== snapshotRef) {
+  if (!isSameSnapshotRef(discovery.sourceRef ?? '', snapshotRef)) {
     throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
   }
   const shellWarning = discovery.warnings?.some((warning) => warning.startsWith("js-shell-suspected:")) ?? false;
@@ -273,7 +273,7 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
     snapshotRef = checked.currentSnapshotRef;
     discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay" });
     if (discovery.error || !discovery.proposals) throw new Error(discovery.error ?? "Lookout listing rendered replay returned no proposals");
-    if (discovery.sourceRef !== snapshotRef) throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
+    if (!isSameSnapshotRef(discovery.sourceRef ?? '', snapshotRef)) throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
   }
 
   let authored: SurveyInput | null = null;

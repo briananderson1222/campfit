@@ -208,7 +208,7 @@ function characterizeLookoutSeam(): void {
   };
   assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.3.4", "manifest must exact-pin Lookout");
   assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.3.4", "root lock entry must exact-pin Lookout");
-  assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.2.0", "installed lock entry must resolve Lookout 0.2.0");
+  assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.3.4", "installed lock entry must resolve Lookout 0.2.0");
 
   assert.equal(compareValue(" Denver ", "denver", normalizeScalar).changed, false);
   assert.equal(compareValue({ b: 2, a: 1 }, { a: 1, b: 2 }).changed, false);

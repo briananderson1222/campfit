@@ -1,7 +1,7 @@
 import { createCheckRunner, type CheckResult, type ExtractableLookoutSource, type LookoutSource, type RenderPolicy, type ObservationStore, type ProposalSetObservation } from "@kontourai/lookout";
 import type { FetchSource, CreateCheckRunnerOptions } from "@kontourai/lookout";
 import type { ExtractionProposal } from "@kontourai/traverse";
-import { toForageFetchOptions } from "@kontourai/traverse/fetch";
+import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
 import { fetchSource as forageFetchSource } from "@kontourai/forage/fetch";
 import { createGuardedFetch } from "@kontourai/forage/egress";
 import type { Camp } from "@/lib/types";
@@ -114,7 +114,7 @@ export async function runLookoutRecrawlForCamp(
       const baseline = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
       baselineResult = baseline;
       if (!baseline.ok) return failed(options, `lookout-baseline:${baseline.error}`);
-      if (baseline.snapshot.ref !== snapshotRef) return failed(options, `lookout-baseline:snapshot-mismatch: classified ${snapshotRef}, replayed ${baseline.snapshot.ref ?? "none"}`);
+      if (!isSameSnapshotRef(baseline.snapshot.ref ?? '', snapshotRef)) return failed(options, `lookout-baseline:snapshot-mismatch: classified ${snapshotRef}, replayed ${baseline.snapshot.ref ?? "none"}`);
       const selection = selectedKnownCampProposals(baseline, options);
       if (!selection.ok) return failed(options, `lookout-baseline:${selection.error}`);
       const proposals = selection.proposals;
@@ -143,7 +143,7 @@ export async function runLookoutRecrawlForCamp(
   // The plain extraction classifies shell content only; it cannot render on
   // its own. A shell warning triggers one separately Lookout-classified render.
   let replayed = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
-  if (replayed.snapshot.ref !== checked.currentSnapshotRef) {
+  if (!isSameSnapshotRef(replayed.snapshot.ref ?? '', checked.currentSnapshotRef)) {
     return failed(options, `lookout-check:snapshot-mismatch: classified ${checked.currentSnapshotRef}, replayed ${replayed.snapshot.ref ?? "none"}`);
   }
   const shellWarning = replayed.warnings.some((warning) => warning.startsWith("js-shell-suspected:"));
@@ -160,7 +160,7 @@ export async function runLookoutRecrawlForCamp(
         : `lookout-check:render-retry-${checked.kind}`);
     }
     replayed = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
-    if (replayed.snapshot.ref !== checked.currentSnapshotRef) {
+    if (!isSameSnapshotRef(replayed.snapshot.ref ?? '', checked.currentSnapshotRef)) {
       return failed(options, `lookout-check:snapshot-mismatch: classified ${checked.currentSnapshotRef}, replayed ${replayed.snapshot.ref ?? "none"}`);
     }
   }
