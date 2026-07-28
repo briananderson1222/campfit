@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildReviewSessionEvents, defaultReviewSessionName, renderReviewWorkbenchHtml } from '@kontourai/survey/review-workbench';
+import { bindReviewQueue, buildReviewSessionEvents, defaultReviewSessionName, renderReviewWorkbenchHtml } from '@kontourai/survey/review-workbench';
 import type { ReviewQueueSessionState } from '@kontourai/survey/review-workbench';
 import { describe, expect, it } from 'vitest';
 
@@ -112,6 +112,7 @@ describe('fresh-discovery review presentation', () => {
       sessionName: defaultReviewSessionName,
       snapshot,
       snapshotHash: hashSurveyReviewSnapshot(snapshot),
+      binding: bindReviewQueue(snapshot, { sessionName: defaultReviewSessionName }),
       proposalStatus: 'PENDING',
       createdBy: 'owner@campfit.test',
       createdAt: '2026-07-13T12:30:00.000Z',

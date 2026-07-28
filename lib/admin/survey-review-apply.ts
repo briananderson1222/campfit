@@ -1,7 +1,13 @@
 import type { ReviewDecision, ReviewSessionEvent } from '@kontourai/survey';
 import { applyReviewSession } from '@kontourai/survey/review-workbench/server-review-session';
-import type { ReviewWorkbenchResult } from '@kontourai/survey/review-workbench';
+import {
+  assertReviewQueueBinding,
+  UnattestedReviewQueueError,
+  type ReviewQueueBinding,
+  type ReviewWorkbenchResult,
+} from '@kontourai/survey/review-workbench';
 import type { CampReviewQueueSession } from './survey-review-items';
+import { SurveyReviewSessionStaleError } from './survey-review-sessions';
 import type { CampChangeProposal } from './types';
 
 export interface SurveyReviewApplyResult {
@@ -34,10 +40,39 @@ export function deriveCampApplyFromSurveySession(opts: {
     readonly sessionName: string;
     readonly snapshotHash: string;
     readonly updatedAt: string;
+    /**
+     * The queue binding persisted when this session's round opened (survey
+     * 2.4.0 queue-binding attestation). When present, the apply derivation
+     * below refuses a queue whose bytes or item set moved after the open.
+     * Absent binding = byte-for-byte 2.3.x behavior (additive adoption).
+     */
+    readonly binding?: ReviewQueueBinding;
   };
 }): SurveyReviewApplyResult {
   const mode = opts.mode ?? 'full';
   validateSessionItems(opts.proposal, opts.session);
+
+  // Queue-binding attestation (survey 2.4.0): the STORED binding, taken when
+  // the round opened, must attest the exact queue this apply derives from.
+  // `applyReviewSession` (below) does not expose
+  // `deriveServerReviewSessionApplyResult`'s `binding` option, so the kernel
+  // runs the identical check that option runs first — the same
+  // `assertReviewQueueBinding(binding, record.snapshot, { sessionName })`
+  // call, against the same arguments. Refusal surfaces as
+  // `SurveyReviewSessionStaleError`, so it flows through exactly the paths
+  // staleness already does (409 at the approve route).
+  if (opts.serverSession?.binding) {
+    try {
+      assertReviewQueueBinding(opts.serverSession.binding, opts.session, {
+        sessionName: opts.serverSession.sessionName,
+      });
+    } catch (error) {
+      if (error instanceof UnattestedReviewQueueError) {
+        throw new SurveyReviewSessionStaleError(error.message);
+      }
+      throw error;
+    }
+  }
 
   const alreadyApplied = new Set(opts.proposal.appliedFields ?? []);
 

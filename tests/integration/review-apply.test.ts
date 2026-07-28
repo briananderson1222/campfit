@@ -55,9 +55,17 @@ import { sessionClaimId } from "@/lib/admin/verification-policy";
 import { campfitSessionVocabulary } from "@/lib/trust-vocabulary";
 import {
   getOrCreateSurveyReviewSessionForProposal,
+  getSurveyReviewSessionForProposal,
+  hashSurveyReviewSnapshot,
   type SurveyReviewSessionRecord,
 } from "@/lib/admin/survey-review-sessions";
-import { replaceSurveyReviewEvents } from "@/lib/admin/survey-review-events";
+import { deriveCampApplyFromSurveySession } from "@/lib/admin/survey-review-apply";
+import type { CampReviewQueueSession } from "@/lib/admin/survey-review-items";
+import {
+  replaceSurveyReviewEvents,
+  SurveyReviewEventValidationError,
+  validateSurveyReviewEventsForSession,
+} from "@/lib/admin/survey-review-events";
 import type { CampChangeProposal, FieldDiff, ProposedChanges } from "@/lib/admin/types";
 
 import { assertTestDatabase, closeTestPool, getTestPool } from "./test-db";
@@ -968,5 +976,236 @@ describe("applyProposalReview", () => {
       [claimId],
     );
     expect(revokedEvents.rows).toEqual([{ claimId, status: "revoked", method: "review-apply" }]);
+  });
+});
+
+/**
+ * Queue-binding attestation (@kontourai/survey 2.4.0, campfit#152): a review
+ * decision is only projectable against the exact queue bytes it was recorded
+ * against. The binding is taken ONCE — by
+ * `getOrCreateSurveyReviewSessionForProposal`, when the round opens, in the
+ * same transaction as the queue row — and every later read/apply validates
+ * the stored queue against that STORED binding, never one recomputed from the
+ * bytes being checked.
+ *
+ * The discriminating tamper below is the coordinated one: the snapshot's
+ * bytes are edited AND the `snapshotHash` column is rewritten to agree — the
+ * exact "digest a writer recomputes as it saves" tautology (survey#213 /
+ * fieldwork#60) that a stored-hash-vs-stored-bytes comparison can never see.
+ * Only the open-time binding refuses it.
+ */
+describe("queue-binding attestation", () => {
+  /** Post-open queue edit that keeps the item set (so only bytes move). */
+  function tamperSnapshot(snapshot: CampReviewQueueSession): CampReviewQueueSession {
+    const clone = JSON.parse(JSON.stringify(snapshot)) as CampReviewQueueSession;
+    return {
+      ...clone,
+      notesByItemName: { [clone.items[0]!.metadata.name]: "note injected after the round opened" },
+    };
+  }
+
+  /** Coordinated write: edited queue + a snapshotHash recomputed to agree with it. Binding left as opened. */
+  async function tamperStoredQueue(session: SurveyReviewSessionRecord): Promise<CampReviewQueueSession> {
+    const tampered = tamperSnapshot(session.snapshot);
+    await getTestPool().query(
+      `UPDATE "SurveyReviewSession" SET snapshot = $1::jsonb, "snapshotHash" = $2 WHERE id = $3`,
+      [JSON.stringify(tampered), hashSurveyReviewSnapshot(tampered), session.id],
+    );
+    return tampered;
+  }
+
+  it("honest round-trip: the round opens with a persisted binding and an untouched queue applies cleanly", async () => {
+    const pool = getTestPool();
+    const { campId, proposalId, session } = await seedReview({
+      campOverrides: { description: "" },
+      proposedChanges: {
+        description: fieldDiff("", "Bound proposed description.", { mode: "populate" }),
+      },
+    });
+
+    // The binding was persisted beside the queue when the round opened, and
+    // it attests exactly the stored queue: same digest the session row
+    // carries, same item set, same session name.
+    expect(session.binding).not.toBeNull();
+    expect(session.binding!.kind).toBe("ReviewQueueBinding");
+    expect(session.binding!.spec.snapshotHash).toBe(session.snapshotHash);
+    expect(session.binding!.spec.itemNames).toEqual(
+      session.snapshot.items.map((item) => item.metadata.name).sort(),
+    );
+
+    await decide(session, { description: "accept-proposed" });
+    const result = await applyProposalReview({
+      proposalId,
+      reviewSessionId: session.id,
+      reviewer: REVIEWER,
+      keepPending: false,
+    });
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.appliedFields).toEqual(["description"]);
+    const campRow = await queryCamp(pool, campId);
+    expect(campRow?.description).toBe("Bound proposed description.");
+  });
+
+  it("read: refuses a queue edited after the round opened, even when the hash column was rewritten to agree", async () => {
+    const { proposalId, session } = await seedReview({
+      proposedChanges: {
+        description: fieldDiff("", "Description under review.", { mode: "populate" }),
+      },
+    });
+
+    await tamperStoredQueue(session);
+
+    // The stored hash agrees with the stored bytes (the tautology), so only
+    // the open-time binding can notice the queue moved.
+    await expect(
+      getSurveyReviewSessionForProposal({ proposalId, reviewSessionId: session.id }),
+    ).rejects.toBeInstanceOf(SurveyReviewSessionStaleError);
+  });
+
+  it("apply: refuses the same coordinated post-open edit end-to-end and writes nothing", async () => {
+    const pool = getTestPool();
+    const { campId, proposalId, session } = await seedReview({
+      campOverrides: { description: "" },
+      proposedChanges: {
+        description: fieldDiff("", "Honest proposed description.", { mode: "populate" }),
+      },
+    });
+
+    // Decisions recorded against the honest queue, THEN the queue moves.
+    await decide(session, { description: "accept-proposed" });
+    await tamperStoredQueue(session);
+
+    await expect(
+      applyProposalReview({
+        proposalId,
+        reviewSessionId: session.id,
+        reviewer: REVIEWER,
+        keepPending: false,
+      }),
+    ).rejects.toBeInstanceOf(SurveyReviewSessionStaleError);
+
+    const proposalRow = await queryProposal(pool, proposalId);
+    expect(proposalRow?.status).toBe("PENDING");
+    const campRow = await queryCamp(pool, campId);
+    expect(campRow?.description).toBe("");
+  });
+
+  it("apply kernel: the binding refuses a moved queue independently of the read-path guard", async () => {
+    // Direct call into deriveCampApplyFromSurveySession — bypassing
+    // getSurveyReviewSessionForProposal's own refusal — so this test stays
+    // red if ONLY the kernel's binding assertion is removed. The record-level
+    // snapshotHash is deliberately recomputed to agree with the moved bytes,
+    // so the pre-existing freshness comparison passes and the binding is the
+    // sole refusing guard.
+    const { proposal, session } = await seedReview({
+      proposedChanges: {
+        description: fieldDiff("", "Kernel-guard description.", { mode: "populate" }),
+      },
+    });
+
+    const tampered = tamperSnapshot(session.snapshot);
+    const events = buildReviewSessionEvents({
+      ...(tampered as ReviewQueueSessionState),
+      decisionsByItemName: { [tampered.items[0]!.metadata.name]: "accept-proposed" },
+    });
+
+    expect(() =>
+      deriveCampApplyFromSurveySession({
+        proposal,
+        session: tampered,
+        events,
+        mode: "full",
+        serverSession: {
+          sessionName: session.sessionName,
+          snapshotHash: hashSurveyReviewSnapshot(tampered),
+          updatedAt: session.updatedAt,
+          binding: session.binding!,
+        },
+      }),
+    ).toThrow(SurveyReviewSessionStaleError);
+  });
+
+  it("events path: the stored binding refuses event writes derived against a moved queue", async () => {
+    // Direct call into validateSurveyReviewEventsForSession — the function
+    // that passes the stored binding to deriveServerReviewSessionApplyResult —
+    // with a record whose snapshotHash agrees with the moved bytes, so the
+    // binding pass-through is the sole refusing guard.
+    const { session } = await seedReview({
+      proposedChanges: {
+        description: fieldDiff("", "Events-guard description.", { mode: "populate" }),
+      },
+    });
+
+    const tampered = tamperSnapshot(session.snapshot);
+    const events = buildReviewSessionEvents({
+      ...(tampered as ReviewQueueSessionState),
+      decisionsByItemName: { [tampered.items[0]!.metadata.name]: "accept-proposed" },
+    });
+
+    expect(() =>
+      validateSurveyReviewEventsForSession(
+        {
+          ...session,
+          snapshot: tampered,
+          snapshotHash: hashSurveyReviewSnapshot(tampered),
+        },
+        events,
+      ),
+    ).toThrow(SurveyReviewEventValidationError);
+  });
+
+  it("read: refuses a binding taken for a different session's queue", async () => {
+    const foreign = await seedReview({
+      proposedChanges: {
+        description: fieldDiff("", "Foreign session description.", { mode: "populate" }),
+      },
+    });
+    const target = await seedReview({
+      proposedChanges: {
+        contactPhone: fieldDiff(null, "555-0100"),
+      },
+    });
+
+    // Swap in the OTHER round's binding. The stored hash still agrees with
+    // the stored bytes and the queue still matches the proposal, so the two
+    // pre-existing hash comparisons both pass — only the binding's item-set/
+    // digest comparison can refuse.
+    await getTestPool().query(
+      `UPDATE "SurveyReviewSession" SET binding = $1::jsonb WHERE id = $2`,
+      [JSON.stringify(foreign.session.binding), target.session.id],
+    );
+
+    await expect(
+      getSurveyReviewSessionForProposal({
+        proposalId: target.proposalId,
+        reviewSessionId: target.session.id,
+      }),
+    ).rejects.toBeInstanceOf(SurveyReviewSessionStaleError);
+  });
+
+  it("open: a session carrying a foreign binding is recreated with its own, never served as fresh", async () => {
+    const foreign = await seedReview({
+      proposedChanges: {
+        description: fieldDiff("", "Foreign session description.", { mode: "populate" }),
+      },
+    });
+    const target = await seedReview({
+      proposedChanges: {
+        contactPhone: fieldDiff(null, "555-0100"),
+      },
+    });
+
+    await getTestPool().query(
+      `UPDATE "SurveyReviewSession" SET binding = $1::jsonb WHERE id = $2`,
+      [JSON.stringify(foreign.session.binding), target.session.id],
+    );
+
+    // The open path must treat the unattested row as not-fresh and mint a
+    // NEW round with its own binding — not hand the tampered one back.
+    const reopened = await getOrCreateSurveyReviewSessionForProposal(target.proposal, { actorId: REVIEWER });
+    expect(reopened.id).not.toBe(target.session.id);
+    expect(reopened.binding).not.toBeNull();
+    expect(reopened.binding!.spec.snapshotHash).toBe(reopened.snapshotHash);
   });
 });

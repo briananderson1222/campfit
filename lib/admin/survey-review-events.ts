@@ -6,6 +6,7 @@ import {
   ServerReviewSessionEventValidationError,
   StaleServerReviewSessionError,
 } from '@kontourai/survey/review-workbench/server-review-session';
+import { UnattestedReviewQueueError } from '@kontourai/survey/review-workbench';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
@@ -188,9 +189,19 @@ export function validateSurveyReviewEventsForSession(
         updatedAt: reviewSession.updatedAt,
       },
       events,
+      // Queue-binding attestation (survey 2.4.0): the STORED binding, taken
+      // when the round opened — never recomputed here — so the derivation
+      // refuses a queue whose bytes or item set moved after the open.
+      // (Legacy pre-021 rows have none; the session getter already refuses
+      // to serve those, so `undefined` here means a caller-built record.)
+      binding: reviewSession.binding ?? undefined,
     });
   } catch (error) {
-    if (error instanceof ServerReviewSessionEventValidationError || error instanceof StaleServerReviewSessionError) {
+    if (
+      error instanceof ServerReviewSessionEventValidationError
+      || error instanceof StaleServerReviewSessionError
+      || error instanceof UnattestedReviewQueueError
+    ) {
       throw new SurveyReviewEventValidationError(error.message);
     }
     throw error;

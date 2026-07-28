@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildReviewSessionEvents } from '@kontourai/survey/review-workbench';
+import { bindReviewQueue, buildReviewSessionEvents } from '@kontourai/survey/review-workbench';
 
 import {
   SurveyReviewEventValidationError,
@@ -85,6 +85,9 @@ const reviewSession = {
   sessionName: events[0]!.spec.sessionName,
   snapshot,
   snapshotHash: hashSurveyReviewSnapshot(snapshot),
+  // Bound at construction — the same moment the round opens — matching the
+  // production open path in getOrCreateSurveyReviewSessionForProposal.
+  binding: bindReviewQueue(snapshot, { sessionName: events[0]!.spec.sessionName }),
   proposalStatus: proposal.status,
   createdBy: 'operator@example.test',
   createdAt: '2026-06-01T12:00:00.000Z',

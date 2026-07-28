@@ -756,6 +756,11 @@ async function deriveDecision(opts: {
       sessionName: surveySessionRecord.sessionName,
       snapshotHash: surveySessionRecord.snapshotHash,
       updatedAt: surveySessionRecord.updatedAt,
+      // The STORED open-time binding (never recomputed here) — the apply
+      // derivation refuses a queue whose bytes or item set moved after the
+      // round opened. `getSurveyReviewSessionForProposal` above already
+      // refuses unbound/unattested rows, so this is non-null in practice.
+      binding: surveySessionRecord.binding ?? undefined,
     },
   });
 
