@@ -39,16 +39,24 @@ jobs:
         if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v6
 
+      # Reads the exact pnpm version from package.json's packageManager field,
+      # so it needs the same preflight guard the checkout above carries. It also
+      # puts pnpm on PATH for `vercel build`, which picks its package manager
+      # from the lockfile in the checkout.
+      - name: Setup pnpm
+        if: steps.preflight.outputs.enabled == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
       - name: Setup Node.js
         if: steps.preflight.outputs.enabled == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: "22"
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Install dependencies
         if: steps.preflight.outputs.enabled == 'true'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
         if: steps.preflight.outputs.enabled == 'true'

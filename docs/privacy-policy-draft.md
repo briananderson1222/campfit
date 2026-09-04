@@ -248,7 +248,7 @@ repository root. "Verified" = confirmed present in the codebase as described on
 | 6 | We never see or store passwords (Supabase manages them) | No password column in `prisma/schema.prisma` `User`; auth via `@supabase/ssr` | Yes |
 | 7 | We store saved camps, dates, notes, per-camp notify prefs | `prisma/schema.prisma` model `SavedCamp` (notes, notifyEmail/Push/Sms, savedAt); `app/api/saves/route.ts` | Yes |
 | 8 | Account notification preferences exist (email active) | `prisma/schema.prisma` `User.notifyEmail/notifyPush/notifySms` | Yes |
-| 9 | Push and SMS notifications are NOT active features today | No `web-push` dependency in `package-lock.json`; no code reads/writes `PushSubscription`; no SMS provider; `notifyPush/Sms` are display-only in `components/dashboard-client.tsx` | Yes |
+| 9 | Push and SMS notifications are NOT active features today | No `web-push` dependency in `pnpm-lock.yaml`; no code reads/writes `PushSubscription`; no SMS provider; `notifyPush/Sms` are display-only in `components/dashboard-client.tsx` | Yes |
 | 10 | Payments processed by Stripe on Stripe-hosted pages | `app/api/stripe/checkout/route.ts` (`stripe.checkout.sessions.create` → redirect `session.url`); `app/api/stripe/portal/route.ts` (billing portal) | Yes |
 | 11 | Card details never touch CampFit servers | No card fields received anywhere in `app/api/stripe/*`; only hosted Checkout/Portal used | Yes |
 | 12 | We store Stripe customer/subscription IDs + tier only | `prisma/schema.prisma` `User.stripeCustomerId/stripeSubscriptionId/tier`; `app/api/stripe/webhook/route.ts` writes them | Yes |
@@ -262,7 +262,7 @@ repository root. "Verified" = confirmed present in the codebase as described on
 | 20 | Hosted on Vercel; Vercel Cron for notifications | `vercel.json` (crons → `/api/cron/notify`); deployment domain camp.fit | Yes |
 | 21 | We use Vercel Web Analytics (cookieless) | `@vercel/analytics` + `<Analytics/>` in `app/layout.tsx` | **PENDING — NOT on main.** PR #1 (`vercel/install-vercel-web-analytics-f-ynlia0`, commit `4d902e4`) is still OPEN/unmerged as of 2026-07-03. See "Surprising findings." |
 | 22 | Phone, child age range, preferred neighborhoods/categories NOT collected today | `prisma/schema.prisma` `User` defines `phoneNumber/childAgeMin/childAgeMax/preferredNeighborhoods/preferredCategories`, but grep found NO read/write path in `app/` or `lib/` | Yes |
-| 23 | No third-party ad cookies / product analytics / session replay / error tracking | No Sentry, PostHog, GA/gtag, Mixpanel, or FullStory in `package.json`/`package-lock.json` | Yes |
+| 23 | No third-party ad cookies / product analytics / session replay / error tracking | No Sentry, PostHog, GA/gtag, Mixpanel, or FullStory in `package.json`/`pnpm-lock.yaml` | Yes |
 | 24 | We don't collect precise user geolocation | Only camp `latitude/longitude` (facility locations) in `prisma/schema.prisma`; no user geolocation captured | Yes |
 | 25 | AI providers process camp data, not user PII | `ANTHROPIC_API_KEY/ZAI_API_KEY/GEMINI_API_KEY` used only in `lib/ingestion/` and `app/api/admin/` | Yes |
 | 26 | We do not sell personal information | No data-sharing/sale code path exists | Yes (absence) |
