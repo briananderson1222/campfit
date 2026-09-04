@@ -25,8 +25,14 @@ public directory. The canonical production domain is **https://camp.fit**.
 1. Install dependencies:
 
    ```sh
-   npm install
+   pnpm install
    ```
+
+   The pnpm version is pinned in `package.json` (`packageManager`). Dependency
+   install scripts are blocked by default; the only packages allowed to run one
+   are listed under `allowBuilds` in `pnpm-workspace.yaml`, pinned by version.
+   Scripts are still run with `npm run …` — that only invokes `package.json`
+   scripts and does not depend on which tool installed `node_modules`.
 
 2. Copy `.env.example` to `.env.local` and fill in the values you need. Not
    every variable is required for every workflow — see the comments in

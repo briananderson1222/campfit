@@ -1,0 +1,36 @@
+# Dependency install scripts are blocked by default (pnpm >= 10). Only the
+# packages listed here, at exactly these versions, may run a build script.
+# esbuild: postinstall selects the platform binary; without it the slower JS
+#   fallback runs (vitest/vite/tsx all load configs through it).
+# sharp: install script links the platform libvips binding; next build's image
+#   optimizer fails closed without it.
+# unrs-resolver: postinstall selects the platform napi binding that
+#   eslint-config-next's import resolver loads.
+# Bump each pin with the dependency.
+allowBuilds:
+  esbuild@0.28.0: true
+  sharp@0.34.5: true
+  unrs-resolver@1.12.2: true
+
+# pnpm 11 no longer reads the "pnpm" field from package.json, and it never read
+# npm's top-level "overrides". These MUST stay byte-identical in value to
+# package.json's "overrides" block, which is kept so the two tools agree:
+#   @hono/node-server: transitive pin (no current dependent resolves it).
+#   postcss: next@16 pins postcss 8.4.31 exactly; "$postcss" lifts it to the
+#     version resolved for the root devDependency (8.5.15).
+overrides:
+  "@hono/node-server": 1.19.14
+  postcss: $postcss
+
+# A newly published version must be at least 24 hours old before it can be
+# resolved into this lockfile. Blunts the most common supply-chain shape (a
+# compromised maintainer publishes and the ecosystem installs within hours).
+# Does not affect installs from an existing lockfile. An urgent security patch
+# is opted in explicitly, by name and version, with the reason in the commit:
+#   minimumReleaseAgeExclude:
+#     - some-package@1.2.3
+minimumReleaseAge: 1440
+
+# mise supplies node and pnpm on developer machines; CI installs the exact
+# version pinned in package.json. Do not reject a same-major pnpm from mise.
+pmOnFail: ignore

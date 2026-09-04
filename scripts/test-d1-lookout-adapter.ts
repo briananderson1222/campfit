@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
 
@@ -33,6 +34,27 @@ import {
 } from "./d0-relation-fixtures";
 
 const ROOT = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
+
+/**
+ * Version of the copy of `pkg` this process would actually import. Resolved
+ * through Node's own module resolution — a hard-coded `node_modules/<pkg>` path
+ * is only valid for a direct dependency under a flat layout, and this repo
+ * installs with pnpm's isolated one. Walks up from the resolved entry point
+ * because most packages' `exports` maps do not expose `./package.json`.
+ */
+function installedVersion(pkg: string): string {
+  let dir = path.dirname(createRequire(import.meta.url).resolve(pkg));
+  for (;;) {
+    const manifestPath = path.join(dir, "package.json");
+    if (fs.existsSync(manifestPath)) {
+      const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { name?: string; version?: string };
+      if (parsed.name === pkg && parsed.version) return parsed.version;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`could not locate the installed package.json for ${pkg}`);
+    dir = parent;
+  }
+}
 
 function makeCamp(overrides: Partial<Camp> = {}): Camp {
   return {
@@ -203,12 +225,12 @@ function characterizeLookoutSeam(): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
   };
-  const lockfile = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8")) as {
-    packages?: Record<string, { version?: string; dependencies?: Record<string, string> }>;
-  };
   assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.3.4", "manifest must exact-pin Lookout");
-  assert.equal(lockfile.packages?.[""]?.dependencies?.["@kontourai/lookout"], "0.3.4", "root lock entry must exact-pin Lookout");
-  assert.equal(lockfile.packages?.["node_modules/@kontourai/lookout"]?.version, "0.3.4", "installed lock entry must resolve Lookout 0.2.0");
+  // Read the version off the copy that is actually on disk rather than off a
+  // lockfile entry. pnpm's isolated layout gives no stable node_modules path to
+  // read, and the installed package.json is the stronger claim anyway: it is
+  // what `import "@kontourai/lookout"` above resolves to.
+  assert.equal(installedVersion("@kontourai/lookout"), "0.3.4", "installed Lookout must resolve to 0.3.4");
 
   assert.equal(compareValue(" Denver ", "denver", normalizeScalar).changed, false);
   assert.equal(compareValue({ b: 2, a: 1 }, { a: 1, b: 2 }).changed, false);
