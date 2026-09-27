@@ -60,8 +60,22 @@
  * record captures whether the corroborating observation shared the same
  * `sourceUrl` (`sameSourceUrl`) so a future, stricter policy can filter on it
  * without re-deriving anything — informational, NOT a gate on `exact`.
+ *
+ * A value a reviewer rejected never corroborates (campfit#156): the same
+ * extractor repeating a value a human already judged wrong is evidence
+ * against it, not independent agreement. Derived from what is stored:
+ *  - status `REJECTED`: the whole proposal was rejected; none of its fields
+ *    count.
+ *  - `rejectedFields`: fields a reviewer rejected on this proposal in any
+ *    review (full, partial, or keep-pending), read from the per-field
+ *    `field_rejected` review records (`recordReviewDecision`). These fields
+ *    do not count, whatever the proposal's status.
+ *  - Every other field counts, as before — including on `SKIPPED` rows,
+ *    which are proposals a newer crawl superseded before anyone judged them.
+ * `appliedFields` is not used: a full approval does not write it, so its
+ * absence does not mean a field was rejected.
  */
-import type { ProposedChanges } from './types';
+import type { ProposalStatus, ProposedChanges } from './types';
 
 export interface FieldCorroboration {
   field: string;
@@ -80,6 +94,14 @@ export interface ProposalHistoryRow {
   sourceUrl: string;
   crawlRunId: string | null;
   createdAt: string;
+  status: ProposalStatus;
+  /** Fields a reviewer rejected on this proposal (from its `field_rejected` review records). */
+  rejectedFields: readonly string[];
+}
+
+/** Whether a reviewer rejected `field`'s value on `row` — see the module header. */
+function reviewerRejected(row: ProposalHistoryRow, field: string): boolean {
+  return row.status === 'REJECTED' || row.rejectedFields.includes(field);
 }
 
 function normalizeForComparison(value: unknown): unknown {
@@ -127,6 +149,7 @@ export function deriveFieldCorroboration(params: {
     // pair is excluded for the pre-existing reason (same-crawl retry).
     if (row.crawlRunId === null || targetCrawlRunId === null) continue;
     if (row.crawlRunId === targetCrawlRunId) continue;
+    if (reviewerRejected(row, field)) continue;
     if (!valuesMatch(diff.new, targetValue)) continue;
 
     corroboratingProposalIds.push(row.id);

@@ -166,11 +166,14 @@ const PROPOSAL_HISTORY_DEPTH_PER_CAMP = 20;
 
 /**
  * One query, bounded per-camp via a window function, returning every Camp's
- * recent `CampChangeProposal` history (any status — a rejected/approved
- * prior proposal for the same field/value still corroborates, since
- * corroboration is about independent OBSERVATION agreement, not about the
- * prior proposal's own review outcome) as `deriveFieldCorroboration`'s input
- * shape. Grouped into a `Map<campId, ProposalHistoryRow[]>` in JS.
+ * recent `CampChangeProposal` history (any status) as
+ * `deriveFieldCorroboration`'s input shape, with each row's `status` and the
+ * fields a reviewer rejected on it. The rejected fields come from the
+ * per-field `field_rejected` review records `recordReviewDecision` writes to
+ * `"CrawlMetric"` (keyed by the proposal's `crawlRunId`, which is indexed, and
+ * `dimensions.proposalId`). A rejected value does not corroborate — see
+ * claim-corroboration.ts. Grouped into a `Map<campId, ProposalHistoryRow[]>`
+ * in JS.
  */
 export async function getCampProposalHistoryBatch(pool: Pool, campIds: string[]): Promise<Map<string, ProposalHistoryRow[]>> {
   const map = new Map<string, ProposalHistoryRow[]>();
@@ -183,10 +186,17 @@ export async function getCampProposalHistoryBatch(pool: Pool, campIds: string[])
     sourceUrl: string;
     crawlRunId: string | null;
     createdAt: string | Date;
+    status: ProposalStatus;
+    rejectedFields: string[] | null;
   }>(
-    `SELECT id, "campId", "proposedChanges", "sourceUrl", "crawlRunId", "createdAt"
+    `SELECT id, "campId", "proposedChanges", "sourceUrl", "crawlRunId", "createdAt", status,
+            (SELECT array_agg(DISTINCT m.dimensions->>'field')
+               FROM "CrawlMetric" m
+              WHERE m."crawlRunId" = ranked."crawlRunId"
+                AND m."metricName" = 'field_rejected'
+                AND m.dimensions->>'proposalId' = ranked.id) AS "rejectedFields"
      FROM (
-       SELECT id, "campId", "proposedChanges", "sourceUrl", "crawlRunId", "createdAt",
+       SELECT id, "campId", "proposedChanges", "sourceUrl", "crawlRunId", "createdAt", status,
               ROW_NUMBER() OVER (PARTITION BY "campId" ORDER BY "createdAt" DESC) AS rn
        FROM "CampChangeProposal"
        WHERE "campId" = ANY($1::text[])
@@ -202,6 +212,8 @@ export async function getCampProposalHistoryBatch(pool: Pool, campIds: string[])
       sourceUrl: row.sourceUrl,
       crawlRunId: row.crawlRunId,
       createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+      status: row.status,
+      rejectedFields: row.rejectedFields ?? [],
     };
     const existing = map.get(row.campId);
     if (existing) existing.push(historyRow);
