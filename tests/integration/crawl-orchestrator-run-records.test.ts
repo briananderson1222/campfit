@@ -87,6 +87,9 @@ import { getUncrawlableCamps, getUnassignedSourceFailures } from '@/lib/admin/cr
 import type { IngestionSourceConfig } from '@/lib/ingestion/sources';
 import type { TraverseProposalSink } from '@/lib/ingestion/traverse-pipeline';
 import type { TraverseRecrawlResult } from '@/lib/ingestion/traverse-recrawl-adapter';
+import { assembleItems } from '@/lib/ingestion/traverse-item-grouping';
+import { buildTraverseItemProposalRecords } from '@/lib/ingestion/traverse-extractor';
+import type { ExtractionProposal, ExtractionResult } from '@kontourai/traverse';
 
 let pool: Pool;
 
@@ -379,6 +382,53 @@ describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () =
     // the bug; this just re-confirms convergence didn't regress them.
     const uncrawlable = await getUncrawlableCamps();
     expect(uncrawlable.some((row) => row.campId === errCampId)).toBe(true);
+  });
+
+  // campfit#157: a price tier the page does not state is dropped; the drop
+  // must reach an operator even when no proposal is created.
+  describe('dropped price tiers reach the run camp log', () => {
+    const ALL_TIERS_UNSTATED: ExtractionProposal[] = [
+      { fieldPath: 'items[].name', pathIndices: [0], candidateValue: 'Unpriced Camp', confidence: 0.9, provenance: { excerpt: 'Unpriced Camp', locator: 'chars:0-13' }, extractor: 'stub' },
+      { fieldPath: 'items[].pricing[].amount', pathIndices: [0, 0], candidateValue: null, confidence: 0.9, provenance: { excerpt: 'Call for pricing', locator: 'chars:20-36' }, extractor: 'stub' },
+    ];
+
+    it('camp strategy: an all-tiers-unstated recrawl with no changes records the warning on its campLog entry', async () => {
+      const campId = await seedCamp({ name: 'Unpriced Camp', websiteUrl: 'https://unpriced.example.test/' });
+      const [item] = assembleItems(ALL_TIERS_UNSTATED);
+      runTraverseRecrawlForCamp.mockResolvedValue({ ...okRecrawlResult(), proposedChanges: {}, operatorWarnings: item!.operatorWarnings });
+
+      const run = await runCrawlPipeline({ triggeredBy: 'test:dropped-price-camp', trigger: 'MANUAL', campIds: [campId], concurrency: 1 });
+
+      const stored = await getCrawlRun(run.id);
+      const entry = stored!.campLog.find((e) => e.campId === campId)!;
+      expect(entry.status).toBe('no_changes');
+      expect(entry.warnings?.some((w) => w.includes('"Call for pricing" dropped'))).toBe(true);
+    });
+
+    it('sources strategy: a real traverse record for an all-tiers-unstated item carries the warning into campLog', async () => {
+      runTraversePipelineForSource.mockImplementation(async (src: IngestionSourceConfig, deps: { sink: TraverseProposalSink }) => {
+        const [record] = buildTraverseItemProposalRecords(
+          { proposals: ALL_TIERS_UNSTATED, raw: { response: '', model: 'stub' }, extractedAt: '2026-01-01T00:00:00.000Z' } as ExtractionResult,
+          { sourceUrl: src.url },
+        );
+        const proposalId = await deps.sink(record!, { sourceKey: src.key, sourceUrl: src.url, snapshotRef: null, snapshotBodyHash: null });
+        return {
+          source: src.key, url: src.url, ok: true, itemCount: 1,
+          routedProposalIds: [proposalId], routedFieldCount: 1, snapshotRef: null, snapshotBodyHash: null,
+          fetchError: null, extractionError: null, warnings: [], tokensUsed: 1, providerCalls: 1, model: 'stub', latencyMs: 1,
+        };
+      });
+
+      const run = await runCrawlPipeline({
+        triggeredBy: 'test:dropped-price-source',
+        trigger: 'MANUAL',
+        sources: [{ key: 'unpriced-source', name: 'Unpriced Source', url: 'https://example.test/unpriced' }],
+      });
+
+      const stored = await getCrawlRun(run.id);
+      expect(stored!.campLog).toHaveLength(1);
+      expect(stored!.campLog[0]!.warnings?.some((w) => w.includes('"Call for pricing" dropped'))).toBe(true);
+    });
   });
 
   it('(1)(2)(3) sources strategy: mid-run progress increments, joinable/documented identifiers, COMPLETED on a mixed run', async () => {

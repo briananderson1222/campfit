@@ -60,6 +60,8 @@ export interface FieldChip {
   sourceHost: string | null;
   /** Self-reported confidence; null when the extractor reported none (unknown, not 0). */
   confidence: number | null;
+  /** ISO time of the recent approval this change contradicts; null when it contradicts none. Such chips are never selectable. */
+  contradictedApprovalAt: string | null;
 }
 
 const EVIDENCE_EXCERPT_PREVIEW_LENGTH = 140;
@@ -96,6 +98,7 @@ export function corroboratedFieldChips(
       sourceHref: source.href,
       sourceHost: source.host,
       confidence: diff?.confidence ?? null,
+      contradictedApprovalAt: diff?.contradictsRecentApproval === true ? (diff.recentApprovalAt ?? '') : null,
     };
   });
 }

@@ -234,6 +234,32 @@ describe('applyBatchAcceptedClaims', () => {
     ]));
   });
 
+  // campfit#155: a change contradicting a recent approval needs individual review.
+  it('(b3) an exact-corroborated change flagged contradictsRecentApproval is excluded from batch accept', async () => {
+    const pool = getTestPool();
+    const campId = await insertCamp(pool, { city: 'Denver' });
+    const proposalId = await insertProposal(pool, {
+      campId,
+      proposedChanges: { city: fieldDiff('Denver', 'Boulder', { contradictsRecentApproval: true, recentApprovalAt: new Date().toISOString() }) },
+      crawlRunId: await insertCrawlRun(pool),
+    });
+    await seedCorroboratingHistory(pool, campId, 'city', 'Boulder');
+
+    const result = await applyBatchAcceptedClaims(pool, {
+      selections: [{ proposalId, field: 'city' }],
+      actor: ACTOR,
+      historyByCamp: await historyFor(pool, campId),
+    });
+
+    expect(result.outcomes).toEqual([{
+      proposalId,
+      field: 'city',
+      status: 'excluded_not_corroborated',
+      message: 'Changes a value a reviewer approved in the last 30 days; review it individually.',
+    }]);
+    expect((await queryCamp(pool, campId))?.city).toBe('Denver');
+  });
+
   it('(b) a selection with NO corroborating history is excluded, Camp unchanged, no Evidence written', async () => {
     const pool = getTestPool();
     const campId = await insertCamp(pool, { city: '' });

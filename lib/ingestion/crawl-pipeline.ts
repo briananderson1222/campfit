@@ -807,6 +807,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               proposalId,
               confidence: result.overallConfidence,
               newProposalsDelta,
+              warnings: result.operatorWarnings,
             });
           }
         } catch (err) {
@@ -937,6 +938,7 @@ async function runSourceSweepStrategy(
           proposalId,
           confidence: record.overallConfidence,
           newProposalsDelta: changesFound > 0 ? 1 : 0,
+          warnings: record.operatorWarnings,
         });
         itemsProcessed++;
         return proposalId;

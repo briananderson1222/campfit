@@ -12,6 +12,8 @@ export interface CrawlCampLogEntry {
   proposals: number;
   fieldsChanged: string[];
   error?: string;
+  /** Extraction notes an operator must see even when no proposal was created (e.g. a dropped price tier). */
+  warnings?: string[];
   durationMs: number;
   processedAt: string; // ISO
 }

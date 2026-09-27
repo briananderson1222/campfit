@@ -655,6 +655,44 @@ async function testSuppressionFires() {
   });
 }
 
+// ─── 4b. campfit#157: a partially extracted price list never replaces live tiers ─
+
+async function testPartialPricingNeverReplacesLiveTiers() {
+  const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>
+    <p>Standard rate: $350 per week</p><p>Members $300</p></main></body></html>`;
+  const livePricing = [
+    { id: "price-std", label: "Standard rate: $350 per week", amount: 350, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+    { id: "price-mem", label: "Members $300", amount: 300, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+  ];
+  // Only the first tier states its unit on the page.
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[0].pricing[0].amount", candidateValue: 350, needle: "$350 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$350 per week" },
+    { fieldPath: "items[0].pricing[1].amount", candidateValue: 300, needle: "Members $300" },
+  ];
+  const result = await runTraverseRecrawlForCamp({
+    campId: "camp-partial-price",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-partial-price", pricing: livePricing as unknown as Camp["pricing"] }),
+    provider: createStubProvider(specs, { model: "stub-partial-price" }),
+    store: createInMemorySnapshotStore(),
+    mode: "live-with-capture",
+    fetchOptions: makeFixtureFetchOptions(html),
+    log: () => {},
+  });
+  assert.equal(result.ok, true, result.error ?? "");
+  assert.ok(
+    !("pricing" in result.proposedChanges),
+    "a price list missing a tier's unit must not become a pricing diff — approving [$350] would DELETE the live Members tier"
+  );
+  const warnings = result.operatorWarnings ?? [];
+  assert.ok(warnings.some((w) => w.includes('"Members $300" dropped: no unit')), `dropped tier must be named: ${JSON.stringify(warnings)}`);
+  assert.ok(warnings.some((w) => w.startsWith("pricing change withheld")), "the withheld pricing change must be recorded");
+  console.log("✓ campfit#157: a partially extracted price list is withheld (no replace diff that would delete a live tier), with operator warnings");
+}
+
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───
 
 async function testSiteHintsReachProviderCall() {
@@ -1170,6 +1208,7 @@ async function main() {
   await testMultiItemPageMatchesByName();
   await testMultiItemPageAmbiguousFailsLoud();
   await testSuppressionFires();
+  await testPartialPricingNeverReplacesLiveTiers();
   await testSiteHintsReachProviderCall();
   await testNeighborhoodHintReachesProviderCall();
   await testAllFiveCallSitesInvokeSharedPipeline();

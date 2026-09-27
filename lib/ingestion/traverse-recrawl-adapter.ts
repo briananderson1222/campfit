@@ -188,6 +188,8 @@ export interface TraverseRecrawlResult {
   model: string;
   /** full audit payload for `createProposal`'s `rawExtraction` column — already a plain object, not a JSON string. */
   rawExtraction: Record<string, unknown>;
+  /** The matched item's operator-facing notes (AssembledItem.operatorWarnings); the crawl pipeline copies them into the run's camp log. */
+  operatorWarnings?: string[];
   /** display name of the item traverse matched to this camp. Null on a no-items/ambiguous failure (nothing was matched). */
   matchedItemName: string | null;
   /** how many items traverse grouped out of the page (1 on a normal single-camp page; >1 on a shared listing page). */
@@ -424,6 +426,7 @@ export async function runTraverseRecrawlForCamp(
     overallConfidence: computeOverallConfidence(proposedChanges),
     matchedItemName: itemDisplayName(item),
     itemCount: fetchResult.items.length,
+    operatorWarnings: item.operatorWarnings,
     rawExtraction: {
       via: "traverse-recrawl",
       campId: opts.campId,

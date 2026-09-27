@@ -118,6 +118,7 @@ function testItemToProposedChangesExactSerialization() {
     categories: [],
     allProposals: [],
     warnings: [],
+    operatorWarnings: [],
   };
 
   const serialized = JSON.stringify(itemToProposedChanges(

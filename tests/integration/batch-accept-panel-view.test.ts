@@ -73,7 +73,28 @@ describe('corroboratedFieldChips', () => {
       sourceHref: undefined,
       sourceHost: null,
       confidence: 0.5,
+      contradictedApprovalAt: null,
     }]);
+  });
+
+  it('reports a missing confidence as null (unknown), never 0', () => {
+    const chips = corroboratedFieldChips(proposal({
+      proposedChanges: { city: { old: 'Boulder', new: 'Austin' } },
+    }));
+    expect(chips[0]?.confidence).toBeNull();
+  });
+
+  // campfit#155: a change to a recently approved value needs individual review.
+  it('keeps an exact-corroborated real diff unselectable when it contradicts a recent approval, and exposes the approval date', () => {
+    const chips = corroboratedFieldChips(proposal({
+      proposedChanges: {
+        city: { old: 'Boulder', new: 'Austin', confidence: 0.9, contradictsRecentApproval: true, recentApprovalAt: '2026-06-10T00:00:00.000Z' },
+      },
+      fieldCorroboration: {
+        city: { field: 'city', value: 'Austin', exact: true, corroboratingProposalIds: ['other'], corroboratingSourceUrls: ['https://a.test'], sameSourceUrl: false },
+      },
+    }));
+    expect(chips[0]).toMatchObject({ field: 'city', selectable: false, contradictedApprovalAt: '2026-06-10T00:00:00.000Z' });
   });
 
   it('keeps an exact-corroborated populate field unselectable in a mixed proposal', () => {

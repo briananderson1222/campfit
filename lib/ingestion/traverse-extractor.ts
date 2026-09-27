@@ -203,6 +203,8 @@ export interface TraverseItemProposalRecord {
   rawExtraction: Record<string, unknown>;
   /** Non-fatal notes for this item (dropped/clamped proposals, positional-pairing fallback). */
   warnings: string[];
+  /** The subset of `warnings` an operator must see even when no proposal is created (see AssembledItem.operatorWarnings). */
+  operatorWarnings?: string[];
 }
 
 /**
@@ -247,6 +249,7 @@ export function buildTraverseItemProposalRecords(
         warnings: [...(result.warnings ?? []), ...item.warnings],
       },
       warnings: item.warnings,
+      operatorWarnings: item.operatorWarnings,
     };
   });
 }

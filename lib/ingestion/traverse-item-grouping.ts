@@ -110,11 +110,19 @@ export interface AssembledItem {
   schedules: { startDate: string | null; endDate: string | null; label: string; confidence: number }[];
   /**
    * each entry is one price tier, fully reconstructed from its own excerpt(s).
-   * Only tiers whose amount AND unit were both extracted are kept: a tier
-   * missing either is dropped with a warning naming its label, never
-   * defaulted (a missing amount is not 0, a missing unit is not PER_WEEK).
+   * A tier missing its amount or unit is never defaulted (a missing amount is
+   * not 0, a missing unit is not PER_WEEK). If ANY tier on the item is
+   * missing one, `pricing` is empty: approving a pricing change replaces the
+   * camp's whole price list (review-apply deletes and re-inserts), so a
+   * partial list would delete the tiers that could not be extracted.
    */
   pricing: { amount: number; unit: PricingUnit; label: string; confidence: number }[];
+  /**
+   * Notes an operator needs even when no proposal is created: each dropped
+   * price tier, and the withheld pricing change. Also included in `warnings`.
+   * Crawl pipelines copy these into the run's camp log.
+   */
+  operatorWarnings: string[];
   /** every distinct camp-type tag proposed for this item (enum-array family, not row objects). */
   campTypes: EnumArrayEntry[];
   /** every distinct category proposed for this item (enum-array family, not row objects). */
@@ -400,7 +408,8 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         confidence: rowConfidence(row),
       }));
 
-    const pricing: AssembledItem["pricing"] = [];
+    const complete: AssembledItem["pricing"] = [];
+    const operatorWarnings: string[] = [];
     for (const row of pricingResult.rows) {
       if (row.size === 0) continue;
       const label = rowExcerpt(row);
@@ -408,11 +417,19 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       const unit = parsePricingUnit(row.get("unit")?.candidateValue);
       if (amount === null || unit === null) {
         const missing = [amount === null ? "amount" : null, unit === null ? "unit" : null].filter(Boolean).join(" and ");
-        warnings.push(`pricing entry "${label}" dropped: no ${missing} was extracted — a price the page does not state is not emitted`);
+        operatorWarnings.push(`pricing entry "${label}" dropped: no ${missing} was extracted — a price the page does not state is not emitted`);
         continue;
       }
-      pricing.push({ amount, unit, label, confidence: rowConfidence(row) });
+      complete.push({ amount, unit, label, confidence: rowConfidence(row) });
     }
+    const dropped = operatorWarnings.length;
+    if (dropped > 0 && complete.length > 0) {
+      operatorWarnings.push(
+        `pricing change withheld: ${complete.length} complete tier(s) (${complete.map((p) => `"${p.label}"`).join(", ")}) not proposed because ${dropped} tier(s) could not be fully extracted — approving a partial list would delete the camp's other price tiers`
+      );
+    }
+    const pricing = dropped > 0 ? [] : complete;
+    warnings.push(...operatorWarnings);
 
     const enumArrayResults: Record<EnumArraySchemaPath, EnumArrayEntry[]> = {
       campTypes: [],
@@ -437,6 +454,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       categories: enumArrayResults.categories,
       allProposals,
       warnings,
+      operatorWarnings,
     });
   }
 
