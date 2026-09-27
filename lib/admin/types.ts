@@ -35,7 +35,12 @@ export interface CrawlRun {
 export interface FieldDiff {
   old: unknown;
   new: unknown;
-  confidence: number;
+  /** Extractor's self-reported confidence, for ranking only. Absent = not reported (unknown), never 0. */
+  confidence?: number;
+  /** True when this change contradicts a value a reviewer approved recently (see diff-engine.ts). */
+  contradictsRecentApproval?: boolean;
+  /** ISO timestamp of the approval this change contradicts; set with contradictsRecentApproval. */
+  recentApprovalAt?: string;
   excerpt?: string;     // verbatim snippet from source page supporting this value
   sourceUrl?: string;   // URL of the page the excerpt was found on
   mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions

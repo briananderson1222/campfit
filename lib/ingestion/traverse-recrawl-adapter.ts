@@ -17,14 +17,13 @@
  *     to re-crawl". A shared listing/domain page could otherwise match (and
  *     silently overwrite) an unrelated camp by name collision.
  *  2. Produce `ProposedChanges` via `diff-engine.ts`'s `computeDiff` — the
- *     confidence floor (`MIN_CONFIDENCE`), the 30-day/0.8-confidence
- *     suppression of recently-approved fields (`fieldSources`), and the
- *     additive-vs-replace array-diff logic all live there and NOWHERE in
- *     `itemToProposedChanges`, which was built for a first-pass/no-history
- *     "populate a brand new item" case. Reusing `itemToProposedChanges` here
- *     would pass type-checking (both produce `ProposedChanges`) while
- *     silently dropping the single most valuable behavior for a RE-crawl:
- *     not re-annoying reviewers with a field they just approved.
+ *     `contradictsRecentApproval` flag for changes to fields approved in the
+ *     last 30 days (`fieldSources`) and the additive-vs-replace array-diff
+ *     logic live there and NOWHERE in `itemToProposedChanges`, which was
+ *     built for a first-pass/no-history "populate a brand new item" case.
+ *     Reusing `itemToProposedChanges` here would pass type-checking (both
+ *     produce `ProposedChanges`) while silently dropping that re-crawl
+ *     behavior.
  *  3. Never create a new `Camp` row and never route to more than the one
  *     target camp — that's `onboard-url`'s job only.
  *
@@ -73,7 +72,7 @@ export interface TraverseRecrawlOptions {
   campName: string;
   /** the known camp's full current row — `computeDiff`'s `current` (old-value diffing / populate-vs-update). */
   current: Camp;
-  /** the known camp's `fieldSources` — `computeDiff`'s 30-day/0.8-confidence suppression of recently-approved fields. */
+  /** the known camp's `fieldSources` — `computeDiff` flags changes to fields approved in the last 30 days. */
   fieldSources?: Record<string, { approvedAt?: string }>;
   /**
    * Admin-authored `CrawlSiteHint` rows for this camp's domain, already

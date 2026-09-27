@@ -178,7 +178,9 @@ export function BatchAcceptPanel({ proposals }: { proposals: RankedProposal[] })
                         )}
                       </label>
                       <span className="text-[11px] font-semibold text-bark-400">
-                        {Math.round(chip.confidence * 100)}% confidence
+                        {chip.confidence === null
+                          ? 'confidence not reported'
+                          : `${Math.round(chip.confidence * 100)}% confidence`}
                       </span>
                       {chip.sourceHost && (
                         chip.sourceHref ? (

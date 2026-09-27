@@ -58,7 +58,8 @@ export interface FieldChip {
   excerptPreview: string | null;
   sourceHref: string | undefined;
   sourceHost: string | null;
-  confidence: number;
+  /** Self-reported confidence; null when the extractor reported none (unknown, not 0). */
+  confidence: number | null;
 }
 
 const EVIDENCE_EXCERPT_PREVIEW_LENGTH = 140;
@@ -94,7 +95,7 @@ export function corroboratedFieldChips(
       excerptPreview: excerptPreview(diff?.excerpt),
       sourceHref: source.href,
       sourceHost: source.host,
-      confidence: diff?.confidence ?? 0,
+      confidence: diff?.confidence ?? null,
     };
   });
 }
