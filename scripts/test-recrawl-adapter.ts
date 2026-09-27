@@ -531,7 +531,9 @@ async function testMultiItemPageMatchesByName() {
     { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
     { fieldPath: "items[1].name", candidateValue: "Junior Rangers Day Camp", needle: "Junior Rangers Day Camp" },
     { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
     { fieldPath: "items[1].pricing[0].amount", candidateValue: 450, needle: "$450 per week" },
+    { fieldPath: "items[1].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$450 per week" },
   ];
 
   const result = await runTraverseRecrawlForCamp({
@@ -567,6 +569,7 @@ async function testMultiItemPageAmbiguousFailsLoud() {
     { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
     { fieldPath: "items[1].name", candidateValue: "Junior Rangers Day Camp", needle: "Junior Rangers Day Camp" },
     { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
   ];
 
   const result = await runTraverseRecrawlForCamp({

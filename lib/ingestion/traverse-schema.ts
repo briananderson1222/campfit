@@ -45,7 +45,7 @@
  */
 
 import type { TargetFieldSchema } from "@kontourai/traverse";
-import type { CampCategory, CampType, RegistrationStatus } from "@/lib/types";
+import type { CampCategory, CampType, PricingUnit, RegistrationStatus } from "@/lib/types";
 
 // Kept in sync with lib/types.ts — surfaced to the provider so it proposes
 // only valid enum members rather than free text we'd have to reject downstream.
@@ -60,6 +60,11 @@ const CAMP_TYPE_VALUES: CampType[] = [
 
 const REGISTRATION_STATUS_VALUES: RegistrationStatus[] = [
   "OPEN", "FULL", "WAITLIST", "CLOSED", "COMING_SOON", "UNKNOWN",
+];
+
+/** Every `PricingUnit`. Also the allow-list traverse-item-grouping.ts parses a proposed unit against. */
+export const PRICING_UNIT_VALUES: readonly PricingUnit[] = [
+  "PER_WEEK", "PER_SESSION", "PER_DAY", "FLAT", "PER_CAMP",
 ];
 
 /**
@@ -169,7 +174,13 @@ export const CAMP_TARGET_SCHEMA: TargetFieldSchema[] = [
   {
     path: "items[].pricing[].amount",
     type: "number",
-    description: "One price amount in whole dollars for THIS camp. If member/nonmember or multiple tiers are listed, each gets its own pricing[] entry.",
+    description: "One price amount in whole dollars for THIS camp. If member/nonmember or multiple tiers are listed, each gets its own pricing[] entry. Only set when the page states a number — never 0 for a price that is not given.",
+  },
+  {
+    path: "items[].pricing[].unit",
+    type: "enum",
+    enumValues: [...PRICING_UNIT_VALUES],
+    description: "What the SAME price entry's amount (at this index) buys, as stated on the page: PER_WEEK = one week, PER_SESSION = one session, PER_DAY = one day, PER_CAMP = the whole camp/program, FLAT = a one-time fee. Leave unset if the page does not say.",
   },
   {
     path: "items[].campTypes[]",
@@ -197,7 +208,8 @@ export const CAMP_FIELD_HINTS: Record<string, string> = {
   "items[].schedules[].startDate": "Sessions are often written as a range like 'June 9-13, 2026' — the start is the first date. A whole-summer span like 'June 8 to August 7' describing many sessions is NOT one session — only propose it as a schedule if the page genuinely offers a single continuous multi-week session, not a season overview.",
   "items[].schedules[].endDate": "For a range like 'June 9-13, 2026' the end date is 'June 13, 2026' — pair it with the SAME session's startDate.",
   "items[].ageGroups[].minAge": "Ground each age band in its own excerpt (e.g. 'Ages 7-9') — do not pair a minAge from one excerpt with a maxAge from a different age band's excerpt.",
-  "items[].pricing[].amount": "Report the numeric dollar amount only, without the '$' sign or 'per week' suffix.",
+  "items[].pricing[].amount": "Report the numeric dollar amount only, without the '$' sign or any unit suffix (the unit goes in pricing[].unit).",
+  "items[].pricing[].unit": "Pair each unit with the SAME price entry's amount, from the same excerpt (e.g. '$450 per session' -> PER_SESSION). Do not assume PER_WEEK.",
   "items[].name": "If the page lists several distinct camps/courses, extract EACH one as its own items[] entry with its own index — do not collapse them into one page-level name like a site title.",
   "items[].state": "Must be a 2-letter US state abbreviation only (e.g. 'CO'), not a full state name.",
   "items[].zip": "Must be a 5-digit US zip code only.",
