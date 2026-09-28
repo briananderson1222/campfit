@@ -5,8 +5,8 @@ const fixturePath = '/admin/review/survey-fixture';
 // The embedded Survey workbench (Survey 1.12.0 field-diff surface) is the single
 // review UI. Fields render as diff cards; a decision is a per-field "Use proposed"
 // / "Keep current"; the reviewer note lives inside each card's collapsed
-// "Audit details". These specs need a live dev server + .env.local, so they run
-// in campfit CI (not in an offline checkout).
+// "Audit details". These specs need a live dev server + .env.local, so CI runs
+// them only through the manual `survey_browser_proof` job (workflow_dispatch).
 
 test('renders the embedded Survey workbench and records reviewer decisions', async ({ page }) => {
   const consoleErrors = await loadFixture(page);

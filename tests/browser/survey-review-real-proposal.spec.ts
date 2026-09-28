@@ -1,7 +1,9 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // These specs drive a real pending proposal, so they need a live dev server + DB
-// (.env.local) and run in campfit CI. The review surface is the single embedded
+// (.env.local). They WRITE to that database (a Survey decision on a real
+// proposal, never cleaned up), so CI runs them only through the manual
+// `survey_browser_proof` job (workflow_dispatch), never on PRs. The review surface is the single embedded
 // Survey workbench (1.12.0 field-diff cards + per-card audit); the saved-decision
 // trail remains as the audit ledger.
 

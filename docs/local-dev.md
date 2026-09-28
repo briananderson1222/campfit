@@ -53,6 +53,16 @@ Running a DB-backed test against `campfit_local` erases any seed data in that da
 
 The complete admin browser flow still needs Supabase Auth, or a future compatible auth shim. Reproducing authentication is outside this DB-only environment. Data-layer jobs and tests that do not enter authenticated UI flows do not need Supabase credentials.
 
+## CI and the live database
+
+No `pull_request` or `push` job in `.github/workflows/ci.yml` receives the
+repo's `PG*` or `SUPABASE_SERVICE_ROLE_KEY` secrets. DB-backed jobs
+(`verify_admin`, `review_apply_unit_tests`) run against a throwaway `postgres:16`
+service container built from `prisma/migrations`, and `build` uses placeholder
+public Supabase values. The Survey browser proof needs hosted Supabase Auth and
+writes a decision onto a real pending proposal, so it runs only as the manual
+`survey_browser_proof` job (`workflow_dispatch`) and touches the live database.
+
 ## Migration workflow
 
 CampFit uses `node-pg-migrate` to apply the raw SQL files in
