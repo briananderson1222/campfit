@@ -236,7 +236,9 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
-  await pool.query(`TRUNCATE "CrawlRun", "Camp" CASCADE`);
+  // The camp strategy's matchOrCreateProvider creates Provider rows; clear
+  // them too so later files (e.g. provider-create.test.ts) start empty.
+  await pool.query(`TRUNCATE "CrawlRun", "Camp", "Provider" CASCADE`);
   runTraverseRecrawlForCamp.mockReset();
   runTraversePipelineForSource.mockReset();
 });
