@@ -193,8 +193,8 @@ describe('getRankedReviewQueue', () => {
       targetCrawlRunId: runA1,
       field: 'city',
       history: [
-        { id: proposalA, proposedChanges: diff('Austin'), sourceUrl: 'https://example.test/camp', crawlRunId: runA1, createdAt: new Date().toISOString() },
-        { id: 'sibling', proposedChanges: diff('Austin'), sourceUrl: 'https://example.test/camp', crawlRunId: runA2, createdAt: new Date().toISOString() },
+        { id: proposalA, proposedChanges: diff('Austin'), sourceUrl: 'https://example.test/camp', crawlRunId: runA1, createdAt: new Date().toISOString(), status: 'PENDING', rejectedFields: [] },
+        { id: 'sibling', proposedChanges: diff('Austin'), sourceUrl: 'https://example.test/camp', crawlRunId: runA2, createdAt: new Date().toISOString(), status: 'APPROVED', rejectedFields: [] },
       ],
     });
     expect(direct.exact).toBe(proposalARow.fieldCorroboration.city.exact);

@@ -261,7 +261,7 @@ function sourceFailureCampId(sourceKey: string): string {
 export function toLegacyMetricsResult(result: TraverseRecrawlResult): LLMExtractionResult {
   const confidence: Record<string, number> = {};
   for (const [field, diff] of Object.entries(result.proposedChanges)) {
-    confidence[field] = diff.confidence;
+    if (diff.confidence !== undefined) confidence[field] = diff.confidence;
   }
   return {
     extracted: {},
@@ -680,8 +680,8 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
           // Extract + diff — the traverse-backed per-camp adapter
           // (traverse-recrawl-adapter.ts) targets ONLY this camp's own row
           // and already runs `diff-engine.ts`'s `computeDiff` internally
-          // (30-day/0.8-confidence suppression via `fieldSources`, confidence
-          // floor, additive-vs-replace array detection) — no inline
+          // (recent-approval flag via `fieldSources`, additive-vs-replace
+          // array detection) — no inline
           // computeDiff/JSON.parse step needed here anymore (Wave 1 Task 1.3
           // / Wave 2 Task 2.1).
           const fieldSources = (camp as unknown as { fieldSources: Record<string, { approvedAt?: string }> }).fieldSources ?? {};
@@ -807,6 +807,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               proposalId,
               confidence: result.overallConfidence,
               newProposalsDelta,
+              warnings: result.operatorWarnings,
             });
           }
         } catch (err) {
@@ -937,6 +938,7 @@ async function runSourceSweepStrategy(
           proposalId,
           confidence: record.overallConfidence,
           newProposalsDelta: changesFound > 0 ? 1 : 0,
+          warnings: record.operatorWarnings,
         });
         itemsProcessed++;
         return proposalId;

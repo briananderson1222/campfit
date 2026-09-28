@@ -13,10 +13,16 @@ export function isFreshDiscoveryProposal(proposedChanges: ProposedChanges): bool
   return diffs.length > 0 && diffs.every(isPopulateFieldClaim);
 }
 
-/** Batch eligibility requires both independent exact corroboration and a
- * real current-to-proposed diff. */
+/** A change to a value a reviewer approved recently (diff-engine.ts flags
+ * it) needs individual review, never the batch-accept fast path. */
+export function contradictsRecentApproval(diff: FieldDiff | undefined): boolean {
+  return diff?.contradictsRecentApproval === true;
+}
+
+/** Batch eligibility requires independent exact corroboration, a real
+ * current-to-proposed diff, and no contradiction of a recent approval. */
 export function isBatchSelectableFieldClaim(diff: FieldDiff | undefined, exact: boolean): boolean {
-  return exact && !isPopulateFieldClaim(diff);
+  return exact && !isPopulateFieldClaim(diff) && !contradictsRecentApproval(diff);
 }
 
 export function proposedCampName(proposedChanges: ProposedChanges, fallback?: string): string {

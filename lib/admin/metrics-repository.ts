@@ -217,7 +217,7 @@ export function buildRejectedProposalLearningDimensions(opts: {
     excerpt: opts.diff.excerpt,
     proposedValue: summarizeMetricValue(opts.diff.new),
     currentValue: summarizeMetricValue(opts.diff.old),
-    confidence: String(opts.diff.confidence),
+    confidence: opts.diff.confidence === undefined ? undefined : String(opts.diff.confidence),
     mode: opts.diff.mode,
     reviewerNotes: opts.reviewerNotes ?? undefined,
     feedbackTags: opts.feedbackTags?.join(','),

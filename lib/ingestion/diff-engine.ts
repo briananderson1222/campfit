@@ -8,9 +8,39 @@ import {
 } from './diff-policy';
 import { compareRelation, compareValue } from './lookout-diff-adapter';
 
-const MIN_CONFIDENCE = 0.3; // Skip fields below this threshold
-const SUPPRESS_DAYS = 30;  // Re-suppress recently-approved fields at low confidence
-const SUPPRESS_CONFIDENCE = 0.8; // Threshold below which suppression applies
+// A change to a field a reviewer approved within this window is still
+// emitted, flagged `contradictsRecentApproval`, so the queue can order or
+// group it. The extractor's self-reported confidence never decides whether a
+// detected change reaches review: it is carried on the diff for ranking only.
+const RECENT_APPROVAL_DAYS = 30;
+
+/** Self-reported confidence for a field, or undefined when none was reported. */
+function knownConfidence(confidence: Record<string, number>, field: string): number | undefined {
+  const value = confidence[field];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Review signals shared by every emitted diff: the confidence when one was
+ * reported (absent means unknown, not 0), and the recent-approval flag when
+ * the change contradicts a value approved within RECENT_APPROVAL_DAYS.
+ */
+function reviewSignals(
+  conf: number | undefined,
+  src: { approvedAt?: string } | undefined,
+  now: number,
+): Pick<FieldDiff, 'confidence' | 'contradictsRecentApproval' | 'recentApprovalAt'> {
+  const signals: Pick<FieldDiff, 'confidence' | 'contradictsRecentApproval' | 'recentApprovalAt'> = {};
+  if (conf !== undefined) signals.confidence = conf;
+  if (src?.approvedAt) {
+    const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
+    if (daysSince < RECENT_APPROVAL_DAYS) {
+      signals.contradictsRecentApproval = true;
+      signals.recentApprovalAt = src.approvedAt;
+    }
+  }
+  return signals;
+}
 
 const SCALAR_FIELDS = [
   'name', 'organizationName', 'description', 'registrationStatus',
@@ -36,8 +66,7 @@ export function computeDiff(
 
   // Scalar fields
   for (const field of SCALAR_FIELDS) {
-    const conf = confidence[field] ?? 0;
-    if (conf < MIN_CONFIDENCE) continue;
+    const conf = knownConfidence(confidence, field);
 
     const extractedVal = (extracted as Record<string, unknown>)[field];
     if (extractedVal === undefined || extractedVal === null) continue;
@@ -46,17 +75,10 @@ export function computeDiff(
 
     const comparison = compareValue(currentVal, extractedVal, normalizeScalar);
     if (comparison.changed && comparison.change) {
-      // Suppress re-proposals for recently-approved fields at low confidence
-      const src = fieldSources[field];
-      if (src?.approvedAt) {
-        const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
-        if (daysSince < SUPPRESS_DAYS && conf < SUPPRESS_CONFIDENCE) continue;
-      }
-
       const isEmpty = currentVal === null || currentVal === undefined || currentVal === '';
       changes[field] = {
         ...comparison.change,
-        confidence: conf,
+        ...reviewSignals(conf, fieldSources[field], now),
         mode: isEmpty ? 'populate' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
       };
@@ -65,8 +87,7 @@ export function computeDiff(
 
   // Enum array fields (campTypes, categories) — support string or array from LLM
   for (const field of ENUM_ARRAY_FIELDS) {
-    const conf = confidence[field] ?? 0;
-    if (conf < MIN_CONFIDENCE) continue;
+    const conf = knownConfidence(confidence, field);
 
     let extractedVal = (extracted as Record<string, unknown>)[field];
     if (extractedVal === undefined || extractedVal === null) continue;
@@ -80,16 +101,10 @@ export function computeDiff(
 
     const comparison = compareValue(currentItems, extractedVal, normalizeScalar);
     if (comparison.changed && comparison.change) {
-      const src = fieldSources[field];
-      if (src?.approvedAt) {
-        const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
-        if (daysSince < SUPPRESS_DAYS && conf < SUPPRESS_CONFIDENCE) continue;
-      }
-
       const isEmpty = currentItems.length === 0;
       changes[field] = {
         ...comparison.change,
-        confidence: conf,
+        ...reviewSignals(conf, fieldSources[field], now),
         mode: isEmpty ? 'populate' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
       };
@@ -98,8 +113,7 @@ export function computeDiff(
 
   // Array fields — detect full replace vs additive
   for (const field of ARRAY_FIELDS) {
-    const conf = confidence[field] ?? 0;
-    if (conf < MIN_CONFIDENCE) continue;
+    const conf = knownConfidence(confidence, field);
 
     const extractedArr = (extracted as Record<string, unknown>)[field];
     if (!Array.isArray(extractedArr) || extractedArr.length === 0) continue;
@@ -111,13 +125,6 @@ export function computeDiff(
     // One Lookout multiset call supplies equality and additive/replace facts.
     const relation = compareRelation(currentItems, extractedArr, identity);
     if (relation.changed && relation.change) {
-      // Suppress recently-approved array fields too
-      const src = fieldSources[field];
-      if (src?.approvedAt) {
-        const daysSince = (now - new Date(src.approvedAt).getTime()) / 86400000;
-        if (daysSince < SUPPRESS_DAYS && conf < SUPPRESS_CONFIDENCE) continue;
-      }
-
       // Check if extracted is purely additive (all current items still present)
       const isAdditive = currentItems.length > 0 &&
         relation.allCurrentRetained &&
@@ -126,7 +133,7 @@ export function computeDiff(
 
       changes[field] = {
         ...relation.change,
-        confidence: conf,
+        ...reviewSignals(conf, fieldSources[field], now),
         mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
       };
@@ -136,9 +143,16 @@ export function computeDiff(
   return changes;
 }
 
+/**
+ * Mean of the diffs' reported confidences, for queue ordering. Diffs with no
+ * reported confidence are left out of the mean; when none reported one, the
+ * result is 0 so an all-unknown proposal sorts with the least confident.
+ */
 export function computeOverallConfidence(proposedChanges: ProposedChanges): number {
-  const diffs = Object.values(proposedChanges) as FieldDiff[];
-  if (diffs.length === 0) return 0;
-  const avg = diffs.reduce((sum, d) => sum + d.confidence, 0) / diffs.length;
+  const known = (Object.values(proposedChanges) as FieldDiff[])
+    .map((d) => d.confidence)
+    .filter((c): c is number => typeof c === 'number');
+  if (known.length === 0) return 0;
+  const avg = known.reduce((sum, c) => sum + c, 0) / known.length;
   return Math.round(avg * 100) / 100;
 }

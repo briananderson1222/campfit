@@ -73,6 +73,8 @@ export type ItemOutcome =
       confidence: number;
       /** 0 or 1 — whether this item's outcome created a new proposal (the calling loop already decided this; the tracker only accumulates it into the run-level `newProposals` counter). */
       newProposalsDelta: 0 | 1;
+      /** Operator-facing extraction notes, persisted on the campLog entry when non-empty. */
+      warnings?: string[];
     }
   | {
       status: 'error';
@@ -171,6 +173,7 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
         fieldsChanged: outcome.fieldsChanged,
         durationMs: outcome.durationMs, processedAt: new Date().toISOString(),
         ...(outcome.providerAction ? { providerAction: outcome.providerAction } : {}),
+        ...(outcome.warnings && outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
       };
       await guardedWrite('appendCrawlLog', outcome.campId, () => appendCrawlLog(run.id, entry));
       await emit({ type: 'camp_done', campId: outcome.campId, proposalId: outcome.proposalId, confidence: outcome.confidence, changesFound });

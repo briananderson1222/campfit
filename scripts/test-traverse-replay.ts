@@ -113,11 +113,12 @@ function testItemToProposedChangesExactSerialization() {
     },
     ageGroups: [{ label: "Ages 6-12", minAge: 6, maxAge: 12, confidence: 0.8 }],
     schedules: [{ label: "June 3-7", startDate: "2026-06-03", endDate: "2026-06-07", confidence: 0.82 }],
-    pricing: [{ label: "$425 per week", amount: 425, confidence: 0.84 }],
+    pricing: [{ label: "$425 per week", amount: 425, unit: "PER_WEEK", confidence: 0.84 }],
     campTypes: [],
     categories: [],
     allProposals: [],
     warnings: [],
+    operatorWarnings: [],
   };
 
   const serialized = JSON.stringify(itemToProposedChanges(
@@ -176,7 +177,9 @@ async function testMultiItemGrouping() {
     { fieldPath: "items[1].schedules[0].startDate", candidateValue: "2026-07-07", needle: "July 7-11, 2026" },
     { fieldPath: "items[1].schedules[0].endDate", candidateValue: "2026-07-11", needle: "July 7-11, 2026" },
     { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
     { fieldPath: "items[1].pricing[0].amount", candidateValue: 450, needle: "$450 per week" },
+    { fieldPath: "items[1].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$450 per week" },
   ];
 
   const provider = createStubProvider(specs, { model: "stub-multi-item" });
@@ -382,6 +385,7 @@ async function testHealthySourceReplay() {
     { fieldPath: "items[].ageGroups[].maxAge", candidateValue: 12, needle: "Ages 6-12" },
     { fieldPath: "items[].schedules[].startDate", candidateValue: "2026-06-09", needle: "June 9-13, 2026" },
     { fieldPath: "items[].pricing[].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[].pricing[].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
     // Out-of-range confidence → clamped to 1 with a warning (never dropped).
     { fieldPath: "items[].city", candidateValue: "Boulder", needle: "Boulder, Colorado", confidence: 1.4 },
     // Excerpt not present in prepared text → dropped with a warning.
@@ -396,7 +400,7 @@ async function testHealthySourceReplay() {
   const result = await runTraverseExtraction({ content: html, sourceRef, provider, maxContentChars: 32_000 });
 
   assert.equal(result.error, undefined, "healthy extraction must not error");
-  assert.equal(result.proposals.length, 8, "8 of 9 stub proposals should survive normalization");
+  assert.equal(result.proposals.length, 9, "9 of 10 stub proposals should survive normalization");
   assert.ok(!result.proposals.some((p) => p.fieldPath === "neighborhood"), "the not-found-excerpt proposal must be dropped");
   assert.ok(
     result.proposals.every((p) => p.pathIndices === undefined),
@@ -460,6 +464,7 @@ async function testDenverPageExtraction() {
     { fieldPath: "items[].ageGroups[].maxAge", candidateValue: 11, needle: "Ages 7-11" },
     { fieldPath: "items[].schedules[].startDate", candidateValue: "2026-07-14", needle: "July 14-18, 2026" },
     { fieldPath: "items[].pricing[].amount", candidateValue: 385, needle: "$385 per week" },
+    { fieldPath: "items[].pricing[].unit", candidateValue: "PER_WEEK", needle: "$385 per week" },
     { fieldPath: "items[].city", candidateValue: "Denver", needle: "Denver, Colorado" },
     { fieldPath: "items[].applicationUrl", candidateValue: "https://www.denverartmuseum.org/en/summer-camps/young-artists", needle: "Enroll online" },
   ];

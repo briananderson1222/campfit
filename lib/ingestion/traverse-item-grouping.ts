@@ -67,9 +67,11 @@
  */
 
 import type { ExtractionProposal } from "@kontourai/traverse";
+import type { PricingUnit } from "@/lib/types";
 import {
   ENUM_ARRAY_SCHEMA_PATHS,
   ITEMS_ARRAY_PREFIX,
+  PRICING_UNIT_VALUES,
   SCALAR_SCHEMA_PATHS,
   type EnumArraySchemaPath,
   type ScalarSchemaPath,
@@ -79,7 +81,7 @@ import {
 const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
   "ageGroups[]": ["minAge", "maxAge"],
   "schedules[]": ["startDate", "endDate"],
-  "pricing[]": ["amount"],
+  "pricing[]": ["amount", "unit"],
 };
 
 export interface FieldProposal {
@@ -106,8 +108,21 @@ export interface AssembledItem {
   ageGroups: { minAge: number | null; maxAge: number | null; label: string; confidence: number }[];
   /** each entry is one session, fully reconstructed from its own excerpt(s). */
   schedules: { startDate: string | null; endDate: string | null; label: string; confidence: number }[];
-  /** each entry is one price tier, fully reconstructed from its own excerpt(s). */
-  pricing: { amount: number | null; label: string; confidence: number }[];
+  /**
+   * each entry is one price tier, fully reconstructed from its own excerpt(s).
+   * A tier missing its amount or unit is never defaulted (a missing amount is
+   * not 0, a missing unit is not PER_WEEK). If ANY tier on the item is
+   * missing one, `pricing` is empty: approving a pricing change replaces the
+   * camp's whole price list (review-apply deletes and re-inserts), so a
+   * partial list would delete the tiers that could not be extracted.
+   */
+  pricing: { amount: number; unit: PricingUnit; label: string; confidence: number }[];
+  /**
+   * Notes an operator needs even when no proposal is created: each dropped
+   * price tier, and the withheld pricing change. Also included in `warnings`.
+   * Crawl pipelines copy these into the run's camp log.
+   */
+  operatorWarnings: string[];
   /** every distinct camp-type tag proposed for this item (enum-array family, not row objects). */
   campTypes: EnumArrayEntry[];
   /** every distinct category proposed for this item (enum-array family, not row objects). */
@@ -326,6 +341,16 @@ function rowExcerpt(row: Map<string, FieldProposal>): string {
   return [...row.values()][0]?.excerpt ?? "";
 }
 
+function parsePricingUnit(value: unknown): PricingUnit | null {
+  return typeof value === "string" && (PRICING_UNIT_VALUES as readonly string[]).includes(value)
+    ? (value as PricingUnit)
+    : null;
+}
+
+function parsePricingAmount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function rowConfidence(row: Map<string, FieldProposal>): number {
   const values = [...row.values()];
   if (values.length === 0) return 0;
@@ -383,13 +408,28 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         confidence: rowConfidence(row),
       }));
 
-    const pricing = pricingResult.rows
-      .filter((row) => row.size > 0)
-      .map((row) => ({
-        amount: (row.get("amount")?.candidateValue as number | undefined) ?? null,
-        label: rowExcerpt(row),
-        confidence: rowConfidence(row),
-      }));
+    const complete: AssembledItem["pricing"] = [];
+    const operatorWarnings: string[] = [];
+    for (const row of pricingResult.rows) {
+      if (row.size === 0) continue;
+      const label = rowExcerpt(row);
+      const amount = parsePricingAmount(row.get("amount")?.candidateValue);
+      const unit = parsePricingUnit(row.get("unit")?.candidateValue);
+      if (amount === null || unit === null) {
+        const missing = [amount === null ? "amount" : null, unit === null ? "unit" : null].filter(Boolean).join(" and ");
+        operatorWarnings.push(`pricing entry "${label}" dropped: no ${missing} was extracted — a price the page does not state is not emitted`);
+        continue;
+      }
+      complete.push({ amount, unit, label, confidence: rowConfidence(row) });
+    }
+    const dropped = operatorWarnings.length;
+    if (dropped > 0 && complete.length > 0) {
+      operatorWarnings.push(
+        `pricing change withheld: ${complete.length} complete tier(s) (${complete.map((p) => `"${p.label}"`).join(", ")}) not proposed because ${dropped} tier(s) could not be fully extracted — approving a partial list would delete the camp's other price tiers`
+      );
+    }
+    const pricing = dropped > 0 ? [] : complete;
+    warnings.push(...operatorWarnings);
 
     const enumArrayResults: Record<EnumArraySchemaPath, EnumArrayEntry[]> = {
       campTypes: [],
@@ -414,6 +454,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       categories: enumArrayResults.categories,
       allProposals,
       warnings,
+      operatorWarnings,
     });
   }
 

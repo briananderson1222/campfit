@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { deriveFieldCorroboration, type ProposalHistoryRow } from '@/lib/admin/claim-corroboration';
-import type { ProposedChanges } from '@/lib/admin/types';
+import type { ProposalStatus, ProposedChanges } from '@/lib/admin/types';
 
 function changes(field: string, newValue: unknown, sourceUrl = 'https://example.test/camp'): ProposedChanges {
   return { [field]: { old: null, new: newValue, confidence: 0.8, sourceUrl } };
@@ -21,6 +21,8 @@ function row(opts: {
   value: unknown;
   crawlRunId: string | null;
   sourceUrl?: string;
+  status?: ProposalStatus;
+  rejectedFields?: string[];
 }): ProposalHistoryRow {
   return {
     id: opts.id,
@@ -28,6 +30,8 @@ function row(opts: {
     sourceUrl: opts.sourceUrl ?? 'https://example.test/camp',
     crawlRunId: opts.crawlRunId,
     createdAt: '2026-01-01T00:00:00.000Z',
+    status: opts.status ?? 'PENDING',
+    rejectedFields: opts.rejectedFields ?? [],
   };
 }
 
@@ -142,6 +146,8 @@ describe('deriveFieldCorroboration', () => {
       sourceUrl: 'https://example.test/camp',
       crawlRunId: 'run-2',
       createdAt: '2026-01-01T00:00:00.000Z',
+      status: 'PENDING',
+      rejectedFields: [],
     };
     const result = deriveFieldCorroboration({
       targetProposalId: 'target',
@@ -205,5 +211,57 @@ describe('deriveFieldCorroboration', () => {
     });
     expect(result.exact).toBe(true);
     expect(result.corroboratingProposalIds).toEqual(['other']);
+  });
+
+  // campfit#156: a value a reviewer rejected is evidence against it, not
+  // independent agreement.
+  describe('reviewer rejections do not corroborate', () => {
+    const target = row({ id: 'target', field: 'city', value: 'Boulder', crawlRunId: 'run-2' });
+    const derive = (other: ProposalHistoryRow, field = 'city') => deriveFieldCorroboration({
+      targetProposalId: 'target',
+      targetCrawlRunId: 'run-2',
+      field,
+      history: [target, other],
+    });
+
+    it('a REJECTED proposal with the same value from an earlier run -> exact: false', () => {
+      const rejected = row({ id: 'rejected', field: 'city', value: 'Boulder', crawlRunId: 'run-1', status: 'REJECTED' });
+      expect(derive(rejected)).toMatchObject({ exact: false, corroboratingProposalIds: [] });
+    });
+
+    it('a REJECTED proposal corroborates no field, even one with no per-field rejection record', () => {
+      const rejected = row({ id: 'rejected', field: 'city', value: 'Boulder', crawlRunId: 'run-1', status: 'REJECTED', rejectedFields: [] });
+      expect(derive(rejected).exact).toBe(false);
+    });
+
+    it('per field: a reviewed proposal whose pricing was rejected still corroborates its city, not its pricing', () => {
+      const price = [{ label: 'Week', amount: 450, unit: 'PER_SESSION' }];
+      const reviewed: ProposalHistoryRow = {
+        ...row({ id: 'reviewed', field: 'city', value: 'Boulder', crawlRunId: 'run-1', status: 'APPROVED', rejectedFields: ['pricing'] }),
+        proposedChanges: {
+          city: { old: null, new: 'Boulder', confidence: 0.8 },
+          pricing: { old: null, new: price, confidence: 0.8 },
+        },
+      };
+      const pricingTarget: ProposalHistoryRow = {
+        ...target,
+        proposedChanges: { ...target.proposedChanges, pricing: { old: null, new: price, confidence: 0.8 } },
+      };
+      const history = [pricingTarget, reviewed];
+      expect(deriveFieldCorroboration({ targetProposalId: 'target', targetCrawlRunId: 'run-2', field: 'city', history }).exact).toBe(true);
+      expect(deriveFieldCorroboration({ targetProposalId: 'target', targetCrawlRunId: 'run-2', field: 'pricing', history }).exact).toBe(false);
+    });
+
+    it('approved, still-pending and superseded (SKIPPED) rows with no rejection still corroborate', () => {
+      for (const status of ['APPROVED', 'PENDING', 'SKIPPED'] as const) {
+        const other = row({ id: 'other', field: 'city', value: 'Boulder', crawlRunId: 'run-1', status });
+        expect(derive(other)).toMatchObject({ exact: true, corroboratingProposalIds: ['other'] });
+      }
+    });
+
+    it('a still-pending proposal with a field rejected in a keep-pending review does not corroborate that field', () => {
+      const pending = row({ id: 'pending', field: 'city', value: 'Boulder', crawlRunId: 'run-1', status: 'PENDING', rejectedFields: ['city'] });
+      expect(derive(pending).exact).toBe(false);
+    });
   });
 });

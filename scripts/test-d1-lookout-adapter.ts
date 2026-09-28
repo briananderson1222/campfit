@@ -141,25 +141,15 @@ function characterizeScalarEnumAndProvenance(): void {
   withFixedNow(() => {
     assert.deepEqual(
       computeDiff(makeCamp(), { city: "Boulder" }, { city: 0.299999 }),
-      {},
-      "confidence below 0.3 must remain ineligible",
-    );
-    assert.deepEqual(
-      computeDiff(makeCamp(), { city: "Boulder" }, { city: 0.3 }),
-      { city: { old: "Denver", new: "Boulder", confidence: 0.3, mode: "update" } },
-      "confidence exactly 0.3 must surface without absent provenance keys",
+      { city: { old: "Denver", new: "Boulder", confidence: 0.299999, mode: "update" } },
+      "confidence below 0.3 must still surface without absent provenance keys",
     );
 
     const inside = new Date(D0_FIXED_NOW - 30 * 86_400_000 + 1).toISOString();
     assert.deepEqual(
       computeDiff(makeCamp(), { city: "Boulder" }, { city: 0.79 }, {}, { city: { approvedAt: inside } }),
-      {},
-      "inside 30 days and below 0.8 must suppress",
-    );
-    assert.equal(
-      computeDiff(makeCamp(), { city: "Boulder" }, { city: 0.8 }, {}, { city: { approvedAt: inside } }).city?.mode,
-      "update",
-      "confidence exactly 0.8 must not suppress",
+      { city: { old: "Denver", new: "Boulder", confidence: 0.79, contradictsRecentApproval: true, recentApprovalAt: inside, mode: "update" } },
+      "inside 30 days and below 0.8 must surface, flagged",
     );
   });
 
@@ -215,10 +205,12 @@ function mutationSensitivity(): void {
   const malformedExpected = "update";
   assert.notEqual("none", malformedExpected, "comparison-error-as-equal mutation must be killed by fail-closed expectation");
 
-  const thresholdMutationMisses = RELATION_REPLAY_CASES.filter((fixture) =>
-    fixture.confidence === 0.8 && fixture.approvedAt && relationExpected.get(fixture.id) !== "suppressed");
-  assert.equal(thresholdMutationMisses.length, 3, "moving the 0.8 suppression threshold must fail one row per relation family");
-  console.log("PASS mutation sensitivity: identity projection, multiset multiplicity, fail-closed mapping, suppression threshold");
+  // Reintroducing a confidence-gated suppression inside the 30-day window must
+  // be killed: every such row, below and at 0.8, expects a reviewer-visible mode.
+  const recentApprovalRows = RELATION_REPLAY_CASES.filter((fixture) =>
+    fixture.id.includes("inside-30d") && relationExpected.get(fixture.id) === "add_items");
+  assert.equal(recentApprovalRows.length, 6, "each relation family must pin a below-0.8 and an at-0.8 recent-approval row as reviewer-visible");
+  console.log("PASS mutation sensitivity: identity projection, multiset multiplicity, fail-closed mapping, no confidence-gated suppression");
 }
 
 function characterizeLookoutSeam(): void {

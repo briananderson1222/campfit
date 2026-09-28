@@ -984,8 +984,8 @@ export interface TraverseCampFetchResult extends TraverseCoreFetchResult {
  * already-known camp needs the raw candidate items so IT can select (never
  * guess/name-match against the whole DB the way `currentByItemNames` does)
  * the one item that is THIS camp, then diff it itself via `diff-engine.ts`'s
- * `computeDiff` — not `itemToProposedChanges`, which has no confidence
- * floor, suppression, or additive-array logic (traverse-recrawl-cutover
+ * `computeDiff` — not `itemToProposedChanges`, which has no recent-approval
+ * flag or additive-array logic (traverse-recrawl-cutover
  * plan, Task 1.3 / Stop-short risk 5). Never throws.
  */
 export async function runTraverseFetchAndAssemble(

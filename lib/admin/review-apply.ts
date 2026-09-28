@@ -50,6 +50,7 @@ import { getPool } from '@/lib/db';
 import { getProposal, updateProposalStatus, partialApprove } from './review-repository';
 import { CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from './proposal-fields';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
+import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
@@ -532,6 +533,10 @@ export async function applyBatchAcceptedClaims(
       });
       if (!corroboration.exact) {
         outcomes.push({ proposalId, field, status: 'excluded_not_corroborated', message: 'No exact-corroborating observation from a different crawl run was found.' });
+        continue;
+      }
+      if (contradictsRecentApproval(proposal.proposedChanges[field])) {
+        outcomes.push({ proposalId, field, status: 'excluded_not_corroborated', message: 'Changes a value a reviewer approved in the last 30 days; review it individually.' });
         continue;
       }
       corroboratedFields.push(field);

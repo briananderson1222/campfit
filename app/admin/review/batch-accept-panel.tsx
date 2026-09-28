@@ -177,8 +177,15 @@ export function BatchAcceptPanel({ proposals }: { proposals: RankedProposal[] })
                             : <XCircle className="w-3 h-3 text-red-400" />
                         )}
                       </label>
+                      {chip.contradictedApprovalAt !== null && (
+                        <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                          Changes a value approved {chip.contradictedApprovalAt ? chip.contradictedApprovalAt.slice(0, 10) : 'recently'} — review individually
+                        </span>
+                      )}
                       <span className="text-[11px] font-semibold text-bark-400">
-                        {Math.round(chip.confidence * 100)}% confidence
+                        {chip.confidence === null
+                          ? 'confidence not reported'
+                          : `${Math.round(chip.confidence * 100)}% confidence`}
                       </span>
                       {chip.sourceHost && (
                         chip.sourceHref ? (

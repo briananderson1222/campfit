@@ -15,11 +15,10 @@
  *  3. A multi-item page with zero/ambiguous name matches surfaces a clear
  *     "ambiguous" failure and proposes NOTHING — never silently updates the
  *     wrong camp (Task 1.3 acceptance (b), Stop-short risk 5).
- *  4. `computeDiff`'s 30-day/0.8-confidence suppression of a
- *     recently-approved field actually fires on the re-crawl path (AC6,
- *     Task 1.3 acceptance (c)) — and does NOT fire when the re-proposed
- *     confidence clears the suppression threshold, proving this isn't an
- *     accidental blanket block.
+ *  4. A change to a field approved within 30 days reaches review on the
+ *     re-crawl path flagged `contradictsRecentApproval` (with the approval
+ *     date), whatever the extractor's self-reported confidence — the
+ *     confidence never decides whether a reviewer sees the change.
  *  5. Admin-authored site hints (`CrawlSiteHint` rows) reach the extraction
  *     provider's `fieldHints` (AC7).
  *  6. Traverse snapshot provenance (`snapshot.ref`/`snapshot.bodyHash`) is
@@ -388,36 +387,32 @@ function testComputeDiffBehaviorTable() {
 
   assert.deepEqual(
     computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.299999 }),
-    {},
-    "confidence just below 0.3 must be omitted"
+    { city: { old: "Denver", new: "Boulder", confidence: 0.299999, mode: "update" } },
+    "a low self-reported confidence must still reach review"
   );
   assert.deepEqual(
-    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.3 }),
-    { city: { old: "Denver", new: "Boulder", confidence: 0.3, mode: "update" } },
-    "confidence exactly 0.3 must remain eligible and missing provenance must remain omitted"
+    computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, {}),
+    { city: { old: "Denver", new: "Boulder", mode: "update" } },
+    "a missing confidence must reach review with confidence absent, and missing provenance must remain omitted"
   );
 
-  const justInsideSuppressionWindow = { city: { approvedAt: approvalTimestamp(1) } };
-  const justOutsideSuppressionWindow = { city: { approvedAt: approvalTimestamp(-1) } };
+  const insideApproval = approvalTimestamp(1);
+  const justInsideRecentApprovalWindow = { city: { approvedAt: insideApproval } };
+  const justOutsideRecentApprovalWindow = { city: { approvedAt: approvalTimestamp(-1) } };
   withFixedNow(() => {
     assert.deepEqual(
-      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justInsideSuppressionWindow),
-      {},
-      "a low-confidence scalar approved just inside 30 days must be suppressed"
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justInsideRecentApprovalWindow),
+      { city: { old: "Denver", new: "Boulder", confidence: 0.79, contradictsRecentApproval: true, recentApprovalAt: insideApproval, mode: "update" } },
+      "a change to a scalar approved just inside 30 days must surface, flagged"
     );
     assert.deepEqual(
-      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justOutsideSuppressionWindow),
+      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.79 }, {}, justOutsideRecentApprovalWindow),
       { city: { old: "Denver", new: "Boulder", confidence: 0.79, mode: "update" } },
-      "a low-confidence scalar approved just outside 30 days must surface"
-    );
-    assert.deepEqual(
-      computeDiff(makeCamp({ city: "Denver" }), { city: "Boulder" }, { city: 0.8 }, {}, justInsideSuppressionWindow),
-      { city: { old: "Denver", new: "Boulder", confidence: 0.8, mode: "update" } },
-      "a recently approved field at confidence exactly 0.8 must surface"
+      "a change to a scalar approved just outside 30 days must surface unflagged"
     );
   });
 
-  console.log("✓ computeDiff characterization: strict superset/replacement/populate/reorder, exact serialization, confidence/suppression boundaries, and provenance omission");
+  console.log("✓ computeDiff characterization: strict superset/replacement/populate/reorder, exact serialization, confidence never gating, recent-approval flag boundaries, and provenance omission");
 
   // Keep the pre-fix RED assertion last: every characterization above must
   // pass before the baseline fails on the one known behavior defect.
@@ -536,7 +531,9 @@ async function testMultiItemPageMatchesByName() {
     { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
     { fieldPath: "items[1].name", candidateValue: "Junior Rangers Day Camp", needle: "Junior Rangers Day Camp" },
     { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
     { fieldPath: "items[1].pricing[0].amount", candidateValue: 450, needle: "$450 per week" },
+    { fieldPath: "items[1].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$450 per week" },
   ];
 
   const result = await runTraverseRecrawlForCamp({
@@ -572,6 +569,7 @@ async function testMultiItemPageAmbiguousFailsLoud() {
     { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
     { fieldPath: "items[1].name", candidateValue: "Junior Rangers Day Camp", needle: "Junior Rangers Day Camp" },
     { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
   ];
 
   const result = await runTraverseRecrawlForCamp({
@@ -594,16 +592,16 @@ async function testMultiItemPageAmbiguousFailsLoud() {
   console.log("✓ multi-item page with no confident name match surfaces a loud ambiguous failure, proposes nothing");
 }
 
-// ─── 4. AC6: 30-day/0.8-confidence suppression actually fires ────────────
+// ─── 4. A change to a recently-approved field reaches review, flagged ────
 
 async function testSuppressionFires() {
   return withFixedNowAsync(async () => {
     const html = loadFixture("avid4-healthy.html");
     const justInsideSuppressionWindow = approvalTimestamp(1);
 
-    // Low-confidence re-proposal (0.5) of a field approved just inside 30 days must be
-    // SUPPRESSED — this is the exact scenario re-crawling an already-reviewed
-    // camp hits routinely.
+    // Low-confidence re-proposal (0.5) of a field approved just inside 30 days
+    // used to be dropped silently. It must now reach review, flagged as
+    // contradicting the recent approval.
     const lowConfSpecs: StubProposalSpec[] = [
       { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Typo)", needle: "Mountain Explorers Day Camp", confidence: 0.5 },
     ];
@@ -621,13 +619,15 @@ async function testSuppressionFires() {
     });
     assert.equal(suppressed.ok, true);
     assert.ok(
-      !("name" in suppressed.proposedChanges),
-      "a low-confidence (<0.8) re-proposal of a field approved <30 days ago must be suppressed"
+      "name" in suppressed.proposedChanges,
+      "a low-confidence re-proposal of a field approved <30 days ago must still reach review"
     );
+    assert.equal(suppressed.proposedChanges["name"].contradictsRecentApproval, true);
+    assert.equal(suppressed.proposedChanges["name"].recentApprovalAt, justInsideSuppressionWindow);
+    assert.equal(suppressed.proposedChanges["name"].confidence, 0.5);
 
-    // Same scenario, but confidence clears the 0.8 suppression threshold — the
-    // change MUST still be proposed (proves this isn't an accidental blanket
-    // block on the field).
+    // Same scenario at high confidence: proposed and flagged the same way —
+    // the flag is a fact about the approval history, not about confidence.
     const highConfSpecs: StubProposalSpec[] = [
       { fieldPath: "items[].name", candidateValue: "Mountain Explorer Day Camp (Renamed)", needle: "Mountain Explorers Day Camp", confidence: 0.95 },
     ];
@@ -646,12 +646,51 @@ async function testSuppressionFires() {
     assert.equal(notSuppressed.ok, true);
     assert.ok(
       "name" in notSuppressed.proposedChanges,
-      "a HIGH-confidence (>=0.8) re-proposal must still be proposed even within the 30-day suppression window"
+      "a HIGH-confidence re-proposal must be proposed within the 30-day window"
     );
     assert.equal(notSuppressed.proposedChanges["name"].new, "Mountain Explorer Day Camp (Renamed)");
+    assert.equal(notSuppressed.proposedChanges["name"].contradictsRecentApproval, true);
 
-    console.log("✓ AC6: 30-day/0.8-confidence suppression of a recently-approved field fires on the re-crawl path, and does not over-suppress high-confidence changes");
+    console.log("✓ a change to a recently-approved field reaches review on the re-crawl path, flagged contradictsRecentApproval at any confidence");
   });
+}
+
+// ─── 4b. campfit#157: a partially extracted price list never replaces live tiers ─
+
+async function testPartialPricingNeverReplacesLiveTiers() {
+  const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>
+    <p>Standard rate: $350 per week</p><p>Members $300</p></main></body></html>`;
+  const livePricing = [
+    { id: "price-std", label: "Standard rate: $350 per week", amount: 350, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+    { id: "price-mem", label: "Members $300", amount: 300, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+  ];
+  // Only the first tier states its unit on the page.
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[0].pricing[0].amount", candidateValue: 350, needle: "$350 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$350 per week" },
+    { fieldPath: "items[0].pricing[1].amount", candidateValue: 300, needle: "Members $300" },
+  ];
+  const result = await runTraverseRecrawlForCamp({
+    campId: "camp-partial-price",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-partial-price", pricing: livePricing as unknown as Camp["pricing"] }),
+    provider: createStubProvider(specs, { model: "stub-partial-price" }),
+    store: createInMemorySnapshotStore(),
+    mode: "live-with-capture",
+    fetchOptions: makeFixtureFetchOptions(html),
+    log: () => {},
+  });
+  assert.equal(result.ok, true, result.error ?? "");
+  assert.ok(
+    !("pricing" in result.proposedChanges),
+    "a price list missing a tier's unit must not become a pricing diff — approving [$350] would DELETE the live Members tier"
+  );
+  const warnings = result.operatorWarnings ?? [];
+  assert.ok(warnings.some((w) => w.includes('"Members $300" dropped: no unit')), `dropped tier must be named: ${JSON.stringify(warnings)}`);
+  assert.ok(warnings.some((w) => w.startsWith("pricing change withheld")), "the withheld pricing change must be recorded");
+  console.log("✓ campfit#157: a partially extracted price list is withheld (no replace diff that would delete a live tier), with operator warnings");
 }
 
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───
@@ -1169,6 +1208,7 @@ async function main() {
   await testMultiItemPageMatchesByName();
   await testMultiItemPageAmbiguousFailsLoud();
   await testSuppressionFires();
+  await testPartialPricingNeverReplacesLiveTiers();
   await testSiteHintsReachProviderCall();
   await testNeighborhoodHintReachesProviderCall();
   await testAllFiveCallSitesInvokeSharedPipeline();

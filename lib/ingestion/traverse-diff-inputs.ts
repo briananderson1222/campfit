@@ -1,9 +1,6 @@
-import type { PricingUnit } from "@/lib/types";
 import type { CampInput } from "./adapter";
 import type { AssembledItem } from "./traverse-item-grouping";
 import { SCALAR_SCHEMA_PATHS } from "./traverse-schema";
-
-const DEFAULT_PRICING_UNIT: PricingUnit = "PER_WEEK";
 
 function meanConfidence(values: number[]): number {
   if (values.length === 0) return 0;
@@ -37,7 +34,7 @@ export function assembledItemToDiffInputs(item: AssembledItem): {
     if (item.schedules[0]?.label) excerpts.schedules = item.schedules[0].label;
   }
   if (item.pricing.length > 0) {
-    extracted.pricing = item.pricing.map((v) => ({ label: v.label, amount: v.amount ?? 0, unit: DEFAULT_PRICING_UNIT, durationWeeks: null, ageQualifier: null, discountNotes: null }));
+    extracted.pricing = item.pricing.map((v) => ({ label: v.label, amount: v.amount, unit: v.unit, durationWeeks: null, ageQualifier: null, discountNotes: null }));
     confidence.pricing = meanConfidence(item.pricing.map((v) => v.confidence));
     if (item.pricing[0]?.label) excerpts.pricing = item.pricing[0].label;
   }

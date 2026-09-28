@@ -60,6 +60,12 @@ function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
         <span className="flex-1 font-medium text-bark-600 truncate">{entry.campName}</span>
         <span className="text-xs text-bark-300 shrink-0">{Math.round(entry.durationMs / 1000)}s</span>
 
+        {entry.warnings && entry.warnings.length > 0 && (
+          <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded-md font-medium shrink-0">
+            {entry.warnings.length} warning{entry.warnings.length !== 1 ? 's' : ''}
+          </span>
+        )}
+
         {entry.fieldsChanged.length > 0 && (
           <span className="text-xs px-1.5 py-0.5 bg-pine-100 text-pine-700 rounded-md font-medium shrink-0">
             {entry.fieldsChanged.length} field{entry.fieldsChanged.length !== 1 ? 's' : ''}
@@ -77,6 +83,12 @@ function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
             {entry.url}
           </a>
           <p className="text-xs text-bark-300">Model: {entry.model}</p>
+
+          {entry.warnings && entry.warnings.length > 0 && (
+            <ul className="text-xs text-amber-800 space-y-0.5 list-disc pl-4">
+              {entry.warnings.map((warning, i) => <li key={i}>{warning}</li>)}
+            </ul>
+          )}
 
           {entry.fieldsChanged.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">

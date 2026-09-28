@@ -35,7 +35,6 @@ import type {
   ExtractionResult,
 } from "@kontourai/traverse";
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
-import type { PricingUnit } from "@/lib/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
 import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
@@ -82,8 +81,6 @@ export async function runTraverseExtraction(
     maxContentChars: opts.maxContentChars,
   });
 }
-
-const DEFAULT_PRICING_UNIT: PricingUnit = "PER_WEEK";
 
 function meanConfidence(values: number[]): number {
   if (values.length === 0) return 0;
@@ -174,8 +171,8 @@ export function itemToProposedChanges(
       old: null,
       new: item.pricing.map((p) => ({
         label: p.label,
-        amount: p.amount ?? 0,
-        unit: DEFAULT_PRICING_UNIT,
+        amount: p.amount,
+        unit: p.unit,
         durationWeeks: null,
         ageQualifier: null,
         discountNotes: null,
@@ -206,6 +203,8 @@ export interface TraverseItemProposalRecord {
   rawExtraction: Record<string, unknown>;
   /** Non-fatal notes for this item (dropped/clamped proposals, positional-pairing fallback). */
   warnings: string[];
+  /** The subset of `warnings` an operator must see even when no proposal is created (see AssembledItem.operatorWarnings). */
+  operatorWarnings?: string[];
 }
 
 /**
@@ -250,6 +249,7 @@ export function buildTraverseItemProposalRecords(
         warnings: [...(result.warnings ?? []), ...item.warnings],
       },
       warnings: item.warnings,
+      operatorWarnings: item.operatorWarnings,
     };
   });
 }

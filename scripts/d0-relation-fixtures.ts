@@ -66,7 +66,8 @@ const d0Matrix = (Object.keys(RELATION_FAMILIES) as RelationField[]).flatMap((fi
     { id: `${field}:strict-superset`, field, current: [stored], candidate: [same, novel], confidence: 0.9, bucket: "unsuppressed>=0.8", expectedPost: "add_items", fixtureRefs: [...refs] },
     { id: `${field}:replacement-removal`, field, current: [stored], candidate: [novel], confidence: 0.9, bucket: "unsuppressed>=0.8", expectedPost: "update", fixtureRefs: [...refs] },
     { id: `${field}:duplicate-not-retained`, field, current: [stored, stored], candidate: [same, novel], confidence: 0.9, bucket: "unsuppressed>=0.8", expectedPost: "update", fixtureRefs: [...refs] },
-    { id: `${field}:inside-30d-below-0.8`, field, current: [stored], candidate: [same, novel], confidence: 0.79, approvedAt: inside30Days, noneReason: "suppressed", bucket: "suppressed:<30d,<0.8", expectedPost: "suppressed", fixtureRefs: [...refs] },
+    // Formerly suppressed; a change to a recently approved relation now reaches review flagged.
+    { id: `${field}:inside-30d-below-0.8`, field, current: [stored], candidate: [same, novel], confidence: 0.79, approvedAt: inside30Days, bucket: "flagged:<30d,<0.8", expectedPost: "add_items", fixtureRefs: [...refs] },
     { id: `${field}:inside-30d-at-0.8`, field, current: [stored], candidate: [same, novel], confidence: 0.8, approvedAt: inside30Days, bucket: "unsuppressed:<30d,>=0.8", expectedPost: "add_items", fixtureRefs: [...refs] },
     { id: `${field}:outside-30d-below-0.8`, field, current: [stored], candidate: [same, novel], confidence: 0.79, approvedAt: outside30Days, bucket: "unsuppressed:>=30d,<0.8", expectedPost: "add_items", fixtureRefs: [...refs] },
   ];

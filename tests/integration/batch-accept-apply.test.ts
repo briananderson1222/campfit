@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { getPool as getProductionPool } from '@/lib/db';
 import { applyBatchAcceptedClaims } from '@/lib/admin/review-apply';
 import { getCampProposalHistoryBatch } from '@/lib/admin/review-repository';
+import { recordReviewDecision } from '@/lib/admin/metrics-repository';
 import { campCanonicalClaimId } from '@/lib/admin/trust-projection';
 import type { FieldDiff, ProposedChanges } from '@/lib/admin/types';
 
@@ -154,6 +155,109 @@ describe('applyBatchAcceptedClaims', () => {
 
     const proposalRow = await queryProposal(pool, proposalId);
     expect(proposalRow?.status).toBe('APPROVED');
+  });
+
+  // campfit#156: a value a reviewer rejected must not corroborate the same
+  // value re-proposed by a later crawl.
+  it('(b1) history whose only matching proposal was REJECTED does not corroborate; the claim is excluded', async () => {
+    const pool = getTestPool();
+    const campId = await insertCamp(pool, { city: 'Denver' });
+    const rejectedRun = await insertCrawlRun(pool);
+    const rejectedId = await insertProposal(pool, {
+      campId,
+      proposedChanges: { city: fieldDiff('Denver', 'Boulder') },
+      crawlRunId: rejectedRun,
+      status: 'REJECTED',
+    });
+    await recordReviewDecision({
+      proposalId: rejectedId,
+      runId: rejectedRun,
+      approvedFields: [],
+      rejectedFields: ['city'],
+    });
+    const proposalId = await insertProposal(pool, {
+      campId,
+      proposedChanges: { city: fieldDiff('Denver', 'Boulder') },
+      crawlRunId: await insertCrawlRun(pool),
+    });
+
+    const historyByCamp = await historyFor(pool, campId);
+    const result = await applyBatchAcceptedClaims(pool, {
+      selections: [{ proposalId, field: 'city' }],
+      actor: ACTOR,
+      historyByCamp,
+    });
+
+    expect(result.outcomes).toEqual([{
+      proposalId,
+      field: 'city',
+      status: 'excluded_not_corroborated',
+      message: 'No exact-corroborating observation from a different crawl run was found.',
+    }]);
+    expect((await queryCamp(pool, campId))?.city).toBe('Denver');
+  });
+
+  it('(b2) per field: a reviewed proposal corroborates the field the reviewer approved, not the one it rejected', async () => {
+    const pool = getTestPool();
+    const campId = await insertCamp(pool, { city: 'Denver', description: 'Old' });
+    const reviewedRun = await insertCrawlRun(pool);
+    const reviewedId = await insertProposal(pool, {
+      campId,
+      proposedChanges: { city: fieldDiff('Denver', 'Boulder'), description: fieldDiff('Old', 'Wrong') },
+      crawlRunId: reviewedRun,
+      status: 'APPROVED',
+    });
+    // The per-field review record the real review path writes for this decision.
+    await recordReviewDecision({
+      proposalId: reviewedId,
+      runId: reviewedRun,
+      approvedFields: ['city'],
+      rejectedFields: ['description'],
+    });
+    const proposalId = await insertProposal(pool, {
+      campId,
+      proposedChanges: { city: fieldDiff('Denver', 'Boulder'), description: fieldDiff('Old', 'Wrong') },
+      crawlRunId: await insertCrawlRun(pool),
+    });
+
+    const history = (await historyFor(pool, campId)).get(campId) ?? [];
+    expect(history.find((row) => row.id === reviewedId)).toMatchObject({ status: 'APPROVED', rejectedFields: ['description'] });
+
+    const result = await applyBatchAcceptedClaims(pool, {
+      selections: [{ proposalId, field: 'city' }, { proposalId, field: 'description' }],
+      actor: ACTOR,
+      historyByCamp: await historyFor(pool, campId),
+    });
+    expect(result.outcomes).toEqual(expect.arrayContaining([
+      { proposalId, field: 'city', status: 'applied' },
+      expect.objectContaining({ proposalId, field: 'description', status: 'excluded_not_corroborated' }),
+    ]));
+  });
+
+  // campfit#155: a change contradicting a recent approval needs individual review.
+  it('(b3) an exact-corroborated change flagged contradictsRecentApproval is excluded from batch accept', async () => {
+    const pool = getTestPool();
+    const campId = await insertCamp(pool, { city: 'Denver' });
+    const proposalId = await insertProposal(pool, {
+      campId,
+      proposedChanges: { city: fieldDiff('Denver', 'Boulder', { contradictsRecentApproval: true, recentApprovalAt: new Date().toISOString() }) },
+      crawlRunId: await insertCrawlRun(pool),
+    });
+    await seedCorroboratingHistory(pool, campId, 'city', 'Boulder');
+
+    const result = await applyBatchAcceptedClaims(pool, {
+      selections: [{ proposalId, field: 'city' }],
+      actor: ACTOR,
+      historyByCamp: await historyFor(pool, campId),
+    });
+
+    expect(result.outcomes).toEqual([{
+      proposalId,
+      field: 'city',
+      status: 'excluded_not_corroborated',
+      message: 'Changes a value a reviewer approved in the last 30 days; review it individually.',
+    }]);
+    expect((await queryCamp(pool, campId))?.city).toBe('Denver');
   });
 
   it('(b) a selection with NO corroborating history is excluded, Camp unchanged, no Evidence written', async () => {
