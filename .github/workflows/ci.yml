@@ -7,6 +7,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validate TypeScript
@@ -106,99 +109,47 @@ jobs:
       - name: Shell-detection auto-retry proof (local fixture server, no network/DB)
         run: npm run test:shell-detect-retry
 
+  # No secrets: every value below is a placeholder. `next build` only inlines
+  # the NEXT_PUBLIC_* values into the bundle; server secrets (service-role key,
+  # PG*, CRON_SECRET, Stripe, Resend, model keys) are read at request time, and
+  # this build output is never deployed (deploy.yml builds separately).
   build:
     name: Next.js production build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: validate
     env:
-      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
-      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
-      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT }}
-      PGDATABASE: ${{ secrets.PGDATABASE }}
-      PGUSER: ${{ secrets.PGUSER }}
-      PGPASSWORD: ${{ secrets.PGPASSWORD }}
-      CRON_SECRET: ${{ secrets.CRON_SECRET }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL }}
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      STRIPE_PRICE_ID: ${{ vars.STRIPE_PRICE_ID }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
 
     steps:
-      - name: Check required build env
-        id: preflight
-        run: |
-          missing=""
-          for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY PGHOST PGUSER PGPASSWORD CRON_SECRET; do
-            eval "value=\${$key}"
-            if [ -z "$value" ]; then
-              missing="$missing $key"
-            fi
-          done
-
-          if [ -n "$missing" ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping build job. Missing:$missing"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout
-        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v6
 
-      # Reads the exact pnpm version from package.json's packageManager field,
-      # so it needs the same preflight guard the checkout above carries.
+      # Reads the exact pnpm version from package.json's packageManager field.
       - name: Setup pnpm
-        if: steps.preflight.outputs.enabled == 'true'
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node.js
-        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: "pnpm"
 
       - name: Install dependencies
-        if: steps.preflight.outputs.enabled == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build app
-        if: steps.preflight.outputs.enabled == 'true'
-        run: |
-          export NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-https://camp.fit}"
-          export PGPORT="${PGPORT:-6543}"
-          export PGDATABASE="${PGDATABASE:-postgres}"
-          export RESEND_FROM_EMAIL="${RESEND_FROM_EMAIL:-CampFit <notifications@example.com>}"
-          npm run build
+        run: npm run build
 
+  # Pure contract checks (no DB, no network, no secrets). The browser proof that
+  # used to run here moved to `survey_browser_proof`, which is manual-only.
   survey_review_proof:
     name: Survey review proof
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: validate
-    env:
-      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
-      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
-      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT }}
-      PGDATABASE: ${{ secrets.PGDATABASE }}
-      PGUSER: ${{ secrets.PGUSER }}
-      PGPASSWORD: ${{ secrets.PGPASSWORD }}
-      PLAYWRIGHT_ADMIN_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL || secrets.PLAYWRIGHT_PROD_ADMIN_EMAIL }}
-      PLAYWRIGHT_ADMIN_PASSWORD: ${{ secrets.PLAYWRIGHT_ADMIN_PASSWORD || secrets.PLAYWRIGHT_PROD_ADMIN_PASSWORD }}
-      IS_UNTRUSTED_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 
     steps:
       - name: Checkout
@@ -223,8 +174,35 @@ jobs:
           npm run verify:survey-apply
           npm run verify:survey
 
+  # MANUAL ONLY — TOUCHES THE LIVE DATABASE AND AUTH.
+  # Starts a local dev server wired to the repo-level PG* and Supabase secrets
+  # (the same database the weekly scraper writes to), signs in as the real
+  # admin through hosted Supabase Auth, and records a Survey decision on the
+  # first real PENDING proposal (PUT /survey-events), sometimes after editing
+  # a field value. Nothing is cleaned up. It cannot run on the throwaway
+  # Postgres because login needs hosted Supabase Auth (see docs/local-dev.md,
+  # "Tier 2"), so it never runs on pull_request or push.
+  survey_browser_proof:
+    name: Survey browser proof (manual, live database)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+      PLAYWRIGHT_ADMIN_EMAIL: ${{ secrets.PLAYWRIGHT_ADMIN_EMAIL || secrets.PLAYWRIGHT_PROD_ADMIN_EMAIL }}
+      PLAYWRIGHT_ADMIN_PASSWORD: ${{ secrets.PLAYWRIGHT_ADMIN_PASSWORD || secrets.PLAYWRIGHT_PROD_ADMIN_PASSWORD }}
+
+    steps:
       - name: Check required browser proof env
-        id: browser-preflight
         run: |
           missing=""
           for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY PGHOST PGUSER PGPASSWORD PLAYWRIGHT_ADMIN_EMAIL PLAYWRIGHT_ADMIN_PASSWORD; do
@@ -235,19 +213,27 @@ jobs:
           done
 
           if [ -n "$missing" ]; then
-            if [ "$IS_UNTRUSTED_FORK" = "true" ]; then
-              echo "enabled=false" >> "$GITHUB_OUTPUT"
-              echo "Skipping Survey browser proof for untrusted fork PR. Missing:$missing"
-            else
-              echo "Survey browser proof requires:$missing" >&2
-              exit 1
-            fi
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Survey browser proof requires:$missing" >&2
+            exit 1
           fi
 
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Reads the exact pnpm version from package.json's packageManager field.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Write browser proof env file
-        if: steps.browser-preflight.outputs.enabled == 'true'
         run: |
           {
             printf 'ADMIN_EMAILS=%s\n' "$ADMIN_EMAILS"
@@ -265,71 +251,60 @@ jobs:
           } > .env.local
 
       - name: Install Playwright browser
-        if: steps.browser-preflight.outputs.enabled == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Verify Survey browser integration
-        if: steps.browser-preflight.outputs.enabled == 'true'
         run: npm run verify:survey-browser
 
+  # Runs against a throwaway Postgres container: schema from the repo's
+  # migrations, rows from scripts/sql/ci-verify-admin-fixture.sql. No PG*
+  # secrets; DATABASE_URL is loopback with sslmode=disable.
   verify_admin:
     name: Verify admin platform
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: validate
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campfit_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT }}
-      PGDATABASE: ${{ secrets.PGDATABASE }}
-      PGUSER: ${{ secrets.PGUSER }}
-      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/campfit_ci?sslmode=disable
 
     steps:
-      - name: Check required DB env
-        id: preflight
-        run: |
-          missing=""
-          for key in PGHOST PGUSER PGPASSWORD; do
-            eval "value=\${$key}"
-            if [ -z "$value" ]; then
-              missing="$missing $key"
-            fi
-          done
-
-          if [ -n "$missing" ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping admin verification. Missing:$missing"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout
-        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/checkout@v6
 
-      # Reads the exact pnpm version from package.json's packageManager field,
-      # so it needs the same preflight guard the checkout above carries.
+      # Reads the exact pnpm version from package.json's packageManager field.
       - name: Setup pnpm
-        if: steps.preflight.outputs.enabled == 'true'
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node.js
-        if: steps.preflight.outputs.enabled == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: "pnpm"
 
       - name: Install dependencies
-        if: steps.preflight.outputs.enabled == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Apply migrations to throwaway database
+        run: npm run db:migrate
+
+      - name: Load verify fixture rows
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/sql/ci-verify-admin-fixture.sql
+
       - name: Verify admin platform
-        if: steps.preflight.outputs.enabled == 'true'
-        run: |
-          export PGPORT="${PGPORT:-6543}"
-          export PGDATABASE="${PGDATABASE:-postgres}"
-          npm run verify:admin
+        run: npm run verify:admin
 
   review_apply_unit_tests:
     name: Review Apply module tests (vitest, throwaway Postgres)

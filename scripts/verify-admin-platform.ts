@@ -17,7 +17,9 @@ function getDbClient() {
     database: config.database,
     user: config.user,
     password: config.password,
-    ssl: { rejectUnauthorized: false },
+    // `config.ssl === false` only for a loopback `sslmode=disable` URL (the CI
+    // throwaway container); every other host keeps the previous SSL setting.
+    ssl: config.ssl === false ? false : { rejectUnauthorized: false },
   });
 }
 
