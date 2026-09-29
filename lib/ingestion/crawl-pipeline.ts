@@ -944,7 +944,6 @@ async function runSourceSweepStrategy(
           warnings: record.operatorWarnings,
           incomplete: record.incomplete,
           withheldListFields: record.withheldListFields,
-          populatedListFields: record.populatedListFields,
         });
         itemsProcessed++;
         return proposalId;

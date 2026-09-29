@@ -215,9 +215,13 @@ export interface TraverseItemProposalRecord {
   operatorWarnings?: string[];
   /** Present when the extraction behind this record did not read all of its text. */
   incomplete?: ExtractionIncompleteness;
-  /** List fields withheld / filled on that incomplete run (also on rawExtraction for the review page). */
+  /**
+   * List fields withheld on that incomplete run (also on rawExtraction for the
+   * review page). This path never fills a list in place: itemToProposedChanges
+   * emits every list as `add_items` against `old: null`, so on an incomplete
+   * run each one is withheld, and no populated-list marker exists here.
+   */
   withheldListFields?: string[];
-  populatedListFields?: string[];
 }
 
 /**
@@ -269,13 +273,11 @@ export function buildTraverseItemProposalRecords(
         warnings: [...(result.warnings ?? []), ...item.warnings],
         ...(incomplete ? { incomplete } : {}),
         ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
-        ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
       },
       warnings: [...withheld.warnings, ...item.warnings],
       operatorWarnings,
       ...(incomplete ? { incomplete } : {}),
       ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
-      ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
     };
   });
 }

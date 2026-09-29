@@ -86,7 +86,7 @@ import { campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
 const REVIEWER = 'reviewer@campfit.test';
 const CAMP_NAME = 'Mountain Explorers Day Camp';
 
-async function seedCamp(): Promise<string> {
+async function seedCamp(opts: { ageGroups?: boolean } = {}): Promise<string> {
   const pool = getTestPool();
   const camp = await pool.query<{ id: string }>(
     `INSERT INTO "Camp" (slug, name, "campType", category, description, city, "websiteUrl", "communitySlug")
@@ -105,11 +105,13 @@ async function seedCamp(): Promise<string> {
      VALUES ('live-price', $1, 'Standard week', 425, 'PER_WEEK', 1, 'ages 6-9', 'Sibling discount 10%')`,
     [campId],
   );
-  await pool.query(
-    `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
-     VALUES ('live-ages', $1, 'Ages 6-9', 6, 9, 1, 3)`,
-    [campId],
-  );
+  if (opts.ageGroups !== false) {
+    await pool.query(
+      `INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge", "minGrade", "maxGrade")
+       VALUES ('live-ages', $1, 'Ages 6-9', 6, 9, 1, 3)`,
+      [campId],
+    );
+  }
   return campId;
 }
 
@@ -188,6 +190,27 @@ describe('list updates wait for a complete run, end to end', () => {
     expect(await counts(campId)).toEqual({ sessions: 2, prices: 1, ageGroups: 1 });
     const pool = getTestPool();
     expect((await pool.query(`SELECT city FROM "Camp" WHERE id = $1`, [campId])).rows[0]).toEqual({ city: 'Denver' });
+  });
+
+  it('an incomplete run that fills an empty list keeps it and records it as possibly partial', async () => {
+    process.env.TRAVERSE_CHUNK_SIZE = '1000';
+    failLaterChunks = true;
+    const campId = await seedCamp({ ageGroups: false });
+    specs = [
+      { fieldPath: 'items[0].name', candidateValue: CAMP_NAME, needle: CAMP_NAME },
+      { fieldPath: 'items[0].ageGroups[0].minAge', candidateValue: 6, needle: 'Ages 6-9' },
+      { fieldPath: 'items[0].ageGroups[0].maxAge', candidateValue: 9, needle: 'Ages 6-9' },
+    ];
+    html = page(['Ages 6-9']);
+
+    const { entry, proposalIds } = await crawl(campId);
+    expect(entry.incomplete?.reason).toBe('provider-failure');
+    expect(entry.incomplete?.populatedListFields).toEqual(['ageGroups']);
+    expect(entry.incomplete?.withheldListFields).toBeUndefined();
+    expect(proposalIds).toHaveLength(1);
+    const proposal = (await getProposal(proposalIds[0]!))!;
+    expect(proposal.proposedChanges.ageGroups?.mode).toBe('populate');
+    expect(proposal.rawExtraction.populatedListFields).toEqual(['ageGroups']);
   });
 
   it('a complete run proposes the full list, including the removal, and applying it gives the right rows', async () => {
