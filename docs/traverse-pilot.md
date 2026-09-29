@@ -163,6 +163,23 @@ npx datum doctor --probe
   on top of whatever datum resolves (kept for one-off pins). Prefer the
   datum-native mechanisms above for anything more than a one-off.
 
+### Output-cap truncation
+
+Since Traverse 2.0 an answer that stops at the model's output cap makes the
+run partial (`output-truncated`), and CampFit then proposes list changes as
+additions only. The crawls page shows, per run, how many extracted pages hit
+the output cap ("N of M hit output cap").
+
+- `TRAVERSE_CHUNK_SIZE` — target characters per extraction chunk. Default
+  `12000` (Traverse's own); accepted range 1000 to 32000, anything else is
+  refused. Lowering it (for example to `6000`) puts fewer items in each call,
+  so each answer is more likely to fit the cap, at the cost of more provider
+  calls on long pages. This is the lever for the glm profile.
+- `TRAVERSE_MAX_TOKENS` — per-call output cap, default `2048`. Raising it made
+  glm-5.2 truncate before any usable tool call (see
+  `docs/cutover-report-2026-07.md`), so it is not the lever for that model; a
+  different provider may behave differently.
+
 Both the console output and `report.md`/`report.json` record which backend
 produced the run: `provider.name` gets an `@<host>` suffix from `baseUrl`
 (e.g. `anthropic-extraction-provider:glm-5.2@api.z.ai`); each source entry
