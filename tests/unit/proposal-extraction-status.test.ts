@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { reportedOverallConfidence, storedExtractionIncompleteness } from '@/lib/admin/proposal-extraction-status';
+import { reportedOverallConfidence, storedExtractionIncompleteness, storedWithheldListFields, withheldListNotice } from '@/lib/admin/proposal-extraction-status';
 
 describe('proposal extraction status', () => {
   it('does not show the 0 ordering key as a reported confidence', () => {
@@ -14,5 +14,13 @@ describe('proposal extraction status', () => {
     expect(storedExtractionIncompleteness({ via: 'traverse' })).toBeNull();
     expect(storedExtractionIncompleteness({ incomplete: { reason: 7 } })).toBeNull();
     expect(storedExtractionIncompleteness(null)).toBeNull();
+  });
+
+  it('names each withheld list in the review notice', () => {
+    expect(storedWithheldListFields({ withheldListFields: ['schedules', 'pricing', 7] })).toEqual(['schedules', 'pricing']);
+    expect(storedWithheldListFields({ via: 'traverse' })).toEqual([]);
+    expect(withheldListNotice('schedules')).toBe(
+      'List updates for sessions were withheld because this run did not read the whole page; re-crawl, or edit manually.',
+    );
   });
 });

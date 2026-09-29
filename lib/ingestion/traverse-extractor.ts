@@ -37,7 +37,7 @@ import type {
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
 import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
-import { describeIncompleteness, extractionIncompleteness, limitListChangesToAdditions, type ExtractionIncompleteness } from "./extraction-completeness";
+import { describeIncompleteness, extractionIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
 import { compareValue } from "./lookout-diff-adapter";
 
@@ -241,7 +241,7 @@ export function buildTraverseItemProposalRecords(
   return items.map((item) => {
     const itemName = itemDisplayName(item);
     const current = opts.currentByItemName?.get(itemName) ?? {};
-    const withheld = limitListChangesToAdditions(itemToProposedChanges(item, current, sourceUrl), incomplete);
+    const withheld = withholdListChangesFromIncompleteRun(itemToProposedChanges(item, current, sourceUrl), incomplete);
     const proposedChanges = withheld.changes;
     const operatorWarnings = [
       ...(incomplete ? [describeIncompleteness(incomplete)] : []),
@@ -265,6 +265,7 @@ export function buildTraverseItemProposalRecords(
         raw: result.raw,
         warnings: [...(result.warnings ?? []), ...item.warnings],
         ...(incomplete ? { incomplete } : {}),
+        ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
       },
       warnings: [...withheld.warnings, ...item.warnings],
       operatorWarnings,

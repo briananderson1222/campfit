@@ -10,7 +10,7 @@ import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-re
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { ReviewDetailHeading } from './review-detail-heading';
-import { reportedOverallConfidence, storedExtractionIncompleteness } from '@/lib/admin/proposal-extraction-status';
+import { reportedOverallConfidence, storedExtractionIncompleteness, storedWithheldListFields, withheldListNotice } from '@/lib/admin/proposal-extraction-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +62,7 @@ export default async function ReviewDetailPage(
   const trustDisplays = await loadCampTrustDisplays(proposal.campId);
   const overallConfidence = reportedOverallConfidence(proposal);
   const incomplete = storedExtractionIncompleteness(proposal.rawExtraction);
+  const withheldListFields = storedWithheldListFields(proposal.rawExtraction);
 
   return (
     <div>
@@ -103,9 +104,14 @@ export default async function ReviewDetailPage(
             {incomplete.unreadRanges > 0
               ? `${incomplete.unreadRanges} text range(s) of the source page were not fully read. `
               : 'Part of the source page was not read. '}
-            These changes cover only the text that was read. A value missing here is not evidence it was removed: list changes only add entries (a list that cannot be merged safely is withheld), and nothing is removed.
+            These changes cover only the text that was read. A value missing here is not evidence it was removed.
           </p>
         </div>
+      )}
+      {withheldListFields.length > 0 && (
+        <ul role="status" className="mb-4 space-y-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {withheldListFields.map((field) => <li key={field}>{withheldListNotice(field)}</li>)}
+        </ul>
       )}
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (

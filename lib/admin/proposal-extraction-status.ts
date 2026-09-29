@@ -42,3 +42,28 @@ export function storedExtractionIncompleteness(
     : 0;
   return { reason, unreadRanges };
 }
+
+const LIST_FIELD_LABELS: Readonly<Record<string, string>> = {
+  schedules: 'sessions',
+  pricing: 'pricing',
+  ageGroups: 'age groups',
+  campTypes: 'camp types',
+  categories: 'categories',
+};
+
+/**
+ * The list fields whose updates the crawl withheld because its extraction
+ * did not read the whole page (`rawExtraction.withheldListFields`), as the
+ * review page names them. Empty for proposals that withheld nothing or were
+ * written before the marker existed.
+ */
+export function storedWithheldListFields(rawExtraction: Record<string, unknown> | null | undefined): string[] {
+  const fields = rawExtraction?.withheldListFields;
+  if (!Array.isArray(fields)) return [];
+  return fields.filter((field): field is string => typeof field === 'string' && field.length > 0);
+}
+
+/** The review page's notice for one withheld list. */
+export function withheldListNotice(field: string): string {
+  return `List updates for ${LIST_FIELD_LABELS[field] ?? field} were withheld because this run did not read the whole page; re-crawl, or edit manually.`;
+}

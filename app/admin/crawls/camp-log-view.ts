@@ -32,7 +32,7 @@ export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'in
     ? `${entry.incomplete.unreadRanges} text range(s) were not fully read`
     : 'part of the page was not read';
   const effect = entry.fieldsChanged.length > 0
-    ? 'The proposal covers only what was read; list changes were limited to additions and nothing was removed.'
+    ? 'The proposal covers only what was read; list updates were withheld until a complete run.'
     : 'No change was found in the text that was read; this is not a confirmation that the page is unchanged.';
   return `Extraction incomplete (${entry.incomplete.reason}): ${ranges}. ${effect}`;
 }

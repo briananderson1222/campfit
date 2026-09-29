@@ -693,16 +693,18 @@ async function testPartialPricingNeverReplacesLiveTiers() {
   console.log("✓ campfit#157: a partially extracted price list is withheld (no replace diff that would delete a live tier), with operator warnings");
 }
 
-// ─── Traverse 2.0+: an incomplete extraction proposes list additions only ───
+// ─── Traverse 2.0+: an incomplete extraction withholds list updates ───
 //
 // The page states the existing $425 tier and a new $395 tier, then more text
 // that the content cap cuts off. Traverse reports the run partial
 // (content-truncated). The camp also holds a $525 tier the read text does not
-// mention: it may sit in the unread text, so it is kept, never removed, and
-// the proposal is the current list plus the new tier. The control run (no
-// cap) proves the same read would otherwise be a replace diff.
+// mention; it may sit in the unread text. A list from a partial read can
+// neither replace the live list (it would delete the $525 tier) nor be merged
+// into it safely, so the pricing update is withheld and named. The scalar is
+// still proposed. The control run (no cap) proves the pricing change exists
+// when the page is read in full.
 
-async function testIncompleteRunProposesAdditionsOnly() {
+async function testIncompleteRunWithholdsListUpdates() {
   const filler = "Further sessions, the extended-week rate and aftercare details are listed below. ".repeat(80);
   const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>
     <p>Boulder, Colorado</p><p>$425 per week</p><p>$395 early bird</p><p>${filler}</p></main></body></html>`;
@@ -734,21 +736,19 @@ async function testIncompleteRunProposesAdditionsOnly() {
   const complete = await run();
   assert.equal(complete.ok, true, complete.error ?? "");
   assert.equal(complete.incomplete, undefined, "a fully read page is not marked incomplete");
-  assert.equal(complete.proposedChanges.pricing?.mode, "update", "control: the read list would replace the live list when the page was read in full");
+  assert.equal(complete.proposedChanges.pricing?.mode, "update", "control: the read list replaces the live list when the page was read in full");
+  assert.equal(complete.rawExtraction.withheldListFields, undefined, "a complete run withholds nothing");
 
   const partial = await run(400);
   assert.equal(partial.ok, true, partial.error ?? "");
   assert.equal(partial.incomplete?.reason, "content-truncated", `run must be marked incomplete: ${JSON.stringify(partial.warnings)}`);
   assert.equal(partial.proposedChanges.city?.new, "Boulder", "a scalar read from the page is still proposed");
-  const pricing = partial.proposedChanges.pricing;
-  assert.equal(pricing?.mode, "add_items", "a list change on an incomplete run is additions only");
-  const amounts = (pricing?.new as { amount: number }[]).map((tier) => tier.amount);
-  assert.deepEqual(amounts, [425, 525, 395], "every live tier is kept and the new tier appended; nothing is removed");
+  assert.ok(!("pricing" in partial.proposedChanges), "no list update from an incomplete run");
+  assert.deepEqual(partial.rawExtraction.withheldListFields, ["pricing"], "the proposal names the withheld list for the review page");
   const warnings = partial.operatorWarnings ?? [];
   assert.ok(warnings.some((w) => w.startsWith("extraction incomplete (content-truncated)")), `operator must see the incomplete run: ${JSON.stringify(warnings)}`);
-  assert.ok(warnings.some((w) => w.startsWith("pricing: 1 current entry not found in the read text kept")), "the kept-not-removed tier is named");
-  assert.deepEqual((partial.rawExtraction.incomplete as { reason?: string } | undefined)?.reason, "content-truncated", "the proposal's audit payload carries the marker");
-  console.log("✓ Traverse partial run: marked incomplete, list changes become additions only, scalars kept");
+  assert.ok(warnings.some((w) => w.startsWith("pricing change withheld")), "the withheld list change is named in the crawl log");
+  console.log("✓ Traverse partial run: marked incomplete, list updates withheld and named, scalars kept");
 }
 
 // ─── TRAVERSE_CHUNK_SIZE reaches extract() on the recrawl path ───
@@ -1297,7 +1297,7 @@ async function main() {
   await testMultiItemPageAmbiguousFailsLoud();
   await testSuppressionFires();
   await testPartialPricingNeverReplacesLiveTiers();
-  await testIncompleteRunProposesAdditionsOnly();
+  await testIncompleteRunWithholdsListUpdates();
   await testChunkSizeReachesExtraction();
   await testSiteHintsReachProviderCall();
   await testNeighborhoodHintReachesProviderCall();

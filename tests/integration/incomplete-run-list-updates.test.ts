@@ -1,15 +1,20 @@
 /**
- * End to end: an incomplete recrawl of a camp whose live lists carry fields
- * the extraction never fills (session times, discount notes, grades), run
- * through the real crawl pipeline, proposal write, Survey review and apply.
+ * End to end, through the real crawl pipeline, proposal write, Survey review
+ * and apply: list updates wait for a complete run.
  *
- * The page is split into small chunks and every chunk after the first fails,
- * so Traverse reports the run partial (provider-failure). Only the network
- * fetch and the model are stubbed: the camp is loaded by the pipeline's own
- * query, the real recrawl adapter builds the proposal, and approval goes
- * through applyProposalReview (session reconciliation, relation re-insert).
+ * Incomplete: the page is split into small chunks and every chunk after the
+ * first fails, so Traverse reports the run partial (provider-failure). A new
+ * session read from the first chunk must not become a list proposal; the
+ * proposal carries only the scalar change and names the withheld list for
+ * the review page, and applying it leaves every list row as it was.
+ * Complete: the same camp read in one chunk proposes the full session list,
+ * including the removal, and applying it gives the right rows.
+ *
+ * Only the network fetch and the model are stubbed: the camp is loaded by the
+ * pipeline's own query, the real recrawl adapter builds the proposal, and
+ * approval goes through applyProposalReview.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ExtractionProvider } from '@kontourai/traverse';
 import { createInMemorySnapshotStore } from '@kontourai/traverse/fetch';
 
@@ -18,6 +23,7 @@ import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 
 let specs: StubProposalSpec[] = [];
 let html = '';
+let failLaterChunks = true;
 
 vi.mock('@/lib/ingestion/resolve-extraction-provider', () => ({
   resolveExtractionProvider: () => {
@@ -27,7 +33,7 @@ vi.mock('@/lib/ingestion/resolve-extraction-provider', () => ({
       name: first.name,
       extract: async (input) => {
         calls += 1;
-        if (calls > 1) throw new Error('fixture: provider unavailable for this chunk');
+        if (failLaterChunks && calls > 1) throw new Error('fixture: provider unavailable for this chunk');
         return first.extract(input);
       },
     };
@@ -73,6 +79,8 @@ import { getProposal } from '@/lib/admin/review-repository';
 import { getCrawlRun } from '@/lib/admin/crawl-repository';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
+import { storedWithheldListFields, withheldListNotice } from '@/lib/admin/proposal-extraction-status';
+import type { CampChangeProposal } from '@/lib/admin/types';
 
 const REVIEWER = 'reviewer@campfit.test';
 const CAMP_NAME = 'Mountain Explorers Day Camp';
@@ -109,18 +117,6 @@ function page(lines: string[]): string {
   return `<html><body><main><h1>${CAMP_NAME}</h1>${lines.map((line) => `<p>${line}</p>`).join('')}<p>${filler}</p></main></body></html>`;
 }
 
-// What the model reads from the first chunk: the live entries with different
-// capitalization, and none of times/discount notes/grades.
-const LIVE_READ: StubProposalSpec[] = [
-  { fieldPath: 'items[0].name', candidateValue: CAMP_NAME, needle: CAMP_NAME },
-  { fieldPath: 'items[0].schedules[0].startDate', candidateValue: '2027-06-07', needle: 'WEEK 1: NATURE' },
-  { fieldPath: 'items[0].schedules[0].endDate', candidateValue: '2027-06-11', needle: 'WEEK 1: NATURE' },
-  { fieldPath: 'items[0].pricing[0].amount', candidateValue: 425, needle: 'STANDARD WEEK' },
-  { fieldPath: 'items[0].pricing[0].unit', candidateValue: 'PER_WEEK', needle: 'STANDARD WEEK' },
-  { fieldPath: 'items[0].ageGroups[0].minAge', candidateValue: 6, needle: 'ages 6-9' },
-  { fieldPath: 'items[0].ageGroups[0].maxAge', candidateValue: 9, needle: 'ages 6-9' },
-];
-
 async function crawl(campId: string) {
   const run = await runCrawlPipeline({ triggeredBy: 'test:incomplete-e2e', trigger: 'MANUAL', campIds: [campId], concurrency: 1 });
   const entry = (await getCrawlRun(run.id))!.campLog.find((e) => e.campId === campId)!;
@@ -138,9 +134,26 @@ async function counts(campId: string) {
   };
 }
 
+async function approveAll(proposal: CampChangeProposal) {
+  const session = await getOrCreateSurveyReviewSessionForProposal(proposal, { actorId: REVIEWER });
+  const events = buildReviewSessionEvents({
+    ...(session.snapshot as ReviewQueueSessionState),
+    decisionsByItemName: Object.fromEntries(session.snapshot.items.map((item) => [item.metadata.name, 'accept-proposed' as const])),
+  });
+  await replaceSurveyReviewEvents({ proposalId: proposal.id, reviewSessionId: session.id, proposal, events, actorEmail: REVIEWER });
+  return applyProposalReview({ proposalId: proposal.id, reviewSessionId: session.id, reviewer: REVIEWER, keepPending: false });
+}
+
+const SESSION_SPECS: StubProposalSpec[] = [
+  { fieldPath: 'items[0].name', candidateValue: CAMP_NAME, needle: CAMP_NAME },
+  { fieldPath: 'items[0].schedules[0].startDate', candidateValue: '2027-06-07', needle: 'Week 1: Nature' },
+  { fieldPath: 'items[0].schedules[0].endDate', candidateValue: '2027-06-11', needle: 'Week 1: Nature' },
+  { fieldPath: 'items[0].schedules[1].startDate', candidateValue: '2027-06-21', needle: 'Week 3: Peaks' },
+  { fieldPath: 'items[0].schedules[1].endDate', candidateValue: '2027-06-25', needle: 'Week 3: Peaks' },
+];
+
 const previousChunkSize = process.env.TRAVERSE_CHUNK_SIZE;
 beforeAll(async () => { await assertTestDatabase(); });
-beforeEach(() => { process.env.TRAVERSE_CHUNK_SIZE = '1000'; });
 afterEach(async () => {
   if (previousChunkSize === undefined) delete process.env.TRAVERSE_CHUNK_SIZE;
   else process.env.TRAVERSE_CHUNK_SIZE = previousChunkSize;
@@ -151,66 +164,53 @@ afterEach(async () => {
 });
 afterAll(async () => { await closeTestPool(); await getProductionPool().end(); });
 
-describe('incomplete recrawl, additions only, end to end', () => {
-  it('reading only existing entries (blanked fields, other capitalization) proposes nothing', async () => {
+describe('list updates wait for a complete run, end to end', () => {
+  it('an incomplete run proposes no list change, names the withheld list for review, and applying leaves the rows unchanged', async () => {
+    process.env.TRAVERSE_CHUNK_SIZE = '1000';
+    failLaterChunks = true;
     const campId = await seedCamp();
-    specs = LIVE_READ;
-    html = page(['WEEK 1: NATURE June 7-11', 'STANDARD WEEK $425', 'ages 6-9']);
-
-    const { entry, proposalIds } = await crawl(campId);
-
-    expect(entry.incomplete?.reason).toBe('provider-failure');
-    expect(entry.status).toBe('no_changes');
-    expect(proposalIds).toEqual([]);
-    expect(await counts(campId)).toEqual({ sessions: 2, prices: 1, ageGroups: 1 });
-  });
-
-  it('a new session and a new price are added on approval, and nothing is duplicated or removed', async () => {
-    const campId = await seedCamp();
-    specs = [
-      ...LIVE_READ,
-      { fieldPath: 'items[0].schedules[1].startDate', candidateValue: '2027-06-21', needle: 'Week 3: Peaks' },
-      { fieldPath: 'items[0].schedules[1].endDate', candidateValue: '2027-06-25', needle: 'Week 3: Peaks' },
-      { fieldPath: 'items[0].pricing[1].amount', candidateValue: 395, needle: 'Early bird' },
-      { fieldPath: 'items[0].pricing[1].unit', candidateValue: 'PER_WEEK', needle: 'Early bird' },
-    ];
-    html = page(['WEEK 1: NATURE June 7-11', 'Week 3: Peaks June 21-25', 'STANDARD WEEK $425', 'Early bird $395', 'ages 6-9']);
+    specs = [...SESSION_SPECS, { fieldPath: 'items[0].city', candidateValue: 'Denver', needle: 'Denver, Colorado' }];
+    html = page(['Denver, Colorado', 'Week 1: Nature June 7-11', 'Week 3: Peaks June 21-25']);
 
     const { entry, proposalIds } = await crawl(campId);
     expect(entry.incomplete?.reason).toBe('provider-failure');
+    expect(entry.warnings?.some((w) => w.startsWith('schedules change withheld'))).toBe(true);
     expect(proposalIds).toHaveLength(1);
     const proposal = (await getProposal(proposalIds[0]!))!;
-    expect(Object.keys(proposal.proposedChanges).sort()).toEqual(['pricing', 'schedules']);
-    expect(proposal.proposedChanges.schedules!.mode).toBe('add_items');
-    expect((proposal.proposedChanges.schedules!.new as unknown[]).length).toBe(3);
-    expect((proposal.proposedChanges.pricing!.new as unknown[]).length).toBe(2);
+    expect(Object.keys(proposal.proposedChanges)).toEqual(['city']);
+    expect(storedWithheldListFields(proposal.rawExtraction)).toEqual(['schedules']);
+    expect(withheldListNotice('schedules')).toContain('List updates for sessions were withheld');
 
-    const session = await getOrCreateSurveyReviewSessionForProposal(proposal, { actorId: REVIEWER });
-    const events = buildReviewSessionEvents({
-      ...(session.snapshot as ReviewQueueSessionState),
-      decisionsByItemName: Object.fromEntries(session.snapshot.items.map((item) => [item.metadata.name, 'accept-proposed' as const])),
-    });
-    await replaceSurveyReviewEvents({ proposalId: proposal.id, reviewSessionId: session.id, proposal, events, actorEmail: REVIEWER });
-    const applied = await applyProposalReview({ proposalId: proposal.id, reviewSessionId: session.id, reviewer: REVIEWER, keepPending: false });
-    expect(applied.appliedFields.slice().sort()).toEqual(['pricing', 'schedules']);
-
-    expect(await counts(campId)).toEqual({ sessions: 3, prices: 2, ageGroups: 1 });
+    await approveAll(proposal);
+    expect(await counts(campId)).toEqual({ sessions: 2, prices: 1, ageGroups: 1 });
     const pool = getTestPool();
-    const sessions = await pool.query<{ id: string; startTime: string | null; earlyDropOff: string | null }>(
-      `SELECT id, "startTime", "earlyDropOff" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL AND id LIKE 'live-%' ORDER BY id`,
-      [campId],
+    expect((await pool.query(`SELECT city FROM "Camp" WHERE id = $1`, [campId])).rows[0]).toEqual({ city: 'Denver' });
+  });
+
+  it('a complete run proposes the full list, including the removal, and applying it gives the right rows', async () => {
+    delete process.env.TRAVERSE_CHUNK_SIZE;
+    failLaterChunks = true;
+    const campId = await seedCamp();
+    specs = SESSION_SPECS;
+    html = page(['Week 1: Nature June 7-11', 'Week 3: Peaks June 21-25']);
+
+    const { entry, proposalIds } = await crawl(campId);
+    expect(entry.incomplete).toBeUndefined();
+    expect(proposalIds).toHaveLength(1);
+    const proposal = (await getProposal(proposalIds[0]!))!;
+    expect(proposal.proposedChanges.schedules?.mode).toBe('update');
+    expect(storedWithheldListFields(proposal.rawExtraction)).toEqual([]);
+
+    await approveAll(proposal);
+    // Week 1 kept (matched by label + dates), Week 2 archived, Week 3 created.
+    expect(await counts(campId)).toEqual({ sessions: 2, prices: 1, ageGroups: 1 });
+    const pool = getTestPool();
+    const rows = await pool.query<{ id: string; label: string; archived: boolean }>(
+      `SELECT id, label, "archivedAt" IS NOT NULL AS archived FROM "CampSchedule" WHERE "campId" = $1 ORDER BY "startDate"`, [campId],
     );
-    // Live sessions kept their ids and their times.
-    expect(sessions.rows).toEqual([
-      { id: 'live-week-1', startTime: '09:00', earlyDropOff: null },
-      { id: 'live-week-2', startTime: '09:00', earlyDropOff: '08:00' },
+    expect(rows.rows.map((row) => [row.label, row.archived])).toEqual([
+      ['Week 1: Nature', false], ['Week 2: Rivers', true], ['Week 3: Peaks', false],
     ]);
-    const prices = await pool.query<{ label: string; discountNotes: string | null }>(
-      `SELECT label, "discountNotes" FROM "CampPricing" WHERE "campId" = $1 ORDER BY amount`, [campId],
-    );
-    expect(prices.rows).toEqual([
-      { label: 'Early bird', discountNotes: null },
-      { label: 'Standard week', discountNotes: 'Sibling discount 10%' },
-    ]);
+    expect(rows.rows[0]!.id).toBe('live-week-1');
   });
 });

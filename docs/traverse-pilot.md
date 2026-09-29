@@ -166,9 +166,11 @@ npx datum doctor --probe
 ### Output-cap truncation
 
 Since Traverse 2.0 an answer that stops at the model's output cap makes the
-run partial (`output-truncated`), and CampFit then proposes list changes as
-additions only. The crawls page shows, per run, how many extracted pages hit
-the output cap ("N of M hit output cap").
+run partial (`output-truncated`). CampFit then withholds that page's list
+updates (sessions, pricing, age groups) until a run reads the whole page, and
+the review page says which lists were withheld, so on long pages list updates
+stall while the cap keeps being hit. The crawls page shows, per run, how many
+extracted pages hit the output cap ("N of M hit output cap").
 
 - `TRAVERSE_CHUNK_SIZE` — target characters per extraction chunk. Default
   `12000` (Traverse's own); accepted range 1000 to 32000, anything else is
