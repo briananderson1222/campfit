@@ -53,6 +53,7 @@ describe("extraction provider retries (relay 0.7 defaults Anthropic maxRetries t
 
     const result = await extract({
       content: "Camp Fixture runs June 1 to June 5.",
+      sourceRef: "fixture:retries",
       contentType: "text",
       targetSchema: [{ path: "items[].name", type: "string", description: "camp name" }],
       provider,
