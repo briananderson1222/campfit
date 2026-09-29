@@ -67,6 +67,7 @@
  *    rendered) — never more than one render per source per run.
  */
 
+import { describeIncompleteness, extractionIncompleteness, type ExtractionIncompleteness } from "./extraction-completeness";
 import { fetchAndExtract, crawlSource } from "@kontourai/traverse/fetch";
 import type {
   FetchAndExtractOptions,
@@ -274,6 +275,15 @@ export interface TraversePipelineSourceResult {
   snapshotBodyHash: string | null;
   fetchError: string | null;
   extractionError: string | null;
+  /**
+   * Present when an extraction ran but did not read and answer all of its
+   * text (Traverse `partial`: a chunk's provider call failed, content was cut
+   * at the content cap, an answer stopped at the output cap, or a cost/chunk
+   * ceiling stopped dispatch). `ok` stays true — what was read is usable — but
+   * the run is not complete, and callers must say so. On a crawl source this
+   * is the first incomplete page's marker; each page also gets a warning.
+   */
+  incomplete?: ExtractionIncompleteness;
   warnings: string[];
   /**
    * `ExtractionResult.totalTokensUsed` (traverse 0.8.0) — input+output tokens
@@ -697,6 +707,11 @@ async function runCoreFetchAndExtract(
 
   core.extractionError = far.extraction.error ?? null;
   core.warnings.push(...(far.extraction.warnings ?? []));
+  const incomplete = extractionIncompleteness(far.extraction);
+  if (incomplete) {
+    core.incomplete = incomplete;
+    core.warnings.push(describeIncompleteness(incomplete));
+  }
   // totalTokensUsed/providerCalls (traverse 0.8.0) are the SUMMED/counted
   // aggregates across every chunk's provider call — always populated,
   // never undefined, even on a zero-call early return. Reading
@@ -843,6 +858,11 @@ async function runTraverseCrawlPipelineForSource(
       extractionErrors++;
       result.warnings.push(`[crawl ${page.url}] extraction ${extraction.error}`);
       continue;
+    }
+    const pageIncomplete = extractionIncompleteness(extraction);
+    if (pageIncomplete) {
+      result.incomplete ??= pageIncomplete;
+      result.warnings.push(`[crawl ${page.url}] ${describeIncompleteness(pageIncomplete)}`);
     }
 
     const items = assembleItems(extraction.proposals);

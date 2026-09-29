@@ -14,6 +14,13 @@ export interface CrawlCampLogEntry {
   error?: string;
   /** Extraction notes an operator must see even when no proposal was created (e.g. a dropped price tier). */
   warnings?: string[];
+  /**
+   * Present when the extraction did not read all of the page's text
+   * (Traverse's partial reason, and how many text ranges were not fully read).
+   * An `ok`/`no_changes` entry with this set is an incomplete run, not a
+   * complete one; entries written before this field existed never carry it.
+   */
+  incomplete?: { reason: string; unreadRanges: number };
   durationMs: number;
   processedAt: string; // ISO
 }
@@ -187,7 +194,7 @@ export interface LLMExtractionResult {
 export type CrawlProgressEvent =
   | { type: 'started'; runId: string; totalCamps: number }
   | { type: 'camp_processing'; campId: string; campName: string; index: number }
-  | { type: 'camp_done'; campId: string; proposalId: string | null; confidence: number; changesFound: number }
+  | { type: 'camp_done'; campId: string; proposalId: string | null; confidence: number; changesFound: number; incomplete?: boolean }
   | { type: 'camp_error'; campId: string; campName: string; error: string }
   | { type: 'completed'; runId: string; stats: Pick<CrawlRun, 'processedCamps' | 'errorCount' | 'newProposals'> }
   | { type: 'failed'; runId: string; error: string };

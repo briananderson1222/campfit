@@ -693,6 +693,59 @@ async function testPartialPricingNeverReplacesLiveTiers() {
   console.log("✓ campfit#157: a partially extracted price list is withheld (no replace diff that would delete a live tier), with operator warnings");
 }
 
+// ─── Traverse 2.0+: an incomplete extraction never proposes a list removal ───
+//
+// The page states one price, then more text that the content cap cuts off.
+// Traverse reports the run partial (content-truncated). The camp holds two
+// live tiers; a one-tier list from a partial read would be a replace diff that
+// deletes the tier sitting in the unread text, so it is withheld. The scalar
+// read from the page is still proposed. The control run (no cap) proves the
+// list diff exists when the whole page is read.
+
+async function testIncompleteRunWithholdsListRemovals() {
+  const filler = "Further sessions, the extended-week rate and aftercare details are listed below. ".repeat(80);
+  const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>
+    <p>Boulder, Colorado</p><p>Standard week: $425 per week</p><p>${filler}</p></main></body></html>`;
+  const livePricing = [
+    { id: "price-std", label: "Standard week", amount: 425, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+    { id: "price-ext", label: "Extended week", amount: 525, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+  ];
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[0].city", candidateValue: "Boulder", needle: "Boulder, Colorado" },
+    { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
+  ];
+  const run = (maxContentChars?: number) => runTraverseRecrawlForCamp({
+    campId: "camp-incomplete",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-incomplete", city: "", pricing: livePricing as unknown as Camp["pricing"] }),
+    provider: createStubProvider(specs, { model: "stub-incomplete" }),
+    store: createInMemorySnapshotStore(),
+    mode: "live-with-capture",
+    fetchOptions: makeFixtureFetchOptions(html),
+    maxContentChars,
+    log: () => {},
+  });
+
+  const complete = await run();
+  assert.equal(complete.ok, true, complete.error ?? "");
+  assert.equal(complete.incomplete, undefined, "a fully read page is not marked incomplete");
+  assert.equal(complete.proposedChanges.pricing?.mode, "update", "control: the one-tier list is a replace diff when the page was read in full");
+
+  const partial = await run(400);
+  assert.equal(partial.ok, true, partial.error ?? "");
+  assert.equal(partial.incomplete?.reason, "content-truncated", `run must be marked incomplete: ${JSON.stringify(partial.warnings)}`);
+  assert.equal(partial.proposedChanges.city?.new, "Boulder", "a scalar read from the page is still proposed");
+  assert.ok(!("pricing" in partial.proposedChanges), "a list change that could delete a live tier is withheld on an incomplete run");
+  const warnings = partial.operatorWarnings ?? [];
+  assert.ok(warnings.some((w) => w.startsWith("extraction incomplete (content-truncated)")), `operator must see the incomplete run: ${JSON.stringify(warnings)}`);
+  assert.ok(warnings.some((w) => w.startsWith("pricing change withheld")), "the withheld list change is named");
+  assert.deepEqual((partial.rawExtraction.incomplete as { reason?: string } | undefined)?.reason, "content-truncated", "the proposal's audit payload carries the marker");
+  console.log("✓ Traverse partial run: marked incomplete, list removals withheld, scalars kept");
+}
+
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───
 
 async function testSiteHintsReachProviderCall() {
@@ -1209,6 +1262,7 @@ async function main() {
   await testMultiItemPageAmbiguousFailsLoud();
   await testSuppressionFires();
   await testPartialPricingNeverReplacesLiveTiers();
+  await testIncompleteRunWithholdsListRemovals();
   await testSiteHintsReachProviderCall();
   await testNeighborhoodHintReachesProviderCall();
   await testAllFiveCallSitesInvokeSharedPipeline();

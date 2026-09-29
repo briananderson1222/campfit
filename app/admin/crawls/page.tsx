@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ChevronDown, ChevronUp, CheckCircle, XCircle, Minus,
+  ChevronDown, ChevronUp, CheckCircle, XCircle, Minus, AlertTriangle,
   ExternalLink, RefreshCw, Loader2, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CrawlModal } from '@/app/admin/crawl-modal';
 import { SchedulePanel } from './schedule-panel';
 import type { CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
+import { campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote } from './camp-log-view';
 
 function durationLabel(startedAt: string, completedAt: string | null, isRunning = false): string {
   const end = isRunning ? Date.now() : (completedAt ? new Date(completedAt).getTime() : Date.now());
@@ -41,24 +42,34 @@ function StatusBadge({ status }: { status: string }) {
 
 function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const outcome = campLogOutcome(entry);
+  const note = campLogOutcomeNote(entry);
 
   return (
     <div className={cn(
       'border-b border-cream-200/40 last:border-0',
-      entry.status === 'error' ? 'bg-red-50/40' : entry.status === 'no_changes' ? '' : 'bg-pine-50/20'
+      outcome === 'error' ? 'bg-red-50/40' : outcome === 'incomplete' ? 'bg-amber-50/50' : outcome === 'unchanged' ? '' : 'bg-pine-50/20'
     )}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-cream-100/40 transition-colors"
       >
-        {entry.status === 'ok'
+        {outcome === 'changed'
           ? <CheckCircle className="w-3.5 h-3.5 text-pine-500 shrink-0" />
-          : entry.status === 'error'
+          : outcome === 'error'
           ? <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          : outcome === 'incomplete'
+          ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" aria-label="Incomplete extraction" />
           : <Minus className="w-3.5 h-3.5 text-bark-300 shrink-0" />}
 
         <span className="flex-1 font-medium text-bark-600 truncate">{entry.campName}</span>
         <span className="text-xs text-bark-300 shrink-0">{Math.round(entry.durationMs / 1000)}s</span>
+
+        {outcome === 'incomplete' && (
+          <span className="text-xs px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded-md font-semibold shrink-0">
+            Incomplete
+          </span>
+        )}
 
         {entry.warnings && entry.warnings.length > 0 && (
           <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded-md font-medium shrink-0">
@@ -106,8 +117,10 @@ function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
             </p>
           )}
 
-          {entry.status === 'no_changes' && (
-            <p className="text-xs text-bark-300">No changes detected — data looks current</p>
+          {note && (
+            <p className={cn('text-xs', outcome === 'incomplete' ? 'text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1' : 'text-bark-300')}>
+              {note}
+            </p>
           )}
         </div>
       )}
@@ -238,14 +251,22 @@ function CrawlRunCard({ run: initialRun, highlight, campNames, onRetry }: { run:
                   <span className="text-xs font-semibold text-bark-400 uppercase tracking-wide">
                     Camp Log ({run.campLog.length}{run.status === 'RUNNING' ? ` / ${run.totalCamps}` : ''})
                   </span>
-                  <div className="flex items-center gap-2 text-xs text-bark-300">
-                    <span className="text-pine-600 font-medium">{run.campLog.filter(e => e.status === 'ok').length} changed</span>
-                    <span>·</span>
-                    <span>{run.campLog.filter(e => e.status === 'no_changes').length} unchanged</span>
-                    {run.campLog.filter(e => e.status === 'error').length > 0 && (
-                      <><span>·</span><span className="text-red-500 font-medium">{run.campLog.filter(e => e.status === 'error').length} errors</span></>
-                    )}
-                  </div>
+                  {(() => {
+                    const counts = campLogOutcomeCounts(run.campLog);
+                    return (
+                      <div className="flex items-center gap-2 text-xs text-bark-300">
+                        <span className="text-pine-600 font-medium">{counts.changed} changed</span>
+                        <span>·</span>
+                        <span>{counts.unchanged} unchanged</span>
+                        {counts.incomplete > 0 && (
+                          <><span>·</span><span className="text-amber-700 font-medium">{counts.incomplete} incomplete</span></>
+                        )}
+                        {counts.error > 0 && (
+                          <><span>·</span><span className="text-red-500 font-medium">{counts.error} errors</span></>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="max-h-96 overflow-y-auto">
                   {run.campLog.map((entry, i) => <CampLogRow key={i} entry={entry} />)}

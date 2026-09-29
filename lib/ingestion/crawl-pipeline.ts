@@ -808,6 +808,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               confidence: result.overallConfidence,
               newProposalsDelta,
               warnings: result.operatorWarnings,
+              incomplete: result.incomplete,
             });
           }
         } catch (err) {
@@ -939,6 +940,7 @@ async function runSourceSweepStrategy(
           confidence: record.overallConfidence,
           newProposalsDelta: changesFound > 0 ? 1 : 0,
           warnings: record.operatorWarnings,
+          incomplete: record.incomplete,
         });
         itemsProcessed++;
         return proposalId;
@@ -1030,6 +1032,7 @@ async function runSourceSweepStrategy(
           campId: sourceFailureCampId(src.key), campName: src.name, url: src.url,
           model: result.model ?? 'unknown', fieldsChanged: [], durationMs: Date.now() - startMs,
           proposalId: null, confidence: 0, newProposalsDelta: 0,
+          incomplete: result.incomplete,
         });
         itemsProcessed++;
       }

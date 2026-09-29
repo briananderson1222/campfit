@@ -90,6 +90,7 @@ import type { TraverseRecrawlResult } from '@/lib/ingestion/traverse-recrawl-ada
 import { assembleItems } from '@/lib/ingestion/traverse-item-grouping';
 import { buildTraverseItemProposalRecords } from '@/lib/ingestion/traverse-extractor';
 import type { ExtractionProposal, ExtractionResult } from '@kontourai/traverse';
+import { campLogOutcome } from '@/app/admin/crawls/camp-log-view';
 
 let pool: Pool;
 
@@ -430,6 +431,69 @@ describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () =
       const stored = await getCrawlRun(run.id);
       expect(stored!.campLog).toHaveLength(1);
       expect(stored!.campLog[0]!.warnings?.some((w) => w.includes('"Call for pricing" dropped'))).toBe(true);
+    });
+  });
+
+  // Traverse 2.0+: a run that lost text is partial, not failed. Its camp-log
+  // entry must carry the marker so the crawls page never shows it as a clean
+  // "no changes".
+  describe('an incomplete extraction reaches the run camp log', () => {
+    const INCOMPLETE = {
+      reason: 'provider-failure' as const,
+      coverage: [
+        { chunk: 1, start: 0, end: 900, status: 'complete' as const },
+        { chunk: 2, start: 800, end: 1700, status: 'unread' as const, reason: 'provider-failure' as const },
+      ],
+    };
+
+    it('camp strategy: an incomplete no-change recrawl is logged as incomplete, not unchanged', async () => {
+      const campId = await seedCamp({ name: 'Partly Read Camp', websiteUrl: 'https://partly-read.example.test/' });
+      runTraverseRecrawlForCamp.mockResolvedValue({ ...okRecrawlResult(), proposedChanges: {}, incomplete: INCOMPLETE });
+
+      const run = await runCrawlPipeline({ triggeredBy: 'test:incomplete-camp', trigger: 'MANUAL', campIds: [campId], concurrency: 1 });
+
+      const entry = (await getCrawlRun(run.id))!.campLog.find((e) => e.campId === campId)!;
+      expect(entry.status).toBe('no_changes');
+      expect(entry.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1 });
+      expect(campLogOutcome(entry)).toBe('incomplete');
+    });
+
+    it('sources strategy: a record from a partial extraction is logged incomplete and withholds its list changes', async () => {
+      const PROPOSALS: ExtractionProposal[] = [
+        { fieldPath: 'items[].name', pathIndices: [0], candidateValue: 'Partly Read Source Camp', confidence: 0.9, provenance: { excerpt: 'Partly Read Source Camp', locator: 'chars:0-23' }, extractor: 'stub' },
+        { fieldPath: 'items[].ageGroups[].minAge', pathIndices: [0, 0], candidateValue: 6, confidence: 0.9, provenance: { excerpt: 'Ages 6-9', locator: 'chars:30-38' }, extractor: 'stub' },
+        { fieldPath: 'items[].ageGroups[].maxAge', pathIndices: [0, 0], candidateValue: 9, confidence: 0.9, provenance: { excerpt: 'Ages 6-9', locator: 'chars:30-38' }, extractor: 'stub' },
+      ];
+      let routedFields: string[] = [];
+      runTraversePipelineForSource.mockImplementation(async (src: IngestionSourceConfig, deps: { sink: TraverseProposalSink }) => {
+        const [record] = buildTraverseItemProposalRecords(
+          {
+            proposals: PROPOSALS, raw: { response: '', model: 'stub' }, extractedAt: '2026-01-01T00:00:00.000Z',
+            partial: { reason: 'provider-failure', completedChunks: 2, remainingChunks: 0 }, coverage: INCOMPLETE.coverage,
+          } as ExtractionResult,
+          { sourceUrl: src.url },
+        );
+        routedFields = Object.keys(record!.proposedChanges);
+        const proposalId = await deps.sink(record!, { sourceKey: src.key, sourceUrl: src.url, snapshotRef: null, snapshotBodyHash: null });
+        return {
+          source: src.key, url: src.url, ok: true, itemCount: 1,
+          routedProposalIds: [proposalId], routedFieldCount: routedFields.length, snapshotRef: null, snapshotBodyHash: null,
+          fetchError: null, extractionError: null, warnings: [], tokensUsed: 1, providerCalls: 2, model: 'stub', latencyMs: 1,
+        };
+      });
+
+      const run = await runCrawlPipeline({
+        triggeredBy: 'test:incomplete-source',
+        trigger: 'MANUAL',
+        sources: [{ key: 'partly-read-source', name: 'Partly Read Source', url: 'https://example.test/partly-read' }],
+      });
+
+      expect(routedFields).toContain('name');
+      expect(routedFields).not.toContain('ageGroups');
+      const [entry] = (await getCrawlRun(run.id))!.campLog;
+      expect(entry!.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1 });
+      expect(entry!.warnings?.some((w) => w.startsWith('ageGroups change withheld'))).toBe(true);
+      expect(campLogOutcome(entry!)).toBe('incomplete');
     });
   });
 

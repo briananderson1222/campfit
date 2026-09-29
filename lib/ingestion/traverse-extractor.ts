@@ -37,6 +37,7 @@ import type {
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
 import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
+import { describeIncompleteness, extractionIncompleteness, withholdListRemovalsFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
 import { compareValue } from "./lookout-diff-adapter";
 
@@ -212,6 +213,8 @@ export interface TraverseItemProposalRecord {
   warnings: string[];
   /** The subset of `warnings` an operator must see even when no proposal is created (see AssembledItem.operatorWarnings). */
   operatorWarnings?: string[];
+  /** Present when the extraction behind this record did not read all of its text. */
+  incomplete?: ExtractionIncompleteness;
 }
 
 /**
@@ -233,11 +236,18 @@ export function buildTraverseItemProposalRecords(
 ): TraverseItemProposalRecord[] {
   const sourceUrl = opts.sourceUrl ?? "";
   const items = assembleItems(result.proposals);
+  const incomplete = extractionIncompleteness(result);
 
   return items.map((item) => {
     const itemName = itemDisplayName(item);
     const current = opts.currentByItemName?.get(itemName) ?? {};
-    const proposedChanges = itemToProposedChanges(item, current, sourceUrl);
+    const withheld = withholdListRemovalsFromIncompleteRun(itemToProposedChanges(item, current, sourceUrl), incomplete);
+    const proposedChanges = withheld.changes;
+    const operatorWarnings = [
+      ...(incomplete ? [describeIncompleteness(incomplete)] : []),
+      ...withheld.warnings,
+      ...item.operatorWarnings,
+    ];
     const extractionModel = result.raw?.model ? `traverse:${result.raw.model}` : "traverse:unknown";
 
     return {
@@ -254,9 +264,11 @@ export function buildTraverseItemProposalRecords(
         proposals: item.allProposals,
         raw: result.raw,
         warnings: [...(result.warnings ?? []), ...item.warnings],
+        ...(incomplete ? { incomplete } : {}),
       },
-      warnings: item.warnings,
-      operatorWarnings: item.operatorWarnings,
+      warnings: [...withheld.warnings, ...item.warnings],
+      operatorWarnings,
+      ...(incomplete ? { incomplete } : {}),
     };
   });
 }
