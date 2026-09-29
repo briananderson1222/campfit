@@ -53,17 +53,55 @@ describe('admin-attested requirements under Surface 2.15+', () => {
       ],
     };
 
-    const allAttested = countAdminAttestedRequirements(rollup([requirement('r1', ['a']), requirement('r2', ['b'])]), bundle);
+    const derivation = {
+      claims: ['a', 'b', 'c', 'd'].map((id) => ({ id, status: 'assumed' })),
+      untimedOwnStatusByClaimId: { a: 'assumed', b: 'assumed', c: 'assumed', d: 'assumed' },
+    };
+    const allAttested = countAdminAttestedRequirements(rollup([requirement('r1', ['a']), requirement('r2', ['b'])]), bundle, derivation);
     expect(allAttested.status).toBe('verified');
     expect(allAttested.requirements.map((r) => r.status)).toEqual(['verified', 'verified']);
     expect(allAttested.summary).toMatchObject({ verifiedRequirements: 2, unsupportedRequirements: 0, verificationCoverage: 1 });
 
-    const crawlOnly = countAdminAttestedRequirements(rollup([requirement('r1', ['a']), requirement('r3', ['c'])]), bundle);
+    const crawlOnly = countAdminAttestedRequirements(rollup([requirement('r1', ['a']), requirement('r3', ['c'])]), bundle, derivation);
     expect(crawlOnly.requirements.map((r) => r.status)).toEqual(['verified', 'assumed']);
     expect(crawlOnly.status).toBe('assumed');
 
-    const superseded = countAdminAttestedRequirements(rollup([requirement('r4', ['d'])]), bundle);
+    const superseded = countAdminAttestedRequirements(rollup([requirement('r4', ['d'])]), bundle, derivation);
     expect(superseded.status).toBe('assumed');
     expect(superseded.requirements[0]!.status).toBe('assumed');
+  });
+
+  it('counts a derived claim only when its own standing is sound and every input counts', () => {
+    const bundle = {
+      evidence: [evidence('e-attest-a', 'a', 'attestation'), evidence('e-crawl-c', 'c', 'extraction')],
+      events: [event('a', ['e-attest-a'], '2026-09-01T00:00:00.000Z'), event('c', ['e-crawl-c'], '2026-09-01T00:00:00.000Z', 'extraction')],
+    };
+    const derivation = {
+      claims: [
+        { id: 'a', status: 'assumed' },
+        { id: 'c', status: 'assumed' },
+        { id: 'reviewed', status: 'verified' },
+        // Own status verified, capped to assumed by an attested input: counts.
+        { id: 'inherits-a', status: 'assumed', derivedFrom: ['a'] },
+        { id: 'rollup-ok', status: 'assumed', derivedFrom: ['inherits-a', 'reviewed'] },
+        // Resting on an unreviewed, unattested input: does not count.
+        { id: 'inherits-c', status: 'assumed', derivedFrom: ['c'] },
+        { id: 'rollup-bad', status: 'assumed', derivedFrom: ['inherits-a', 'inherits-c'] },
+        // Own standing only assumed, no attestation: does not count.
+        { id: 'own-assumed', status: 'assumed', derivedFrom: ['a'] },
+        // A dangling input never counts.
+        { id: 'dangling', status: 'assumed', derivedFrom: ['missing'] },
+      ],
+      untimedOwnStatusByClaimId: {
+        a: 'assumed', c: 'assumed', reviewed: 'verified', 'inherits-a': 'verified', 'rollup-ok': 'verified',
+        'inherits-c': 'verified', 'rollup-bad': 'verified', 'own-assumed': 'assumed', dangling: 'verified',
+      },
+    };
+    const statuses = (ids: string[]) => countAdminAttestedRequirements(
+      rollup(ids.map((id) => requirement(`r-${id}`, [id]))), bundle, derivation,
+    ).requirements.map((r) => r.status);
+
+    expect(statuses(['inherits-a', 'rollup-ok'])).toEqual(['verified', 'verified']);
+    expect(statuses(['inherits-c', 'rollup-bad', 'own-assumed', 'dangling'])).toEqual(['assumed', 'assumed', 'assumed', 'assumed']);
   });
 });

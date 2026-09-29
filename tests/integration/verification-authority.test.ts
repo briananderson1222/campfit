@@ -867,6 +867,94 @@ describe("AC4 writers-recordEvidence", () => {
     const sessionRollup = await deriveSessionVerification(scheduleIds[0]!);
     expect(sessionRollup.status).not.toBe("verified");
   });
+  // Surface 2.15+: a Session's inherited attributes derive from the attested
+  // Camp fields, so the ceiling caps them (and the Session / Camp rollups
+  // over them) at 'assumed'. "Mark verified" must still reach VERIFIED when
+  // every input is attested or reviewed, and must not when one is neither.
+  async function recordSessionAttribute(
+    pool: Pool,
+    scheduleId: string,
+    attribute: "dates" | "time",
+    reviewed: boolean,
+    now: string,
+  ): Promise<void> {
+    const claimId = sessionClaimId(scheduleId, attribute);
+    await persistClaim(pool, {
+      id: claimId,
+      subjectType: SESSION_SUBJECT_TYPE,
+      subjectId: scheduleId,
+      facet: campfitSessionVocabulary.facet,
+      claimType: attribute === "dates" ? campfitSessionVocabulary.claimTypes.dates : campfitSessionVocabulary.claimTypes.time,
+      fieldOrBehavior: attribute,
+    });
+    // Reviewed: crawl + human evidence and a verified event, as review
+    // apply records it. Unreviewed: a machine observation left 'assumed'.
+    const evidenceTypes = reviewed ? (["crawl_observation", "human_attestation"] as const) : (["crawl_observation"] as const);
+    const evidenceIds: string[] = [];
+    for (const evidenceType of evidenceTypes) {
+      const evidenceId = `${claimId}.evidence.${evidenceType}`;
+      await appendEvidence(pool, {
+        id: evidenceId,
+        claimId,
+        evidenceType,
+        method: evidenceType === "crawl_observation" ? "observation" : "attestation",
+        sourceRef: "https://example.com/camp",
+        excerptOrSummary: `Session ${attribute} from the provider's schedule listing.`,
+        observedAt: now,
+        collectedBy: evidenceType === "crawl_observation" ? "campfit-crawler" : "reviewer@campfit.test",
+      });
+      evidenceIds.push(evidenceId);
+    }
+    await appendEvent(pool, {
+      id: `${claimId}.event`,
+      claimId,
+      status: reviewed ? "verified" : "assumed",
+      type: "verification",
+      actor: reviewed ? "reviewer@campfit.test" : "campfit-crawler",
+      method: reviewed ? "attestation" : "observation",
+      evidenceIds,
+      createdAt: now,
+    });
+  }
+
+  for (const scenario of [
+    { name: "reviewed session dates/time + mark verified derives VERIFIED with every requirement verified", timeReviewed: true },
+    { name: "an unreviewed, unattested session attribute keeps the Camp below VERIFIED after mark verified", timeReviewed: false },
+  ]) {
+    it(`bulkAttestCamp on a Camp with a Session: ${scenario.name}`, async () => {
+      const testPool = getTestPool();
+      const pool = getProductionPool();
+      const { campId, scheduleIds } = await seedCampWithSchedules(
+        testPool,
+        [{ label: "Session A", startDate: "2026-08-10", endDate: "2026-08-14", startTime: "09:00", endTime: "15:00" }],
+        { name: "Attested Camp with a Session" },
+      );
+      const scheduleId = scheduleIds[0]!;
+      const now = new Date(Date.now() - 60_000).toISOString();
+      await recordSessionAttribute(pool, scheduleId, "dates", true, now);
+      await recordSessionAttribute(pool, scheduleId, "time", scenario.timeReviewed, now);
+
+      const result = await bulkAttestCamp(campId, "reviewer@campfit.test");
+      const rollup = await deriveCampVerification(campId);
+      const sessionRollup = await deriveSessionVerification(scheduleId);
+
+      if (scenario.timeReviewed) {
+        expect(result.dataConfidence).toBe("VERIFIED");
+        expect(result.gapRequirementIds).toEqual([]);
+        expect(rollup.status).toBe("verified");
+        expect(rollup.requirements.every((requirement) => requirement.status === "verified")).toBe(true);
+        expect(sessionRollup.status).toBe("verified");
+      } else {
+        expect(result.dataConfidence).not.toBe("VERIFIED");
+        expect(result.gapRequirementIds).toContain("sessions-verified");
+        expect(rollup.status).not.toBe("verified");
+        expect(sessionRollup.requirements.find((requirement) => requirement.id === "time")?.status).not.toBe("verified");
+      }
+      const campRow = await testPool.query<{ dataConfidence: string }>(`SELECT "dataConfidence" FROM "Camp" WHERE id = $1`, [campId]);
+      expect(campRow.rows[0]!.dataConfidence === "VERIFIED").toBe(scenario.timeReviewed);
+    });
+  }
+
   it("/attest route's reconciled path (recordCampAttestationEvidence, lib/admin/entity-admin-repository.ts) creates a Claim + Evidence + Event row per attested field and drives refreshCampVerificationCache to VERIFIED for a fully-attested, session-less Camp", async () => {
     const testPool = getTestPool();
     const campId = await insertCamp(testPool, { name: "AC4 /attest reconciliation Camp" });

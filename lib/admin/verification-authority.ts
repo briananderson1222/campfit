@@ -464,7 +464,7 @@ export async function deriveCampVerification(campId: string, options: DeriveVeri
   if (!rollup) {
     throw new Error(`deriveCampVerification(${campId}): expected a "${VERIFIED_CAMP_CLAIM_GROUP_ID}" ClaimGroupRollup, got none.`);
   }
-  return countAdminAttestedRequirements(rollup, bundleInput);
+  return countAdminAttestedRequirements(rollup, bundleInput, derivation);
 }
 
 /**
@@ -477,14 +477,22 @@ export async function deriveCampVerification(campId: string, options: DeriveVeri
  * that promotion because it also verified requirements whose claims were only
  * unreviewed gaps.
  *
- * This keeps the attestation outcome and nothing else: a requirement whose
- * status is `assumed` counts as verified only when every one of its claims is
- * governed by an admin attestation: its latest event is `assumed` and cites
- * only `method: 'attestation'` evidence recorded for that claim. (The /attest
- * path writes that event with `method: 'survey-assumption'`, bulk attestation
- * with `method: 'attestation'`; the evidence is what both share.) The group becomes `verified` only when every required requirement
- * is then verified. Any other `assumed` claim stays unverified, as Surface
- * now derives.
+ * This keeps the attestation outcome and nothing else. A claim whose derived
+ * status is `assumed` counts as verified only when
+ *  - its own standing is sound: it is governed by an admin attestation (its
+ *    latest event is `assumed` and cites only `method: 'attestation'`
+ *    evidence recorded for that claim; the /attest path writes that event
+ *    with `method: 'survey-assumption'`, bulk attestation with
+ *    `method: 'attestation'`), or its own status before the derivation
+ *    ceiling is `verified` (an inherited Session attribute, a Session or
+ *    Camp rollup), and
+ *  - every claim it derives from counts as verified by this same rule.
+ * So a Session attribute inherited from an attested Camp field, and the
+ * rollups over it, count; anything resting on an unreviewed, unattested input
+ * does not. A requirement whose status is `assumed` counts as verified only
+ * when all of its claims do, and the group becomes `verified` only when
+ * every required requirement is then verified. A `stale`, `proposed` or
+ * weaker claim is never promoted: the ceiling already put it below `assumed`.
  *
  * The encoding that removes this rule is a policy change (the field policies
  * accept an admin attestation on its own), which is left to a separate
@@ -493,6 +501,10 @@ export async function deriveCampVerification(campId: string, options: DeriveVeri
 export function countAdminAttestedRequirements(
   rollup: ClaimGroupRollup,
   bundle: Pick<TrustBundle, 'events' | 'evidence'>,
+  derivation: {
+    readonly claims: readonly (Pick<Claim, 'id' | 'derivedFrom'> & { readonly status: string })[];
+    readonly untimedOwnStatusByClaimId: Readonly<Record<string, string>>;
+  },
 ): ClaimGroupRollup {
   const attested = (claimId: string): boolean => {
     const latest = bundle.events
@@ -503,12 +515,29 @@ export function countAdminAttestedRequirements(
     return ids.length > 0 && ids.every((id) =>
       bundle.evidence.some((item) => item.id === id && item.claimId === claimId && item.method === 'attestation'));
   };
+  const derived = new Map(derivation.claims.map((claim) => [claim.id, claim] as const));
+  const memo = new Map<string, boolean>();
+  const counts = (claimId: string, visiting: Set<string>): boolean => {
+    const known = memo.get(claimId);
+    if (known !== undefined) return known;
+    const claim = derived.get(claimId);
+    if (!claim || visiting.has(claimId)) return false;
+    let result = claim.status === 'verified';
+    if (claim.status === 'assumed') {
+      visiting.add(claimId);
+      const ownSound = attested(claimId) || derivation.untimedOwnStatusByClaimId[claimId] === 'verified';
+      result = ownSound && (claim.derivedFrom ?? []).every((input) => counts(input, visiting));
+      visiting.delete(claimId);
+    }
+    memo.set(claimId, result);
+    return result;
+  };
   let changed = false;
   const requirements = rollup.requirements.map((requirement) => {
     if (requirement.status !== 'assumed' || requirement.claimIds.length === 0 || requirement.missingClaimIds.length > 0) {
       return requirement;
     }
-    if (!requirement.claimIds.every(attested)) return requirement;
+    if (!requirement.claimIds.every((id) => counts(id, new Set()))) return requirement;
     changed = true;
     return {
       ...requirement,
@@ -576,7 +605,7 @@ export async function deriveSessionVerification(scheduleId: string, options: Der
   if (!rollup) {
     throw new Error(`deriveSessionVerification(${scheduleId}): expected a "${VERIFIED_SESSION_CLAIM_GROUP_ID}" ClaimGroupRollup, got none.`);
   }
-  return countAdminAttestedRequirements(rollup, bundleInput);
+  return countAdminAttestedRequirements(rollup, bundleInput, derivation);
 }
 
 export interface RefreshCampVerificationCacheResult {
