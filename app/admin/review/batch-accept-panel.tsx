@@ -33,6 +33,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, ExternalLink, Loader2, Quote, XCircle } from 'lucide-react';
+import { reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import { cn } from '@/lib/utils';
 import type { RankedProposal } from '@/lib/admin/review-repository';
 import {
@@ -142,7 +143,10 @@ export function BatchAcceptPanel({ proposals }: { proposals: RankedProposal[] })
               <span className="text-xs text-bark-300 shrink-0">{proposal.communitySlug}</span>
               <ShadowAutoAcceptBadge show={proposal.shadowAutoAccept} />
               <span className="ml-auto text-xs font-semibold text-pine-600 shrink-0">
-                {Math.round(proposal.overallConfidence * 100)}%
+                {(() => {
+                  const confidence = reportedOverallConfidence(proposal);
+                  return confidence === null ? 'confidence not reported' : `${Math.round(confidence * 100)}%`;
+                })()}
               </span>
             </div>
             <p className="text-xs text-bark-400 mb-2">

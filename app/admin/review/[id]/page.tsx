@@ -10,6 +10,7 @@ import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-re
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { ReviewDetailHeading } from './review-detail-heading';
+import { reportedOverallConfidence, storedExtractionIncompleteness } from '@/lib/admin/proposal-extraction-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,8 @@ export default async function ReviewDetailPage(
     reviewSessionId: surveyReviewSessionRecord.id,
   });
   const trustDisplays = await loadCampTrustDisplays(proposal.campId);
+  const overallConfidence = reportedOverallConfidence(proposal);
+  const incomplete = storedExtractionIncompleteness(proposal.rawExtraction);
 
   return (
     <div>
@@ -83,7 +86,9 @@ export default async function ReviewDetailPage(
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm text-bark-400">Overall confidence</p>
-          <p className="font-display text-3xl font-bold text-bark-700">{Math.round(proposal.overallConfidence * 100)}%</p>
+          <p className="font-display text-3xl font-bold text-bark-700">
+            {overallConfidence === null ? <span className="text-lg text-bark-400">Not reported</span> : `${Math.round(overallConfidence * 100)}%`}
+          </p>
           {proposal.crawlCompletedAt && (
             <p className="mt-1 text-xs text-bark-400">
               Last crawled {new Date(proposal.crawlCompletedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -91,6 +96,17 @@ export default async function ReviewDetailPage(
           )}
         </div>
       </div>
+      {incomplete && (
+        <div role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">Incomplete extraction ({incomplete.reason})</p>
+          <p className="mt-0.5">
+            {incomplete.unreadRanges > 0
+              ? `${incomplete.unreadRanges} text range(s) of the source page were not fully read. `
+              : 'Part of the source page was not read. '}
+            These changes cover only the text that was read. A value missing here is not evidence it was removed, and list changes that could delete entries were withheld.
+          </p>
+        </div>
+      )}
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">

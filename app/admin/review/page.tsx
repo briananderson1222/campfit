@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getRankedReviewQueue, getUnverifiedCamps, getPendingReports } from '@/lib/admin/review-repository';
+import { reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import { cn } from '@/lib/utils';
 import { ChevronRight, AlertTriangle, Clock, Flag } from 'lucide-react';
 import { ReportActions } from './report-actions';
@@ -213,7 +214,7 @@ export default async function ReviewQueuePage(
                 <div className="space-y-3">
                   {needsReview.map(proposal => {
                     const changeCount = Object.keys(proposal.proposedChanges).length;
-                    const conf = proposal.overallConfidence;
+                    const conf = reportedOverallConfidence(proposal);
                     return (
                       <Link
                         key={proposal.id}
@@ -370,7 +371,14 @@ function TabLink({ href, active, children }: { href: string; active: boolean; ch
   );
 }
 
-function ConfidenceBadge({ value }: { value: number }) {
+function ConfidenceBadge({ value }: { value: number | null }) {
+  if (value === null) {
+    return (
+      <div className="w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 bg-cream-200 text-bark-500 font-semibold" title="No confidence was reported for these changes">
+        <span className="text-[11px] leading-tight text-center">Not<br />reported</span>
+      </div>
+    );
+  }
   const pct = Math.round(value * 100);
   return (
     <div className={cn(
