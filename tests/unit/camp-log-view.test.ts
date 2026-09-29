@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
+import { campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote, outputCapCount } from '@/app/admin/crawls/camp-log-view';
 
 describe('crawl camp-log outcome', () => {
   it('never shows an incomplete run as unchanged or plainly changed', () => {
@@ -25,5 +25,16 @@ describe('crawl camp-log outcome', () => {
       { status: 'no_changes', incomplete: { reason: 'max-chunks', unreadRanges: 3 } },
       { status: 'error' },
     ])).toEqual({ changed: 1, unchanged: 1, incomplete: 1, error: 1 });
+  });
+
+  it('counts pages that hit the output cap among pages that were extracted', () => {
+    expect(outputCapCount([
+      { status: 'ok', incomplete: { reason: 'output-truncated', unreadRanges: 1, outputTruncated: true } },
+      { status: 'no_changes', incomplete: { reason: 'provider-failure', unreadRanges: 1, outputTruncated: false } },
+      { status: 'no_changes' },
+      { status: 'error' },
+      // Written before the flag existed: not counted as a cap hit.
+      { status: 'no_changes', incomplete: { reason: 'output-truncated', unreadRanges: 1 } },
+    ])).toEqual({ truncated: 1, extracted: 4 });
   });
 });

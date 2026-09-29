@@ -1,6 +1,6 @@
 import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
 import type { CrawlProgressEvent, CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
-import { unreadRangeCount, type ExtractionIncompleteness } from './extraction-completeness';
+import { hitOutputCap, unreadRangeCount, type ExtractionIncompleteness } from './extraction-completeness';
 
 /**
  * Shared run-record tracker (campfit#85, WS11 Slice 4, Wave 2; guarded
@@ -178,7 +178,13 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
         ...(outcome.providerAction ? { providerAction: outcome.providerAction } : {}),
         ...(outcome.warnings && outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
         ...(outcome.incomplete
-          ? { incomplete: { reason: outcome.incomplete.reason, unreadRanges: unreadRangeCount(outcome.incomplete) } }
+          ? {
+              incomplete: {
+                reason: outcome.incomplete.reason,
+                unreadRanges: unreadRangeCount(outcome.incomplete),
+                outputTruncated: hitOutputCap(outcome.incomplete),
+              },
+            }
           : {}),
       };
       await guardedWrite('appendCrawlLog', outcome.campId, () => appendCrawlLog(run.id, entry));

@@ -32,7 +32,17 @@ export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'in
     ? `${entry.incomplete.unreadRanges} text range(s) were not fully read`
     : 'part of the page was not read';
   const effect = entry.fieldsChanged.length > 0
-    ? 'The proposal covers only what was read; list changes that could remove entries were withheld.'
+    ? 'The proposal covers only what was read; list changes were limited to additions and nothing was removed.'
     : 'No change was found in the text that was read; this is not a confirmation that the page is unchanged.';
   return `Extraction incomplete (${entry.incomplete.reason}): ${ranges}. ${effect}`;
+}
+
+/**
+ * How many processed pages of a run hit the provider's output cap, out of the
+ * pages whose extraction ran (errors excluded). The rate the owner watches
+ * after a Traverse or model change.
+ */
+export function outputCapCount(entries: readonly Pick<CrawlCampLogEntry, 'status' | 'incomplete'>[]): { truncated: number; extracted: number } {
+  const extracted = entries.filter((entry) => entry.status !== 'error');
+  return { truncated: extracted.filter((entry) => entry.incomplete?.outputTruncated === true).length, extracted: extracted.length };
 }

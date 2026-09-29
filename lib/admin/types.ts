@@ -20,7 +20,12 @@ export interface CrawlCampLogEntry {
    * An `ok`/`no_changes` entry with this set is an incomplete run, not a
    * complete one; entries written before this field existed never carry it.
    */
-  incomplete?: { reason: string; unreadRanges: number };
+  incomplete?: {
+    reason: string;
+    unreadRanges: number;
+    /** An answer stopped at the provider's output cap (Traverse `output-truncated`). Absent on entries written before it was recorded. */
+    outputTruncated?: boolean;
+  };
   durationMs: number;
   processedAt: string; // ISO
 }

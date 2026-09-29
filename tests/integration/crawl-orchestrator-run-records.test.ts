@@ -90,7 +90,7 @@ import type { TraverseRecrawlResult } from '@/lib/ingestion/traverse-recrawl-ada
 import { assembleItems } from '@/lib/ingestion/traverse-item-grouping';
 import { buildTraverseItemProposalRecords } from '@/lib/ingestion/traverse-extractor';
 import type { ExtractionProposal, ExtractionResult } from '@kontourai/traverse';
-import { campLogOutcome } from '@/app/admin/crawls/camp-log-view';
+import { campLogOutcome, outputCapCount } from '@/app/admin/crawls/camp-log-view';
 
 let pool: Pool;
 
@@ -454,8 +454,22 @@ describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () =
 
       const entry = (await getCrawlRun(run.id))!.campLog.find((e) => e.campId === campId)!;
       expect(entry.status).toBe('no_changes');
-      expect(entry.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1 });
+      expect(entry.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1, outputTruncated: false });
       expect(campLogOutcome(entry)).toBe('incomplete');
+    });
+
+    it('camp strategy: a later chunk that stopped at the output cap is counted, although the first loss was a provider failure', async () => {
+      const campId = await seedCamp({ name: 'Capped Camp', websiteUrl: 'https://capped.example.test/' });
+      runTraverseRecrawlForCamp.mockResolvedValue({
+        ...okRecrawlResult(),
+        incomplete: { ...INCOMPLETE, coverage: [...INCOMPLETE.coverage, { chunk: 3, start: 1600, end: 2400, status: 'output-truncated' as const }] },
+      });
+
+      const run = await runCrawlPipeline({ triggeredBy: 'test:output-cap', trigger: 'MANUAL', campIds: [campId], concurrency: 1 });
+
+      const stored = (await getCrawlRun(run.id))!;
+      expect(stored.campLog.find((e) => e.campId === campId)!.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 2, outputTruncated: true });
+      expect(outputCapCount(stored.campLog)).toEqual({ truncated: 1, extracted: 1 });
     });
 
     it('sources strategy: a record from a partial extraction is logged incomplete and withholds its list changes', async () => {
@@ -491,7 +505,7 @@ describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () =
       expect(routedFields).toContain('name');
       expect(routedFields).not.toContain('ageGroups');
       const [entry] = (await getCrawlRun(run.id))!.campLog;
-      expect(entry!.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1 });
+      expect(entry!.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1, outputTruncated: false });
       expect(entry!.warnings?.some((w) => w.startsWith('ageGroups change withheld'))).toBe(true);
       expect(campLogOutcome(entry!)).toBe('incomplete');
     });

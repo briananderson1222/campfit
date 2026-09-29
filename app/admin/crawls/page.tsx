@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { CrawlModal } from '@/app/admin/crawl-modal';
 import { SchedulePanel } from './schedule-panel';
 import type { CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
-import { campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote } from './camp-log-view';
+import { campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote, outputCapCount } from './camp-log-view';
 
 function durationLabel(startedAt: string, completedAt: string | null, isRunning = false): string {
   const end = isRunning ? Date.now() : (completedAt ? new Date(completedAt).getTime() : Date.now());
@@ -253,6 +253,7 @@ function CrawlRunCard({ run: initialRun, highlight, campNames, onRetry }: { run:
                   </span>
                   {(() => {
                     const counts = campLogOutcomeCounts(run.campLog);
+                    const outputCap = outputCapCount(run.campLog);
                     return (
                       <div className="flex items-center gap-2 text-xs text-bark-300">
                         <span className="text-pine-600 font-medium">{counts.changed} changed</span>
@@ -260,6 +261,9 @@ function CrawlRunCard({ run: initialRun, highlight, campNames, onRetry }: { run:
                         <span>{counts.unchanged} unchanged</span>
                         {counts.incomplete > 0 && (
                           <><span>·</span><span className="text-amber-700 font-medium">{counts.incomplete} incomplete</span></>
+                        )}
+                        {outputCap.truncated > 0 && (
+                          <><span>·</span><span className="text-amber-700" title="Pages where an extraction answer stopped at the model's output cap">{outputCap.truncated} of {outputCap.extracted} hit output cap</span></>
                         )}
                         {counts.error > 0 && (
                           <><span>·</span><span className="text-red-500 font-medium">{counts.error} errors</span></>
