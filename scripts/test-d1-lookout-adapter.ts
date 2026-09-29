@@ -217,12 +217,12 @@ function characterizeLookoutSeam(): void {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
   };
-  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.8.0", "manifest must exact-pin Lookout");
+  assert.equal(manifest.dependencies?.["@kontourai/lookout"], "0.8.1", "manifest must exact-pin Lookout");
   // Read the version off the copy that is actually on disk rather than off a
   // lockfile entry. pnpm's isolated layout gives no stable node_modules path to
   // read, and the installed package.json is the stronger claim anyway: it is
   // what `import "@kontourai/lookout"` above resolves to.
-  assert.equal(installedVersion("@kontourai/lookout"), "0.8.0", "installed Lookout must resolve to 0.8.0");
+  assert.equal(installedVersion("@kontourai/lookout"), "0.8.1", "installed Lookout must resolve to 0.8.1");
 
   assert.equal(compareValue(" Denver ", "denver", normalizeScalar).changed, false);
   assert.equal(compareValue({ b: 2, a: 1 }, { a: 1, b: 2 }).changed, false);
