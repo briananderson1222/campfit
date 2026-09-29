@@ -505,8 +505,14 @@ describe('runCrawlPipeline cross-strategy convergence (campfit#85 Wave 6)', () =
       expect(routedFields).toContain('name');
       expect(routedFields).not.toContain('ageGroups');
       const [entry] = (await getCrawlRun(run.id))!.campLog;
-      expect(entry!.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1, outputTruncated: false });
+      expect(entry!.incomplete).toEqual({ reason: 'provider-failure', unreadRanges: 1, outputTruncated: false, withheldListFields: ['ageGroups'] });
       expect(entry!.warnings?.some((w) => w.startsWith('ageGroups change withheld'))).toBe(true);
+      expect(entry!.incomplete?.withheldListFields).toEqual(['ageGroups']);
+      // The provider-source proposal carries the marker the review page reads.
+      const stored = await pool.query<{ rawExtraction: Record<string, unknown> }>(
+        `SELECT "rawExtraction" FROM "CampChangeProposal" WHERE "crawlRunId" = $1`, [run.id],
+      );
+      expect(stored.rows.map((row) => row.rawExtraction.withheldListFields)).toEqual([['ageGroups']]);
       expect(campLogOutcome(entry!)).toBe('incomplete');
     });
   });

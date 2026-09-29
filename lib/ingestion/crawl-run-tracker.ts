@@ -78,6 +78,9 @@ export type ItemOutcome =
       warnings?: string[];
       /** Set when the extraction did not read all of its text; persisted on the campLog entry. */
       incomplete?: ExtractionIncompleteness;
+      /** List fields withheld / filled on that incomplete run; persisted with the marker. */
+      withheldListFields?: readonly string[];
+      populatedListFields?: readonly string[];
     }
   | {
       status: 'error';
@@ -183,6 +186,8 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
                 reason: outcome.incomplete.reason,
                 unreadRanges: unreadRangeCount(outcome.incomplete),
                 outputTruncated: hitOutputCap(outcome.incomplete),
+                ...(outcome.withheldListFields?.length ? { withheldListFields: [...outcome.withheldListFields] } : {}),
+                ...(outcome.populatedListFields?.length ? { populatedListFields: [...outcome.populatedListFields] } : {}),
               },
             }
           : {}),

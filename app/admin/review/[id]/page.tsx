@@ -10,7 +10,8 @@ import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-re
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { ReviewDetailHeading } from './review-detail-heading';
-import { reportedOverallConfidence, storedExtractionIncompleteness, storedWithheldListFields, withheldListNotice } from '@/lib/admin/proposal-extraction-status';
+import { reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
+import { ExtractionNotices } from './extraction-notices';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,8 +62,6 @@ export default async function ReviewDetailPage(
   });
   const trustDisplays = await loadCampTrustDisplays(proposal.campId);
   const overallConfidence = reportedOverallConfidence(proposal);
-  const incomplete = storedExtractionIncompleteness(proposal.rawExtraction);
-  const withheldListFields = storedWithheldListFields(proposal.rawExtraction);
 
   return (
     <div>
@@ -97,22 +96,7 @@ export default async function ReviewDetailPage(
           )}
         </div>
       </div>
-      {incomplete && (
-        <div role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p className="font-semibold">Incomplete extraction ({incomplete.reason})</p>
-          <p className="mt-0.5">
-            {incomplete.unreadRanges > 0
-              ? `${incomplete.unreadRanges} text range(s) of the source page were not fully read. `
-              : 'Part of the source page was not read. '}
-            These changes cover only the text that was read. A value missing here is not evidence it was removed.
-          </p>
-        </div>
-      )}
-      {withheldListFields.length > 0 && (
-        <ul role="status" className="mb-4 space-y-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          {withheldListFields.map((field) => <li key={field}>{withheldListNotice(field)}</li>)}
-        </ul>
-      )}
+      <ExtractionNotices rawExtraction={proposal.rawExtraction} />
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">

@@ -45,14 +45,15 @@ describe('extraction completeness', () => {
   });
 
   it('withholds every list change except one into an empty field, keeps scalars, and names what it withheld', () => {
-    const { changes, warnings, withheldFields } = withholdListChangesFromIncompleteRun(CHANGES, INCOMPLETE);
+    const { changes, warnings, withheldFields, populatedFields } = withholdListChangesFromIncompleteRun(CHANGES, INCOMPLETE);
+    expect(populatedFields).toEqual(['ageGroups']);
     expect(Object.keys(changes).sort()).toEqual(['ageGroups', 'city']);
     expect(withheldFields.sort()).toEqual(['campTypes', 'pricing', 'schedules']);
     expect(warnings.every((w) => w.includes('change withheld'))).toBe(true);
   });
 
   it('changes nothing on a complete run', () => {
-    expect(withholdListChangesFromIncompleteRun(CHANGES, undefined)).toEqual({ changes: CHANGES, warnings: [], withheldFields: [] });
+    expect(withholdListChangesFromIncompleteRun(CHANGES, undefined)).toEqual({ changes: CHANGES, warnings: [], withheldFields: [], populatedFields: [] });
   });
 
   it('detects an output-cap stop from the reason or any coverage range', () => {

@@ -81,6 +81,7 @@ import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { storedWithheldListFields, withheldListNotice } from '@/lib/admin/proposal-extraction-status';
 import type { CampChangeProposal } from '@/lib/admin/types';
+import { campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
 
 const REVIEWER = 'reviewer@campfit.test';
 const CAMP_NAME = 'Mountain Explorers Day Camp';
@@ -175,6 +176,8 @@ describe('list updates wait for a complete run, end to end', () => {
     const { entry, proposalIds } = await crawl(campId);
     expect(entry.incomplete?.reason).toBe('provider-failure');
     expect(entry.warnings?.some((w) => w.startsWith('schedules change withheld'))).toBe(true);
+    expect(entry.incomplete?.withheldListFields).toEqual(['schedules']);
+    expect(campLogOutcomeNote(entry)).toContain('List updates for sessions were withheld');
     expect(proposalIds).toHaveLength(1);
     const proposal = (await getProposal(proposalIds[0]!))!;
     expect(Object.keys(proposal.proposedChanges)).toEqual(['city']);

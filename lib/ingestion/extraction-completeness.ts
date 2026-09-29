@@ -61,18 +61,21 @@ export function describeIncompleteness(incomplete: ExtractionIncompleteness): st
  * or a changed price or date, would be added next to the stale one. List
  * updates therefore wait for a complete run. A list proposed into an empty
  * field (`populate`) removes and duplicates nothing and is kept, as is every
- * scalar. `withheldFields` names the withheld lists so the review page can
- * say so.
+ * scalar. `withheldFields` names the withheld lists and `populatedFields` the
+ * lists filled from this partial read (which may be missing entries), so the
+ * review page and crawl log can say so.
  */
 export function withholdListChangesFromIncompleteRun(
   changes: ProposedChanges,
   incomplete: ExtractionIncompleteness | undefined,
-): { changes: ProposedChanges; warnings: string[]; withheldFields: string[] } {
-  if (!incomplete) return { changes, warnings: [], withheldFields: [] };
+): { changes: ProposedChanges; warnings: string[]; withheldFields: string[]; populatedFields: string[] } {
+  if (!incomplete) return { changes, warnings: [], withheldFields: [], populatedFields: [] };
   const kept: ProposedChanges = {};
   const warnings: string[] = [];
   const withheldFields: string[] = [];
+  const populatedFields: string[] = [];
   for (const [field, diff] of Object.entries(changes)) {
+    if (Array.isArray(diff.new) && diff.mode === "populate") populatedFields.push(field);
     if (Array.isArray(diff.new) && diff.mode !== "populate") {
       withheldFields.push(field);
       warnings.push(
@@ -82,5 +85,5 @@ export function withholdListChangesFromIncompleteRun(
     }
     kept[field] = diff;
   }
-  return { changes: kept, warnings, withheldFields };
+  return { changes: kept, warnings, withheldFields, populatedFields };
 }

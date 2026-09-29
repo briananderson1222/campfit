@@ -197,6 +197,10 @@ export interface TraverseRecrawlResult {
    * remove entries are withheld from `proposedChanges` on such a run.
    */
   incomplete?: ExtractionIncompleteness;
+  /** List fields withheld on an incomplete run (see extraction-completeness.ts). */
+  withheldListFields?: string[];
+  /** Empty list fields filled from an incomplete run; they may be missing entries. */
+  populatedListFields?: string[];
   /** display name of the item traverse matched to this camp. Null on a no-items/ambiguous failure (nothing was matched). */
   matchedItemName: string | null;
   /** how many items traverse grouped out of the page (1 on a normal single-camp page; >1 on a shared listing page). */
@@ -444,6 +448,8 @@ export async function runTraverseRecrawlForCamp(
     itemCount: fetchResult.items.length,
     operatorWarnings,
     ...(fetchResult.incomplete ? { incomplete: fetchResult.incomplete } : {}),
+    ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
+    ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
     rawExtraction: {
       via: "traverse-recrawl",
       campId: opts.campId,
@@ -455,6 +461,7 @@ export async function runTraverseRecrawlForCamp(
       warnings: fetchResult.warnings,
       ...(fetchResult.incomplete ? { incomplete: fetchResult.incomplete } : {}),
       ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
+      ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
     },
     ...shared,
   };

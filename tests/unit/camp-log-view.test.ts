@@ -37,4 +37,22 @@ describe('crawl camp-log outcome', () => {
       { status: 'no_changes', incomplete: { reason: 'output-truncated', unreadRanges: 1 } },
     ])).toEqual({ truncated: 1, extracted: 4 });
   });
+
+  it('builds the incomplete note from what was actually withheld or filled', () => {
+    const base = { reason: 'output-truncated', unreadRanges: 1, outputTruncated: true };
+    const listsOnly = campLogOutcomeNote({
+      status: 'no_changes', fieldsChanged: [],
+      incomplete: { ...base, withheldListFields: ['schedules', 'pricing', 'ageGroups'] },
+    })!;
+    expect(listsOnly).toContain('List updates for sessions, pricing, age groups were withheld');
+    expect(listsOnly).not.toContain('No change was found');
+
+    const scalarOnly = campLogOutcomeNote({ status: 'ok', fieldsChanged: ['city'], incomplete: base })!;
+    expect(scalarOnly).toContain('The proposal covers only what was read.');
+    expect(scalarOnly).not.toContain('withheld');
+
+    const populated = campLogOutcomeNote({ status: 'ok', fieldsChanged: ['ageGroups'], incomplete: { ...base, populatedListFields: ['ageGroups'] } })!;
+    expect(populated).toContain('possibly missing entries: age groups');
+    expect(populated).not.toContain('withheld');
+  });
 });

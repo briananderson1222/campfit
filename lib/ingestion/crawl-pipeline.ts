@@ -809,6 +809,8 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               newProposalsDelta,
               warnings: result.operatorWarnings,
               incomplete: result.incomplete,
+              withheldListFields: result.withheldListFields,
+              populatedListFields: result.populatedListFields,
             });
           }
         } catch (err) {
@@ -941,6 +943,8 @@ async function runSourceSweepStrategy(
           newProposalsDelta: changesFound > 0 ? 1 : 0,
           warnings: record.operatorWarnings,
           incomplete: record.incomplete,
+          withheldListFields: record.withheldListFields,
+          populatedListFields: record.populatedListFields,
         });
         itemsProcessed++;
         return proposalId;

@@ -25,6 +25,10 @@ export interface CrawlCampLogEntry {
     unreadRanges: number;
     /** An answer stopped at the provider's output cap (Traverse `output-truncated`). Absent on entries written before it was recorded. */
     outputTruncated?: boolean;
+    /** List fields whose updates this run withheld (it did not read the whole page). */
+    withheldListFields?: string[];
+    /** Empty list fields this run filled from its partial read (they may be missing entries). */
+    populatedListFields?: string[];
   };
   durationMs: number;
   processedAt: string; // ISO

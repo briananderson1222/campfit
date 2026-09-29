@@ -58,12 +58,35 @@ const LIST_FIELD_LABELS: Readonly<Record<string, string>> = {
  * written before the marker existed.
  */
 export function storedWithheldListFields(rawExtraction: Record<string, unknown> | null | undefined): string[] {
-  const fields = rawExtraction?.withheldListFields;
+  return storedFieldList(rawExtraction?.withheldListFields);
+}
+
+/**
+ * Empty list fields the crawl filled although its extraction did not read the
+ * whole page (`rawExtraction.populatedListFields`): nothing was removed, but
+ * the list may be missing entries.
+ */
+export function storedPopulatedListFields(rawExtraction: Record<string, unknown> | null | undefined): string[] {
+  return storedFieldList(rawExtraction?.populatedListFields);
+}
+
+function storedFieldList(fields: unknown): string[] {
   if (!Array.isArray(fields)) return [];
   return fields.filter((field): field is string => typeof field === 'string' && field.length > 0);
 }
 
+/** A list field's name for review and crawl-log text ("sessions", "age groups"). */
+export function listFieldLabel(field: string): string {
+  return LIST_FIELD_LABELS[field] ?? field;
+}
+
+/** The review page's notice for one list filled from an incomplete run. */
+export function populatedListNotice(field: string): string {
+  const label = listFieldLabel(field);
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${label === 'pricing' ? 'was' : 'were'} filled from a run that did not read the whole page; the list may be missing entries.`;
+}
+
 /** The review page's notice for one withheld list. */
 export function withheldListNotice(field: string): string {
-  return `List updates for ${LIST_FIELD_LABELS[field] ?? field} were withheld because this run did not read the whole page; re-crawl, or edit manually.`;
+  return `List updates for ${listFieldLabel(field)} were withheld because this run did not read the whole page; re-crawl, or edit manually.`;
 }

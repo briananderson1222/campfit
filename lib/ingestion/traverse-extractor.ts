@@ -215,6 +215,9 @@ export interface TraverseItemProposalRecord {
   operatorWarnings?: string[];
   /** Present when the extraction behind this record did not read all of its text. */
   incomplete?: ExtractionIncompleteness;
+  /** List fields withheld / filled on that incomplete run (also on rawExtraction for the review page). */
+  withheldListFields?: string[];
+  populatedListFields?: string[];
 }
 
 /**
@@ -266,10 +269,13 @@ export function buildTraverseItemProposalRecords(
         warnings: [...(result.warnings ?? []), ...item.warnings],
         ...(incomplete ? { incomplete } : {}),
         ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
+        ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
       },
       warnings: [...withheld.warnings, ...item.warnings],
       operatorWarnings,
       ...(incomplete ? { incomplete } : {}),
+      ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
+      ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
     };
   });
 }
