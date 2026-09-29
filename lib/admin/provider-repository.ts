@@ -42,6 +42,26 @@ export async function getProviderCrawlContext(providerId: string): Promise<{
   };
 }
 
+/**
+ * Average overall confidence of a provider's camp proposals, over only the
+ * proposals where some field change reported a confidence, and how many that
+ * is. A proposal with none stores 0 as a queue-ordering key (see
+ * diff-engine's computeOverallConfidence); averaging those in would report a
+ * confidence no extractor gave. Subqueries rather than a join, so each
+ * proposal is counted once.
+ */
+const REPORTED_CONFIDENCE_PROPOSALS = `
+  FROM "CampChangeProposal" rc
+  JOIN "Camp" rcc ON rcc.id = rc."campId"
+  WHERE rcc."providerId" = p.id
+    AND EXISTS (
+      SELECT 1 FROM jsonb_each(rc."proposedChanges") f
+      WHERE jsonb_typeof(f.value -> 'confidence') = 'number'
+    )`;
+const PROVIDER_CONFIDENCE_COLUMNS = `
+      (SELECT ROUND(AVG(rc."overallConfidence")::numeric, 2)::float ${REPORTED_CONFIDENCE_PROPOSALS}) AS "avgConfidence",
+      (SELECT COUNT(*)::int ${REPORTED_CONFIDENCE_PROPOSALS}) AS "avgConfidenceCount"`;
+
 /** All providers with rollup stats, ordered by name. */
 export async function getProviders(
   communitySlug: string | string[] = 'denver',
@@ -60,7 +80,7 @@ export async function getProviders(
       COUNT(DISTINCT c.id)::int                                          AS "campCount",
       COUNT(DISTINCT cp.id) FILTER (WHERE cp.status = 'PENDING')::int   AS "pendingProposals",
       MAX(cr."completedAt")                                              AS "lastCrawledAt",
-      ROUND(AVG(cp2."overallConfidence")::numeric, 2)::float            AS "avgConfidence"
+      ${PROVIDER_CONFIDENCE_COLUMNS}
     FROM "Provider" p
     LEFT JOIN "Camp" c ON c."providerId" = p.id
     LEFT JOIN "CampChangeProposal" cp ON cp."campId" = c.id
@@ -71,7 +91,6 @@ export async function getProviders(
       ORDER BY cl."createdAt" DESC
       LIMIT 1
     )
-    LEFT JOIN "CampChangeProposal" cp2 ON cp2."campId" = c.id
     WHERE 1 = 1
       ${communityScope.clause}
       ${archivedClause}
@@ -89,7 +108,7 @@ export async function getProvider(id: string): Promise<ProviderWithStats | null>
       COUNT(DISTINCT c.id)::int                                          AS "campCount",
       COUNT(DISTINCT cp.id) FILTER (WHERE cp.status = 'PENDING')::int   AS "pendingProposals",
       MAX(cr."completedAt")                                              AS "lastCrawledAt",
-      ROUND(AVG(cp2."overallConfidence")::numeric, 2)::float            AS "avgConfidence"
+      ${PROVIDER_CONFIDENCE_COLUMNS}
     FROM "Provider" p
     LEFT JOIN "Camp" c ON c."providerId" = p.id
     LEFT JOIN "CampChangeProposal" cp ON cp."campId" = c.id
@@ -100,7 +119,6 @@ export async function getProvider(id: string): Promise<ProviderWithStats | null>
       ORDER BY cl."createdAt" DESC
       LIMIT 1
     )
-    LEFT JOIN "CampChangeProposal" cp2 ON cp2."campId" = c.id
     WHERE p.id = $1
     GROUP BY p.id
   `, [id]);

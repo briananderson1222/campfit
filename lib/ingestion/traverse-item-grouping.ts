@@ -86,7 +86,8 @@ const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
 
 export interface FieldProposal {
   candidateValue: unknown;
-  confidence: number;
+  /** The provider's self-report, absent when it gave none (Traverse 2.0+). Never defaulted. */
+  confidence?: number;
   excerpt: string;
   locator: string;
   extractor: string;
@@ -95,7 +96,7 @@ export interface FieldProposal {
 /** One reconstructed entry of an enum-array family (e.g. one campTypes[] tag). */
 export interface EnumArrayEntry {
   value: string;
-  confidence: number;
+  confidence?: number;
   excerpt: string;
 }
 
@@ -105,9 +106,9 @@ export interface AssembledItem {
   /** bare scalar field -> its single proposal (e.g. "name", "city"). */
   scalars: Partial<Record<ScalarSchemaPath, FieldProposal>>;
   /** each entry is one age band, fully reconstructed from its own excerpt(s). */
-  ageGroups: { minAge: number | null; maxAge: number | null; label: string; confidence: number }[];
+  ageGroups: { minAge: number | null; maxAge: number | null; label: string; confidence?: number }[];
   /** each entry is one session, fully reconstructed from its own excerpt(s). */
-  schedules: { startDate: string | null; endDate: string | null; label: string; confidence: number }[];
+  schedules: { startDate: string | null; endDate: string | null; label: string; confidence?: number }[];
   /**
    * each entry is one price tier, fully reconstructed from its own excerpt(s).
    * A tier missing its amount or unit is never defaulted (a missing amount is
@@ -116,7 +117,7 @@ export interface AssembledItem {
    * camp's whole price list (review-apply deletes and re-inserts), so a
    * partial list would delete the tiers that could not be extracted.
    */
-  pricing: { amount: number; unit: PricingUnit; label: string; confidence: number }[];
+  pricing: { amount: number; unit: PricingUnit; label: string; confidence?: number }[];
   /**
    * Notes an operator needs even when no proposal is created: each dropped
    * price tier, and the withheld pricing change. Also included in `warnings`.
@@ -136,7 +137,7 @@ export interface AssembledItem {
 function toFieldProposal(p: ExtractionProposal): FieldProposal {
   return {
     candidateValue: p.candidateValue,
-    confidence: p.confidence,
+    ...(p.confidence === undefined ? {} : { confidence: p.confidence }),
     excerpt: p.provenance.excerpt,
     locator: p.provenance.locator,
     extractor: p.extractor,
@@ -329,9 +330,14 @@ function assembleEnumArrayEntries(
   const byValue = new Map<string, EnumArrayEntry>();
   for (const fp of ordered) {
     const value = String(fp.candidateValue);
-    const candidate: EnumArrayEntry = { value, confidence: fp.confidence, excerpt: fp.excerpt };
+    const candidate: EnumArrayEntry = { value, ...(fp.confidence === undefined ? {} : { confidence: fp.confidence }), excerpt: fp.excerpt };
     const existing = byValue.get(value);
-    if (!existing || candidate.confidence > existing.confidence) byValue.set(value, candidate);
+    // A later duplicate replaces the kept one only when both reported a
+    // confidence and the later one is higher; an unreported confidence is
+    // not ranked as low or high.
+    if (!existing || (candidate.confidence !== undefined && existing.confidence !== undefined && candidate.confidence > existing.confidence)) {
+      byValue.set(value, candidate);
+    }
   }
 
   return { rows: [...byValue.values()], warnings };
@@ -351,10 +357,24 @@ function parsePricingAmount(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function rowConfidence(row: Map<string, FieldProposal>): number {
-  const values = [...row.values()];
-  if (values.length === 0) return 0;
-  return Math.round((values.reduce((s, v) => s + v.confidence, 0) / values.length) * 100) / 100;
+/**
+ * Mean of a set of self-reported confidences, rounded to 2dp — or undefined
+ * when the set is empty or any member reported none. Traverse 2.0 made
+ * confidence optional; a mean over only the members that reported one would
+ * present a number for values the provider never scored.
+ */
+export function meanReportedConfidence(values: readonly (number | undefined)[]): number | undefined {
+  if (values.length === 0 || values.some((value) => value === undefined)) return undefined;
+  const known = values as readonly number[];
+  return Math.round((known.reduce((sum, value) => sum + value, 0) / known.length) * 100) / 100;
+}
+
+function withConfidence(confidence: number | undefined): { confidence?: number } {
+  return confidence === undefined ? {} : { confidence };
+}
+
+function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
+  return meanReportedConfidence([...row.values()].map((value) => value.confidence));
 }
 
 /**
@@ -396,7 +416,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         minAge: (row.get("minAge")?.candidateValue as number | undefined) ?? null,
         maxAge: (row.get("maxAge")?.candidateValue as number | undefined) ?? null,
         label: rowExcerpt(row),
-        confidence: rowConfidence(row),
+        ...withConfidence(rowConfidence(row)),
       }));
 
     const schedules = scheduleResult.rows
@@ -405,7 +425,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         startDate: (row.get("startDate")?.candidateValue as string | undefined) ?? null,
         endDate: (row.get("endDate")?.candidateValue as string | undefined) ?? null,
         label: rowExcerpt(row),
-        confidence: rowConfidence(row),
+        ...withConfidence(rowConfidence(row)),
       }));
 
     const complete: AssembledItem["pricing"] = [];
@@ -420,7 +440,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         operatorWarnings.push(`pricing entry "${label}" dropped: no ${missing} was extracted — a price the page does not state is not emitted`);
         continue;
       }
-      complete.push({ amount, unit, label, confidence: rowConfidence(row) });
+      complete.push({ amount, unit, label, ...withConfidence(rowConfidence(row)) });
     }
     const dropped = operatorWarnings.length;
     if (dropped > 0 && complete.length > 0) {

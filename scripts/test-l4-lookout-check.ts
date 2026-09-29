@@ -117,7 +117,16 @@ const baselineRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-baseline-"
 try {
   const sourceId = "baseline-camp";
   let latest: Snapshot = { ...snapshot, sourceId, url: "https://baseline.test", body: "Old", bodyHash: "bca97160f4e1211fe659338d0a9705a7dff8aa3ea2e1be1cc1958100a33962c2", fetchedAt: "2026-07-11T00:00:00.000Z" };
-  const corpusStore: SnapshotStore = { latest: async () => latest, get: async () => latest, list: async () => [latest], put: async (next) => { latest = next; } };
+  // Keeps history like the production store: Lookout 0.7+ resolves the prior
+  // observation's snapshot reference too, so a store that forgets earlier
+  // captures cannot authenticate a diff.
+  const history: Snapshot[] = [latest];
+  const corpusStore: SnapshotStore = {
+    latest: async () => latest,
+    get: async (_sourceId, bodyHash) => history.find((item) => item.bodyHash === bodyHash),
+    list: async () => [...new Set([latest, ...history])],
+    put: async (next) => { history.push(next); latest = next; },
+  };
   let phase: "baseline" | "changed" | "recovery" = "baseline";
   let replayCalls = 0;
   const replayCamp = async (): Promise<TraverseRecrawlResult> => ({
@@ -162,7 +171,7 @@ try {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
     fetchSource: async () => ({ snapshot: next }), clock: () => "2026-07-12T01:00:00.000Z",
   });
-  assert.equal(changed.ok, true);
+  assert.equal(changed.ok, true, changed.error ?? "changed failed");
   assert.equal((await readdir(path.join(baselineRoot, "survey"))).filter((name) => name.endsWith(".json")).length, 1, "first later change emits exactly one survey");
 
   // Production-coordinator crash recovery: a changed run advances the pointer

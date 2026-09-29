@@ -10,6 +10,8 @@ import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-re
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { ReviewDetailHeading } from './review-detail-heading';
+import { reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
+import { ExtractionNotices } from './extraction-notices';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +61,7 @@ export default async function ReviewDetailPage(
     reviewSessionId: surveyReviewSessionRecord.id,
   });
   const trustDisplays = await loadCampTrustDisplays(proposal.campId);
+  const overallConfidence = reportedOverallConfidence(proposal);
 
   return (
     <div>
@@ -83,7 +86,9 @@ export default async function ReviewDetailPage(
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm text-bark-400">Overall confidence</p>
-          <p className="font-display text-3xl font-bold text-bark-700">{Math.round(proposal.overallConfidence * 100)}%</p>
+          <p className="font-display text-3xl font-bold text-bark-700">
+            {overallConfidence === null ? <span className="text-lg text-bark-400">Not reported</span> : `${Math.round(overallConfidence * 100)}%`}
+          </p>
           {proposal.crawlCompletedAt && (
             <p className="mt-1 text-xs text-bark-400">
               Last crawled {new Date(proposal.crawlCompletedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -91,6 +96,7 @@ export default async function ReviewDetailPage(
           )}
         </div>
       </div>
+      <ExtractionNotices rawExtraction={proposal.rawExtraction} />
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">

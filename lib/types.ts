@@ -269,7 +269,10 @@ export interface ProviderWithStats extends Provider {
   campCount: number;
   pendingProposals: number;
   lastCrawledAt: string | null;
+  /** Mean over proposals that reported a confidence; null when none did. */
   avgConfidence: number | null;
+  /** How many proposals {@link avgConfidence} averages. */
+  avgConfidenceCount: number;
 }
 
 export interface Community {

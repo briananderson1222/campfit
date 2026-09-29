@@ -67,6 +67,7 @@
  *    rendered) — never more than one render per source per run.
  */
 
+import { describeIncompleteness, extractionIncompleteness, type ExtractionIncompleteness } from "./extraction-completeness";
 import { fetchAndExtract, crawlSource } from "@kontourai/traverse/fetch";
 import type {
   FetchAndExtractOptions,
@@ -165,6 +166,8 @@ export interface TraversePipelineDeps {
   extraFieldHints?: Record<string, string>;
   /** content-prep truncation forwarded to extract(). */
   maxContentChars?: number;
+  /** Target characters per extraction chunk; defaults to {@link resolveExtractionChunkSize}. */
+  chunkSize?: number;
   /**
    * Ceiling on `provider.extract()` calls issued for ONE source's page,
    * across every chunk `@kontourai/traverse`'s chunker splits it into
@@ -274,6 +277,15 @@ export interface TraversePipelineSourceResult {
   snapshotBodyHash: string | null;
   fetchError: string | null;
   extractionError: string | null;
+  /**
+   * Present when an extraction ran but did not read and answer all of its
+   * text (Traverse `partial`: a chunk's provider call failed, content was cut
+   * at the content cap, an answer stopped at the output cap, or a cost/chunk
+   * ceiling stopped dispatch). `ok` stays true — what was read is usable — but
+   * the run is not complete, and callers must say so. On a crawl source this
+   * is the first incomplete page's marker; each page also gets a warning.
+   */
+  incomplete?: ExtractionIncompleteness;
   warnings: string[];
   /**
    * `ExtractionResult.totalTokensUsed` (traverse 0.8.0) — input+output tokens
@@ -409,6 +421,33 @@ export const DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE = 40;
 export const DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE = 450_000;
 
 /**
+ * Target characters per extraction chunk (Traverse's `chunkSize`), read from
+ * `TRAVERSE_CHUNK_SIZE` when set. The default is Traverse's own, 12_000, so an
+ * unset variable changes nothing.
+ *
+ * Why it is tunable: the production glm profile stops at its 2048-token
+ * output cap on dense pages (docs/cutover-report-2026-07.md), and since
+ * Traverse 2.0 such a run is partial (`output-truncated`). Raising the output
+ * cap made glm worse, not better (see resolve-extraction-provider.ts), so the
+ * lever is smaller chunks: fewer items per call, each answer fitting the cap,
+ * at the cost of more provider calls on long pages. Lower it (for example to
+ * 6_000) when the crawl log's output-cap count stays high. It must be an
+ * integer from 1_000 to 32_000 (the per-chunk content budget); anything else
+ * is refused rather than clamped.
+ */
+export const DEFAULT_EXTRACTION_CHUNK_SIZE = 12_000;
+
+export function resolveExtractionChunkSize(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const raw = env.TRAVERSE_CHUNK_SIZE;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_EXTRACTION_CHUNK_SIZE;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1_000 || value > 32_000) {
+    throw new Error(`TRAVERSE_CHUNK_SIZE must be an integer from 1000 to 32000, got "${raw}"`);
+  }
+  return value;
+}
+
+/**
  * One fetch+extract call (an "attempt") — factored out so the shell-retry
  * seam can run it twice. `render` sets `SourceConfig.render` (traverse
  * 0.13.0's native rendered-fetch seam) for THIS attempt; `deps.fetchOptions`
@@ -465,6 +504,7 @@ async function runFetchAndExtractAttempt(
     store: deps.store,
     mode,
     maxContentChars: deps.maxContentChars,
+    chunkSize: deps.chunkSize ?? resolveExtractionChunkSize(),
     // Real, non-unbounded defaults (unlike `maxContentChars` above) — see
     // DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE / DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE's
     // docs for the maxChunks=40 arithmetic. Covers both the scheduled
@@ -697,6 +737,11 @@ async function runCoreFetchAndExtract(
 
   core.extractionError = far.extraction.error ?? null;
   core.warnings.push(...(far.extraction.warnings ?? []));
+  const incomplete = extractionIncompleteness(far.extraction);
+  if (incomplete) {
+    core.incomplete = incomplete;
+    core.warnings.push(describeIncompleteness(incomplete));
+  }
   // totalTokensUsed/providerCalls (traverse 0.8.0) are the SUMMED/counted
   // aggregates across every chunk's provider call — always populated,
   // never undefined, even on a zero-call early return. Reading
@@ -828,6 +873,7 @@ async function runTraverseCrawlPipelineForSource(
       fieldHints: mergeFieldHints(deps),
       provider: deps.provider,
       maxContentChars: deps.maxContentChars,
+      chunkSize: deps.chunkSize ?? resolveExtractionChunkSize(),
       // Per-page cost ceiling, exactly as the single-page path applies it — the
       // page/depth caps bound the number of pages, so total spend stays bounded.
       maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
@@ -843,6 +889,11 @@ async function runTraverseCrawlPipelineForSource(
       extractionErrors++;
       result.warnings.push(`[crawl ${page.url}] extraction ${extraction.error}`);
       continue;
+    }
+    const pageIncomplete = extractionIncompleteness(extraction);
+    if (pageIncomplete) {
+      result.incomplete ??= pageIncomplete;
+      result.warnings.push(`[crawl ${page.url}] ${describeIncompleteness(pageIncomplete)}`);
     }
 
     const items = assembleItems(extraction.proposals);

@@ -1,5 +1,6 @@
 import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
 import type { CrawlProgressEvent, CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
+import { hitOutputCap, unreadRangeCount, type ExtractionIncompleteness } from './extraction-completeness';
 
 /**
  * Shared run-record tracker (campfit#85, WS11 Slice 4, Wave 2; guarded
@@ -75,6 +76,11 @@ export type ItemOutcome =
       newProposalsDelta: 0 | 1;
       /** Operator-facing extraction notes, persisted on the campLog entry when non-empty. */
       warnings?: string[];
+      /** Set when the extraction did not read all of its text; persisted on the campLog entry. */
+      incomplete?: ExtractionIncompleteness;
+      /** List fields withheld / filled on that incomplete run; persisted with the marker. */
+      withheldListFields?: readonly string[];
+      populatedListFields?: readonly string[];
     }
   | {
       status: 'error';
@@ -174,9 +180,23 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
         durationMs: outcome.durationMs, processedAt: new Date().toISOString(),
         ...(outcome.providerAction ? { providerAction: outcome.providerAction } : {}),
         ...(outcome.warnings && outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
+        ...(outcome.incomplete
+          ? {
+              incomplete: {
+                reason: outcome.incomplete.reason,
+                unreadRanges: unreadRangeCount(outcome.incomplete),
+                outputTruncated: hitOutputCap(outcome.incomplete),
+                ...(outcome.withheldListFields?.length ? { withheldListFields: [...outcome.withheldListFields] } : {}),
+                ...(outcome.populatedListFields?.length ? { populatedListFields: [...outcome.populatedListFields] } : {}),
+              },
+            }
+          : {}),
       };
       await guardedWrite('appendCrawlLog', outcome.campId, () => appendCrawlLog(run.id, entry));
-      await emit({ type: 'camp_done', campId: outcome.campId, proposalId: outcome.proposalId, confidence: outcome.confidence, changesFound });
+      await emit({
+        type: 'camp_done', campId: outcome.campId, proposalId: outcome.proposalId, confidence: outcome.confidence, changesFound,
+        ...(outcome.incomplete ? { incomplete: true } : {}),
+      });
     }
     processedCamps++;
     await guardedWrite('updateCrawlRunProgress', outcome.campId, () =>

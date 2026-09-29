@@ -45,6 +45,7 @@
  * `LLMExtractionResult` it replaces).
  */
 
+import { describeIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import type { ExtractionProvider } from "@kontourai/traverse";
 import type { FetchMode, FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetch";
 import type { Camp } from "@/lib/types";
@@ -190,6 +191,16 @@ export interface TraverseRecrawlResult {
   rawExtraction: Record<string, unknown>;
   /** The matched item's operator-facing notes (AssembledItem.operatorWarnings); the crawl pipeline copies them into the run's camp log. */
   operatorWarnings?: string[];
+  /**
+   * Present when the extraction did not read all of the page's text (see
+   * `TraversePipelineSourceResult.incomplete`). List changes that could
+   * remove entries are withheld from `proposedChanges` on such a run.
+   */
+  incomplete?: ExtractionIncompleteness;
+  /** List fields withheld on an incomplete run (see extraction-completeness.ts). */
+  withheldListFields?: string[];
+  /** Empty list fields filled from an incomplete run; they may be missing entries. */
+  populatedListFields?: string[];
   /** display name of the item traverse matched to this camp. Null on a no-items/ambiguous failure (nothing was matched). */
   matchedItemName: string | null;
   /** how many items traverse grouped out of the page (1 on a normal single-camp page; >1 on a shared listing page). */
@@ -410,14 +421,23 @@ export async function runTraverseRecrawlForCamp(
 
   const item = selection.item;
   const { extracted, confidence, excerpts } = assembledItemToDiffInputs(item);
-  const proposedChanges = computeDiff(
-    opts.current,
-    extracted,
-    confidence,
-    excerpts,
-    opts.fieldSources ?? {},
-    opts.websiteUrl
+  const withheld = withholdListChangesFromIncompleteRun(
+    computeDiff(
+      opts.current,
+      extracted,
+      confidence,
+      excerpts,
+      opts.fieldSources ?? {},
+      opts.websiteUrl
+    ),
+    fetchResult.incomplete,
   );
+  const proposedChanges = withheld.changes;
+  const operatorWarnings = [
+    ...(fetchResult.incomplete ? [describeIncompleteness(fetchResult.incomplete)] : []),
+    ...withheld.warnings,
+    ...item.operatorWarnings,
+  ];
 
   return {
     ok: true,
@@ -426,7 +446,10 @@ export async function runTraverseRecrawlForCamp(
     overallConfidence: computeOverallConfidence(proposedChanges),
     matchedItemName: itemDisplayName(item),
     itemCount: fetchResult.items.length,
-    operatorWarnings: item.operatorWarnings,
+    operatorWarnings,
+    ...(fetchResult.incomplete ? { incomplete: fetchResult.incomplete } : {}),
+    ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
+    ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
     rawExtraction: {
       via: "traverse-recrawl",
       campId: opts.campId,
@@ -436,6 +459,9 @@ export async function runTraverseRecrawlForCamp(
       proposals: item.allProposals,
       itemWarnings: item.warnings,
       warnings: fetchResult.warnings,
+      ...(fetchResult.incomplete ? { incomplete: fetchResult.incomplete } : {}),
+      ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
+      ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
     },
     ...shared,
   };

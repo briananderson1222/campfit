@@ -693,6 +693,94 @@ async function testPartialPricingNeverReplacesLiveTiers() {
   console.log("✓ campfit#157: a partially extracted price list is withheld (no replace diff that would delete a live tier), with operator warnings");
 }
 
+// ─── Traverse 2.0+: an incomplete extraction withholds list updates ───
+//
+// The page states the existing $425 tier and a new $395 tier, then more text
+// that the content cap cuts off. Traverse reports the run partial
+// (content-truncated). The camp also holds a $525 tier the read text does not
+// mention; it may sit in the unread text. A list from a partial read can
+// neither replace the live list (it would delete the $525 tier) nor be merged
+// into it safely, so the pricing update is withheld and named. The scalar is
+// still proposed. The control run (no cap) proves the pricing change exists
+// when the page is read in full.
+
+async function testIncompleteRunWithholdsListUpdates() {
+  const filler = "Further sessions, the extended-week rate and aftercare details are listed below. ".repeat(80);
+  const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>
+    <p>Boulder, Colorado</p><p>$425 per week</p><p>$395 early bird</p><p>${filler}</p></main></body></html>`;
+  const livePricing = [
+    { id: "price-std", label: "$425 per week", amount: 425, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+    { id: "price-ext", label: "$525 per week", amount: 525, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+  ];
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+    { fieldPath: "items[0].city", candidateValue: "Boulder", needle: "Boulder, Colorado" },
+    { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[1].amount", candidateValue: 395, needle: "$395 early bird" },
+    { fieldPath: "items[0].pricing[1].unit", candidateValue: "PER_WEEK", needle: "$395 early bird" },
+  ];
+  const run = (maxContentChars?: number) => runTraverseRecrawlForCamp({
+    campId: "camp-incomplete",
+    websiteUrl: "https://avid4.com/day-camps/colorado/",
+    campName: "Mountain Explorers Day Camp",
+    current: makeCamp({ id: "camp-incomplete", city: "", pricing: livePricing as unknown as Camp["pricing"] }),
+    provider: createStubProvider(specs, { model: "stub-incomplete" }),
+    store: createInMemorySnapshotStore(),
+    mode: "live-with-capture",
+    fetchOptions: makeFixtureFetchOptions(html),
+    maxContentChars,
+    log: () => {},
+  });
+
+  const complete = await run();
+  assert.equal(complete.ok, true, complete.error ?? "");
+  assert.equal(complete.incomplete, undefined, "a fully read page is not marked incomplete");
+  assert.equal(complete.proposedChanges.pricing?.mode, "update", "control: the read list replaces the live list when the page was read in full");
+  assert.equal(complete.rawExtraction.withheldListFields, undefined, "a complete run withholds nothing");
+
+  const partial = await run(400);
+  assert.equal(partial.ok, true, partial.error ?? "");
+  assert.equal(partial.incomplete?.reason, "content-truncated", `run must be marked incomplete: ${JSON.stringify(partial.warnings)}`);
+  assert.equal(partial.proposedChanges.city?.new, "Boulder", "a scalar read from the page is still proposed");
+  assert.ok(!("pricing" in partial.proposedChanges), "no list update from an incomplete run");
+  assert.deepEqual(partial.rawExtraction.withheldListFields, ["pricing"], "the proposal names the withheld list for the review page");
+  const warnings = partial.operatorWarnings ?? [];
+  assert.ok(warnings.some((w) => w.startsWith("extraction incomplete (content-truncated)")), `operator must see the incomplete run: ${JSON.stringify(warnings)}`);
+  assert.ok(warnings.some((w) => w.startsWith("pricing change withheld")), "the withheld list change is named in the crawl log");
+  console.log("✓ Traverse partial run: marked incomplete, list updates withheld and named, scalars kept");
+}
+
+// ─── TRAVERSE_CHUNK_SIZE reaches extract() on the recrawl path ───
+
+async function testChunkSizeReachesExtraction() {
+  const paragraphs = Array.from({ length: 40 }, (_, i) => `<p>Session ${i + 1}: outdoor exploring, climbing and river games for the whole week.</p>`).join("");
+  const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>${paragraphs}</main></body></html>`;
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+  ];
+  const run = async (chunkSize: string | undefined) => {
+    const previous = process.env.TRAVERSE_CHUNK_SIZE;
+    if (chunkSize === undefined) delete process.env.TRAVERSE_CHUNK_SIZE;
+    else process.env.TRAVERSE_CHUNK_SIZE = chunkSize;
+    try {
+      return await runTraverseRecrawlForCamp({
+        campId: "camp-chunks", websiteUrl: "https://avid4.com/day-camps/colorado/", campName: "Mountain Explorers Day Camp",
+        current: makeCamp({ id: "camp-chunks" }), provider: createStubProvider(specs, { model: "stub-chunks" }),
+        store: createInMemorySnapshotStore(), mode: "live-with-capture", fetchOptions: makeFixtureFetchOptions(html), log: () => {},
+      });
+    } finally {
+      if (previous === undefined) delete process.env.TRAVERSE_CHUNK_SIZE;
+      else process.env.TRAVERSE_CHUNK_SIZE = previous;
+    }
+  };
+  const byDefault = await run(undefined);
+  const small = await run("1000");
+  assert.equal(byDefault.providerCalls, 1, "the page fits one default-size chunk");
+  assert.ok(small.providerCalls > 1, `a 1000-char chunk size splits the page into several calls (got ${small.providerCalls})`);
+  console.log(`✓ TRAVERSE_CHUNK_SIZE reaches extract(): ${byDefault.providerCalls} call(s) by default, ${small.providerCalls} at 1000 chars`);
+}
+
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───
 
 async function testSiteHintsReachProviderCall() {
@@ -1209,6 +1297,8 @@ async function main() {
   await testMultiItemPageAmbiguousFailsLoud();
   await testSuppressionFires();
   await testPartialPricingNeverReplacesLiveTiers();
+  await testIncompleteRunWithholdsListUpdates();
+  await testChunkSizeReachesExtraction();
   await testSiteHintsReachProviderCall();
   await testNeighborhoodHintReachesProviderCall();
   await testAllFiveCallSitesInvokeSharedPipeline();

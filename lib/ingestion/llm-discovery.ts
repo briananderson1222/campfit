@@ -3,8 +3,10 @@ import type { ExtractionProvider } from "@kontourai/traverse";
 import { parseAnySnapshotSourceRef, type FetchMode, type FetchSourceOptions, type SnapshotStore } from "@kontourai/traverse/fetch";
 import { DISCOVERY_FIELD_HINTS, DISCOVERY_TARGET_SCHEMA } from "./discovery-schema";
 import { groupDiscoveryItems } from "./discovery-item-grouping";
+import { describeIncompleteness, extractionIncompleteness, type ExtractionIncompleteness } from "./extraction-completeness";
 import { fetchAndExtractWithRevalidation } from "./traverse-fetch-extract";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
+import { resolveExtractionChunkSize } from "./traverse-pipeline";
 import { createGuardedTraverseFetchOptions, type EgressPolicyProfile } from "@/lib/security/egress-url-policy";
 
 export interface DiscoveredCampStub {
@@ -31,6 +33,8 @@ export interface DiscoveryResult {
   /** Raw evidence retained for Lookout observation/event derivation. */
   proposals?: readonly import("@kontourai/traverse").ExtractionProposal[];
   sourceRef?: string;
+  /** Present when the listing extraction did not read all of the page's text. */
+  incomplete?: ExtractionIncompleteness;
 }
 
 export interface DiscoveryOptions {
@@ -58,6 +62,7 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
         mode: options.mode ?? "live-with-capture",
         prep: "markdown",
         maxContentChars: options.maxChars,
+        chunkSize: resolveExtractionChunkSize(),
         // Match the established per-source traverse backstops. Callers may
         // lower either ceiling, but discovery is never silently unbounded.
         maxProviderCalls: options.maxProviderCalls ?? 40,
@@ -87,14 +92,21 @@ export async function discoverCampsFromUrl(url: string, options: DiscoveryOption
 
     const sourceUrl = result.fetch.snapshot.url;
     const grouped = groupDiscoveryItems(result.extraction.proposals, sourceUrl);
+    const incomplete = extractionIncompleteness(result.extraction);
     const stubs = grouped.items.map((item) => ({ ...item, sourceUrl, sourceRef: result.sourceRef! }));
     return {
       isListingPage: stubs.length >= 2,
       stubs,
       model: result.extraction.raw?.model ?? model,
-      warnings: [...(result.fetch.warnings ?? []), ...(result.extraction.warnings ?? []), ...grouped.warnings],
+      warnings: [
+        ...(result.fetch.warnings ?? []),
+        ...(result.extraction.warnings ?? []),
+        ...grouped.warnings,
+        ...(incomplete ? [describeIncompleteness(incomplete)] : []),
+      ],
       proposals: result.extraction.proposals,
       sourceRef: result.sourceRef,
+      ...(incomplete ? { incomplete } : {}),
     };
   } catch (error) {
     return { isListingPage: false, stubs: [], model, error: `Discovery failed: ${error instanceof Error ? error.message : String(error)}` };

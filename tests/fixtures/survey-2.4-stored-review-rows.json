@@ -1,0 +1,957 @@
+{
+  "note": "Rows written by campfit main with @kontourai/survey 2.4.0 (getOrCreateSurveyReviewSessionForProposal + replaceSurveyReviewEvents), dumped verbatim. Loaded by tests/integration/survey-stored-session-compat.test.ts under the current Survey.",
+  "camp": {
+    "id": "stored-camp-24",
+    "slug": "stored-camp-24",
+    "name": "Stored Camp",
+    "description": "",
+    "notes": null,
+    "campType": "SUMMER_DAY",
+    "category": "SPORTS",
+    "websiteUrl": "https://old.example.test",
+    "interestingDetails": null,
+    "city": "Denver",
+    "region": null,
+    "neighborhood": "",
+    "address": "",
+    "latitude": null,
+    "longitude": null,
+    "lunchIncluded": false,
+    "registrationOpenDate": null,
+    "registrationOpenTime": null,
+    "registrationStatus": "UNKNOWN",
+    "sourceType": "CSV",
+    "sourceUrl": null,
+    "lastVerifiedAt": null,
+    "dataConfidence": "PLACEHOLDER",
+    "createdAt": "2026-09-29T10:44:00.362Z",
+    "updatedAt": "2026-09-29T10:44:00.362Z",
+    "fieldSources": null,
+    "organizationName": null,
+    "providerId": null,
+    "communitySlug": "denver",
+    "registrationCloseDate": null,
+    "campTypes": [],
+    "categories": [],
+    "state": null,
+    "zip": null,
+    "archivedAt": null,
+    "archivedBy": null,
+    "archiveReason": null,
+    "applicationUrl": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "socialLinks": null,
+    "lastCrawledAt": null,
+    "displayName": "Denver"
+  },
+  "proposal": {
+    "id": "stored-proposal-24",
+    "campId": "stored-camp-24",
+    "crawlRunId": null,
+    "createdAt": "2026-09-01T12:00:00.000Z",
+    "reviewedAt": null,
+    "reviewedBy": null,
+    "status": "PENDING",
+    "sourceUrl": "https://example.test/camp",
+    "rawExtraction": {},
+    "proposedChanges": {
+      "websiteUrl": {
+        "new": "https://new.example.test",
+        "old": "https://old.example.test",
+        "mode": "update",
+        "excerpt": "Visit https://new.example.test",
+        "sourceUrl": "https://example.test/camp",
+        "confidence": 0.78
+      },
+      "description": {
+        "new": "Outdoor day camp for ages 7-12.",
+        "old": "",
+        "mode": "populate",
+        "excerpt": "Outdoor day camp for ages 7-12",
+        "sourceUrl": "https://example.test/camp",
+        "confidence": 0.94
+      },
+      "contactPhone": {
+        "new": "303-555-0100",
+        "old": null,
+        "mode": "populate",
+        "excerpt": "Call 303-555-0100",
+        "sourceUrl": "https://example.test/camp",
+        "confidence": 0.64
+      }
+    },
+    "overallConfidence": 0.79,
+    "extractionModel": "traverse:fixture-model",
+    "reviewerNotes": null,
+    "feedbackTags": null,
+    "appliedFields": [],
+    "priority": 0,
+    "snapshotRef": null,
+    "snapshotBodyHash": null
+  },
+  "sessions": [
+    {
+      "id": "25c1879f-2a56-4d10-9422-4e994387c7e7",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "snapshot": {
+        "items": [
+          {
+            "kind": "ReviewItem",
+            "spec": {
+              "target": "websiteUrl",
+              "rationale": "CampFit crawl proposal requires operator review before projecting a verified claim.",
+              "candidates": [
+                {
+                  "id": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.current.candidate",
+                  "role": "current",
+                  "value": "https://old.example.test",
+                  "source": {
+                    "kind": "manual-entry",
+                    "sourceId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.current.source",
+                    "sourceRef": "campfit:camp:stored-camp-24:field:websiteUrl:current",
+                    "observedAt": "2026-09-01T12:00:00.000Z",
+                    "locatorScheme": "structured-field"
+                  },
+                  "locator": {
+                    "scheme": "structured-field",
+                    "excerpt": "Current CampFit value before applying the crawl proposal.",
+                    "locator": "field:websiteUrl"
+                  },
+                  "producer": {
+                    "status": "current-managed-value",
+                    "rawValue": "https://old.example.test",
+                    "decisionEffect": "kept-current-value"
+                  },
+                  "extraction": {
+                    "target": "websiteUrl",
+                    "extractor": "campfit-current-record",
+                    "extractedAt": "2026-09-01T12:00:00.000Z",
+                    "extractionId": "camp.stored-camp-24.field.websiteUrl.stored-proposal-24.current"
+                  },
+                  "projection": {
+                    "claimId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.current.claim",
+                    "candidateId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.current.candidate",
+                    "rawSourceId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.current.source",
+                    "extractionId": "camp.stored-camp-24.field.websiteUrl.stored-proposal-24.current",
+                    "candidateSetId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates"
+                  },
+                  "sourceRank": 2,
+                  "claimTarget": {
+                    "facet": "public-directory.camp-profile",
+                    "claimId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.current.claim",
+                    "claimType": "public-data.field-candidate",
+                    "subjectId": "stored-camp-24",
+                    "collectedBy": "campfit-current-record",
+                    "impactLevel": "medium",
+                    "subjectType": "public-directory.camp",
+                    "evidenceType": "human_attestation",
+                    "evidenceMethod": "observation",
+                    "fieldOrBehavior": "websiteUrl"
+                  }
+                },
+                {
+                  "id": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.proposed.candidate",
+                  "role": "proposed",
+                  "value": "https://new.example.test",
+                  "source": {
+                    "kind": "web-page",
+                    "sourceId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.source",
+                    "sourceRef": "https://example.test/camp",
+                    "observedAt": "2026-09-01T12:00:00.000Z",
+                    "locatorScheme": "html"
+                  },
+                  "locator": {
+                    "scheme": "html",
+                    "excerpt": "Visit https://new.example.test",
+                    "locator": "field:websiteUrl"
+                  },
+                  "producer": {
+                    "mode": "update",
+                    "oldValue": "https://old.example.test",
+                    "rawValue": "https://new.example.test",
+                    "proposalId": "stored-proposal-24",
+                    "decisionEffect": "accepted-candidate-value",
+                    "sourceAuthority": {
+                      "scope": "Camp stored-camp-24 field websiteUrl",
+                      "declaredBy": "traverse:fixture-model",
+                      "authorityClass": "publisher_owned_page"
+                    }
+                  },
+                  "confidence": 0.78,
+                  "extraction": {
+                    "target": "websiteUrl",
+                    "extractor": "traverse:fixture-model",
+                    "confidence": 0.78,
+                    "extractedAt": "2026-09-01T12:00:00.000Z",
+                    "extractionId": "camp.stored-camp-24.field.websiteUrl.stored-proposal-24.proposed"
+                  },
+                  "projection": {
+                    "claimId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.proposed.claim",
+                    "candidateId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.proposed.candidate",
+                    "rawSourceId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.source",
+                    "extractionId": "camp.stored-camp-24.field.websiteUrl.stored-proposal-24.proposed",
+                    "candidateSetId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates"
+                  },
+                  "sourceRank": 1,
+                  "claimTarget": {
+                    "facet": "public-directory.camp-profile",
+                    "claimId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.proposed.claim",
+                    "claimType": "public-data.field-candidate",
+                    "subjectId": "stored-camp-24",
+                    "collectedBy": "traverse:fixture-model",
+                    "impactLevel": "medium",
+                    "subjectType": "public-directory.camp",
+                    "evidenceType": "crawl_observation",
+                    "evidenceMethod": "extraction",
+                    "fieldOrBehavior": "websiteUrl"
+                  }
+                }
+              ],
+              "projection": {
+                "candidateSetId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates"
+              },
+              "producerPolicy": {
+                "decisionMode": "current-proposed",
+                "feedbackTags": [],
+                "sourceAuthorityProjection": "only-for-selected-source-backed-value"
+              },
+              "candidateSetStatus": "needs-review"
+            },
+            "status": {
+              "observedCandidateCount": 2
+            },
+            "metadata": {
+              "name": "camp-proposal-stored-proposal-24-websiteUrl",
+              "labels": {
+                "field": "websiteUrl",
+                "campId": "stored-camp-24",
+                "domain": "public-directory",
+                "product": "campfit",
+                "proposalId": "stored-proposal-24"
+              },
+              "producer": {
+                "slug": "stored-camp-24",
+                "source": "campfit.admin.review",
+                "displayName": "Stored Camp",
+                "communitySlug": "denver"
+              }
+            },
+            "apiVersion": "survey.kontourai.io/v1alpha1"
+          },
+          {
+            "kind": "ReviewItem",
+            "spec": {
+              "target": "description",
+              "rationale": "CampFit crawl proposal requires operator review before projecting a verified claim.",
+              "candidates": [
+                {
+                  "id": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.current.candidate",
+                  "role": "current",
+                  "value": "",
+                  "source": {
+                    "kind": "manual-entry",
+                    "sourceId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.current.source",
+                    "sourceRef": "campfit:camp:stored-camp-24:field:description:current",
+                    "observedAt": "2026-09-01T12:00:00.000Z",
+                    "locatorScheme": "structured-field"
+                  },
+                  "locator": {
+                    "scheme": "structured-field",
+                    "excerpt": "Current CampFit value before applying the crawl proposal.",
+                    "locator": "field:description"
+                  },
+                  "producer": {
+                    "status": "current-managed-value",
+                    "rawValue": "",
+                    "decisionEffect": "kept-current-value"
+                  },
+                  "extraction": {
+                    "target": "description",
+                    "extractor": "campfit-current-record",
+                    "extractedAt": "2026-09-01T12:00:00.000Z",
+                    "extractionId": "camp.stored-camp-24.field.description.stored-proposal-24.current"
+                  },
+                  "projection": {
+                    "claimId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.current.claim",
+                    "candidateId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.current.candidate",
+                    "rawSourceId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.current.source",
+                    "extractionId": "camp.stored-camp-24.field.description.stored-proposal-24.current",
+                    "candidateSetId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates"
+                  },
+                  "sourceRank": 2,
+                  "claimTarget": {
+                    "facet": "public-directory.camp-profile",
+                    "claimId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.current.claim",
+                    "claimType": "public-data.field-candidate",
+                    "subjectId": "stored-camp-24",
+                    "collectedBy": "campfit-current-record",
+                    "impactLevel": "medium",
+                    "subjectType": "public-directory.camp",
+                    "evidenceType": "human_attestation",
+                    "evidenceMethod": "observation",
+                    "fieldOrBehavior": "description"
+                  }
+                },
+                {
+                  "id": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.proposed.candidate",
+                  "role": "proposed",
+                  "value": "Outdoor day camp for ages 7-12.",
+                  "source": {
+                    "kind": "web-page",
+                    "sourceId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.source",
+                    "sourceRef": "https://example.test/camp",
+                    "observedAt": "2026-09-01T12:00:00.000Z",
+                    "locatorScheme": "html"
+                  },
+                  "locator": {
+                    "scheme": "html",
+                    "excerpt": "Outdoor day camp for ages 7-12",
+                    "locator": "field:description"
+                  },
+                  "producer": {
+                    "mode": "populate",
+                    "oldValue": "",
+                    "rawValue": "Outdoor day camp for ages 7-12.",
+                    "proposalId": "stored-proposal-24",
+                    "decisionEffect": "accepted-candidate-value",
+                    "sourceAuthority": {
+                      "scope": "Camp stored-camp-24 field description",
+                      "declaredBy": "traverse:fixture-model",
+                      "authorityClass": "publisher_owned_page"
+                    }
+                  },
+                  "confidence": 0.94,
+                  "extraction": {
+                    "target": "description",
+                    "extractor": "traverse:fixture-model",
+                    "confidence": 0.94,
+                    "extractedAt": "2026-09-01T12:00:00.000Z",
+                    "extractionId": "camp.stored-camp-24.field.description.stored-proposal-24.proposed"
+                  },
+                  "projection": {
+                    "claimId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.proposed.claim",
+                    "candidateId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.proposed.candidate",
+                    "rawSourceId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.source",
+                    "extractionId": "camp.stored-camp-24.field.description.stored-proposal-24.proposed",
+                    "candidateSetId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates"
+                  },
+                  "sourceRank": 1,
+                  "claimTarget": {
+                    "facet": "public-directory.camp-profile",
+                    "claimId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.proposed.claim",
+                    "claimType": "public-data.field-candidate",
+                    "subjectId": "stored-camp-24",
+                    "collectedBy": "traverse:fixture-model",
+                    "impactLevel": "medium",
+                    "subjectType": "public-directory.camp",
+                    "evidenceType": "crawl_observation",
+                    "evidenceMethod": "extraction",
+                    "fieldOrBehavior": "description"
+                  }
+                }
+              ],
+              "projection": {
+                "candidateSetId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates"
+              },
+              "producerPolicy": {
+                "decisionMode": "current-proposed",
+                "feedbackTags": [],
+                "sourceAuthorityProjection": "only-for-selected-source-backed-value"
+              },
+              "candidateSetStatus": "needs-review"
+            },
+            "status": {
+              "observedCandidateCount": 2
+            },
+            "metadata": {
+              "name": "camp-proposal-stored-proposal-24-description",
+              "labels": {
+                "field": "description",
+                "campId": "stored-camp-24",
+                "domain": "public-directory",
+                "product": "campfit",
+                "proposalId": "stored-proposal-24"
+              },
+              "producer": {
+                "slug": "stored-camp-24",
+                "source": "campfit.admin.review",
+                "displayName": "Stored Camp",
+                "communitySlug": "denver"
+              }
+            },
+            "apiVersion": "survey.kontourai.io/v1alpha1"
+          },
+          {
+            "kind": "ReviewItem",
+            "spec": {
+              "target": "contactPhone",
+              "rationale": "CampFit crawl proposal requires operator review before projecting a verified claim.",
+              "candidates": [
+                {
+                  "id": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.current.candidate",
+                  "role": "current",
+                  "value": null,
+                  "source": {
+                    "kind": "manual-entry",
+                    "sourceId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.current.source",
+                    "sourceRef": "campfit:camp:stored-camp-24:field:contactPhone:current",
+                    "observedAt": "2026-09-01T12:00:00.000Z",
+                    "locatorScheme": "structured-field"
+                  },
+                  "locator": {
+                    "scheme": "structured-field",
+                    "excerpt": "Current CampFit value before applying the crawl proposal.",
+                    "locator": "field:contactPhone"
+                  },
+                  "producer": {
+                    "status": "current-managed-value",
+                    "rawValue": null,
+                    "decisionEffect": "kept-current-value"
+                  },
+                  "extraction": {
+                    "target": "contactPhone",
+                    "extractor": "campfit-current-record",
+                    "extractedAt": "2026-09-01T12:00:00.000Z",
+                    "extractionId": "camp.stored-camp-24.field.contactPhone.stored-proposal-24.current"
+                  },
+                  "projection": {
+                    "claimId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.current.claim",
+                    "candidateId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.current.candidate",
+                    "rawSourceId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.current.source",
+                    "extractionId": "camp.stored-camp-24.field.contactPhone.stored-proposal-24.current",
+                    "candidateSetId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates"
+                  },
+                  "sourceRank": 2,
+                  "claimTarget": {
+                    "facet": "public-directory.camp-profile",
+                    "claimId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.current.claim",
+                    "claimType": "public-data.field-candidate",
+                    "subjectId": "stored-camp-24",
+                    "collectedBy": "campfit-current-record",
+                    "impactLevel": "medium",
+                    "subjectType": "public-directory.camp",
+                    "evidenceType": "human_attestation",
+                    "evidenceMethod": "observation",
+                    "fieldOrBehavior": "contactPhone"
+                  }
+                },
+                {
+                  "id": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.proposed.candidate",
+                  "role": "proposed",
+                  "value": "303-555-0100",
+                  "source": {
+                    "kind": "web-page",
+                    "sourceId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.source",
+                    "sourceRef": "https://example.test/camp",
+                    "observedAt": "2026-09-01T12:00:00.000Z",
+                    "locatorScheme": "html"
+                  },
+                  "locator": {
+                    "scheme": "html",
+                    "excerpt": "Call 303-555-0100",
+                    "locator": "field:contactPhone"
+                  },
+                  "producer": {
+                    "mode": "populate",
+                    "oldValue": null,
+                    "rawValue": "303-555-0100",
+                    "proposalId": "stored-proposal-24",
+                    "decisionEffect": "accepted-candidate-value",
+                    "sourceAuthority": {
+                      "scope": "Camp stored-camp-24 field contactPhone",
+                      "declaredBy": "traverse:fixture-model",
+                      "authorityClass": "publisher_owned_page"
+                    }
+                  },
+                  "confidence": 0.64,
+                  "extraction": {
+                    "target": "contactPhone",
+                    "extractor": "traverse:fixture-model",
+                    "confidence": 0.64,
+                    "extractedAt": "2026-09-01T12:00:00.000Z",
+                    "extractionId": "camp.stored-camp-24.field.contactPhone.stored-proposal-24.proposed"
+                  },
+                  "projection": {
+                    "claimId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.proposed.claim",
+                    "candidateId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.proposed.candidate",
+                    "rawSourceId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.source",
+                    "extractionId": "camp.stored-camp-24.field.contactPhone.stored-proposal-24.proposed",
+                    "candidateSetId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates"
+                  },
+                  "sourceRank": 1,
+                  "claimTarget": {
+                    "facet": "public-directory.camp-profile",
+                    "claimId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.proposed.claim",
+                    "claimType": "public-data.field-candidate",
+                    "subjectId": "stored-camp-24",
+                    "collectedBy": "traverse:fixture-model",
+                    "impactLevel": "medium",
+                    "subjectType": "public-directory.camp",
+                    "evidenceType": "crawl_observation",
+                    "evidenceMethod": "extraction",
+                    "fieldOrBehavior": "contactPhone"
+                  }
+                }
+              ],
+              "projection": {
+                "candidateSetId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates"
+              },
+              "producerPolicy": {
+                "decisionMode": "current-proposed",
+                "feedbackTags": [],
+                "sourceAuthorityProjection": "only-for-selected-source-backed-value"
+              },
+              "candidateSetStatus": "needs-review"
+            },
+            "status": {
+              "observedCandidateCount": 2
+            },
+            "metadata": {
+              "name": "camp-proposal-stored-proposal-24-contactPhone",
+              "labels": {
+                "field": "contactPhone",
+                "campId": "stored-camp-24",
+                "domain": "public-directory",
+                "product": "campfit",
+                "proposalId": "stored-proposal-24"
+              },
+              "producer": {
+                "slug": "stored-camp-24",
+                "source": "campfit.admin.review",
+                "displayName": "Stored Camp",
+                "communitySlug": "denver"
+              }
+            },
+            "apiVersion": "survey.kontourai.io/v1alpha1"
+          }
+        ],
+        "actorId": "reviewer@campfit.test",
+        "reviewedAt": "2026-09-29T04:44:00.393Z",
+        "activeItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+        "notesByItemName": {},
+        "decisionsByItemName": {}
+      },
+      "snapshotHash": "aff8bb38b6ce04442c2a6d3cd4f4bd736ac5272a00be022a53569b0ea43980b9",
+      "proposalStatus": "PENDING",
+      "createdBy": "reviewer@campfit.test",
+      "createdAt": "2026-09-29T04:44:00.391Z",
+      "updatedAt": "2026-09-29T04:44:00.391Z",
+      "appliedAt": null,
+      "binding": {
+        "kind": "ReviewQueueBinding",
+        "spec": {
+          "boundAt": "2026-09-29T04:44:00.405Z",
+          "itemNames": [
+            "camp-proposal-stored-proposal-24-contactPhone",
+            "camp-proposal-stored-proposal-24-description",
+            "camp-proposal-stored-proposal-24-websiteUrl"
+          ],
+          "sessionName": "review-workbench-session",
+          "snapshotHash": "aff8bb38b6ce04442c2a6d3cd4f4bd736ac5272a00be022a53569b0ea43980b9"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      }
+    }
+  ],
+  "events": [
+    {
+      "id": "68e54267-742e-4561-babd-dd985dd22f50",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 1,
+      "eventName": "review-workbench-session-0001-session-started",
+      "eventType": "session-started",
+      "reviewItemName": null,
+      "activeItemName": null,
+      "reviewDecisionName": null,
+      "candidateId": null,
+      "status": null,
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "sequence": 1,
+          "eventType": "session-started",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "sessionName": "review-workbench-session"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0001-session-started"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "57b281f2-7706-4bc6-80f9-000ee974b5fe",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 2,
+      "eventName": "review-workbench-session-0002-item-selected",
+      "eventType": "item-selected",
+      "reviewItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+      "activeItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+      "reviewDecisionName": null,
+      "candidateId": null,
+      "status": null,
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "sequence": 2,
+          "eventType": "item-selected",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "sessionName": "review-workbench-session",
+          "activeItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+          "reviewItemName": "camp-proposal-stored-proposal-24-websiteUrl"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0002-item-selected"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "c844e850-9323-464d-8498-30b54b80156a",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 3,
+      "eventName": "review-workbench-session-0003-decision-changed",
+      "eventType": "decision-changed",
+      "reviewItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+      "activeItemName": null,
+      "reviewDecisionName": "camp-proposal-stored-proposal-24-websiteUrl-reject-proposed",
+      "candidateId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.proposed.candidate",
+      "status": "rejected",
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "data": {
+            "workbenchDecision": "reject-proposed"
+          },
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "status": "rejected",
+          "sequence": 3,
+          "eventType": "decision-changed",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "candidateId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.proposed.candidate",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+          "reviewDecisionName": "camp-proposal-stored-proposal-24-websiteUrl-reject-proposed"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0003-decision-changed"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "4ad27df7-bf28-4cbf-bb23-06220e1dae64",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 4,
+      "eventName": "review-workbench-session-0004-decision-submitted",
+      "eventType": "decision-submitted",
+      "reviewItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+      "activeItemName": null,
+      "reviewDecisionName": "camp-proposal-stored-proposal-24-websiteUrl-reject-proposed",
+      "candidateId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.proposed.candidate",
+      "status": "rejected",
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "data": {
+            "workbenchDecision": "reject-proposed"
+          },
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "status": "rejected",
+          "sequence": 4,
+          "eventType": "decision-submitted",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "candidateId": "camp.stored-camp-24.field.websiteUrl.proposal.stored-proposal-24.candidates.proposed.candidate",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-websiteUrl",
+          "reviewDecisionName": "camp-proposal-stored-proposal-24-websiteUrl-reject-proposed"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0004-decision-submitted"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "06ec4def-7f04-40e8-a8af-3bd887cdb373",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 5,
+      "eventName": "review-workbench-session-0005-note-changed",
+      "eventType": "note-changed",
+      "reviewItemName": "camp-proposal-stored-proposal-24-description",
+      "activeItemName": null,
+      "reviewDecisionName": null,
+      "candidateId": null,
+      "status": null,
+      "rationale": "Matches the page.",
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "sequence": 5,
+          "eventType": "note-changed",
+          "rationale": "Matches the page.",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-description"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0005-note-changed"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "56a64d92-a422-48b5-b073-02130f1a1f88",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 6,
+      "eventName": "review-workbench-session-0006-decision-changed",
+      "eventType": "decision-changed",
+      "reviewItemName": "camp-proposal-stored-proposal-24-description",
+      "activeItemName": null,
+      "reviewDecisionName": "camp-proposal-stored-proposal-24-description-accept-proposed",
+      "candidateId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.proposed.candidate",
+      "status": "verified",
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "data": {
+            "workbenchDecision": "accept-proposed"
+          },
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "status": "verified",
+          "sequence": 6,
+          "eventType": "decision-changed",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "candidateId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.proposed.candidate",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-description",
+          "reviewDecisionName": "camp-proposal-stored-proposal-24-description-accept-proposed"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0006-decision-changed"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "1d5d35fa-b7c5-4173-bffc-ae27771977e5",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 7,
+      "eventName": "review-workbench-session-0007-decision-submitted",
+      "eventType": "decision-submitted",
+      "reviewItemName": "camp-proposal-stored-proposal-24-description",
+      "activeItemName": null,
+      "reviewDecisionName": "camp-proposal-stored-proposal-24-description-accept-proposed",
+      "candidateId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.proposed.candidate",
+      "status": "verified",
+      "rationale": "Matches the page.",
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "data": {
+            "workbenchDecision": "accept-proposed"
+          },
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "status": "verified",
+          "sequence": 7,
+          "eventType": "decision-submitted",
+          "rationale": "Matches the page.",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "candidateId": "camp.stored-camp-24.field.description.proposal.stored-proposal-24.candidates.proposed.candidate",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-description",
+          "reviewDecisionName": "camp-proposal-stored-proposal-24-description-accept-proposed"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0007-decision-submitted"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "b2fc0637-bec8-4c01-9fc6-26ffa7abccda",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 8,
+      "eventName": "review-workbench-session-0008-decision-changed",
+      "eventType": "decision-changed",
+      "reviewItemName": "camp-proposal-stored-proposal-24-contactPhone",
+      "activeItemName": null,
+      "reviewDecisionName": "camp-proposal-stored-proposal-24-contactPhone-keep-current",
+      "candidateId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.current.candidate",
+      "status": "verified",
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "data": {
+            "workbenchDecision": "keep-current"
+          },
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "status": "verified",
+          "sequence": 8,
+          "eventType": "decision-changed",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "candidateId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.current.candidate",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-contactPhone",
+          "reviewDecisionName": "camp-proposal-stored-proposal-24-contactPhone-keep-current"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0008-decision-changed"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "89fcc10a-0d9e-427f-86b4-8241d02d8c48",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 9,
+      "eventName": "review-workbench-session-0009-decision-submitted",
+      "eventType": "decision-submitted",
+      "reviewItemName": "camp-proposal-stored-proposal-24-contactPhone",
+      "activeItemName": null,
+      "reviewDecisionName": "camp-proposal-stored-proposal-24-contactPhone-keep-current",
+      "candidateId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.current.candidate",
+      "status": "verified",
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "data": {
+            "workbenchDecision": "keep-current"
+          },
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "status": "verified",
+          "sequence": 9,
+          "eventType": "decision-submitted",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "candidateId": "camp.stored-camp-24.field.contactPhone.proposal.stored-proposal-24.candidates.current.candidate",
+          "sessionName": "review-workbench-session",
+          "reviewItemName": "camp-proposal-stored-proposal-24-contactPhone",
+          "reviewDecisionName": "camp-proposal-stored-proposal-24-contactPhone-keep-current"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0009-decision-submitted"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    },
+    {
+      "id": "9a89cb25-90fe-43f0-8e7d-7e11f4675da9",
+      "proposalId": "stored-proposal-24",
+      "sessionName": "review-workbench-session",
+      "sequence": 10,
+      "eventName": "review-workbench-session-0010-session-completed",
+      "eventType": "session-completed",
+      "reviewItemName": null,
+      "activeItemName": null,
+      "reviewDecisionName": null,
+      "candidateId": null,
+      "status": null,
+      "rationale": null,
+      "actor": "reviewer@campfit.test",
+      "occurredAt": "2026-09-29T04:44:00.393Z",
+      "event": {
+        "kind": "ReviewSessionEvent",
+        "spec": {
+          "actor": {
+            "id": "reviewer@campfit.test"
+          },
+          "sequence": 10,
+          "eventType": "session-completed",
+          "occurredAt": "2026-09-29T04:44:00.393Z",
+          "sessionName": "review-workbench-session"
+        },
+        "metadata": {
+          "name": "review-workbench-session-0010-session-completed"
+        },
+        "apiVersion": "survey.kontourai.io/v1alpha1"
+      },
+      "createdAt": "2026-09-29T04:44:00.422Z",
+      "updatedAt": "2026-09-29T04:44:00.422Z",
+      "reviewSessionId": "25c1879f-2a56-4d10-9422-4e994387c7e7"
+    }
+  ]
+}

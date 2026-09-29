@@ -91,13 +91,23 @@ function parseObjectName(name: string): ParsedObjectName | undefined {
   return { name, fetchedAt: match[1], bodyHash: match[2] };
 }
 
+/**
+ * JSON has no byte type: a Uint8Array is stored as an index-keyed object.
+ * Traverse captures carry `bodyBytes`; Forage 1.0 text captures (Lookout's
+ * CHECK path) carry `bytes`, the exact bytes their `bodyHash` covers. Both are
+ * revived, or a Forage capture read back could not be hashed or referenced.
+ */
 function reviveBodyBytes(value: unknown): unknown {
-  if (typeof value !== "object" || value === null || !("bodyBytes" in value)) {
+  return reviveByteField(reviveByteField(value, "bodyBytes"), "bytes");
+}
+
+function reviveByteField(value: unknown, field: "bodyBytes" | "bytes"): unknown {
+  if (typeof value !== "object" || value === null || !(field in value)) {
     return value;
   }
 
   const record = value as Record<string, unknown>;
-  const encoded = record.bodyBytes;
+  const encoded = record[field];
   if (encoded instanceof Uint8Array || typeof encoded !== "object" || encoded === null) {
     return value;
   }
@@ -106,7 +116,7 @@ function reviveBodyBytes(value: unknown): unknown {
     .filter(([key]) => /^\d+$/.test(key))
     .sort(([a], [b]) => Number(a) - Number(b));
   if (
-    entries.length === 0 ||
+    (entries.length === 0 && Object.keys(encoded as object).length > 0) ||
     entries.some(([, byte]) => !Number.isInteger(byte) || Number(byte) < 0 || Number(byte) > 255)
   ) {
     return value;
@@ -114,7 +124,7 @@ function reviveBodyBytes(value: unknown): unknown {
 
   return {
     ...record,
-    bodyBytes: Uint8Array.from(entries.map(([, byte]) => Number(byte))),
+    [field]: Uint8Array.from(entries.map(([, byte]) => Number(byte))),
   };
 }
 
@@ -129,7 +139,8 @@ function isSnapshot(value: unknown): value is Snapshot {
     typeof candidate.contentType === "string" &&
     typeof candidate.body === "string" &&
     typeof candidate.bodyHash === "string" &&
-    (candidate.bodyBytes === undefined || candidate.bodyBytes instanceof Uint8Array)
+    (candidate.bodyBytes === undefined || candidate.bodyBytes instanceof Uint8Array) &&
+    (candidate.bytes === undefined || candidate.bytes instanceof Uint8Array)
   );
 }
 

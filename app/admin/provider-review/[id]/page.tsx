@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { formatReportedConfidence, reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { requireAdminAccess } from '@/lib/admin/access';
@@ -63,7 +64,7 @@ export default async function ProviderReviewDetailPage(
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm text-bark-400">Overall confidence</p>
-          <p className="font-display text-3xl font-bold text-bark-700">{Math.round((proposal.overallConfidence ?? 0) * 100)}%</p>
+          <p className="font-display text-3xl font-bold text-bark-700">{formatReportedConfidence(reportedOverallConfidence(proposal))}</p>
           <p className="mt-1 text-xs text-bark-400">
             Proposed {new Date(proposal.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
           </p>
