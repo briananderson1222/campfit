@@ -218,9 +218,10 @@ export function ProvidersTable({
                         )}
                       >
                         {Math.round(provider.avgConfidence * 100)}%
+                        <span className="ml-1 font-normal text-bark-300">of {provider.avgConfidenceCount}</span>
                       </span>
                     ) : (
-                      <span className="text-xs text-bark-200">—</span>
+                      <span className="text-xs text-bark-300">Not reported</span>
                     )}
                   </td>
                 </tr>

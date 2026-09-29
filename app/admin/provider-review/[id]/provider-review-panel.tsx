@@ -109,7 +109,9 @@ export function ProviderReviewPanel({
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-3">
         {fields.map(([field, diff]) => {
-          const conf = Math.round((diff.confidence ?? proposal.overallConfidence ?? 0) * 100);
+          // A field's own reported confidence only: the proposal's overall value
+          // is not this field's, and an unreported one is not 0.
+          const conf = typeof diff.confidence === 'number' ? Math.round(diff.confidence * 100) : null;
           const isEditing = editing[field] !== undefined;
           return (
             <div
@@ -131,11 +133,12 @@ export function ProviderReviewPanel({
                     <span className="font-semibold text-bark-600 text-sm">{FIELD_LABELS[field] ?? field}</span>
                     <span className={cn(
                       'text-xs px-1.5 py-0.5 rounded-full font-medium',
+                      conf === null ? 'bg-cream-200 text-bark-500' :
                       conf >= 80 ? 'bg-pine-100 text-pine-600' :
                       conf >= 50 ? 'bg-amber-100 text-amber-600' :
                       'bg-red-100 text-red-500'
                     )}>
-                      {conf}%
+                      {conf === null ? 'confidence not reported' : `${conf}%`}
                     </span>
                   </div>
 

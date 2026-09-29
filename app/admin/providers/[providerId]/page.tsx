@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { formatReportedConfidence, reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import Link from 'next/link';
 import { getProvider, getProviderCamps, getProviderPendingProposals, getPendingProviderChangeProposals } from '@/lib/admin/provider-repository';
 import { cn } from '@/lib/utils';
@@ -124,8 +125,9 @@ export default async function ProviderDetailPage(
   ]);
   const fieldTimeline = await getProviderFieldTimeline(providerId).catch(() => ({}));
 
-  const avgConfPct =
-    provider.avgConfidence != null ? `${Math.round(provider.avgConfidence * 100)}%` : '—';
+  const avgConfPct = provider.avgConfidence != null
+    ? `${Math.round(provider.avgConfidence * 100)}% of ${provider.avgConfidenceCount}`
+    : 'Not reported';
 
   return (
     <div className="space-y-8">
@@ -208,9 +210,8 @@ export default async function ProviderDetailPage(
           <div className="divide-y divide-amber-100/60">
             {proposals.map((p: any) => {
               const fieldCount = Object.keys(p.proposedChanges ?? {}).length;
-              const confPct = p.overallConfidence != null
-                ? Math.round(p.overallConfidence * 100)
-                : null;
+              const reported = reportedOverallConfidence(p);
+              const confPct = reported != null ? Math.round(reported * 100) : null;
               return (
                 <div key={p.id} className="px-5 py-3 flex items-center gap-4">
                   {confPct != null && (
@@ -256,7 +257,10 @@ export default async function ProviderDetailPage(
             {providerChangeProposals.map((proposal: any) => (
               <div key={proposal.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-sm text-amber-900 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold">{Math.round((proposal.overallConfidence ?? 0) * 100)}% confidence</div>
+                  <div className="font-semibold">{(() => {
+                    const reported = reportedOverallConfidence(proposal);
+                    return reported === null ? 'Confidence not reported' : `${Math.round(reported * 100)}% confidence`;
+                  })()}</div>
                   <div className="text-xs text-amber-700 mt-1">
                     {Object.keys(proposal.proposedChanges ?? {}).join(', ') || 'No fields'} · {shortDate(proposal.createdAt)}
                   </div>

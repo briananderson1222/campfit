@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { formatReportedConfidence, reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { requireAdminAccess } from '@/lib/admin/access';
@@ -73,20 +74,27 @@ export default async function ProviderReviewQueuePage(
         <div className="space-y-3">
           {proposals.map((proposal) => {
             const changeCount = Object.keys(proposal.proposedChanges ?? {}).length;
-            const conf = Math.round((proposal.overallConfidence ?? 0) * 100);
+            const reported = reportedOverallConfidence(proposal);
+            const conf = reported === null ? null : Math.round(reported * 100);
             return (
               <Link
                 key={proposal.id}
                 href={buildDetailHref(proposal.id, { page, providerId })}
                 className="glass-panel p-5 flex items-center gap-4 hover:border-pine-300/60 transition-colors group"
               >
-                <div className={cn(
-                  'w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 text-white font-bold',
-                  conf >= 80 ? 'bg-pine-500' : conf >= 50 ? 'bg-amber-400' : 'bg-red-400'
-                )}>
-                  <span className="text-lg leading-none">{conf}</span>
-                  <span className="text-[10px] leading-none opacity-80">%</span>
-                </div>
+                {conf === null ? (
+                  <div className="w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 bg-cream-200 text-bark-500 font-semibold" title="No confidence was reported for these changes">
+                    <span className="text-[11px] leading-tight text-center">Not<br />reported</span>
+                  </div>
+                ) : (
+                  <div className={cn(
+                    'w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 text-white font-bold',
+                    conf >= 80 ? 'bg-pine-500' : conf >= 50 ? 'bg-amber-400' : 'bg-red-400'
+                  )}>
+                    <span className="text-lg leading-none">{conf}</span>
+                    <span className="text-[10px] leading-none opacity-80">%</span>
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-semibold text-bark-700 group-hover:text-pine-600 transition-colors truncate">

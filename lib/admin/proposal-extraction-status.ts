@@ -1,5 +1,3 @@
-import type { CampChangeProposal } from './types';
-
 /**
  * The overall confidence to SHOW for a proposal, or null when no field change
  * carries a reported confidence. `overallConfidence` is stored as 0 in that
@@ -8,12 +6,18 @@ import type { CampChangeProposal } from './types';
  * a reported "0%", which no extractor said. Traverse 2.0 made confidence
  * optional, so this case is now reachable in normal crawls.
  */
-export function reportedOverallConfidence(
-  proposal: Pick<CampChangeProposal, 'overallConfidence' | 'proposedChanges'>,
-): number | null {
+export function reportedOverallConfidence(proposal: {
+  readonly overallConfidence?: number | null;
+  readonly proposedChanges?: Readonly<Record<string, unknown>> | null;
+}): number | null {
   const anyReported = Object.values(proposal.proposedChanges ?? {})
-    .some((diff) => typeof diff?.confidence === 'number');
-  return anyReported ? proposal.overallConfidence : null;
+    .some((diff) => typeof (diff as { confidence?: unknown } | null | undefined)?.confidence === 'number');
+  return anyReported && typeof proposal.overallConfidence === 'number' ? proposal.overallConfidence : null;
+}
+
+/** "82%", or "Not reported" when no confidence was reported. */
+export function formatReportedConfidence(value: number | null | undefined): string {
+  return typeof value === 'number' ? `${Math.round(value * 100)}%` : 'Not reported';
 }
 
 export interface StoredExtractionIncompleteness {
