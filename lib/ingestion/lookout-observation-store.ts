@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { SurveyInput } from "@kontourai/survey";
-import { createDriftEmitter, createObservationStore, diffProposalSets, type LookoutSource, type ObservationStore, type ProposalSetObservation, type StoredProposalObservationV1 } from "@kontourai/lookout";
+import { createDriftEmitter, createObservationStore, diffProposalSets, type LookoutSource, type ObservationStore, type ProposalSetObservation, type StoredProposalObservation } from "@kontourai/lookout";
+import type { SnapshotStore } from "@kontourai/traverse/fetch";
+import { withExactSnapshotLookup } from "./lookout-snapshot-lookup";
 import { authorDriftSurveyInput } from "./lookout-survey-authoring";
 import type { ExtractionProposal } from "@kontourai/traverse";
 
@@ -112,6 +114,13 @@ export async function emitCampfitObservation(input: {
   resultKind?: "changed" | "unchanged-hash";
   proposals: readonly ExtractionProposal[];
   entityKey: string;
+  /**
+   * The snapshot store the observed captures live in. Lookout 0.7+ resolves
+   * both the current and the prior snapshot reference through it before a
+   * diff is computed or committed, so a reference that does not resolve is
+   * refused rather than diffed.
+   */
+  snapshotStore: SnapshotStore;
   store?: ObservationStore;
   spoolRoot?: string;
   now?: () => string;
@@ -128,7 +137,7 @@ export async function emitCampfitObservation(input: {
   // so the pieces it used to hold internally are captured here instead: the
   // prior observation as it is loaded, and the events as they are diffed.
   // Both are needed before commit, because commit stages the survey first.
-  let prior: StoredProposalObservationV1 | null = null;
+  let prior: StoredProposalObservation | null = null;
   const nowFn = input.now ?? (() => new Date().toISOString());
   // Read once and reused for the observation record and the authored record, as
   // Lookout did. Calling a real clock twice would let them disagree.
@@ -156,6 +165,7 @@ export async function emitCampfitObservation(input: {
   };
   const emitter = createDriftEmitter<readonly ExtractionProposal[]>({
     store: orderedStore,
+    snapshotStore: withExactSnapshotLookup(input.snapshotStore),
     now: () => recordedAt,
     diff: (diffInput) => {
       const result = diffProposalSets(diffInput);

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { createDriftEmitter, diffProposalSets, extractionProposalIdentity } from "@kontourai/lookout";
-import type { ExtractableLookoutSource, StoredProposalObservationV1 } from "@kontourai/lookout";
+import type { ExtractableLookoutSource, StoredProposalObservation } from "@kontourai/lookout";
 import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
 import { authorDriftSurveyInput } from "./lookout-survey-authoring";
 import type { FetchSource, LookoutSource, NewEntityAppearedEvent, ProposalDiffEvent } from "@kontourai/lookout";
@@ -17,6 +17,7 @@ import {
 } from "./llm-discovery";
 import { discoverCampsFromUrl } from "./llm-discovery";
 import { runLookoutCheck } from "./lookout-check-adapter";
+import { withExactSnapshotLookup } from "./lookout-snapshot-lookup";
 import { createCampfitObservationStore, persistSurveyInput } from "./lookout-observation-store";
 import { assignGlobalItemIndices } from "./traverse-item-grouping";
 
@@ -282,10 +283,11 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   // Lookout 0.3.x no longer authors the trust record, so the prior observation
   // is captured as it loads and the record is authored from the diff — both
   // before commit, which stages the survey alongside the observation.
-  let prior: StoredProposalObservationV1 | null = null;
+  let prior: StoredProposalObservation | null = null;
   const recordedAt = new Date().toISOString();
   const emitter = createDriftEmitter<ProposalEntity>({
     now: () => recordedAt,
+    snapshotStore: withExactSnapshotLookup(options.store),
     store: {
       loadLatest: async (sourceId) => {
         const loaded = await observationStore.loadLatest(sourceId);

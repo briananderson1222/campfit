@@ -133,7 +133,7 @@ export async function runLookoutRecrawlForCamp(
         source, entityKey: options.campId, checkedAt: checked.checkedAt,
         resultKind: "unchanged-hash", proposals,
         observation: { sourceId: source.id, snapshotRef, observedAt: checked.checkedAt, proposals },
-        store: observationStore, spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
+        store: observationStore, snapshotStore: options.store, spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
       });
       if (!emission.ok) return failed(options, `lookout-baseline:${emission.error.kind}: ${emission.error.message}`);
       if (emission.value.events.length !== 0 || emission.value.surveyInput !== null) return failed(options, "lookout-baseline:unexpected-events");
@@ -188,7 +188,7 @@ export async function runLookoutRecrawlForCamp(
   };
   const emission = await emitCampfitObservation({
     source, observation, checkedAt: checked.checkedAt, proposals,
-    entityKey: options.campId, store: observationStore,
+    entityKey: options.campId, store: observationStore, snapshotStore: options.store,
     spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
   });
   if (!emission.ok) return failed(options, `lookout-emission:${emission.error.kind}: ${emission.error.message}`);

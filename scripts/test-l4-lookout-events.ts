@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import type { ProposalDiffEvent } from "@kontourai/lookout";
 import { createObservationStore } from "@kontourai/lookout";
 import type { ExtractionProposal } from "@kontourai/traverse";
 import { buildSnapshotSourceRef, type Snapshot, type SnapshotStore } from "@kontourai/traverse/fetch";
+import { buildSnapshotSourceRef as buildForageSnapshotRef } from "@kontourai/forage/fetch";
 import { eventsToProposedChanges } from "../lib/ingestion/lookout-event-mapper";
 import { emitCampfitObservation, persistSurveyInput } from "../lib/ingestion/lookout-observation-store";
 import { runLookoutRecrawlForCamp } from "../lib/ingestion/lookout-check-adapter";
@@ -27,6 +29,26 @@ const invalid = eventsToProposedChanges(events, "https://camp.test", new Set(["c
 assert.equal(invalid.changes.name, undefined);
 assert.ok(invalid.warnings.includes("unsupported-field-not-proposed:camp-1:name"));
 
+// Lookout 0.7+ resolves every observation's snapshot reference through the
+// snapshot store before diffing, so direct emissions need real captures.
+function captureStore() {
+  const history: Snapshot[] = [];
+  const store: SnapshotStore = {
+    latest: async (sourceId) => history.filter((item) => item.sourceId === sourceId).at(-1),
+    get: async (sourceId, bodyHash) => history.find((item) => item.sourceId === sourceId && item.bodyHash === bodyHash),
+    list: async (sourceId) => history.filter((item) => item.sourceId === sourceId).reverse(),
+    put: async (next) => { history.push(next); },
+  };
+  const capture = (sourceId: string, url: string, body: string, fetchedAt: string): string => {
+    const snapshot: Snapshot = { sourceId, url, fetchedAt, status: 200, contentType: "html", body, bodyHash: createHash("sha256").update(body).digest("hex") };
+    history.push(snapshot);
+    // Lookout's CHECK hands the emitter Forage references, so that is the
+    // reference shape observations carry in production.
+    return buildForageSnapshotRef(snapshot);
+  };
+  return { store, capture };
+}
+
 const root = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-survey-"));
 try {
   const input = { source: "fixture", generatedAt: "2026-07-11T00:00:00.000Z", rawSources: [], extractions: [], candidateSets: [], claims: [], reviewOutcomes: [] } as never;
@@ -44,24 +66,27 @@ const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-emission-")
 try {
   const observationStore = createObservationStore({ root: path.join(runtimeRoot, "observations") });
   const source = { id: "camp-1", url: "https://camp.test", kind: "web-page" as const, targetSchema: [], cadenceHint: "test", renderPolicy: "never" as const };
+  const { store: snapshotStore, capture } = captureStore();
+  const refOne = capture(source.id, source.url, "one", "2026-07-11T00:00:00.000Z");
+  const refTwo = capture(source.id, source.url, "two", "2026-07-12T00:00:00.000Z");
   const proposal = (value: string, excerpt: string): ExtractionProposal => ({
     fieldPath: "items[].name", candidateValue: value, confidence: 0.91,
     provenance: { excerpt, locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0],
   });
   const baseline = await emitCampfitObservation({
     source, entityKey: "camp-1", checkedAt: "2026-07-11T00:00:00.000Z",
-    observation: { sourceId: source.id, snapshotRef: "snapshot:one", observedAt: "2026-07-11T00:00:00.000Z", proposals: [proposal("Old", "Old")] },
-    proposals: [proposal("Old", "Old")], store: observationStore, spoolRoot: path.join(runtimeRoot, "survey"),
+    observation: { sourceId: source.id, snapshotRef: refOne, observedAt: "2026-07-11T00:00:00.000Z", proposals: [proposal("Old", "Old")] },
+    proposals: [proposal("Old", "Old")], store: observationStore, snapshotStore, spoolRoot: path.join(runtimeRoot, "survey"),
   });
-  assert.equal(baseline.ok, true);
+  assert.equal(baseline.ok, true, baseline.ok ? "" : `${baseline.error.kind}: ${baseline.error.message}`);
   if (baseline.ok) {
     assert.equal(baseline.value.events.length, 0, "first enablement seeds baseline without mass emission");
     assert.equal(baseline.value.surveyInput, null);
   }
   const changed = await emitCampfitObservation({
     source, entityKey: "camp-1", checkedAt: "2026-07-12T00:00:00.000Z",
-    observation: { sourceId: source.id, snapshotRef: "snapshot:two", observedAt: "2026-07-12T00:00:00.000Z", proposals: [proposal("New", "New")] },
-    proposals: [proposal("New", "New")], store: observationStore, spoolRoot: path.join(runtimeRoot, "survey"),
+    observation: { sourceId: source.id, snapshotRef: refTwo, observedAt: "2026-07-12T00:00:00.000Z", proposals: [proposal("New", "New")] },
+    proposals: [proposal("New", "New")], store: observationStore, snapshotStore, spoolRoot: path.join(runtimeRoot, "survey"),
   });
   assert.equal(changed.ok, true);
   if (changed.ok) assert.equal(changed.value.events.length, 1);
@@ -79,20 +104,26 @@ try {
   const spoolRoot = path.join(failureRoot, "survey");
   const source = { id: "camp-failure", url: "https://camp.test", kind: "web-page" as const, targetSchema: [], cadenceHint: "test", renderPolicy: "never" as const };
   const proposal = (value: string): ExtractionProposal => ({ fieldPath: "items[].name", candidateValue: value, confidence: 0.9, provenance: { excerpt: value, locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0] });
-  await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-11T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: "snapshot:baseline", observedAt: "2026-07-11T00:00:00.000Z", proposals: [proposal("Old")] }, proposals: [proposal("Old")], store: observationStore, spoolRoot });
+  const { store: snapshotStore, capture } = captureStore();
+  const refs = {
+    baseline: capture(source.id, source.url, "baseline", "2026-07-11T00:00:00.000Z"),
+    commitFails: capture(source.id, source.url, "commit-fails", "2026-07-12T00:00:00.000Z"),
+    finalizeFails: capture(source.id, source.url, "finalize-fails", "2026-07-13T00:00:00.000Z"),
+  };
+  await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-11T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: refs.baseline, observedAt: "2026-07-11T00:00:00.000Z", proposals: [proposal("Old")] }, proposals: [proposal("Old")], store: observationStore, snapshotStore, spoolRoot });
 
-  const commitFailed = await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-12T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: "snapshot:commit-fails", observedAt: "2026-07-12T00:00:00.000Z", proposals: [proposal("New")] }, proposals: [proposal("New")], store: observationStore, spoolRoot, faults: { beforeObservationCommit: () => { throw new Error("injected commit failure"); } } });
+  const commitFailed = await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-12T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: refs.commitFails, observedAt: "2026-07-12T00:00:00.000Z", proposals: [proposal("New")] }, proposals: [proposal("New")], store: observationStore, snapshotStore, spoolRoot, faults: { beforeObservationCommit: () => { throw new Error("injected commit failure"); } } });
   assert.equal(commitFailed.ok, false, "a commit failure cannot claim emission success");
   assert.deepEqual((await readdir(spoolRoot)).filter((name) => name.endsWith(".json")), [], "pending Survey is not consumer-visible");
   const afterCommitFailure = await observationStore.loadLatest(source.id);
-  assert.equal(afterCommitFailure.ok && afterCommitFailure.value?.snapshotRef, "snapshot:baseline", "failed commit does not advance pointer");
+  assert.equal(afterCommitFailure.ok && afterCommitFailure.value?.snapshotRef, refs.baseline, "failed commit does not advance pointer");
 
-  const finalizeFailed = await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-13T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: "snapshot:finalize-fails", observedAt: "2026-07-13T00:00:00.000Z", proposals: [proposal("Newer")] }, proposals: [proposal("Newer")], store: observationStore, spoolRoot, faults: { beforeSurveyFinalize: () => { throw new Error("injected finalize failure"); } } });
+  const finalizeFailed = await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-13T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: refs.finalizeFails, observedAt: "2026-07-13T00:00:00.000Z", proposals: [proposal("Newer")] }, proposals: [proposal("Newer")], store: observationStore, snapshotStore, spoolRoot, faults: { beforeSurveyFinalize: () => { throw new Error("injected finalize failure"); } } });
   assert.equal(finalizeFailed.ok, false, "a finalize failure cannot claim emission success");
   assert.deepEqual((await readdir(spoolRoot)).filter((name) => name.endsWith(".json")), [], "unfinalized Survey remains invisible");
   const afterFinalizeFailure = await observationStore.loadLatest(source.id);
-  assert.equal(afterFinalizeFailure.ok && afterFinalizeFailure.value?.snapshotRef, "snapshot:finalize-fails", "committed pointer is recoverable");
-  const retried = await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-13T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: "snapshot:finalize-fails", observedAt: "2026-07-13T00:00:00.000Z", proposals: [proposal("Newer")] }, proposals: [proposal("Newer")], store: observationStore, spoolRoot });
+  assert.equal(afterFinalizeFailure.ok && afterFinalizeFailure.value?.snapshotRef, refs.finalizeFails, "committed pointer is recoverable");
+  const retried = await emitCampfitObservation({ source, entityKey: source.id, checkedAt: "2026-07-13T00:00:00.000Z", observation: { sourceId: source.id, snapshotRef: refs.finalizeFails, observedAt: "2026-07-13T00:00:00.000Z", proposals: [proposal("Newer")] }, proposals: [proposal("Newer")], store: observationStore, snapshotStore, spoolRoot });
   assert.equal(retried.ok, true, "retry recovers the committed pending delivery");
   assert.equal((await readdir(spoolRoot)).filter((name) => name.endsWith(".json")).length, 1, "recovery publishes exactly one Survey batch");
 } finally { await rm(failureRoot, { recursive: true, force: true }); }
@@ -106,7 +137,8 @@ try {
   const sourceId = "camp-coordinator-recovery";
   const base: Snapshot = { sourceId, url: "https://recovery.test", fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "Old", bodyHash: "bca97160f4e1211fe659338d0a9705a7dff8aa3ea2e1be1cc1958100a33962c2" };
   let latest: Snapshot = base;
-  const snapshotStore: SnapshotStore = { latest: async () => latest, get: async () => latest, list: async () => [latest], put: async (next) => { latest = next; } };
+  const history: Snapshot[] = [base];
+  const snapshotStore: SnapshotStore = { latest: async () => latest, get: async (_sourceId, bodyHash) => history.find((item) => item.bodyHash === bodyHash), list: async () => [...new Set([latest, ...history])], put: async (next) => { history.push(next); latest = next; } };
   const observationStore = createObservationStore({ root: path.join(coordinatorRoot, "observations") });
   const surveySpoolRoot = path.join(coordinatorRoot, "survey");
   const proposal = (value: string): ExtractionProposal => ({ fieldPath: "items[].name", candidateValue: value, confidence: 0.9, provenance: { excerpt: value, locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0] });
