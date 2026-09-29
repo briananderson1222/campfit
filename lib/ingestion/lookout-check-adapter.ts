@@ -132,7 +132,10 @@ export async function runLookoutRecrawlForCamp(
       const emission = await emitCampfitObservation({
         source, entityKey: options.campId, checkedAt: checked.checkedAt,
         resultKind: "unchanged-hash", proposals,
-        observation: { sourceId: source.id, snapshotRef, observedAt: checked.checkedAt, proposals },
+        observation: {
+          sourceId: source.id, snapshotRef, observedAt: checked.checkedAt, proposals,
+          ...(baseline.incomplete ? { incomplete: baseline.incomplete } : {}),
+        },
         store: observationStore, snapshotStore: options.store, spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
       });
       if (!emission.ok) return failed(options, `lookout-baseline:${emission.error.kind}: ${emission.error.message}`);
@@ -185,6 +188,9 @@ export async function runLookoutRecrawlForCamp(
     snapshotRef: checked.currentSnapshotRef,
     observedAt: checked.checkedAt,
     proposals,
+    // Lookout never reports a proposal missing from an incomplete run as
+    // removed, and does not let such a run replace a complete baseline.
+    ...(replayed.incomplete ? { incomplete: replayed.incomplete } : {}),
   };
   const emission = await emitCampfitObservation({
     source, observation, checkedAt: checked.checkedAt, proposals,

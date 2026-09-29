@@ -324,7 +324,13 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   });
   const emitted = await emitter.emit({
     source,
-    current: { sourceId: source.id, snapshotRef, observedAt: checked.checkedAt, proposals: discovery.proposals },
+    current: {
+      sourceId: source.id, snapshotRef, observedAt: checked.checkedAt, proposals: discovery.proposals,
+      // An incomplete listing never has its missing entries read as removed,
+      // and a later complete run never reads entries the incomplete baseline
+      // missed as newly appeared.
+      ...(discovery.incomplete ? { incomplete: discovery.incomplete } : {}),
+    },
     check: { checkedAt: checked.checkedAt, resultKind: checked.kind === "changed" ? "changed" : "unchanged-hash", currentSnapshotRef: snapshotRef },
     callbacks: {
       selectEntities: proposalEntities,
