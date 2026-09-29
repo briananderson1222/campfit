@@ -11,6 +11,7 @@ import { buildSnapshotSourceRef as buildForageSnapshotRef } from "@kontourai/for
 import { eventsToProposedChanges } from "../lib/ingestion/lookout-event-mapper";
 import { emitCampfitObservation, persistSurveyInput } from "../lib/ingestion/lookout-observation-store";
 import { runLookoutRecrawlForCamp } from "../lib/ingestion/lookout-check-adapter";
+import { deliverRecrawlReview } from "../lib/ingestion/crawl-pipeline";
 import type { TraverseRecrawlResult } from "../lib/ingestion/traverse-recrawl-adapter";
 import type { Camp } from "../lib/types";
 
@@ -235,6 +236,43 @@ for (const markIncomplete of [false, true]) {
     assert.equal(reportsRemoval, !markIncomplete, markIncomplete
       ? "a city missing from an incomplete run must not be reported as removed"
       : "control: the same run without the marker reports the city removal");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+
+// Forage 1.0 hashes a text page by its received bytes, so a page that is not
+// plain UTF-8 reads as "changed" once after the upgrade although its text is
+// the same. That one CHECK must cost one re-extraction and nothing else: no
+// Survey batch, and no review proposal when the values equal the database.
+{
+  const root = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-rehash-"));
+  try {
+    const sourceId = "camp-rehash";
+    const oldHash: Snapshot = { sourceId, url: "https://rehash.test", fetchedAt: "2026-09-28T00:00:00.000Z", status: 200, contentType: "html", body: "Café Camp", bodyHash: createHash("sha256").update("Café Camp").digest("hex") };
+    const bytes = Uint8Array.from([...Buffer.from("Caf", "latin1"), 0xe9, ...Buffer.from(" Camp", "latin1")]);
+    const rehashed = { ...oldHash, fetchedAt: "2026-09-29T09:00:00.000Z", bytes, declaredCharset: "windows-1252", bodyHash: createHash("sha256").update(bytes).digest("hex") } as unknown as Snapshot;
+    let latest = oldHash;
+    const history: Snapshot[] = [oldHash];
+    const snapshotStore: SnapshotStore = { latest: async () => latest, get: async (_s, bodyHash) => history.find((item) => item.bodyHash === bodyHash), list: async () => [...new Set([latest, ...history])], put: async (item) => { history.push(item); latest = item; } };
+    const observationStore = createObservationStore({ root: path.join(root, "observations") });
+    const name: ExtractionProposal = { fieldPath: "items[].name", candidateValue: "Café Camp", confidence: 0.9, provenance: { excerpt: "Café Camp", locator: "chars:0-9" }, extractor: "fixture", pathIndices: [0] };
+    let replays = 0;
+    const replayCamp = async (): Promise<TraverseRecrawlResult> => ({
+      ...(replays++, {}),
+      ok: true, error: null, proposedChanges: {}, overallConfidence: 0, model: "fixture",
+      rawExtraction: { itemIndex: 0, itemName: "Café Camp", proposals: [name] }, matchedItemName: "Café Camp", itemCount: 1,
+      snapshot: { ref: buildSnapshotSourceRef(latest), bodyHash: latest.bodyHash }, tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: [],
+    });
+    const options = { campId: sourceId, websiteUrl: oldHash.url, campName: "Café Camp", current: { id: sourceId, websiteUrl: oldHash.url, name: "Café Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
+    const surveySpoolRoot = path.join(root, "survey");
+    await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: oldHash }) });
+    const before = replays;
+    const result = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: rehashed }) });
+    assert.equal(result.ok, true, result.error ?? "rehash run failed");
+    assert.equal(replays - before, 1, "the rehashed page is re-extracted once");
+    assert.deepEqual((await readdir(surveySpoolRoot).catch(() => [] as string[])).filter((file) => file.endsWith(".json")), [], "no Survey batch for identical values");
+    let sinkCalls = 0;
+    assert.equal(await deliverRecrawlReview(result, async () => { sinkCalls++; return "proposal"; }), null);
+    assert.equal(sinkCalls, 0, "no review proposal when the values equal the database");
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
