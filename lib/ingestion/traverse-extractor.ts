@@ -36,7 +36,7 @@ import type {
 } from "@kontourai/traverse";
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
-import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
+import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
 import { compareValue } from "./lookout-diff-adapter";
 
@@ -82,9 +82,9 @@ export async function runTraverseExtraction(
   });
 }
 
-function meanConfidence(values: number[]): number {
-  if (values.length === 0) return 0;
-  return Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 100) / 100;
+/** Present only when reported: an unreported confidence is absent, never 0. */
+function reportedConfidence(confidence: number | undefined): { confidence?: number } {
+  return confidence === undefined ? {} : { confidence };
 }
 
 /** Best-effort display name for one item, for logging/anchor-camp lookup. */
@@ -125,7 +125,7 @@ export function itemToProposedChanges(
     const diff: FieldDiff = {
       ...comparison.change,
       old: (comparison.change.old as FieldDiff["old"]) ?? null,
-      confidence: fp.confidence,
+      ...reportedConfidence(fp.confidence),
       mode: isEmpty ? "populate" : "update",
       ...projectProvenance({ excerpt: fp.excerpt, sourceUrl, includeEmptyExcerpt: true }),
     };
@@ -142,7 +142,7 @@ export function itemToProposedChanges(
         minGrade: null,
         maxGrade: null,
       })),
-      confidence: meanConfidence(item.ageGroups.map((ag) => ag.confidence)),
+      ...reportedConfidence(meanReportedConfidence(item.ageGroups.map((ag) => ag.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.ageGroups[0].label, sourceUrl, includeEmptyExcerpt: true }),
     };
@@ -160,7 +160,7 @@ export function itemToProposedChanges(
         earlyDropOff: null,
         latePickup: null,
       })),
-      confidence: meanConfidence(item.schedules.map((s) => s.confidence)),
+      ...reportedConfidence(meanReportedConfidence(item.schedules.map((s) => s.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true }),
     };
@@ -177,7 +177,7 @@ export function itemToProposedChanges(
         ageQualifier: null,
         discountNotes: null,
       })),
-      confidence: meanConfidence(item.pricing.map((p) => p.confidence)),
+      ...reportedConfidence(meanReportedConfidence(item.pricing.map((p) => p.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.pricing[0].label, sourceUrl, includeEmptyExcerpt: true }),
     };
@@ -186,10 +186,17 @@ export function itemToProposedChanges(
   return changes;
 }
 
-/** Weighted-free mean confidence across a proposal set, clamped to 2dp. */
+/**
+ * Queue-ordering key for a proposal set: the mean of the confidences that
+ * were reported, 2dp. Proposals without one are left out; when none reported
+ * one the key is 0, the same convention as diff-engine's
+ * computeOverallConfidence, so an all-unknown proposal sorts with the least
+ * confident. It is an ordering key, not a confidence to display.
+ */
 export function overallConfidence(proposals: ExtractionProposal[]): number {
-  if (proposals.length === 0) return 0;
-  return meanConfidence(proposals.map((p) => p.confidence));
+  const known = proposals.map((p) => p.confidence).filter((c): c is number => typeof c === "number");
+  if (known.length === 0) return 0;
+  return Math.round((known.reduce((sum, c) => sum + c, 0) / known.length) * 100) / 100;
 }
 
 export interface TraverseItemProposalRecord {

@@ -538,7 +538,7 @@ async function testFieldParityFullFields() {
   assert.equal(item.campTypes[0].value, "SUMMER_DAY");
   assert.equal(item.categories.length, 2, "two categories[] entries must assemble, in encounter order");
   assert.deepEqual(item.categories.map((c) => c.value), ["SPORTS", "NATURE"]);
-  assert.ok(item.categories.every((c) => c.confidence > 0 && typeof c.excerpt === "string" && c.excerpt.length > 0));
+  assert.ok(item.categories.every((c) => typeof c.confidence === "number" && c.confidence > 0 && typeof c.excerpt === "string" && c.excerpt.length > 0));
 
   console.log(
     `\u2713 field-schema parity (AC5): ${result.proposals.length} proposals covering 10 new legacy scalars + campTypes[]/categories[] enum-arrays assembled correctly`
