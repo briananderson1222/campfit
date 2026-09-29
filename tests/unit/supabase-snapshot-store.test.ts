@@ -226,4 +226,22 @@ describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () =>
     expect((await exact.findExact({ ...lookup, snapshotDigest: "0".repeat(64) })).kind).toBe("mismatch");
     expect((await exact.findExact({ ...lookup, url: "https://charset.example/other" })).kind).toBe("mismatch");
   });
+
+  it('exact lookup never returns a same-hash capture from a different fetch', async () => {
+    const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
+    const later = { ...capture, fetchedAt: '2026-09-29T10:00:00.000Z' } as unknown as Snapshot;
+    const laterLookup = parseForageSnapshotRef(buildForageSnapshotRef(later as never))!;
+    const exact = withExactSnapshotLookup(store);
+
+    // Only the earlier fetch is stored: the later reference must not resolve to it.
+    await store.put(capture);
+    expect((await exact.findExact({ ...laterLookup, snapshotDigest: undefined })).kind).toBe('missing');
+
+    // Both fetches stored: each reference resolves to its own capture.
+    await store.put(later);
+    const found = await exact.findExact(laterLookup);
+    expect(found.kind).toBe('found');
+    expect(found.kind === 'found' && found.snapshot.fetchedAt).toBe('2026-09-29T10:00:00.000Z');
+  });
 });
+
