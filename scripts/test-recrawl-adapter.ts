@@ -693,28 +693,30 @@ async function testPartialPricingNeverReplacesLiveTiers() {
   console.log("✓ campfit#157: a partially extracted price list is withheld (no replace diff that would delete a live tier), with operator warnings");
 }
 
-// ─── Traverse 2.0+: an incomplete extraction never proposes a list removal ───
+// ─── Traverse 2.0+: an incomplete extraction proposes list additions only ───
 //
-// The page states one price, then more text that the content cap cuts off.
-// Traverse reports the run partial (content-truncated). The camp holds two
-// live tiers; a one-tier list from a partial read would be a replace diff that
-// deletes the tier sitting in the unread text, so it is withheld. The scalar
-// read from the page is still proposed. The control run (no cap) proves the
-// list diff exists when the whole page is read.
+// The page states the existing $425 tier and a new $395 tier, then more text
+// that the content cap cuts off. Traverse reports the run partial
+// (content-truncated). The camp also holds a $525 tier the read text does not
+// mention: it may sit in the unread text, so it is kept, never removed, and
+// the proposal is the current list plus the new tier. The control run (no
+// cap) proves the same read would otherwise be a replace diff.
 
-async function testIncompleteRunWithholdsListRemovals() {
+async function testIncompleteRunProposesAdditionsOnly() {
   const filler = "Further sessions, the extended-week rate and aftercare details are listed below. ".repeat(80);
   const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>
-    <p>Boulder, Colorado</p><p>Standard week: $425 per week</p><p>${filler}</p></main></body></html>`;
+    <p>Boulder, Colorado</p><p>$425 per week</p><p>$395 early bird</p><p>${filler}</p></main></body></html>`;
   const livePricing = [
-    { id: "price-std", label: "Standard week", amount: 425, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
-    { id: "price-ext", label: "Extended week", amount: 525, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+    { id: "price-std", label: "$425 per week", amount: 425, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
+    { id: "price-ext", label: "$525 per week", amount: 525, unit: "PER_WEEK" as const, durationWeeks: null, ageQualifier: null, discountNotes: null },
   ];
   const specs: StubProposalSpec[] = [
     { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
     { fieldPath: "items[0].city", candidateValue: "Boulder", needle: "Boulder, Colorado" },
     { fieldPath: "items[0].pricing[0].amount", candidateValue: 425, needle: "$425 per week" },
     { fieldPath: "items[0].pricing[0].unit", candidateValue: "PER_WEEK", needle: "$425 per week" },
+    { fieldPath: "items[0].pricing[1].amount", candidateValue: 395, needle: "$395 early bird" },
+    { fieldPath: "items[0].pricing[1].unit", candidateValue: "PER_WEEK", needle: "$395 early bird" },
   ];
   const run = (maxContentChars?: number) => runTraverseRecrawlForCamp({
     campId: "camp-incomplete",
@@ -732,18 +734,51 @@ async function testIncompleteRunWithholdsListRemovals() {
   const complete = await run();
   assert.equal(complete.ok, true, complete.error ?? "");
   assert.equal(complete.incomplete, undefined, "a fully read page is not marked incomplete");
-  assert.equal(complete.proposedChanges.pricing?.mode, "update", "control: the one-tier list is a replace diff when the page was read in full");
+  assert.equal(complete.proposedChanges.pricing?.mode, "update", "control: the read list would replace the live list when the page was read in full");
 
   const partial = await run(400);
   assert.equal(partial.ok, true, partial.error ?? "");
   assert.equal(partial.incomplete?.reason, "content-truncated", `run must be marked incomplete: ${JSON.stringify(partial.warnings)}`);
   assert.equal(partial.proposedChanges.city?.new, "Boulder", "a scalar read from the page is still proposed");
-  assert.ok(!("pricing" in partial.proposedChanges), "a list change that could delete a live tier is withheld on an incomplete run");
+  const pricing = partial.proposedChanges.pricing;
+  assert.equal(pricing?.mode, "add_items", "a list change on an incomplete run is additions only");
+  const amounts = (pricing?.new as { amount: number }[]).map((tier) => tier.amount);
+  assert.deepEqual(amounts, [425, 525, 395], "every live tier is kept and the new tier appended; nothing is removed");
   const warnings = partial.operatorWarnings ?? [];
   assert.ok(warnings.some((w) => w.startsWith("extraction incomplete (content-truncated)")), `operator must see the incomplete run: ${JSON.stringify(warnings)}`);
-  assert.ok(warnings.some((w) => w.startsWith("pricing change withheld")), "the withheld list change is named");
+  assert.ok(warnings.some((w) => w.startsWith("pricing: 1 current entry not found in the read text kept")), "the kept-not-removed tier is named");
   assert.deepEqual((partial.rawExtraction.incomplete as { reason?: string } | undefined)?.reason, "content-truncated", "the proposal's audit payload carries the marker");
-  console.log("✓ Traverse partial run: marked incomplete, list removals withheld, scalars kept");
+  console.log("✓ Traverse partial run: marked incomplete, list changes become additions only, scalars kept");
+}
+
+// ─── TRAVERSE_CHUNK_SIZE reaches extract() on the recrawl path ───
+
+async function testChunkSizeReachesExtraction() {
+  const paragraphs = Array.from({ length: 40 }, (_, i) => `<p>Session ${i + 1}: outdoor exploring, climbing and river games for the whole week.</p>`).join("");
+  const html = `<html><body><main><h1>Mountain Explorers Day Camp</h1>${paragraphs}</main></body></html>`;
+  const specs: StubProposalSpec[] = [
+    { fieldPath: "items[0].name", candidateValue: "Mountain Explorers Day Camp", needle: "Mountain Explorers Day Camp" },
+  ];
+  const run = async (chunkSize: string | undefined) => {
+    const previous = process.env.TRAVERSE_CHUNK_SIZE;
+    if (chunkSize === undefined) delete process.env.TRAVERSE_CHUNK_SIZE;
+    else process.env.TRAVERSE_CHUNK_SIZE = chunkSize;
+    try {
+      return await runTraverseRecrawlForCamp({
+        campId: "camp-chunks", websiteUrl: "https://avid4.com/day-camps/colorado/", campName: "Mountain Explorers Day Camp",
+        current: makeCamp({ id: "camp-chunks" }), provider: createStubProvider(specs, { model: "stub-chunks" }),
+        store: createInMemorySnapshotStore(), mode: "live-with-capture", fetchOptions: makeFixtureFetchOptions(html), log: () => {},
+      });
+    } finally {
+      if (previous === undefined) delete process.env.TRAVERSE_CHUNK_SIZE;
+      else process.env.TRAVERSE_CHUNK_SIZE = previous;
+    }
+  };
+  const byDefault = await run(undefined);
+  const small = await run("1000");
+  assert.equal(byDefault.providerCalls, 1, "the page fits one default-size chunk");
+  assert.ok(small.providerCalls > 1, `a 1000-char chunk size splits the page into several calls (got ${small.providerCalls})`);
+  console.log(`✓ TRAVERSE_CHUNK_SIZE reaches extract(): ${byDefault.providerCalls} call(s) by default, ${small.providerCalls} at 1000 chars`);
 }
 
 // ─── 5. AC7: admin-authored site hints reach the provider's fieldHints ───
@@ -1262,7 +1297,8 @@ async function main() {
   await testMultiItemPageAmbiguousFailsLoud();
   await testSuppressionFires();
   await testPartialPricingNeverReplacesLiveTiers();
-  await testIncompleteRunWithholdsListRemovals();
+  await testIncompleteRunProposesAdditionsOnly();
+  await testChunkSizeReachesExtraction();
   await testSiteHintsReachProviderCall();
   await testNeighborhoodHintReachesProviderCall();
   await testAllFiveCallSitesInvokeSharedPipeline();

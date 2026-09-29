@@ -45,7 +45,7 @@
  * `LLMExtractionResult` it replaces).
  */
 
-import { describeIncompleteness, withholdListRemovalsFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
+import { describeIncompleteness, limitListChangesToAdditions, type ExtractionIncompleteness } from "./extraction-completeness";
 import type { ExtractionProvider } from "@kontourai/traverse";
 import type { FetchMode, FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetch";
 import type { Camp } from "@/lib/types";
@@ -417,7 +417,7 @@ export async function runTraverseRecrawlForCamp(
 
   const item = selection.item;
   const { extracted, confidence, excerpts } = assembledItemToDiffInputs(item);
-  const withheld = withholdListRemovalsFromIncompleteRun(
+  const withheld = limitListChangesToAdditions(
     computeDiff(
       opts.current,
       extracted,

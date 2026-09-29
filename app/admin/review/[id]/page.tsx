@@ -103,7 +103,7 @@ export default async function ReviewDetailPage(
             {incomplete.unreadRanges > 0
               ? `${incomplete.unreadRanges} text range(s) of the source page were not fully read. `
               : 'Part of the source page was not read. '}
-            These changes cover only the text that was read. A value missing here is not evidence it was removed, and list changes that could delete entries were withheld.
+            These changes cover only the text that was read. A value missing here is not evidence it was removed: list changes only add entries (a list that cannot be merged safely is withheld), and nothing is removed.
           </p>
         </div>
       )}
