@@ -244,4 +244,3 @@ describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () =>
     expect(found.kind === 'found' && found.snapshot.fetchedAt).toBe('2026-09-29T10:00:00.000Z');
   });
 });
-

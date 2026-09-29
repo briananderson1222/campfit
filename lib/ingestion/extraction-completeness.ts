@@ -4,7 +4,8 @@ import type {
   ExtractionResult,
 } from "@kontourai/traverse";
 import type { ProposedChanges } from "@/lib/admin/types";
-import { normalizeScalar, relationDomainIdentity, type RelationField } from "./diff-policy";
+import { normalizeScalar, type RelationField } from "./diff-policy";
+import { scheduleNaturalKey } from "@/lib/admin/session-identity";
 
 /**
  * Why an extraction did not read and answer all of its prepared text, as
@@ -60,8 +61,8 @@ export function describeIncompleteness(incomplete: ExtractionIncompleteness): st
  * so withholding every list change would also stall pure additions.
  *
  * Each list change is rewritten as additions only: the current list, in
- * full, followed by the read entries it does not already hold (by the same
- * domain identity the diff uses), with mode `add_items`. Nothing is removed.
+ * full, followed by the read entries it does not already hold (by the
+ * identity in entryKey below), with mode `add_items`. Nothing is removed.
  * A change with no new entry is dropped. A change whose current list is not
  * known (the provider-source path diffs lists against nothing, `old: null`)
  * or whose identity cannot be computed is withheld, because no additions-only
@@ -101,14 +102,9 @@ function novelEntries(
   current: readonly unknown[],
   candidate: readonly unknown[],
 ): { novel: unknown[]; removed: number } | null {
-  const identity = isRelationField(field)
-    ? relationDomainIdentity(field)
-    : (value: unknown) => JSON.stringify(normalizeScalar(value));
   const keyOf = (value: unknown): string | null => {
     try {
-      const resolved = identity(value);
-      if (typeof resolved === "string") return resolved;
-      return resolved.ok ? resolved.key : null;
+      return entryKey(field, value);
     } catch {
       return null;
     }
@@ -129,6 +125,35 @@ function novelEntries(
   }
   const removed = [...currentKeys].filter((key) => !candidateKeys.has(key)).length;
   return { novel, removed };
+}
+
+/**
+ * "Is this the same entry?" for the additions-only rewrite, built only from
+ * the fields the extraction fills. The recrawl sends startTime/endTime,
+ * discount notes, age qualifiers and grades as null, so the diff's full
+ * domain identity would read every current entry that has one of them set
+ * as new, and approving would add a blanked duplicate.
+ *  - sessions: the apply path's own natural key (session-identity.ts's
+ *    scheduleNaturalKey: trimmed, case-insensitive label + start + end date),
+ *    so an entry counted as existing here is the row reconciliation matches;
+ *  - price tiers: case-insensitive label + amount + unit;
+ *  - age groups: case-insensitive label + min age + max age;
+ *  - tag arrays: the diff's scalar normalization (case-insensitive).
+ * Null means the key cannot be computed (no label), and the change is then
+ * withheld rather than guessed.
+ */
+function entryKey(field: string, value: unknown): string | null {
+  if (!isRelationField(field)) return JSON.stringify(normalizeScalar(value));
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Record<string, unknown>;
+  const label = typeof entry.label === "string" && entry.label.trim() ? entry.label : null;
+  if (label === null) return null;
+  const text = (item: unknown): string | null => (typeof item === "string" && item !== "" ? item : null);
+  const number = (item: unknown): string => (typeof item === "number" && Number.isFinite(item) ? String(item) : "");
+  if (field === "schedules") return scheduleNaturalKey(label, text(entry.startDate), text(entry.endDate));
+  const name = label.trim().toLowerCase();
+  if (field === "pricing") return `${name}|${number(entry.amount)}|${typeof entry.unit === "string" ? entry.unit : ""}`;
+  return `${name}|${number(entry.minAge)}|${number(entry.maxAge)}`;
 }
 
 function isRelationField(field: string): field is RelationField {

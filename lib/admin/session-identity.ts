@@ -107,7 +107,7 @@ export interface ScheduleReconciliationResult {
 }
 
 /** Trimmed, case-insensitive `label` + `startDate` + `endDate` — the natural key a human/crawl already treats as "the same session" (plan line ~194). */
-function scheduleNaturalKey(label: string, startDate: string | null, endDate: string | null): string {
+export function scheduleNaturalKey(label: string, startDate: string | null, endDate: string | null): string {
   return `${label.trim().toLowerCase()}|${startDate ?? ''}|${endDate ?? ''}`;
 }
 
