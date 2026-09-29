@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import type { Snapshot } from "@kontourai/traverse/fetch";
+import { buildSnapshotSourceRef as buildForageSnapshotRef, parseSnapshotSourceRef as parseForageSnapshotRef } from "@kontourai/forage/fetch";
+
+import { withExactSnapshotLookup } from "@/lib/ingestion/lookout-snapshot-lookup";
 
 import {
   SNAPSHOT_BUCKET,
@@ -178,5 +181,49 @@ describe("createSupabaseSnapshotStore", () => {
     expect(await store.latest("https://missing.example")).toBeUndefined();
     expect(await store.get("https://missing.example", "deadbeef")).toBeUndefined();
     expect(await store.list("https://missing.example")).toEqual([]);
+  });
+});
+
+describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () => {
+  // A windows-1252 page: Forage 1.0 hashes the received bytes and keeps them on
+  // `bytes`, with the decoded text on `body`. JSON stores the Uint8Array as an
+  // index-keyed object, so it must be revived for the capture to be hashed and
+  // referenced again after a read.
+  const bytes = Uint8Array.from([0x43, 0x61, 0x66, 0xe9]); // "Café" in windows-1252
+  const capture = {
+    sourceId: "https://charset.example/camps",
+    url: "https://charset.example/camps",
+    fetchedAt: "2026-09-28T10:00:00.000Z",
+    status: 200,
+    contentType: "html",
+    body: "Café",
+    bytes,
+    declaredCharset: "windows-1252",
+    bodyHash: createHash("sha256").update(bytes).digest("hex"),
+  } as unknown as Snapshot;
+
+  it("reads back a byte-exact capture whose Forage reference still resolves", async () => {
+    const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
+    const reference = buildForageSnapshotRef(capture as never);
+    await store.put(capture);
+
+    const [readBack] = await store.list(capture.sourceId);
+    expect((readBack as unknown as { bytes: unknown }).bytes).toBeInstanceOf(Uint8Array);
+    expect(buildForageSnapshotRef(readBack as never)).toBe(reference);
+
+    const lookup = parseForageSnapshotRef(reference)!;
+    const found = await withExactSnapshotLookup(store).findExact(lookup);
+    expect(found.kind).toBe("found");
+  });
+
+  it("exact lookup refuses a hash prefix and a mismatched envelope digest", async () => {
+    const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
+    await store.put(capture);
+    const exact = withExactSnapshotLookup(store);
+    const lookup = parseForageSnapshotRef(buildForageSnapshotRef(capture as never))!;
+
+    expect((await exact.findExact({ ...lookup, bodyHash: lookup.bodyHash.slice(0, 16).padEnd(64, "0") })).kind).toBe("missing");
+    expect((await exact.findExact({ ...lookup, snapshotDigest: "0".repeat(64) })).kind).toBe("mismatch");
+    expect((await exact.findExact({ ...lookup, url: "https://charset.example/other" })).kind).toBe("mismatch");
   });
 });
