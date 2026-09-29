@@ -78,6 +78,17 @@ import type { ExtractionProvider } from "@kontourai/traverse";
  */
 export const DEFAULT_EXTRACTION_MAX_TOKENS = 2048;
 
+/**
+ * Provider-request retries for the `anthropic` runtime profile. Relay 0.7
+ * turned the Anthropic SDK's own retries off by default (`maxRetries: 0`), so
+ * one overloaded or rate-limited response would now cost the chunk it served
+ * and leave the run incomplete. Crawls are unattended batches, so the SDK's
+ * earlier default of 2 is restored explicitly. A Dispatch plan (several
+ * candidates, or a receipt/attempt setting) still retries across candidates on
+ * top of this, as it did before.
+ */
+export const DEFAULT_EXTRACTION_MAX_RETRIES = 2;
+
 export interface ResolvedExtractionProvider {
   /** The traverse ExtractionProvider, ready to pass to runTraverseExtraction/extract. */
   provider: ExtractionProvider;
@@ -130,7 +141,9 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
       ...spec,
       cwd: process.cwd(),
       allowPromptedStructuredOutput,
-      ...(spec.profile === "anthropic" ? { apiKey: resolved.apiKey, ...(baseUrl ? { baseUrl } : {}) } : {}),
+      ...(spec.profile === "anthropic"
+        ? { apiKey: resolved.apiKey, maxRetries: DEFAULT_EXTRACTION_MAX_RETRIES, ...(baseUrl ? { baseUrl } : {}) }
+        : {}),
     });
     return { id: `candidate-${index}`, runtime };
   });
