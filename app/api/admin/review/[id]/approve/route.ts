@@ -3,8 +3,11 @@ import { requireAdminAccess } from '@/lib/admin/access';
 import { getProposalCommunitySlug } from '@/lib/admin/community-access';
 import {
   applyProposalReview,
+  ReviewApplyCitationError,
   ReviewApplyConflictError,
   ReviewApplyProposalNotFoundError,
+  ReviewApplyValueError,
+  ReviewCitationMismatchError,
   ReviewApplySessionNotFoundError,
   SurveyReviewApplyError,
   SurveyReviewSessionStaleError,
@@ -52,6 +55,18 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     }
     if (error instanceof SurveyReviewApplyError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    // A reviewer-fixable refusal: the request was understood, but an approved
+    // field's citation or value cannot be accepted. Nothing was written.
+    if (
+      error instanceof ReviewApplyCitationError
+      || error instanceof ReviewApplyValueError
+      || error instanceof ReviewCitationMismatchError
+    ) {
+      return NextResponse.json(
+        { error: error.message, ...('fields' in error && error.fields.length ? { fields: error.fields } : {}) },
+        { status: 422 },
+      );
     }
     console.error('Approve error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

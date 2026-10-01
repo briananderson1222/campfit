@@ -3,7 +3,7 @@ import { logAndMapPublicEgressError } from '@/lib/security/public-egress-error';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
-import { getCampCrawlTarget, skipPendingCampProposals } from '@/lib/admin/crawl-repository';
+import { CrawlSchemaOutdatedError, getCampCrawlTarget } from '@/lib/admin/crawl-repository';
 
 export const maxDuration = 300;
 
@@ -21,8 +21,10 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   if (!camp) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
   if (!camp.websiteUrl) return NextResponse.json({ error: 'Camp has no websiteUrl to crawl' }, { status: 400 });
 
-  // Skip any existing PENDING proposals so they fall out of the review queue
-  await skipPendingCampProposals(params.campId);
+  // A reviewer asked for this recrawl: extract even if the page text is
+  // unchanged. The pending proposal is NOT skipped up front: writing the new
+  // proposal supersedes it (createProposal), and if the crawl writes nothing
+  // (no changes, an error) it must survive.
 
   // Fire-and-forget — same pattern as /api/admin/crawl/start
   let resolveRunId!: (id: string) => void;
@@ -42,6 +44,7 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     trigger: 'MANUAL',
     campIds: [params.campId],
     model,
+    forceExtract: true,
     onProgress: (event) => {
       if (event.type === 'started') resolveRunId(event.runId);
     },
@@ -59,6 +62,8 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     ]);
     return NextResponse.json({ runId });
   } catch (err) {
+    // An operator-fixable setup fault: say what to do, not "request failed".
+    if (err instanceof CrawlSchemaOutdatedError) return NextResponse.json({ error: err.message }, { status: 500 });
     return NextResponse.json({ error: logAndMapPublicEgressError('[camps/crawl] failed to start:', err) }, { status: 500 });
   }
 }

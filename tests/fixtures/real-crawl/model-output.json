@@ -1,0 +1,395 @@
+{
+  "_comment": "Structured-tool input a real crawl's model returned, replayed through the real Relay extraction provider. Field paths are un-indexed (the structured-output schema only admits declared paths); the model's own item index survives only in `locator`, which Traverse replaces with a verified chars: offset. `programs` is a clean multi-program listing answer. `invalidValues` are the out-of-schema values real runs returned: enum text outside the allowed set, dates with no year, capitalised platform names. Names and URLs are fictional. The second winter session carries a year the model supplied (\"2026-12-22\") although its excerpt states none. `duplicates` are entries whose values repeat another entry's: a second link for a platform already listed.",
+  "programs": [
+    {
+      "fieldPath": "items[].name",
+      "value": "Pine Ridge Junior Camp",
+      "confidence": 1,
+      "excerpt": "## [Pine Ridge Junior Camp](/camps/juniors-ages-8-10)",
+      "locator": "items[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].ageGroups[].minAge",
+      "value": 8,
+      "confidence": 1,
+      "excerpt": "Ages 8 - 10",
+      "locator": "items[0].ageGroups[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].ageGroups[].maxAge",
+      "value": 10,
+      "confidence": 1,
+      "excerpt": "Ages 8 - 10",
+      "locator": "items[0].ageGroups[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].pricing[].amount",
+      "value": 3850,
+      "confidence": 1,
+      "excerpt": "15 Day Sessions\n*Ages 8 - 10*\n**$3,850**",
+      "locator": "items[0].pricing[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].pricing[].unit",
+      "value": "PER_SESSION",
+      "confidence": 0.98,
+      "excerpt": "15 Day Sessions\n*Ages 8 - 10*\n**$3,850**",
+      "locator": "items[0].pricing[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2027-06-06",
+      "confidence": 1,
+      "excerpt": "**First Session:** June 6th - June 20th, 2027",
+      "locator": "items[0].schedules[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2027-06-20",
+      "confidence": 1,
+      "excerpt": "**First Session:** June 6th - June 20th, 2027",
+      "locator": "items[0].schedules[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2027-06-22",
+      "confidence": 1,
+      "excerpt": "**Second Session:** June 22nd - July 6th, 2027",
+      "locator": "items[0].schedules[1]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2027-07-06",
+      "confidence": 1,
+      "excerpt": "**Second Session:** June 22nd - July 6th, 2027",
+      "locator": "items[0].schedules[1]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].applicationUrl",
+      "value": "https://register.pineridge.example/apply",
+      "confidence": 1,
+      "excerpt": "[Enroll Today!](https://register.pineridge.example/apply)",
+      "locator": "items[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].name",
+      "value": "High Meadow Ranch for Girls",
+      "confidence": 1,
+      "excerpt": "## [High Meadow Ranch for Girls](/camps/high-meadow-for-girls)",
+      "locator": "items[1]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].ageGroups[].minAge",
+      "value": 9,
+      "confidence": 1,
+      "excerpt": "Ages 9-17",
+      "locator": "items[1].ageGroups[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].ageGroups[].maxAge",
+      "value": 17,
+      "confidence": 1,
+      "excerpt": "Ages 9-17",
+      "locator": "items[1].ageGroups[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].pricing[].amount",
+      "value": 7400,
+      "confidence": 1,
+      "excerpt": "Month-long Sessions\n*Ages 9-17*\n**$7,400**",
+      "locator": "items[1].pricing[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].pricing[].unit",
+      "value": "PER_SESSION",
+      "confidence": 0.98,
+      "excerpt": "Month-long Sessions\n*Ages 9-17*\n**$7,400**",
+      "locator": "items[1].pricing[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2027-06-06",
+      "confidence": 1,
+      "excerpt": "**First Session:** June 6 - July 6th, 2027",
+      "locator": "items[1].schedules[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2027-07-06",
+      "confidence": 1,
+      "excerpt": "**First Session:** June 6 - July 6th, 2027",
+      "locator": "items[1].schedules[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2027-07-10",
+      "confidence": 1,
+      "excerpt": "**Second Session:** July 10th - Aug. 9th, 2027",
+      "locator": "items[1].schedules[1]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2027-08-09",
+      "confidence": 1,
+      "excerpt": "**Second Session:** July 10th - Aug. 9th, 2027",
+      "locator": "items[1].schedules[1]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].applicationUrl",
+      "value": "https://register.pineridge.example/apply",
+      "confidence": 1,
+      "excerpt": "[Enroll Today!](https://register.pineridge.example/apply)",
+      "locator": "items[1]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].name",
+      "value": "Big Creek Ranch for Boys",
+      "confidence": 1,
+      "excerpt": "## [Big Creek Ranch for Boys](/camps/big-creek-for-boys)",
+      "locator": "items[2]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].ageGroups[].minAge",
+      "value": 9,
+      "confidence": 1,
+      "excerpt": "Ages 9-17",
+      "locator": "items[2].ageGroups[0]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].ageGroups[].maxAge",
+      "value": 17,
+      "confidence": 1,
+      "excerpt": "Ages 9-17",
+      "locator": "items[2].ageGroups[0]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].pricing[].amount",
+      "value": 7400,
+      "confidence": 1,
+      "excerpt": "Month-long Sessions\n*Ages 9-17*\n**$7,400**",
+      "locator": "items[2].pricing[0]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].pricing[].unit",
+      "value": "PER_SESSION",
+      "confidence": 0.98,
+      "excerpt": "Month-long Sessions\n*Ages 9-17*\n**$7,400**",
+      "locator": "items[2].pricing[0]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2027-06-06",
+      "confidence": 1,
+      "excerpt": "**First Session:** June 6th - July 6th, 2027",
+      "locator": "items[2].schedules[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2027-07-06",
+      "confidence": 1,
+      "excerpt": "**First Session:** June 6th - July 6th, 2027",
+      "locator": "items[2].schedules[0]",
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2027-07-10",
+      "confidence": 1,
+      "excerpt": "**Second Session:** July 10th - Aug. 9th, 2027",
+      "locator": "items[2].schedules[1]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2027-08-09",
+      "confidence": 1,
+      "excerpt": "**Second Session:** July 10th - Aug. 9th, 2027",
+      "locator": "items[2].schedules[1]",
+      "occurrenceHint": 2
+    },
+    {
+      "fieldPath": "items[].applicationUrl",
+      "value": "https://register.pineridge.example/apply",
+      "confidence": 1,
+      "excerpt": "[Enroll Today!](https://register.pineridge.example/apply)",
+      "locator": "items[2]",
+      "occurrenceHint": 3
+    }
+  ],
+  "invalidValues": [
+    {
+      "fieldPath": "items[].campTypes[]",
+      "value": "DAY_CAMP",
+      "confidence": 1,
+      "excerpt": "Winter Break Day Camps",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].campTypes[]",
+      "value": "DAY",
+      "confidence": 1,
+      "excerpt": "Single-day camps for grades K-5.",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].registrationStatus",
+      "value": "SOLD_OUT",
+      "confidence": 1,
+      "excerpt": "All winter day camps are sold out.",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].registrationOpenDate",
+      "value": "January 14",
+      "confidence": 1,
+      "excerpt": "Registration opens January 14.",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "December 21",
+      "confidence": 1,
+      "excerpt": "Too Cold to Hold: December 21",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "December 21",
+      "confidence": 1,
+      "excerpt": "Too Cold to Hold: December 21",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].startDate",
+      "value": "2026-12-22",
+      "confidence": 1,
+      "excerpt": "Too Hot to Handle: December 22",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].schedules[].endDate",
+      "value": "2026-12-22",
+      "confidence": 1,
+      "excerpt": "Too Hot to Handle: December 22",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].platform",
+      "value": "Instagram",
+      "confidence": 1,
+      "excerpt": "[Instagram](https://www.instagram.com/pineridgecamps/)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].url",
+      "value": "https://www.instagram.com/pineridgecamps/",
+      "confidence": 1,
+      "excerpt": "[Instagram](https://www.instagram.com/pineridgecamps/)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].platform",
+      "value": "X",
+      "confidence": 1,
+      "excerpt": "[X](https://x.com/pineridgecamps/)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].url",
+      "value": "https://x.com/pineridgecamps/",
+      "confidence": 1,
+      "excerpt": "[X](https://x.com/pineridgecamps/)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].platform",
+      "value": "YouTube",
+      "confidence": 1,
+      "excerpt": "[YouTube](https://www.youtube.com/user/pineridgecamps)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].url",
+      "value": "https://www.youtube.com/user/pineridgecamps",
+      "confidence": 1,
+      "excerpt": "[YouTube](https://www.youtube.com/user/pineridgecamps)",
+      "locator": null,
+      "occurrenceHint": 1
+    }
+  ],
+  "duplicates": [
+    {
+      "fieldPath": "items[].socialLinks[].platform",
+      "value": "Instagram",
+      "confidence": 1,
+      "excerpt": "[Ranch Instagram](https://www.instagram.com/pineridgeranch/)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].url",
+      "value": "https://www.instagram.com/pineridgeranch/",
+      "confidence": 1,
+      "excerpt": "[Ranch Instagram](https://www.instagram.com/pineridgeranch/)",
+      "locator": null,
+      "occurrenceHint": 1
+    }
+  ],
+  "mixedEnumList": [
+    {
+      "fieldPath": "items[].campTypes[]",
+      "value": "SLEEPAWAY",
+      "confidence": 1,
+      "excerpt": "Month-long Sessions",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].campTypes[]",
+      "value": "DAY",
+      "confidence": 1,
+      "excerpt": "Winter Break Day Camps",
+      "locator": null,
+      "occurrenceHint": 1
+    }
+  ]
+}

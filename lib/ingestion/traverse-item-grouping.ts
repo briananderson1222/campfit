@@ -69,12 +69,13 @@
 import type { ExtractionProposal } from "@kontourai/traverse";
 import type { PricingUnit } from "@/lib/types";
 import {
+  CAMP_TARGET_SCHEMA,
   ENUM_ARRAY_SCHEMA_PATHS,
   ITEMS_ARRAY_PREFIX,
   PRICING_UNIT_VALUES,
   SCALAR_SCHEMA_PATHS,
   type EnumArraySchemaPath,
-  type ScalarSchemaPath,
+  type ItemFieldPath,
 } from "./traverse-schema";
 
 /** One nested array field family this module reconstructs full rows for. */
@@ -82,7 +83,67 @@ const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
   "ageGroups[]": ["minAge", "maxAge"],
   "schedules[]": ["startDate", "endDate"],
   "pricing[]": ["amount", "unit"],
+  "socialLinks[]": ["platform", "url"],
 };
+
+/** Schema entry per path relative to one item (`category`, `campTypes[]`, `schedules[].startDate`, ...). */
+const SCHEMA_BY_REL_PATH = new Map(
+  CAMP_TARGET_SCHEMA.map((field) => [field.path.slice(ITEMS_ARRAY_PREFIX.length), field] as const),
+);
+
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/;
+
+/** A real calendar date written `YYYY-MM-DD` (optionally followed by a time). "June 1" is not one: it has no year. */
+function isIsoCalendarDate(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const match = ISO_DATE_RE.exec(value);
+  if (!match) return false;
+  const day = `${match[1]}-${match[2]}-${match[3]}`;
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
+}
+
+/**
+ * Check one proposed value against its schema entry's declared type. Traverse
+ * annotates a mismatch (`evidenceMatch.schema`) but never drops the proposal,
+ * and the structured-output schema types every value as a plain string, so a
+ * provider can return any text for an enum, or "June 1" for a date. This is
+ * where such a value is refused: it is never part of a proposed change, and it
+ * is reported (see `AssembledItem.refusedValues`).
+ *
+ * A date must also have its year in the excerpt it cites.
+ *
+ * An enum is matched ignoring case and surrounding space and returned in its
+ * declared spelling ("Instagram" is `instagram`); nothing looser than that.
+ */
+function screenValue(relPath: string, value: unknown, excerpt: string): { ok: true; value: unknown } | { ok: false; why: string } {
+  const field = SCHEMA_BY_REL_PATH.get(relPath);
+  if (!field) return { ok: true, value };
+  switch (field.type) {
+    case "enum": {
+      const allowed = field.enumValues ?? [];
+      const wanted = String(value).trim().toLowerCase();
+      const canonical = allowed.find((candidate) => candidate.toLowerCase() === wanted);
+      return canonical === undefined
+        ? { ok: false, why: `not one of the allowed values (${allowed.join(", ")})` }
+        : { ok: true, value: canonical };
+    }
+    case "date":
+      if (!isIsoCalendarDate(value)) return { ok: false, why: "not a full calendar date (YYYY-MM-DD)" };
+      // A provider asked for YYYY-MM-DD will supply a year the text does not
+      // state ("December 21" becomes this year, or next). The cited excerpt
+      // must carry the year, or the date is a guess.
+      return excerpt.includes((value as string).slice(0, 4))
+        ? { ok: true, value }
+        : { ok: false, why: "its year is not stated in the cited text" };
+    case "number":
+      return typeof value === "number" && Number.isFinite(value) ? { ok: true, value } : { ok: false, why: "not a number" };
+    case "boolean":
+      return typeof value === "boolean" ? { ok: true, value } : { ok: false, why: "not true or false" };
+    default:
+      return { ok: true, value };
+  }
+}
 
 export interface FieldProposal {
   candidateValue: unknown;
@@ -91,6 +152,12 @@ export interface FieldProposal {
   excerpt: string;
   locator: string;
   extractor: string;
+  /**
+   * Set when `candidateValue` failed its schema type check (see `screenValue`);
+   * holds why. The proposal keeps its place so positional pairing of the
+   * other sub-fields is not shifted, but its value is never used.
+   */
+  refused?: string;
 }
 
 /** One reconstructed entry of an enum-array family (e.g. one campTypes[] tag). */
@@ -98,17 +165,18 @@ export interface EnumArrayEntry {
   value: string;
   confidence?: number;
   excerpt: string;
+  locator: string;
 }
 
 export interface AssembledItem {
   /** the source item index (pathIndices[0], or 0 when the model didn't index). */
   itemIndex: number;
   /** bare scalar field -> its single proposal (e.g. "name", "city"). */
-  scalars: Partial<Record<ScalarSchemaPath, FieldProposal>>;
-  /** each entry is one age band, fully reconstructed from its own excerpt(s). */
-  ageGroups: { minAge: number | null; maxAge: number | null; label: string; confidence?: number }[];
+  scalars: Partial<Record<ItemFieldPath, FieldProposal>>;
+  /** each entry is one age band, fully reconstructed from its own excerpt(s). `locator` is where `label` sits in the prepared text. */
+  ageGroups: { minAge: number | null; maxAge: number | null; label: string; locator: string; confidence?: number }[];
   /** each entry is one session, fully reconstructed from its own excerpt(s). */
-  schedules: { startDate: string | null; endDate: string | null; label: string; confidence?: number }[];
+  schedules: { startDate: string | null; endDate: string | null; label: string; locator: string; confidence?: number }[];
   /**
    * each entry is one price tier, fully reconstructed from its own excerpt(s).
    * A tier missing its amount or unit is never defaulted (a missing amount is
@@ -117,7 +185,31 @@ export interface AssembledItem {
    * camp's whole price list (review-apply deletes and re-inserts), so a
    * partial list would delete the tiers that could not be extracted.
    */
-  pricing: { amount: number; unit: PricingUnit; label: string; confidence?: number }[];
+  pricing: { amount: number; unit: PricingUnit; label: string; locator: string; confidence?: number }[];
+  /**
+   * Values the provider proposed that failed their field's type check (an
+   * enum member outside the allowed set, a date with no year), keyed by item
+   * field (`campTypes`, `category`, `schedules`, ...). They are never part of
+   * a proposed value; each is also an operator warning.
+   */
+  refusedValues: Record<string, string[]>;
+  /**
+   * Entries left out of a proposed list or object because another entry with
+   * the same values was kept: a session on the same dates under another label,
+   * a second URL for the same social platform. One sentence each, for the
+   * review page. Exact repeats are not listed.
+   */
+  droppedEntries: string[];
+  /**
+   * Present when this one item carries more than one distinct `name`: the
+   * page lists several programs and the provider did not separate them (the
+   * structured-output schema only admits un-indexed paths, so no `items[N]`
+   * index arrives). `names` are the programs seen. No single program's name
+   * is taken as the item's name, and a scalar the programs disagree on is not
+   * taken from any one of them (`withheldFields`); list fields combine every
+   * program's entries.
+   */
+  multiProgram?: { names: string[]; withheldFields: string[] };
   /**
    * Notes an operator needs even when no proposal is created: each dropped
    * price tier, and the withheld pricing change. Also included in `warnings`.
@@ -134,9 +226,11 @@ export interface AssembledItem {
   warnings: string[];
 }
 
-function toFieldProposal(p: ExtractionProposal): FieldProposal {
+function toFieldProposal(p: ExtractionProposal, relPath: string): FieldProposal {
+  const screened = screenValue(relPath, p.candidateValue, p.provenance.excerpt);
   return {
-    candidateValue: p.candidateValue,
+    candidateValue: screened.ok ? screened.value : p.candidateValue,
+    ...(screened.ok ? {} : { refused: screened.why }),
     ...(p.confidence === undefined ? {} : { confidence: p.confidence }),
     excerpt: p.provenance.excerpt,
     locator: p.provenance.locator,
@@ -255,7 +349,7 @@ function assembleNestedRows(
     // relPath looks like "ageGroups[].minAge" — the sub-field is the last segment.
     const subField = entry.relPath.split(".").pop() ?? entry.relPath;
     if (!subFields.includes(subField)) continue;
-    const fp = toFieldProposal(entry.proposal);
+    const fp = toFieldProposal(entry.proposal, entry.relPath);
     if (entry.subIndex !== undefined) {
       const row = indexedRows.get(entry.subIndex) ?? new Map<string, FieldProposal>();
       row.set(subField, fp);
@@ -302,13 +396,13 @@ function assembleNestedRows(
  */
 function assembleEnumArrayEntries(
   entries: RelativeProposal[]
-): { rows: EnumArrayEntry[]; warnings: string[] } {
+): { rows: EnumArrayEntry[]; refused: FieldProposal[]; warnings: string[] } {
   const warnings: string[] = [];
   const indexedRows = new Map<number, FieldProposal>();
   const unindexedRows: FieldProposal[] = [];
 
   for (const entry of entries) {
-    const fp = toFieldProposal(entry.proposal);
+    const fp = toFieldProposal(entry.proposal, entry.relPath);
     if (entry.subIndex !== undefined) {
       indexedRows.set(entry.subIndex, fp);
     } else {
@@ -329,8 +423,9 @@ function assembleEnumArrayEntries(
 
   const byValue = new Map<string, EnumArrayEntry>();
   for (const fp of ordered) {
+    if (fp.refused) continue;
     const value = String(fp.candidateValue);
-    const candidate: EnumArrayEntry = { value, ...(fp.confidence === undefined ? {} : { confidence: fp.confidence }), excerpt: fp.excerpt };
+    const candidate: EnumArrayEntry = { value, ...(fp.confidence === undefined ? {} : { confidence: fp.confidence }), excerpt: fp.excerpt, locator: fp.locator };
     const existing = byValue.get(value);
     // A later duplicate replaces the kept one only when both reported a
     // confidence and the later one is higher; an unreported confidence is
@@ -340,21 +435,77 @@ function assembleEnumArrayEntries(
     }
   }
 
-  return { rows: [...byValue.values()], warnings };
+  return { rows: [...byValue.values()], refused: ordered.filter((fp) => fp.refused), warnings };
 }
 
 function rowExcerpt(row: Map<string, FieldProposal>): string {
   return [...row.values()][0]?.excerpt ?? "";
 }
 
-function parsePricingUnit(value: unknown): PricingUnit | null {
+/** Locator of the same proposal {@link rowExcerpt} takes its excerpt from. */
+function rowLocator(row: Map<string, FieldProposal>): string {
+  return [...row.values()][0]?.locator ?? "";
+}
+
+/** Distinct values in first-seen order, compared case- and whitespace-insensitively; the first spelling is kept. */
+function distinctValues(values: readonly unknown[]): string[] {
+  const seen = new Map<string, string>();
+  for (const value of values) {
+    const text = typeof value === "string" ? value.trim() : JSON.stringify(value);
+    const key = text.toLowerCase().replace(/\s+/g, " ");
+    if (!seen.has(key)) seen.set(key, text);
+  }
+  return [...seen.values()];
+}
+
+/** The operator-facing sentence for {@link AssembledItem.multiProgram}. */
+export function multiProgramWarning(multiProgram: { names: readonly string[]; withheldFields: readonly string[] }): string {
+  const others = multiProgram.withheldFields.filter((field) => field !== "name");
+  return `page lists ${multiProgram.names.length} programs (${multiProgram.names.map((name) => `"${name}"`).join(", ")}) that were not separated into items — the camp name is not proposed from any one program`
+    + (others.length > 0 ? `; ${others.join(", ")} not proposed because the programs state different values` : "")
+    + "; list fields combine every program's entries";
+}
+
+/** Keep the first row for each key; report how many repeats were dropped. */
+function dedupeRows<T extends { label: string }>(
+  rows: readonly T[],
+  key: (row: T) => string,
+): { rows: T[]; dropped: number; droppedLabels: { kept: string; dropped: string }[] } {
+  const seen = new Map<string, T>();
+  const kept: T[] = [];
+  const droppedLabels: { kept: string; dropped: string }[] = [];
+  let dropped = 0;
+  for (const row of rows) {
+    const k = key(row);
+    const first = seen.get(k);
+    if (first) {
+      dropped++;
+      // Same values under a different label is a row a reviewer may want
+      // (another program's session on the same dates), so it is reported.
+      if (first.label !== row.label) droppedLabels.push({ kept: first.label, dropped: row.label });
+      continue;
+    }
+    seen.set(k, row);
+    kept.push(row);
+  }
+  return { rows: kept, dropped, droppedLabels };
+}
+
+function parsePricingUnit(fp: FieldProposal | undefined): PricingUnit | null {
+  const value = fp && !fp.refused ? fp.candidateValue : undefined;
   return typeof value === "string" && (PRICING_UNIT_VALUES as readonly string[]).includes(value)
     ? (value as PricingUnit)
     : null;
 }
 
-function parsePricingAmount(value: unknown): number | null {
+function parsePricingAmount(fp: FieldProposal | undefined): number | null {
+  const value = fp && !fp.refused ? fp.candidateValue : undefined;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** A sub-field's value, or null when it is absent or was refused. */
+function acceptedValue<T>(fp: FieldProposal | undefined): T | null {
+  return fp && !fp.refused ? ((fp.candidateValue as T | undefined) ?? null) : null;
 }
 
 /**
@@ -386,8 +537,29 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
   const items: AssembledItem[] = [];
 
   for (const [itemIndex, entries] of [...byItem.entries()].sort((a, b) => a[0] - b[0])) {
-    const scalars: Partial<Record<ScalarSchemaPath, FieldProposal>> = {};
+    const scalars: Partial<Record<ItemFieldPath, FieldProposal>> = {};
     const warnings: string[] = [];
+    const operatorWarnings: string[] = [];
+    const refusedValues: Record<string, string[]> = {};
+    const refusalWarnings: string[] = [];
+    const droppedEntries: string[] = [];
+    /**
+     * Record every refused proposal under `field`, with one warning per
+     * distinct reason. `warn: false` for a list family whose dropped rows are
+     * already reported (the refusal would only repeat that note).
+     */
+    const refuse = (field: string, refused: readonly FieldProposal[], warn = true) => {
+      if (refused.length === 0) return;
+      const values = distinctValues(refused.map((fp) => fp.candidateValue));
+      refusedValues[field] = distinctValues([...(refusedValues[field] ?? []), ...values]);
+      if (!warn) return;
+      for (const why of distinctValues(refused.map((fp) => fp.refused))) {
+        const affected = distinctValues(refused.filter((fp) => fp.refused === why).map((fp) => fp.candidateValue));
+        refusalWarnings.push(`${field}: ${affected.map((value) => `"${value}"`).join(", ")} not proposed — ${why}`);
+      }
+    };
+    const refusedIn = (rows: readonly Map<string, FieldProposal>[]) =>
+      rows.flatMap((row) => [...row.values()].filter((fp) => fp.refused));
     const allProposals: ExtractionProposal[] = [];
 
     if (chunkBoundaryIndices.has(itemIndex)) {
@@ -396,9 +568,23 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       );
     }
 
+    const programNames = distinctValues(entries.filter((e) => e.relPath === "name").map((e) => e.proposal.candidateValue));
+    const collapsedPrograms = programNames.length > 1;
+    const withheldProgramFields: string[] = [];
+
     for (const scalarPath of SCALAR_SCHEMA_PATHS) {
-      const match = entries.find((e) => e.relPath === scalarPath);
-      if (match) scalars[scalarPath] = toFieldProposal(match.proposal);
+      const matches = entries.filter((e) => e.relPath === scalarPath).map((e) => toFieldProposal(e.proposal, e.relPath));
+      if (matches.length === 0) continue;
+      refuse(scalarPath, matches.filter((fp) => fp.refused));
+      const valid = matches.filter((fp) => !fp.refused);
+      if (valid.length === 0) continue;
+      // Several programs collapsed into this item: a value is the item's only
+      // when every program states the same one. The name never is.
+      if (collapsedPrograms && (scalarPath === "name" || distinctValues(valid.map((fp) => fp.candidateValue)).length > 1)) {
+        withheldProgramFields.push(scalarPath);
+        continue;
+      }
+      scalars[scalarPath] = valid[0];
     }
 
     const ageGroupEntries = entries.filter((e) => e.relPath.startsWith("ageGroups[]."));
@@ -409,47 +595,89 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     const scheduleResult = assembleNestedRows(scheduleEntries, NESTED_ARRAY_FIELDS["schedules[]"]);
     const pricingResult = assembleNestedRows(pricingEntries, NESTED_ARRAY_FIELDS["pricing[]"]);
     warnings.push(...ageGroupResult.warnings, ...scheduleResult.warnings, ...pricingResult.warnings);
+    refuse("ageGroups", refusedIn(ageGroupResult.rows));
+    refuse("schedules", refusedIn(scheduleResult.rows), false);
+    refuse("pricing", refusedIn(pricingResult.rows), false);
 
-    const ageGroups = ageGroupResult.rows
-      .filter((row) => row.size > 0)
-      .map((row) => ({
-        minAge: (row.get("minAge")?.candidateValue as number | undefined) ?? null,
-        maxAge: (row.get("maxAge")?.candidateValue as number | undefined) ?? null,
-        label: rowExcerpt(row),
-        ...withConfidence(rowConfidence(row)),
-      }));
+    // A provider may report the same band, session or tier more than once
+    // (a repeated card, or the same text read by two overlapping chunks).
+    // Approving a list writes one row per entry, so repeats are dropped here.
+    const ageGroupRows = dedupeRows(
+      ageGroupResult.rows
+        .map((row) => ({
+          minAge: acceptedValue<number>(row.get("minAge")),
+          maxAge: acceptedValue<number>(row.get("maxAge")),
+          label: rowExcerpt(row),
+          locator: rowLocator(row),
+          ...withConfidence(rowConfidence(row)),
+        }))
+        .filter((row) => row.minAge !== null || row.maxAge !== null),
+      (row) => JSON.stringify([row.minAge, row.maxAge]),
+    );
+    const ageGroups = ageGroupRows.rows;
 
-    const schedules = scheduleResult.rows
-      .filter((row) => row.size > 0)
-      .map((row) => ({
-        startDate: (row.get("startDate")?.candidateValue as string | undefined) ?? null,
-        endDate: (row.get("endDate")?.candidateValue as string | undefined) ?? null,
-        label: rowExcerpt(row),
-        ...withConfidence(rowConfidence(row)),
-      }));
+    // A session is its dates. One with no usable start date, or an unusable
+    // end date, is dropped, and then the whole change is withheld: approving a
+    // session list reconciles the camp's sessions against it, so a partial
+    // list would archive the sessions that could not be extracted.
+    const completeSchedules: AssembledItem["schedules"] = [];
+    const droppedScheduleLabels: string[] = [];
+    for (const row of scheduleResult.rows) {
+      if (row.size === 0) continue;
+      const label = rowExcerpt(row);
+      const startDate = acceptedValue<string>(row.get("startDate"));
+      const endDate = acceptedValue<string>(row.get("endDate"));
+      if (startDate === null || row.get("endDate")?.refused) {
+        droppedScheduleLabels.push(label);
+        continue;
+      }
+      completeSchedules.push({ startDate, endDate, label, locator: rowLocator(row), ...withConfidence(rowConfidence(row)) });
+    }
+    const scheduleRows = dedupeRows(completeSchedules, (row) => JSON.stringify([row.startDate, row.endDate]));
+    const droppedSchedules = droppedScheduleLabels.length;
+    if (droppedSchedules > 0) {
+      // One note for the family, not one per row: a listing page can carry dozens.
+      const examples = distinctValues(droppedScheduleLabels).slice(0, 3).map((label) => `"${label}"`).join(", ");
+      operatorWarnings.push(
+        `${droppedSchedules} session entr${droppedSchedules === 1 ? "y" : "ies"} dropped (e.g. ${examples}): no full calendar date (YYYY-MM-DD) was extracted — a date the page does not state in full is not emitted`
+      );
+    }
+    if (droppedSchedules > 0 && scheduleRows.rows.length > 0) {
+      operatorWarnings.push(
+        `sessions change withheld: ${scheduleRows.rows.length} complete session(s) not proposed because ${droppedSchedules} session(s) could not be fully extracted — approving a partial list would archive the camp's other sessions`
+      );
+    }
+    const schedules = droppedSchedules > 0 ? [] : scheduleRows.rows;
 
     const complete: AssembledItem["pricing"] = [];
-    const operatorWarnings: string[] = [];
+    let droppedPricing = 0;
     for (const row of pricingResult.rows) {
       if (row.size === 0) continue;
       const label = rowExcerpt(row);
-      const amount = parsePricingAmount(row.get("amount")?.candidateValue);
-      const unit = parsePricingUnit(row.get("unit")?.candidateValue);
+      const locator = rowLocator(row);
+      const amount = parsePricingAmount(row.get("amount"));
+      const unit = parsePricingUnit(row.get("unit"));
       if (amount === null || unit === null) {
+        droppedPricing++;
         const missing = [amount === null ? "amount" : null, unit === null ? "unit" : null].filter(Boolean).join(" and ");
         operatorWarnings.push(`pricing entry "${label}" dropped: no ${missing} was extracted — a price the page does not state is not emitted`);
         continue;
       }
-      complete.push({ amount, unit, label, ...withConfidence(rowConfidence(row)) });
+      complete.push({ amount, unit, label, locator, ...withConfidence(rowConfidence(row)) });
     }
-    const dropped = operatorWarnings.length;
-    if (dropped > 0 && complete.length > 0) {
+    const pricingRows = dedupeRows(complete, (row) => JSON.stringify([row.amount, row.unit, row.label]));
+    for (const [family, result] of [["ageGroups", ageGroupRows], ["schedules", scheduleRows], ["pricing", pricingRows]] as const) {
+      if (result.dropped > 0) warnings.push(`${family}: ${result.dropped} repeated entr${result.dropped === 1 ? "y" : "ies"} dropped`);
+      for (const pair of result.droppedLabels) {
+        droppedEntries.push(`${family}: "${pair.dropped}" was left out because it has the same values as "${pair.kept}"`);
+      }
+    }
+    if (droppedPricing > 0 && pricingRows.rows.length > 0) {
       operatorWarnings.push(
-        `pricing change withheld: ${complete.length} complete tier(s) (${complete.map((p) => `"${p.label}"`).join(", ")}) not proposed because ${dropped} tier(s) could not be fully extracted — approving a partial list would delete the camp's other price tiers`
+        `pricing change withheld: ${pricingRows.rows.length} complete tier(s) (${pricingRows.rows.map((p) => `"${p.label}"`).join(", ")}) not proposed because ${droppedPricing} tier(s) could not be fully extracted — approving a partial list would delete the camp's other price tiers`
       );
     }
-    const pricing = dropped > 0 ? [] : complete;
-    warnings.push(...operatorWarnings);
+    const pricing = droppedPricing > 0 ? [] : pricingRows.rows;
 
     const enumArrayResults: Record<EnumArraySchemaPath, EnumArrayEntry[]> = {
       campTypes: [],
@@ -458,9 +686,63 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     for (const enumField of ENUM_ARRAY_SCHEMA_PATHS) {
       const fieldEntries = entries.filter((e) => e.relPath === `${enumField}[]`);
       const result = assembleEnumArrayEntries(fieldEntries);
-      enumArrayResults[enumField] = result.rows;
+      refuse(enumField, result.refused);
+      // The list replaces the stored one when approved. With any member
+      // refused, the remainder is not the page's list, so nothing is proposed.
+      if (result.refused.length > 0) {
+        if (result.rows.length > 0) {
+          operatorWarnings.push(
+            `${enumField} change withheld: ${result.rows.map((row) => `"${row.value}"`).join(", ")} not proposed because other value(s) for this list were not valid — approving a partial list would replace the stored one`
+          );
+        }
+      } else {
+        enumArrayResults[enumField] = result.rows;
+      }
       warnings.push(...result.warnings);
     }
+
+    // socialLinks[] rows fold into the one `{ platform: url }` object the Camp
+    // column stores. A row needs both halves, and a platform outside the
+    // allowed set is refused like any other enum value.
+    const socialResult = assembleNestedRows(
+      entries.filter((e) => e.relPath.startsWith("socialLinks[].")),
+      NESTED_ARRAY_FIELDS["socialLinks[]"],
+    );
+    warnings.push(...socialResult.warnings);
+    refuse("socialLinks", refusedIn(socialResult.rows));
+    const socialLinks: Record<string, string> = {};
+    const socialProposals: FieldProposal[] = [];
+    for (const row of socialResult.rows) {
+      const platform = acceptedValue<string>(row.get("platform"));
+      const url = row.get("url");
+      if (row.get("platform")?.refused) continue;
+      if (platform === null || !url || typeof url.candidateValue !== "string" || !url.candidateValue.trim()) {
+        if (row.size > 0) warnings.push(`socialLinks entry "${rowExcerpt(row)}" dropped: it needs both a platform and a url`);
+        continue;
+      }
+      if (platform in socialLinks) {
+        if (socialLinks[platform] !== url.candidateValue.trim()) {
+          droppedEntries.push(`socialLinks: a second ${platform} link (${url.candidateValue.trim()}) was left out; ${socialLinks[platform]} was kept`);
+        }
+        continue;
+      }
+      socialLinks[platform] = url.candidateValue.trim();
+      socialProposals.push(url);
+    }
+    if (socialProposals.length > 0) {
+      scalars.socialLinks = {
+        candidateValue: socialLinks,
+        ...withConfidence(meanReportedConfidence(socialProposals.map((fp) => fp.confidence))),
+        excerpt: socialProposals[0].excerpt,
+        locator: socialProposals[0].locator,
+        extractor: socialProposals[0].extractor,
+      };
+    }
+    operatorWarnings.push(...refusalWarnings);
+
+    const multiProgram = collapsedPrograms ? { names: programNames, withheldFields: withheldProgramFields } : undefined;
+    if (multiProgram) operatorWarnings.push(multiProgramWarning(multiProgram));
+    warnings.push(...operatorWarnings);
 
     for (const e of entries) allProposals.push(e.proposal);
 
@@ -475,6 +757,9 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       allProposals,
       warnings,
       operatorWarnings,
+      refusedValues,
+      droppedEntries,
+      ...(multiProgram ? { multiProgram } : {}),
     });
   }
 

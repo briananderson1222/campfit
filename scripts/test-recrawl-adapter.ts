@@ -178,9 +178,9 @@ function makeValidatorFetchOptions(
 }
 
 /** A provider whose `extract()` counts calls then throws — proves, independently of telemetry, that extraction never runs on a 304. */
-function makeThrowingProvider(counter: { calls: number }): ExtractionProvider {
+function makeThrowingProvider(counter: { calls: number }, name = "throwing-on-304"): ExtractionProvider {
   return {
-    name: "throwing-on-304",
+    name,
     async extract(): Promise<ProviderExtractionOutput> {
       counter.calls++;
       throw new Error("extract() must never be called on a 304 (campfit#77 AC1)");
@@ -1080,13 +1080,20 @@ async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
     websiteUrl: "https://avid4.com/day-camps/colorado/",
     campName: "Mountain Explorers Day Camp",
     current: makeCamp({ id: "camp-304", city: "" }),
-    provider: makeThrowingProvider(providerCounter),
+    // Same provider identity as the seed: the fingerprint covers it, so a
+    // different model would (correctly) be asked to read the page again.
+    provider: makeThrowingProvider(providerCounter, "stub-extraction-provider:stub-304-seed"),
     store,
     mode: "live-with-capture",
     fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "304-when-validated", probe),
+    // What the crawl pipeline passes: the fingerprint the seed's complete
+    // extraction recorded. A 304 skips extraction only when the re-served
+    // body is the text that extraction read.
+    priorContentFingerprint: seed.contentFingerprint,
     log: () => {},
   });
 
+  assert.ok(seed.contentFingerprint, "a completed extraction reports the fingerprint of the text it read");
   assert.equal(providerCounter.calls, 0, "extract() must never be called on a 304 (throwing-provider counter proves it)");
   assert.equal(result.ok, true, "a 304 is a successful freshness check");
   assert.equal(result.notModified, true, "a 304 must surface notModified: true");
@@ -1266,12 +1273,12 @@ async function testCrawlPipelineWiresNotModifiedToFreshnessSeam() {
   const source = fs.readFileSync(path.join(ROOT_DIR, "lib/ingestion/crawl-pipeline.ts"), "utf8");
   assert.match(
     source,
-    /import\s*{\s*recordRecrawlFreshness\s*}\s*from\s*['"]\.\/recrawl-freshness['"]/,
+    /import\s*{[^}]*\brecordRecrawlFreshness\b[^}]*}\s*from\s*['"]\.\/recrawl-freshness['"]/,
     "crawl-pipeline must import the crawl-freshness seam"
   );
   assert.match(
     source,
-    /else if \(result\.notModified\)/,
+    /else if \(result\.notModified \|\| result\.contentUnchanged\)/,
     "crawl-pipeline must branch on result.notModified BEFORE the changed-page proposal block"
   );
   assert.match(

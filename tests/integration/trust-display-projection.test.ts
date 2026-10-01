@@ -10,7 +10,7 @@ function human(mode: 'source' | 'override' = 'source'): TrustBundle {
   return buildCampAttestationTrustInput({ campId: 'camp', fields: ['name'], actor: 'human', attestedAt: at, mode, notes: mode === 'override' ? 'called provider' : undefined, sourceRef: mode === 'source' ? 'snapshot:1' : undefined, sourceLocator: mode === 'source' ? 'chars:2-6' : undefined, excerpt: mode === 'source' ? 'camp' : undefined });
 }
 function crawl(): TrustBundle {
-  return buildCampReviewTrustInput({ proposalId: 'p', campId: 'camp', sourceUrl: 'https://example.test', snapshotRef: 'snapshot:1', snapshotBody: 'a camp here', proposedChanges: { name: { old: 'old', new: 'camp', confidence: 1, excerpt: 'camp' } }, approvedFields: ['name'], reviewer: 'reviewer', reviewedAt: at });
+  return buildCampReviewTrustInput({ proposalId: 'p', campId: 'camp', sourceUrl: 'https://example.test', snapshotRef: 'snapshot:1', citation: { text: 'a camp here', space: 'snapshot-body' }, proposedChanges: { name: { old: 'old', new: 'camp', confidence: 1, excerpt: 'camp' } }, approvedFields: ['name'], reviewer: 'reviewer', reviewedAt: at });
 }
 
 describe('trust display projection', () => {
@@ -64,8 +64,8 @@ describe('trust display projection', () => {
     expect(approvedFieldsRequireSnapshot({ description: { old: 'old', new: 'new', excerpt: 'new', confidence: 1 } }, [])).toBe(false);
     const excerptChange = { description: { old: 'old', new: 'new', excerpt: 'new', confidence: 1 } };
     expect(canBuildReviewTrustBundle({}, excerptChange, ['description'])).toBe(true);
-    expect(canBuildReviewTrustBundle({ snapshotRef: 'snapshot:1', snapshotBody: 'new' }, excerptChange, ['description'])).toBe(true);
+    expect(canBuildReviewTrustBundle({ snapshotRef: 'snapshot:1', citation: { text: 'new', space: 'snapshot-body' } }, excerptChange, ['description'])).toBe(true);
     expect(canBuildReviewTrustBundle({}, { schedules: { old: [], new: [], confidence: 1 } }, ['schedules'])).toBe(true);
-    expect(canBuildReviewTrustBundle({ snapshotRef: 'snapshot:1', snapshotBody: 'body' }, { schedules: { old: [], new: [], confidence: 1 } }, ['schedules'])).toBe(true);
+    expect(canBuildReviewTrustBundle({ snapshotRef: 'snapshot:1', citation: { text: 'body', space: 'snapshot-body' } }, { schedules: { old: [], new: [], confidence: 1 } }, ['schedules'])).toBe(true);
   });
 });

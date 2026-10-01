@@ -5,7 +5,8 @@ import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-st
 import { campfitVocabulary } from '@/lib/trust-vocabulary';
 
 import { loadClaimBundle } from './claim-store';
-import { projectTrustDisplay, type TrustDisplay } from './trust-display';
+import { resolveCitationText } from './citation-text';
+import { citationTextKey, projectTrustDisplay, type TrustDisplay } from './trust-display';
 import { campCanonicalClaimId } from './trust-projection';
 
 /** Server-only composition boundary for presentation code. Missing or malformed
@@ -18,13 +19,21 @@ export async function loadCampTrustDisplays(
   const snapshotBodies: Record<string, string> = {};
   const store = createCampfitSnapshotStore();
 
-  await Promise.all([...new Set(bundle.evidence.map((item) => item.sourceRef).filter(Boolean))].map(async (sourceRef) => {
-    const parsed = parseSnapshotSourceRef(sourceRef);
+  // One entry per distinct citation text: the raw body of a snapshot, or the
+  // prepared text an extraction read from it (re-derived and digest-checked;
+  // an unreproducible one is omitted, which shows as stale, never as verified).
+  const byKey = new Map(bundle.evidence.filter((item) => item.sourceRef).map((item) => [citationTextKey(item), item] as const));
+  await Promise.all([...byKey].map(async ([key, evidence]) => {
+    const parsed = parseSnapshotSourceRef(evidence.sourceRef);
     if (!parsed) return;
     const snapshot = await store.get(parsed.sourceId, parsed.bodyHash);
-    if (snapshot && snapshot.bodyHash === parsed.bodyHash && snapshot.url === parsed.url && snapshot.fetchedAt === parsed.fetchedAt) {
-      snapshotBodies[sourceRef] = snapshot.body;
-    }
+    if (!snapshot || snapshot.bodyHash !== parsed.bodyHash || snapshot.url !== parsed.url || snapshot.fetchedAt !== parsed.fetchedAt) return;
+    const citation = resolveCitationText({
+      snapshotRef: evidence.sourceRef,
+      snapshot,
+      preparedArtifact: evidence.metadata?.citationSpace === 'prepared' ? evidence.metadata.preparedArtifact : undefined,
+    });
+    if (citation.ok) snapshotBodies[key] = citation.text;
   }));
 
   const selectedFields = fields ?? bundle.claims

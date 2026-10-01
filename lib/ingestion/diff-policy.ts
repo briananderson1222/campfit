@@ -190,15 +190,19 @@ export interface ProvenanceProjectionOptions {
   excerpt?: string;
   sourceUrl?: string;
   includeEmptyExcerpt?: boolean;
+  /** `chars:<start>-<end>` of `excerpt` in the prepared text; kept only alongside an excerpt. */
+  locator?: string;
 }
 
 export function projectProvenance({
   excerpt,
   sourceUrl,
   includeEmptyExcerpt = false,
-}: ProvenanceProjectionOptions): { excerpt?: string; sourceUrl?: string } {
+  locator,
+}: ProvenanceProjectionOptions): { excerpt?: string; sourceUrl?: string; locator?: string } {
   return {
     ...(includeEmptyExcerpt || excerpt ? { excerpt: excerpt ?? "" } : {}),
+    ...(excerpt && locator ? { locator } : {}),
     ...(sourceUrl ? { sourceUrl } : {}),
   };
 }

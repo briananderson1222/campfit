@@ -21,12 +21,43 @@ export async function getCampCrawlTarget(campId: string): Promise<{ id: string; 
   return rows[0];
 }
 
-export async function skipPendingCampProposals(campId: string): Promise<void> {
-  await getPool().query(
-    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
-     WHERE "campId" = $1 AND status = 'PENDING'`,
-    [campId]
-  );
+/** A crawl query hit a column that only exists after a migration this database has not had. */
+export class CrawlSchemaOutdatedError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'The database is missing crawl-state columns (migration 022_camp_crawl_attempt_and_content_digest). '
+      + 'Run `npm run db:migrate` against this database, then crawl again.',
+      { cause },
+    );
+    this.name = 'CrawlSchemaOutdatedError';
+  }
+
+  /** Set once a FAILED run was written for this error, so it is not recorded twice. */
+  recorded = false;
+}
+
+/** Postgres `undefined_column`. Rethrown as {@link CrawlSchemaOutdatedError} so the operator is told what to do. */
+export function asCrawlSchemaError(err: unknown): unknown {
+  return (err as { code?: unknown } | null)?.code === '42703' ? new CrawlSchemaOutdatedError(err) : err;
+}
+
+/**
+ * Leave a FAILED run on record for a crawl that could not even start, so the
+ * failure shows in the crawl monitor instead of only in a server log.
+ * Best-effort: never throws.
+ */
+export async function recordUnstartedCrawlFailure(opts: {
+  triggeredBy: string;
+  trigger: 'MANUAL' | 'SCHEDULED';
+  campIds?: string[];
+  error: string;
+}): Promise<void> {
+  try {
+    const run = await createCrawlRun({ triggeredBy: opts.triggeredBy, trigger: opts.trigger, campIds: opts.campIds, totalCamps: 0 });
+    await completeCrawlRun(run.id, 'FAILED', [{ campId: 'run', url: '', error: opts.error }]);
+  } catch (err) {
+    console.error(`[crawl] could not record the failed start: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function getLatestCrawlRunsForAdmin(): Promise<CrawlRun[]> {
@@ -173,6 +204,45 @@ export async function completeCrawlRun(
     `UPDATE "CrawlRun" SET status = $1, "completedAt" = now(), "errorLog" = $2 WHERE id = $3`,
     [status, JSON.stringify(errorLog), id]
   );
+}
+
+/**
+ * How long a RUNNING run may go without recording progress before it is
+ * treated as dead. A run's process can be killed without a chance to write its
+ * final status (a serverless function hitting its time limit, a crash, a
+ * deploy), which would otherwise leave the row RUNNING forever. Well above the
+ * slowest observed single-camp extraction, so a live run is not reaped.
+ */
+export const STALE_CRAWL_RUN_MS = 30 * 60 * 1000;
+
+/**
+ * Mark RUNNING runs with no progress for `staleAfterMs` as FAILED. Progress is
+ * the newest camp-log entry, or the start time when nothing was logged. Called
+ * when a new run starts, so no scheduler or background job is needed.
+ *
+ * A late completion wins: a run that was only slow and later finishes
+ * overwrites FAILED with the status it actually reached, because that status
+ * is the true one. The note stays in its error log.
+ */
+export async function failStaleCrawlRuns(staleAfterMs: number = STALE_CRAWL_RUN_MS): Promise<string[]> {
+  const pool = getPool();
+  const note = [{
+    campId: 'run',
+    url: '',
+    error: `Run recorded no progress for over ${Math.round(staleAfterMs / 60000)} minute(s) and never finished; its process likely crashed or was stopped. Marked FAILED when a later run started.`,
+  }];
+  const result = await pool.query<{ id: string }>(
+    `UPDATE "CrawlRun" r
+        SET status = 'FAILED', "completedAt" = now(), "errorLog" = COALESCE(r."errorLog", '[]'::jsonb) || $2::jsonb
+      WHERE r.status = 'RUNNING'
+        AND COALESCE(
+              (SELECT max((entry->>'processedAt')::timestamptz) FROM jsonb_array_elements(r."campLog") AS entry),
+              r."startedAt"
+            ) < now() - ($1::double precision * interval '1 millisecond')
+      RETURNING r.id`,
+    [staleAfterMs, JSON.stringify(note)]
+  );
+  return result.rows.map((row) => row.id);
 }
 
 export async function getCrawlRun(id: string): Promise<CrawlRun | null> {

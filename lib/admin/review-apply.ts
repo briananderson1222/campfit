@@ -48,14 +48,17 @@ import { parseSnapshotSourceRef } from '@kontourai/traverse/fetch';
 
 import { getPool } from '@/lib/db';
 import { getProposal, updateProposalStatus, partialApprove } from './review-repository';
-import { CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from './proposal-fields';
+import { CAMP_ENUM_ARRAY_FIELDS, CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from './proposal-fields';
+import { invalidEnumMembers } from './review-format-validation';
+import { resolveCitationText, storedPreparedArtifact } from './citation-text';
+import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
 import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
-import { buildCampReviewTrustInput, campCanonicalClaimId } from './trust-projection';
+import { buildCampReviewTrustInput, campCanonicalClaimId, type ReviewCitationSource } from './trust-projection';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from './survey-review-apply';
 import { getSurveyReviewEvents } from './survey-review-events';
 import { applyScheduleReconciliation, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
@@ -67,21 +70,87 @@ import {
 import type { CampChangeProposal, FieldDiff, ProposedChanges } from './types';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 
-async function exactProposalSnapshot(proposal: CampChangeProposal): Promise<{ snapshotRef: string; snapshotBody: string }> {
-  if (!proposal.snapshotRef) throw new Error(`Proposal ${proposal.id} has no immutable snapshot reference.`);
+/**
+ * Load the proposal's immutable snapshot and the exact text its excerpts are
+ * checked against (see citation-text.ts): the prepared text the extraction
+ * read, when the proposal recorded its digest, otherwise the raw body.
+ */
+async function exactProposalSnapshot(proposal: CampChangeProposal): Promise<{ snapshotRef: string; citation: ReviewCitationSource }> {
+  if (!proposal.snapshotRef) throw new ReviewApplyCitationError(`Proposal ${proposal.id} has no immutable snapshot reference.`);
   const parsed = parseSnapshotSourceRef(proposal.snapshotRef);
-  if (!parsed || !/^[a-f0-9]{64}$/i.test(parsed.bodyHash)) throw new Error(`Proposal ${proposal.id} has a malformed snapshot reference.`);
+  if (!parsed || !/^[a-f0-9]{64}$/i.test(parsed.bodyHash)) throw new ReviewApplyCitationError(`Proposal ${proposal.id} has a malformed snapshot reference.`);
   const snapshot = await createCampfitSnapshotStore().get(parsed.sourceId, parsed.bodyHash);
   if (!snapshot || snapshot.bodyHash !== parsed.bodyHash || snapshot.url !== parsed.url || snapshot.fetchedAt !== parsed.fetchedAt) {
-    throw new Error(`Proposal ${proposal.id} snapshot identity does not match stored bytes.`);
+    throw new ReviewApplyCitationError(`The stored snapshot for proposal ${proposal.id} is missing or does not match its reference, so its excerpts cannot be checked. Nothing was applied; re-crawl the camp.`);
   }
-  return { snapshotRef: proposal.snapshotRef, snapshotBody: snapshot.body };
+  const preparedArtifact = storedPreparedArtifact(proposal.rawExtraction);
+  const citationText = resolveCitationText({ snapshotRef: proposal.snapshotRef, snapshot, preparedArtifact });
+  if (!citationText.ok) {
+    throw new ReviewApplyCitationError(`${citationText.message} Nothing was applied.`);
+  }
+  return {
+    snapshotRef: proposal.snapshotRef,
+    citation: { text: citationText.text, space: citationText.space, ...(citationText.space === 'prepared' ? { preparedArtifact: citationText.artifact } : {}) },
+  };
+}
+
+/**
+ * Refuse, before any write, an approval whose excerpt is not an exact
+ * citation of the stored source text. Every failing field is named at once.
+ */
+function assertExactCitations(changes: ProposedChanges, fields: readonly string[], citation: ReviewCitationSource): void {
+  const failing = fields.filter((field) => {
+    const diff = changes[field];
+    return Boolean(diff?.excerpt?.trim())
+      && resolveReviewExcerpt(diff!.excerpt!, citation.text, diff!.locator).state !== 'verified';
+  });
+  if (failing.length > 0) {
+    throw new ReviewApplyCitationError(
+      `Cannot apply ${failing.map((field) => `"${field}"`).join(', ')}: the cited excerpt does not match the stored source text exactly. Nothing was applied. Keep the current value for ${failing.length === 1 ? 'this field' : 'these fields'}, or re-crawl the camp.`,
+      failing,
+    );
+  }
+}
+
+/**
+ * Refuse, before any write, an approved value this module cannot store as
+ * approved: an enum member outside the allowed set, or a field with no apply
+ * path. Without this such a field was skipped and still reported as applied.
+ */
+function assertApplicableValues(changes: ProposedChanges, fields: readonly string[]): void {
+  const problems: string[] = [];
+  const failing: string[] = [];
+  for (const field of fields) {
+    const diff = changes[field];
+    if (!diff) continue;
+    const invalid = invalidEnumMembers(field, diff.new);
+    if (invalid.length > 0) {
+      failing.push(field);
+      problems.push(`"${field}" has value(s) that are not allowed: ${invalid.map((value) => `"${value}"`).join(', ')}`);
+    } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field) && Array.isArray(diff.new) && diff.new.length === 0) {
+      failing.push(field);
+      problems.push(`"${field}" would be emptied, which leaves the camp without one`);
+    } else if (!hasApplyPath(field, diff)) {
+      failing.push(field);
+      problems.push(`"${field}" has no way to be applied in the proposed shape`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new ReviewApplyValueError(`Cannot apply: ${problems.join('; ')}. Nothing was applied. Keep the current value or edit the field manually.`, failing);
+  }
+}
+
+function hasApplyPath(field: string, diff: FieldDiff): boolean {
+  if (CAMP_SCALAR_FIELDS.includes(field)) return true;
+  if (CAMP_ENUM_ARRAY_FIELDS.includes(field)) return Array.isArray(diff.new);
+  return field in CAMP_RELATION_TABLES && Array.isArray(diff.new);
 }
 
 // Re-exported so callers (e.g. the route) can catch these alongside this
 // module's own typed errors without a separate import from
 // survey-review-sessions.ts / survey-review-apply.ts.
 export { SurveyReviewSessionStaleError, SurveyReviewApplyError };
+export { ReviewCitationMismatchError } from './trust-projection';
 
 export interface ApplyProposalReviewOptions {
   readonly proposalId: string;
@@ -161,6 +230,22 @@ export class ReviewApplySessionNotFoundError extends Error {
  * Proposal concurrently (e.g. two concurrent full-approve requests racing to
  * apply the same Proposal).
  */
+/** The proposal's excerpts cannot be confirmed as exact citations of its stored source. A reviewer-fixable refusal (HTTP 422), never a server fault. */
+export class ReviewApplyCitationError extends Error {
+  constructor(message: string, readonly fields: readonly string[] = []) {
+    super(message);
+    this.name = 'ReviewApplyCitationError';
+  }
+}
+
+/** An approved field carries a value that cannot be stored as approved (HTTP 422). */
+export class ReviewApplyValueError extends Error {
+  constructor(message: string, readonly fields: readonly string[] = []) {
+    super(message);
+    this.name = 'ReviewApplyValueError';
+  }
+}
+
 export class ReviewApplyConflictError extends Error {
   constructor(message = 'Proposal has already been reviewed.') {
     super(message);
@@ -244,9 +329,11 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     derivedApprovedCount = decision.approvedFields.length;
     appliedFields = decision.approvedFields.filter((field) => !alreadyAppliedFields.has(field));
 
+    assertApplicableValues(decision.effectiveChanges, appliedFields);
     const proposalSnapshot = proposal.snapshotRef && approvedFieldsRequireSnapshot(decision.effectiveChanges, appliedFields)
       ? await exactProposalSnapshot(proposal)
-      : {};
+      : undefined;
+    if (proposalSnapshot) assertExactCitations(decision.effectiveChanges, appliedFields, proposalSnapshot.citation);
 
     // Builds the Review Decision's Claim/Evidence/VerificationEvent shapes
     // for every field in this round (approved and rejected alike) — kept as
@@ -268,7 +355,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       extractionModel: proposal.extractionModel,
       reviewerNotes: decision.reviewerNotes,
       feedbackTags,
-      ...proposalSnapshot,
+      ...(proposalSnapshot ?? {}),
     });
 
     for (const field of appliedFields) {
@@ -277,6 +364,8 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
 
       if (SCALAR_FIELDS.includes(field)) {
         changeLogs.push(await applyScalarField(client, proposal, reviewer, decision.reviewedAt, field, diff));
+      } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field)) {
+        changeLogs.push(await applyEnumArrayField(client, proposal, reviewer, decision.reviewedAt, field, diff));
       } else if (field in RELATION_TABLES && Array.isArray(diff.new)) {
         const relationResult = await applyRelationField(client, proposal, reviewer, decision.reviewedAt, field, diff);
         changeLogs.push(relationResult.changeLog);
@@ -606,9 +695,11 @@ async function applyBatchAcceptedFieldsForProposal(
     // excerpt mismatch, or malformed citation rolls back a mutation-free txn.
     if (newlyAppliedFields.length > 0) {
       narrowedChanges = pickFields(proposal.proposedChanges, newlyAppliedFields);
+      assertApplicableValues(narrowedChanges, newlyAppliedFields);
       const proposalSnapshot = proposal.snapshotRef && approvedFieldsRequireSnapshot(narrowedChanges, newlyAppliedFields)
         ? await exactProposalSnapshot(proposal)
-        : {};
+        : undefined;
+      if (proposalSnapshot) assertExactCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot.citation);
       reviewTrustBundle = buildCampReviewTrustInput({
         proposalId: proposal.id,
         campId: proposal.campId,
@@ -620,7 +711,7 @@ async function applyBatchAcceptedFieldsForProposal(
         proposalCreatedAt: proposal.createdAt,
         extractionModel: proposal.extractionModel,
         reviewerNotes: BATCH_ACCEPT_REVIEWER_NOTES,
-        ...proposalSnapshot,
+        ...(proposalSnapshot ?? {}),
       });
     }
 
@@ -713,7 +804,7 @@ export function approvedFieldsRequireSnapshot(changes: ProposedChanges, approved
 
 /** General review provenance always builds; snapshot citation is optional enrichment. */
 export function canBuildReviewTrustBundle(
-  _snapshot: { snapshotRef?: string; snapshotBody?: string },
+  _snapshot: { snapshotRef?: string; citation?: ReviewCitationSource },
   _changes: ProposedChanges,
   _approvedFields: readonly string[],
 ): boolean {
@@ -857,6 +948,54 @@ async function applyScalarField(
  * (`revokeArchivedSessionClaims`) — see this module's header comment and
  * `applyProposalReview`'s post-commit block.
  */
+/**
+ * Replace one enum-list column (`campTypes`, `categories`). The members were
+ * checked against the allowed set by {@link assertApplicableValues} before the
+ * transaction wrote anything.
+ */
+const ENUM_ARRAY_TWIN: Record<string, { column: string; type: string }> = {
+  campTypes: { column: 'campType', type: 'CampType' },
+  categories: { column: 'category', type: 'CampCategory' },
+};
+
+async function applyEnumArrayField(
+  client: PoolClient,
+  proposal: CampChangeProposal,
+  reviewer: string,
+  reviewedAt: string,
+  field: string,
+  diff: FieldDiff,
+): Promise<ChangeLogEntry> {
+  const fieldSource = {
+    excerpt: diff.excerpt ?? null,
+    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
+    approvedAt: reviewedAt,
+  };
+  // Each list has a single-value twin column (`campType`, `category`) that
+  // other code still reads. It must stay a member of the list: kept when it
+  // still is one, otherwise moved to the list's first member.
+  const twin = ENUM_ARRAY_TWIN[field]!;
+  const result = await client.query(
+    `UPDATE "Camp"
+        SET "${field}" = $1::text[],
+            "${twin.column}" = CASE WHEN "${twin.column}"::text = ANY($1::text[]) THEN "${twin.column}" ELSE ($1::text[])[1]::"${twin.type}" END,
+            "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb
+      WHERE id = $3`,
+    [diff.new as string[], JSON.stringify({ [field]: fieldSource }), proposal.campId]
+  );
+  if (result.rowCount !== 1) throw new Error(`Applying "${field}" updated ${result.rowCount ?? 0} camp rows, expected 1.`);
+  const empty = !Array.isArray(diff.old) || diff.old.length === 0;
+  return {
+    campId: proposal.campId,
+    proposalId: proposal.id,
+    changedBy: reviewer,
+    fieldName: field,
+    oldValue: diff.old,
+    newValue: diff.new,
+    changeType: empty ? 'FIELD_POPULATED' : 'UPDATE',
+  };
+}
+
 async function applyRelationField(
   client: PoolClient,
   proposal: CampChangeProposal,

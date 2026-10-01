@@ -45,7 +45,8 @@ import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
 import { startRun } from './crawl-run-tracker';
 import { createProposal } from '@/lib/admin/review-repository';
-import { recordRecrawlFreshness } from './recrawl-freshness';
+import { asCrawlSchemaError, CrawlSchemaOutdatedError, recordUnstartedCrawlFailure } from '@/lib/admin/crawl-repository';
+import { recordCrawlAttempt, recordRecrawlFreshness } from './recrawl-freshness';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
 import { runLookoutListingDiscovery } from './lookout-discovery';
@@ -373,6 +374,12 @@ export interface CrawlOptions {
    */
   sources?: IngestionSourceConfig[];
   /**
+   * Camp strategy: always extract, even when the page text matches the last
+   * complete extraction. For a recrawl a person asked for.
+   */
+  forceExtract?: boolean;
+
+  /**
    * Per-source current-value resolver, forwarded as-is to
    * `traverse-pipeline.ts`'s `TraversePipelineDeps.currentByItemNames` for
    * the sources strategy's scalar populate-vs-update diffing (mirrors
@@ -460,7 +467,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
   // below (AC6). COALESCE to `false` for a camp with no linked provider
   // (never requires render) — mirrors this query's own `fieldSources`
   // COALESCE idiom.
-  const campsResult = await pool.query<Camp & { id: string; name: string; websiteUrl: string; communitySlug: string; fieldSources: Record<string, { approvedAt?: string }>; requiresRender: boolean }>(
+  const campsResult = await pool.query<KnownCampRow>(
     resolvedCampIds?.length
       ? `SELECT c.id, c.name, c.slug, c."websiteUrl", c."communitySlug", c.neighborhood, c.city, c.description,
                c."campType", c.category, c."campTypes", c."categories", c.state, c.zip,
@@ -483,6 +490,11 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                ) ORDER BY pr.amount ASC NULLS LAST, pr.label ASC, pr.id ASC)
                  FROM "CampPricing" pr WHERE pr."campId" = c.id), '[]') AS "pricing",
                COALESCE(c."fieldSources", '{}') AS "fieldSources",
+               c."lastExtractedContentDigest",
+               (SELECT cp.status FROM "CampChangeProposal" cp WHERE cp."campId" = c.id ORDER BY cp."createdAt" DESC, cp.id DESC LIMIT 1) AS "latestProposalStatus",
+               (SELECT c."lastCrawledAt" IS NULL OR COALESCE(cp."reviewedAt", cp."createdAt") > c."lastCrawledAt"
+                  FROM "CampChangeProposal" cp WHERE cp."campId" = c.id ORDER BY cp."createdAt" DESC, cp.id DESC LIMIT 1) AS "latestProposalDecidedSinceCrawl",
+               EXISTS (SELECT 1 FROM "CampChangeLog" cl WHERE cl."campId" = c.id AND c."lastCrawledAt" IS NOT NULL AND cl."changedAt" > c."lastCrawledAt") AS "changedSinceCrawl",
                COALESCE(p."requiresRender", false) AS "requiresRender"
          FROM "Camp" c
          LEFT JOIN "Provider" p ON p.id = c."providerId"
@@ -508,12 +520,27 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                ) ORDER BY pr.amount ASC NULLS LAST, pr.label ASC, pr.id ASC)
                  FROM "CampPricing" pr WHERE pr."campId" = c.id), '[]') AS "pricing",
                COALESCE(c."fieldSources", '{}') AS "fieldSources",
+               c."lastExtractedContentDigest",
+               (SELECT cp.status FROM "CampChangeProposal" cp WHERE cp."campId" = c.id ORDER BY cp."createdAt" DESC, cp.id DESC LIMIT 1) AS "latestProposalStatus",
+               (SELECT c."lastCrawledAt" IS NULL OR COALESCE(cp."reviewedAt", cp."createdAt") > c."lastCrawledAt"
+                  FROM "CampChangeProposal" cp WHERE cp."campId" = c.id ORDER BY cp."createdAt" DESC, cp.id DESC LIMIT 1) AS "latestProposalDecidedSinceCrawl",
+               EXISTS (SELECT 1 FROM "CampChangeLog" cl WHERE cl."campId" = c.id AND c."lastCrawledAt" IS NOT NULL AND cl."changedAt" > c."lastCrawledAt") AS "changedSinceCrawl",
                COALESCE(p."requiresRender", false) AS "requiresRender"
          FROM "Camp" c
          LEFT JOIN "Provider" p ON p.id = c."providerId"
-         WHERE c."websiteUrl" IS NOT NULL AND c."websiteUrl" != '' ORDER BY c."lastVerifiedAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
+         WHERE c."websiteUrl" IS NOT NULL AND c."websiteUrl" != '' ORDER BY c."lastCrawlAttemptAt" ASC NULLS FIRST${options.limit ? ` LIMIT ${options.limit}` : ''}`,
     resolvedCampIds?.length ? [resolvedCampIds] : []
-  );
+  ).catch(async (err: unknown) => {
+    const explained = asCrawlSchemaError(err);
+    if (explained instanceof CrawlSchemaOutdatedError) {
+      // No run exists yet. Leave a FAILED one so the cause is visible.
+      await recordUnstartedCrawlFailure({
+        triggeredBy: options.triggeredBy, trigger: options.trigger ?? 'MANUAL', campIds: options.campIds, error: explained.message,
+      });
+      explained.recorded = true;
+    }
+    throw explained;
+  });
 
   // Fetch neighborhoods once for the run (community slug from first camp or
   // default 'denver') — restored Wave 3 gap closure: this feeds the
@@ -543,6 +570,50 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
     totalCamps: camps.length,
     onProgress: options.onProgress,
   });
+  // Anything below that throws past the per-camp isolation (a failed final
+  // write, a rejected task) must still end the run: without this the row
+  // stays RUNNING forever.
+  try {
+    return await runKnownCampStrategy(options, pool, tracker, camps, neighborhoods);
+  } catch (err) {
+    await tracker.fail(err);
+    throw err;
+  }
+}
+
+type KnownCampRow = Camp & { id: string; name: string; websiteUrl: string; communitySlug: string; fieldSources: Record<string, { approvedAt?: string }>; requiresRender: boolean; lastExtractedContentDigest?: string | null; latestProposalStatus?: string | null; latestProposalDecidedSinceCrawl?: boolean | null; changedSinceCrawl?: boolean };
+
+/**
+ * The fingerprint a crawl may skip extraction on, or null when it must
+ * extract. Matching text is not enough: the last extraction's result must be
+ * settled. It is not settled when
+ *  - the caller forces extraction (a reviewer asked for a recrawl);
+ *  - the camp's latest proposal was rejected or skipped since the last
+ *    crawl: the page still says what was turned down, so it is read and
+ *    proposed again (once; that crawl then becomes the last crawl);
+ *  - the camp's data changed after the last crawl (an approval, a manual
+ *    edit), so the stored values may now disagree with the same page.
+ * A PENDING latest proposal keeps the skip: that proposal already carries
+ * this page's reading, and extracting again would only stack a duplicate
+ * beside it (or discard a reviewer's partial decisions).
+ */
+export function skipEligibleFingerprint(
+  camp: Pick<KnownCampRow, 'lastExtractedContentDigest' | 'latestProposalStatus' | 'latestProposalDecidedSinceCrawl' | 'changedSinceCrawl'>,
+  forceExtract: boolean,
+): string | null {
+  if (forceExtract || !camp.lastExtractedContentDigest) return null;
+  if ((camp.latestProposalStatus === 'REJECTED' || camp.latestProposalStatus === 'SKIPPED') && camp.latestProposalDecidedSinceCrawl) return null;
+  if (camp.latestProposalStatus !== 'PENDING' && camp.changedSinceCrawl) return null;
+  return camp.lastExtractedContentDigest;
+}
+
+async function runKnownCampStrategy(
+  options: CrawlOptions,
+  pool: import('pg').Pool,
+  tracker: Awaited<ReturnType<typeof startRun>>,
+  camps: KnownCampRow[],
+  neighborhoods: string[],
+): Promise<CrawlRun> {
   const emit = tracker.emit;
   const runId = tracker.run.id;
 
@@ -668,6 +739,11 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
         await emit({ type: 'camp_processing', campId: camp.id, campName: camp.name, index: campIndex });
 
         const startMs = Date.now();
+        // What this attempt leaves on the camp row (see recrawl-freshness.ts):
+        // every attempt is recorded, a completed one advances `lastCrawledAt`,
+        // and only a complete extraction records the text it read.
+        let crawlCompleted = false;
+        let extractedContentDigest: string | undefined;
         try {
           // Fetch site hints for this domain
           const domain = getSiteHost(camp.websiteUrl).replace(/^www\./, '');
@@ -705,6 +781,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
                 // recrawl fails closed with traverse's typed invalid-config
                 // FetchError instead of a crash or a silent empty-shell fetch.
                 requiresRender: (camp as unknown as { requiresRender: boolean }).requiresRender,
+                priorContentFingerprint: skipEligibleFingerprint(camp, options.forceExtract === true),
               });
           const durationMs = Date.now() - startMs;
           const displayModel = withModelOverrideNote(result.model, options.model);
@@ -730,7 +807,7 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
             // Still record failure metric (shape-adapted — see toLegacyMetricsResult)
             const siteHost = getSiteHost(camp.websiteUrl);
             await recordExtractionMetrics({ runId, campId: camp.id, siteHost, result: toLegacyMetricsResult(result), changesFound: 0, durationMs });
-          } else if (result.notModified) {
+          } else if (result.notModified || result.contentUnchanged) {
             // Conditional GET (campfit#77 AC1, amended): a trustworthy 304 — the
             // page is byte-identical to the prior snapshot. Record CRAWL freshness
             // (`lastCrawledAt`) via the narrow repository seam; this deliberately
@@ -758,7 +835,9 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               proposalId: null,
               confidence: result.overallConfidence,
               newProposalsDelta: 0,
+              skipped: result.contentUnchanged ? 'content_unchanged' : 'not_modified',
             });
+            crawlCompleted = true;
           } else {
             const proposedChanges = result.proposedChanges;
             const changesFound = Object.keys(proposedChanges).length;
@@ -811,11 +890,34 @@ export async function runCrawlPipeline(options: CrawlOptions): Promise<CrawlRun>
               incomplete: result.incomplete,
               withheldListFields: result.withheldListFields,
               populatedListFields: result.populatedListFields,
+              modelSource: result.modelSource,
+              coverage: result.coverage,
             });
+            // Only now is this crawl's result durable (the proposal row, or
+            // the logged "no changes"). Recording the digest any earlier
+            // would let a failed proposal write be skipped as "unchanged" on
+            // the next crawl and never retried. An incomplete read is never
+            // recorded: the page was not fully extracted.
+            crawlCompleted = true;
+            if (!result.incomplete) extractedContentDigest = result.contentFingerprint;
           }
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
           await tracker.recordUnhandledError({ campId: camp.id, campName: camp.name, url: camp.websiteUrl, error });
+        }
+
+        // Scheduling state, written for every attempt so the queue advances
+        // (a failing camp included). Best-effort: a missed write must not fail
+        // the camp, whose outcome is already recorded above.
+        try {
+          const recorded = await recordCrawlAttempt(pool, {
+            campId: camp.id,
+            completed: crawlCompleted,
+            ...(extractedContentDigest ? { extractedContentDigest } : {}),
+          });
+          if (!recorded) console.warn(`[crawl] crawl-attempt write skipped: camp ${camp.id} no longer exists`);
+        } catch (err) {
+          console.warn(`[crawl] crawl-attempt write failed for camp ${camp.id} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
 
         itemsProcessed++;
@@ -866,6 +968,22 @@ async function runSourceSweepStrategy(
     totalCamps: sources.length,
     onProgress: options.onProgress,
   });
+  // Same run-level guard as the camp strategy: a throw here must not leave
+  // the run RUNNING.
+  try {
+    return await runSourceSweepBody(sources, options, pool, tracker);
+  } catch (err) {
+    await tracker.fail(err);
+    throw err;
+  }
+}
+
+async function runSourceSweepBody(
+  sources: IngestionSourceConfig[],
+  options: CrawlOptions,
+  pool: import('pg').Pool,
+  tracker: Awaited<ReturnType<typeof startRun>>,
+): Promise<CrawlRun> {
   const runId = tracker.run.id;
 
   // Resolve the traverse extraction provider + snapshot store ONCE for the

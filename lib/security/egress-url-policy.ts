@@ -178,12 +178,37 @@ export async function evaluateEgressUrl(
   return { url, addresses };
 }
 
+/** Statuses the Fetch standard requires to carry a null body; `new Response(body, ...)` throws for them otherwise. */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 103, 204, 205, 304]);
+
+/**
+ * Build the `Response` for an upstream reply. A null-body status (a `304` to
+ * a conditional GET, a `204`) gets a null body whatever bytes arrived. A
+ * status `Response` cannot represent at all (outside 200-599) throws, and the
+ * caller turns that into a rejection.
+ */
+export function buildEgressResponse(status: number, headers: HeadersInit | undefined, body: BodyInit | null): Response {
+  return new Response(NULL_BODY_STATUSES.has(status) ? null : body, { status, headers });
+}
+
 const defaultConnector: EgressConnector = async ({ request, url, address }) => {
   const body = request.body ? Buffer.from(await request.arrayBuffer()) : undefined;
   return new Promise((resolve, reject) => {
     const transport = url.protocol === "https:" ? https : http;
     const headers = Object.fromEntries(request.headers);
     headers.host = url.host;
+    // Settle exactly once. Everything below runs in socket event handlers,
+    // where a thrown error becomes an uncaught exception and leaves this
+    // promise pending forever, so each handler routes its failure here.
+    let settled = false;
+    const signal = request.signal;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      settle();
+    };
+    const rejectOnce = (error: unknown) => finish(() => reject(error instanceof Error ? error : new Error(String(error))));
     const outgoing = transport.request({
       protocol: url.protocol, hostname: address.address, family: address.family, port: url.port || (url.protocol === "https:" ? 443 : 80),
       path: `${url.pathname}${url.search}`, method: request.method, headers,
@@ -191,9 +216,28 @@ const defaultConnector: EgressConnector = async ({ request, url, address }) => {
     }, (incoming) => {
       const chunks: Buffer[] = [];
       incoming.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-      incoming.on("end", () => resolve(new Response(Buffer.concat(chunks), { status: incoming.statusCode ?? 500, headers: incoming.headers as HeadersInit })));
+      incoming.once("error", rejectOnce);
+      // A connection closed before the body ended emits "aborted"/"close" and
+      // never "end"; without this the caller would wait forever.
+      incoming.once("close", () => { if (!incoming.complete) rejectOnce(new Error("upstream closed before the response ended")); });
+      incoming.once("end", () => {
+        try {
+          const response = buildEgressResponse(incoming.statusCode ?? 500, incoming.headers as HeadersInit, Buffer.concat(chunks));
+          finish(() => resolve(response));
+        } catch (error) {
+          rejectOnce(error);
+        }
+      });
     });
-    outgoing.once("error", reject);
+    // The caller's timeout and cancellation arrive as an abort on the request
+    // signal. Honouring it is what bounds a stalled socket.
+    function onAbort(): void {
+      outgoing.destroy();
+      rejectOnce(signal.reason ?? new Error("request aborted"));
+    }
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener("abort", onAbort, { once: true });
+    outgoing.once("error", rejectOnce);
     if (body) outgoing.write(body);
     outgoing.end();
   });
@@ -254,7 +298,7 @@ export function createGuardedFetch(options: {
           controller.close();
         },
       });
-      return new Response(body, { status: response.status ?? 200, headers: response.headers });
+      return buildEgressResponse(response.status ?? 200, response.headers, body);
     }
     : defaultConnector;
   const maxRedirects = options.maxRedirects ?? 5;

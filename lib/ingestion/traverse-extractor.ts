@@ -35,7 +35,7 @@ import type {
   ExtractionResult,
 } from "@kontourai/traverse";
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
-import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, SCALAR_SCHEMA_PATHS } from "./traverse-schema";
+import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, ITEM_FIELD_PATHS } from "./traverse-schema";
 import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
 import { describeIncompleteness, extractionIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
@@ -116,7 +116,7 @@ export function itemToProposedChanges(
 ): ProposedChanges {
   const changes: ProposedChanges = {};
 
-  for (const scalarPath of SCALAR_SCHEMA_PATHS) {
+  for (const scalarPath of ITEM_FIELD_PATHS) {
     const fp = item.scalars[scalarPath];
     if (!fp) continue;
     const currentVal = current[scalarPath];
@@ -128,7 +128,7 @@ export function itemToProposedChanges(
       old: (comparison.change.old as FieldDiff["old"]) ?? null,
       ...reportedConfidence(fp.confidence),
       mode: isEmpty ? "populate" : "update",
-      ...projectProvenance({ excerpt: fp.excerpt, sourceUrl, includeEmptyExcerpt: true }),
+      ...projectProvenance({ excerpt: fp.excerpt, sourceUrl, includeEmptyExcerpt: true, locator: fp.locator }),
     };
     changes[scalarPath] = diff;
   }
@@ -145,7 +145,7 @@ export function itemToProposedChanges(
       })),
       ...reportedConfidence(meanReportedConfidence(item.ageGroups.map((ag) => ag.confidence))),
       mode: "add_items",
-      ...projectProvenance({ excerpt: item.ageGroups[0].label, sourceUrl, includeEmptyExcerpt: true }),
+      ...projectProvenance({ excerpt: item.ageGroups[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.ageGroups[0].locator }),
     };
   }
 
@@ -163,7 +163,7 @@ export function itemToProposedChanges(
       })),
       ...reportedConfidence(meanReportedConfidence(item.schedules.map((s) => s.confidence))),
       mode: "add_items",
-      ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true }),
+      ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.schedules[0].locator }),
     };
   }
 
@@ -180,7 +180,7 @@ export function itemToProposedChanges(
       })),
       ...reportedConfidence(meanReportedConfidence(item.pricing.map((p) => p.confidence))),
       mode: "add_items",
-      ...projectProvenance({ excerpt: item.pricing[0].label, sourceUrl, includeEmptyExcerpt: true }),
+      ...projectProvenance({ excerpt: item.pricing[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.pricing[0].locator }),
     };
   }
 
@@ -245,7 +245,10 @@ export function buildTraverseItemProposalRecords(
   const items = assembleItems(result.proposals);
   const incomplete = extractionIncompleteness(result);
 
-  return items.map((item) => {
+  // An item that collapsed several programs has no name of its own, and this
+  // path creates or matches a camp BY that name. Such an item is not routed;
+  // callers report it from `assembleItems(...).multiProgram`.
+  return items.filter((item) => !item.multiProgram).map((item) => {
     const itemName = itemDisplayName(item);
     const current = opts.currentByItemName?.get(itemName) ?? {};
     const withheld = withholdListChangesFromIncompleteRun(itemToProposedChanges(item, current, sourceUrl), incomplete);
@@ -271,6 +274,9 @@ export function buildTraverseItemProposalRecords(
         proposals: item.allProposals,
         raw: result.raw,
         warnings: [...(result.warnings ?? []), ...item.warnings],
+        ...(result.preparedArtifact ? { preparedArtifact: result.preparedArtifact } : {}),
+        ...(Object.keys(item.refusedValues).length > 0 ? { refusedValues: item.refusedValues } : {}),
+        ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
         ...(incomplete ? { incomplete } : {}),
         ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
       },

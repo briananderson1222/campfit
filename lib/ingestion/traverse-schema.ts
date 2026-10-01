@@ -38,6 +38,9 @@
  * of enum strings on one item, not row objects with multiple sub-fields.
  * Before this cutover pass: 9 scalars / 0 enum-arrays. After: 19 scalars / 2
  * enum-arrays (the 10 added scalars are called out individually below).
+ * `socialLinks` has since moved from an `object` leaf to `socialLinks[]` rows
+ * (see `SOCIAL_PLATFORM_VALUES`): every target here is a scalar leaf, which is
+ * the only shape the structured-output schema can express.
  *
  * Traverse itself defines zero field names (its own ADR 0001, referenced
  * above) — every path/enum here is caller-owned, so this is additive schema
@@ -66,6 +69,18 @@ const REGISTRATION_STATUS_VALUES: RegistrationStatus[] = [
 export const PRICING_UNIT_VALUES: readonly PricingUnit[] = [
   "PER_WEEK", "PER_SESSION", "PER_DAY", "FLAT", "PER_CAMP",
 ];
+
+/**
+ * Platforms a `socialLinks[]` entry may name. `Camp.socialLinks` is stored as
+ * one `{ platform: url }` object; it is extracted as rows of two scalar leaves
+ * (`platform`, `url`) because Traverse's structured-output schema carries
+ * scalar proposal values only and refuses an `object` or `array` target
+ * (`buildRelayExtractionSchema`). traverse-item-grouping.ts folds the rows
+ * back into the stored object, and every link keeps its own cited excerpt.
+ */
+export const SOCIAL_PLATFORM_VALUES = [
+  "instagram", "facebook", "x", "twitter", "tiktok", "youtube", "linkedin", "pinterest", "threads",
+] as const;
 
 /**
  * The per-item camp/program listing schema. Every path is scoped under
@@ -129,9 +144,15 @@ export const CAMP_TARGET_SCHEMA: TargetFieldSchema[] = [
     description: "The best camp-specific or organization contact phone number listed on the page for THIS camp/program.",
   },
   {
-    path: "items[].socialLinks",
-    type: "object",
-    description: "An object of explicit social profile URLs found on the page for THIS camp/program's organization, e.g. {\"instagram\":\"https://...\",\"facebook\":\"https://...\"} — only platforms explicitly linked, never guessed.",
+    path: "items[].socialLinks[].platform",
+    type: "enum",
+    enumValues: [...SOCIAL_PLATFORM_VALUES],
+    description: "Which social platform ONE explicit social profile link on the page belongs to, for THIS camp/program's organization. Each linked profile gets its own socialLinks[] entry. Only platforms explicitly linked, never guessed.",
+  },
+  {
+    path: "items[].socialLinks[].url",
+    type: "string",
+    description: "The SAME social profile link's full URL (at this socialLinks[] index), exactly as it appears on the page.",
   },
   { path: "items[].city", type: "string", description: "City where this camp/program takes place. Must be a real city name (e.g. \"Arvada\", \"Denver\") — NOT a state name." },
   { path: "items[].neighborhood", type: "string", description: "Neighborhood or district of this camp/program's location." },
@@ -216,7 +237,7 @@ export const CAMP_FIELD_HINTS: Record<string, string> = {
   "items[].registrationOpenDate": "Only set if an explicit open/start date for registration is stated — do not infer from the camp's own session dates.",
   "items[].registrationCloseDate": "Only set if an explicit close date or registration deadline is stated — do not infer from the camp's own session dates.",
   "items[].lunchIncluded": "Only set true/false when the page explicitly says whether lunch/meals are included — leave unset if not mentioned.",
-  "items[].socialLinks": "Only include platforms with an explicit URL on the page — never guess a handle or platform that isn't linked.",
+  "items[].socialLinks[].url": "Only include platforms with an explicit URL on the page — never guess a handle or platform that isn't linked. Pair each url with the SAME entry's platform.",
   "items[].campTypes[]": "List every camp-type tag that genuinely applies to THIS camp/program — most camps have exactly one, but some (e.g. a day camp that also offers an overnight option) may have more than one.",
   "items[].categories[]": "List every activity category that applies to THIS camp/program, not just the single best fit — a multi-activity camp may span several categories at once.",
 };
@@ -233,11 +254,23 @@ export const ITEMS_ARRAY_PREFIX = "items[].";
 export const SCALAR_SCHEMA_PATHS = [
   "name", "organizationName", "description", "category", "registrationStatus",
   "registrationOpenDate", "registrationCloseDate", "lunchIncluded",
-  "applicationUrl", "websiteUrl", "contactEmail", "contactPhone", "socialLinks",
+  "applicationUrl", "websiteUrl", "contactEmail", "contactPhone",
   "city", "neighborhood", "address", "state", "zip", "interestingDetails",
 ] as const;
 
 export type ScalarSchemaPath = (typeof SCALAR_SCHEMA_PATHS)[number];
+
+/**
+ * `socialLinks` is extracted as `socialLinks[]` rows and folded into one
+ * object value by traverse-item-grouping.ts, so it reaches the diff as a
+ * single per-item field like the scalars above without being a schema leaf.
+ */
+export const OBJECT_SCHEMA_PATHS = ["socialLinks"] as const;
+
+export type ItemFieldPath = ScalarSchemaPath | (typeof OBJECT_SCHEMA_PATHS)[number];
+
+/** Every per-item field that maps to one Camp column value: the scalar leaves plus the folded objects. */
+export const ITEM_FIELD_PATHS: readonly ItemFieldPath[] = [...SCALAR_SCHEMA_PATHS, ...OBJECT_SCHEMA_PATHS];
 
 /**
  * Field paths (relative to one item) for the enum-ARRAY families — lists of

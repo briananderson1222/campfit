@@ -26,6 +26,21 @@ describe('review page extraction notices', () => {
     expect(html).toContain('Camp types were filled from a run that did not read the whole page; the list may be missing entries.');
   });
 
+  it('lists entries left out of a list, refused values and the programs of a multi-program page', () => {
+    const html = render({
+      via: 'traverse-recrawl',
+      droppedEntries: ['socialLinks: a second instagram link (https://www.instagram.com/pineridgeranch/) was left out; https://www.instagram.com/pineridgecamps/ was kept'],
+      refusedValues: { campTypes: ['DAY_CAMP', 'DAY'], schedules: ['2026-12-22'] },
+      multiProgram: { names: ['Pine Ridge Junior Camp', 'High Meadow Ranch for Girls'], withheldFields: ['name', 'description'] },
+    });
+    expect(html).toContain('data-testid="dropped-entry-notices"');
+    expect(html).toContain('Entries left out of the proposed lists');
+    expect(html).toContain('a second instagram link (https://www.instagram.com/pineridgeranch/) was left out');
+    expect(html).toContain('Camp types: the extraction also returned &quot;DAY_CAMP&quot;, &quot;DAY&quot;, which are not valid for this field and are not proposed.');
+    expect(html).toContain('This page lists 2 programs (Pine Ridge Junior Camp, High Meadow Ranch for Girls).');
+    expect(html).toContain('and neither is description, where the programs differ');
+  });
+
   it('renders nothing for a complete run', () => {
     expect(render({ via: 'traverse-recrawl' })).toBe('');
     expect(render(null)).toBe('');

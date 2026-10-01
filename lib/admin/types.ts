@@ -30,6 +30,17 @@ export interface CrawlCampLogEntry {
     /** Empty list fields this run filled from its partial read (they may be missing entries). */
     populatedListFields?: string[];
   };
+  /** Whether `model` was reported by the provider or is only the configured id. Absent when the provider did not say, and on older entries. */
+  modelSource?: 'provider-reported' | 'configured';
+  /**
+   * How much of the page's prepared text the extraction read, for every
+   * extraction (complete or not): text ranges in total, fully read, not read,
+   * and cut off at the provider's output cap. Absent when no extraction ran
+   * (an error, or an unchanged page) and on older entries.
+   */
+  coverage?: { ranges: number; complete: number; unread: number; outputTruncated: number };
+  /** The page was fetched and found unchanged, so no extraction ran: `not_modified` is an HTTP 304, `content_unchanged` is the same text as the last complete extraction. */
+  skipped?: 'not_modified' | 'content_unchanged';
   durationMs: number;
   processedAt: string; // ISO
 }
@@ -60,6 +71,12 @@ export interface FieldDiff {
   /** ISO timestamp of the approval this change contradicts; set with contradictsRecentApproval. */
   recentApprovalAt?: string;
   excerpt?: string;     // verbatim snippet from source page supporting this value
+  /**
+   * `chars:<start>-<end>` of `excerpt` within the prepared text the extraction
+   * read (the proposal's `rawExtraction.preparedArtifact`). Absent on proposals
+   * written before it was recorded; those resolve by a unique text match.
+   */
+  locator?: string;
   sourceUrl?: string;   // URL of the page the excerpt was found on
   mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions
 }

@@ -46,7 +46,7 @@
  */
 
 import { describeIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
-import type { ExtractionProvider } from "@kontourai/traverse";
+import type { ExtractionCoverageEntry, ExtractionModelSource, ExtractionProvider } from "@kontourai/traverse";
 import type { FetchMode, FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetch";
 import type { Camp } from "@/lib/types";
 import type { ProposedChanges } from "@/lib/admin/types";
@@ -138,6 +138,13 @@ export interface TraverseRecrawlOptions {
    * never a silently-served empty-shell fetch presented as success.
    */
   requiresRender?: boolean;
+  /**
+   * Fingerprint recorded by this camp's last COMPLETE extraction
+   * (`Camp.lastExtractedContentDigest`), or null/absent when none is on record.
+   * When the fetched page's prepared text has the same fingerprint, extraction
+   * is skipped and the result is `contentUnchanged`.
+   */
+  priorContentFingerprint?: string | null;
 }
 
 /**
@@ -167,6 +174,24 @@ export interface TraverseRecrawlResult {
    * item-selection failure.
    */
   notModified?: boolean;
+  /**
+   * `true` when the fetched page's prepared text is the text this camp's last
+   * complete extraction already read (see content-fingerprint.ts): no provider
+   * call, no diff, no proposal. Set on a 200 whose raw HTML merely differs in
+   * per-request noise, and together with `notModified` on a 304 whose
+   * re-served body matches. The caller treats it exactly like `notModified`.
+   */
+  contentUnchanged?: boolean;
+  /**
+   * Fingerprint of the prepared text this crawl fetched. The caller stores it
+   * as the camp's `lastExtractedContentDigest` only when the extraction was
+   * complete (`ok` and not `incomplete`).
+   */
+  contentFingerprint?: string;
+  /** Whether the reported model id came from the provider or is the configured id. */
+  modelSource?: ExtractionModelSource;
+  /** Counts over the prepared-text ranges this extraction covered; present for every extraction, complete or not. */
+  coverage?: ExtractionCoverageSummary;
   /**
    * The bytes were unchanged, but first Lookout enablement replayed the exact
    * snapshot and found DB-current review changes. The crawl pipeline records
@@ -262,6 +287,24 @@ function buildExtraFieldHints(opts: TraverseRecrawlOptions): Record<string, stri
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** How much of the prepared text an extraction read. `outputTruncated` counts ranges whose answer stopped at the output cap. */
+export interface ExtractionCoverageSummary {
+  ranges: number;
+  complete: number;
+  unread: number;
+  outputTruncated: number;
+}
+
+export function summarizeCoverage(coverage: readonly ExtractionCoverageEntry[] | undefined): ExtractionCoverageSummary | undefined {
+  if (!coverage) return undefined;
+  return {
+    ranges: coverage.length,
+    complete: coverage.filter((entry) => entry.status === "complete").length,
+    unread: coverage.filter((entry) => entry.status === "unread").length,
+    outputTruncated: coverage.filter((entry) => entry.status === "output-truncated").length,
+  };
+}
+
 /** Same normalization discipline as the domain-name-generation helpers in crawl-pipeline.ts, kept local here to avoid importing FROM crawl-pipeline.ts (which imports this module after the Wave 2 rewire — a cross-import back would be circular). */
 function normalizeItemName(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -339,6 +382,7 @@ export async function runTraverseRecrawlForCamp(
     // RENDER). Reuses `opts.store` (the existing filesystem SnapshotStore) for
     // the prior-snapshot validator lookup; no new cache.
     revalidate: true,
+    priorContentFingerprint: opts.priorContentFingerprint ?? null,
     fetchOptions: opts.fetchOptions,
     extraFieldHints: buildExtraFieldHints(opts),
     maxContentChars: opts.maxContentChars,
@@ -348,6 +392,7 @@ export async function runTraverseRecrawlForCamp(
     now: opts.now,
   });
 
+  const coverage = summarizeCoverage(fetchResult.coverage);
   const shared = {
     model: fetchResult.model ? `traverse:${fetchResult.model}` : "traverse:unknown",
     snapshot: { ref: fetchResult.snapshotRef, bodyHash: fetchResult.snapshotBodyHash },
@@ -355,6 +400,9 @@ export async function runTraverseRecrawlForCamp(
     providerCalls: fetchResult.providerCalls,
     latencyMs: fetchResult.latencyMs,
     warnings: fetchResult.warnings,
+    ...(fetchResult.contentFingerprint ? { contentFingerprint: fetchResult.contentFingerprint } : {}),
+    ...(fetchResult.modelSource ? { modelSource: fetchResult.modelSource } : {}),
+    ...(coverage ? { coverage } : {}),
   };
 
   // Conditional GET (campfit#77 AC1): a trustworthy 304 — the page is unchanged.
@@ -363,10 +411,14 @@ export async function runTraverseRecrawlForCamp(
   // `tokensUsed` is null (extraction never ran — see
   // `fetchAndExtractRevalidating`), carried through `shared`. `snapshot` is the
   // re-served prior's provenance. The caller records crawl freshness only.
-  if (fetchResult.notModified) {
+  if (fetchResult.notModified || fetchResult.contentUnchanged) {
+    const note = fetchResult.contentUnchanged
+      ? "content-unchanged: the page text is the text the last complete extraction read; extraction skipped"
+      : "not-modified: content unchanged since prior snapshot (304)";
     return {
       ok: true,
-      notModified: true,
+      ...(fetchResult.notModified ? { notModified: true } : {}),
+      ...(fetchResult.contentUnchanged ? { contentUnchanged: true } : {}),
       error: null,
       proposedChanges: {},
       overallConfidence: 0,
@@ -375,11 +427,12 @@ export async function runTraverseRecrawlForCamp(
       rawExtraction: {
         via: "traverse-recrawl",
         campId: opts.campId,
-        notModified: true,
+        ...(fetchResult.notModified ? { notModified: true } : {}),
+        ...(fetchResult.contentUnchanged ? { contentUnchanged: true } : {}),
         warnings: fetchResult.warnings,
       },
       ...shared,
-      warnings: [...fetchResult.warnings, "not-modified: content unchanged since prior snapshot (304)"],
+      warnings: [...fetchResult.warnings, note],
     };
   }
 
@@ -420,7 +473,7 @@ export async function runTraverseRecrawlForCamp(
   }
 
   const item = selection.item;
-  const { extracted, confidence, excerpts } = assembledItemToDiffInputs(item);
+  const { extracted, confidence, excerpts, locators } = assembledItemToDiffInputs(item);
   const withheld = withholdListChangesFromIncompleteRun(
     computeDiff(
       opts.current,
@@ -428,7 +481,8 @@ export async function runTraverseRecrawlForCamp(
       confidence,
       excerpts,
       opts.fieldSources ?? {},
-      opts.websiteUrl
+      opts.websiteUrl,
+      locators,
     ),
     fetchResult.incomplete,
   );
@@ -462,6 +516,14 @@ export async function runTraverseRecrawlForCamp(
       ...(fetchResult.incomplete ? { incomplete: fetchResult.incomplete } : {}),
       ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
       ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
+      // What a reviewer and a citation check need from the run itself: which
+      // text was read (bound to the snapshot), how much of it, and by what.
+      ...(fetchResult.preparedArtifact ? { preparedArtifact: fetchResult.preparedArtifact } : {}),
+      ...(fetchResult.modelSource ? { modelSource: fetchResult.modelSource } : {}),
+      ...(coverage ? { coverage } : {}),
+      ...(Object.keys(item.refusedValues).length > 0 ? { refusedValues: item.refusedValues } : {}),
+      ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
+      ...(item.multiProgram ? { multiProgram: item.multiProgram } : {}),
     },
     ...shared,
   };

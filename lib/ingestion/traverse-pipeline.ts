@@ -83,16 +83,19 @@ import {
   SHELL_WARNING_CODE,
   SHELL_WARNING_CODE_EMBEDDED,
   type EmbeddedState,
+  type ExtractionCoverageEntry,
+  type ExtractionModelSource,
   type ExtractionProvider,
+  type PreparedArtifact,
 } from "@kontourai/traverse";
-import { fetchAndExtractWithRevalidation } from "./traverse-fetch-extract";
+import { fetchAndExtractWithRevalidation, type FetchAndExtractOutcome } from "./traverse-fetch-extract";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS } from "./traverse-schema";
 import {
   buildTraverseItemProposalRecords,
   itemDisplayName,
   type TraverseItemProposalRecord,
 } from "./traverse-extractor";
-import { assembleItems, type AssembledItem } from "./traverse-item-grouping";
+import { assembleItems, multiProgramWarning, type AssembledItem } from "./traverse-item-grouping";
 import { CAMPFIT_FETCH_USER_AGENT } from "./traverse-snapshot-store";
 import type { IngestionSourceConfig } from "./sources";
 
@@ -142,6 +145,16 @@ export interface TraversePipelineDeps {
    * adapter (traverse-recrawl-adapter.ts) sets this today.
    */
   revalidate?: boolean;
+  /**
+   * Opt the revalidating plain-HTTP attempt into the unchanged-content check
+   * (see `fetchAndExtractWithRevalidation`). Pass the fingerprint recorded by
+   * this source's last COMPLETE extraction, or `null` when there is none. With
+   * this set, extraction is skipped exactly when the fetched page's prepared
+   * text is the text that extraction already read — on a 200 whose raw HTML
+   * differs as much as on a 304 — and a 304 alone no longer skips it. Leave it
+   * `undefined` to keep the status-only rule (a trustworthy 304 skips).
+   */
+  priorContentFingerprint?: string | null;
   /** override the fetch User-Agent (defaults to the honest CampFit bot UA). */
   userAgent?: string;
   /**
@@ -266,6 +279,26 @@ export interface TraversePipelineSourceResult {
    * attempt, or any fetch failure.
    */
   notModified?: boolean;
+  /**
+   * `true` when the unchanged-content check matched (`deps.priorContentFingerprint`):
+   * the fetched page's prepared text is the text the last complete extraction
+   * read, so `extract()` was not called (`providerCalls === 0`, no items).
+   * `ok` is true. Can be set together with `notModified` (a 304 whose
+   * re-served body matched) or alone (a 200 whose raw bytes differ).
+   */
+  contentUnchanged?: boolean;
+  /**
+   * Fingerprint of the fetched snapshot's prepared text (content-fingerprint.ts).
+   * Present whenever the unchanged-content check ran. The caller records it
+   * for the next crawl only after a COMPLETE extraction.
+   */
+  contentFingerprint?: string;
+  /** Identity of the exact prepared text this extraction read, bound to `snapshotRef` (Traverse `PreparedArtifact`). Absent without an extraction. */
+  preparedArtifact?: PreparedArtifact;
+  /** Whether `model` was reported by the provider or is the configured id. Absent when the provider did not say. */
+  modelSource?: ExtractionModelSource;
+  /** Which ranges of the prepared text were read and answered, for every extraction (complete or not). */
+  coverage?: ExtractionCoverageEntry[];
   /** number of items (camps/courses/programs) traverse grouped out of this page. */
   itemCount: number;
   /** proposal ids the sink returned, one per routed item (null = sink no-op / not routed). */
@@ -479,7 +512,7 @@ async function runFetchAndExtractAttempt(
   render: boolean,
   renderTimeoutMs: number | undefined,
   now: () => number
-): Promise<{ far: FetchAndExtractResult; latencyMs: number }> {
+): Promise<{ far: FetchAndExtractOutcome; latencyMs: number }> {
   const startedAt = now();
   const mode = deps.mode ?? "live-with-capture";
   // Conditional GET (campfit#77) applies ONLY to the plain-HTTP attempt: it is
@@ -520,8 +553,13 @@ async function runFetchAndExtractAttempt(
   // The revalidating path composes fetch->extract itself so a trustworthy 304
   // can return BEFORE extraction (zero provider calls). Every OTHER path stays
   // on the unchanged one-call `fetchAndExtract` composition, byte-for-byte.
-  const far = revalidateThisAttempt
-    ? await fetchAndExtractWithRevalidation(config, opts, true)
+  const far: FetchAndExtractOutcome = revalidateThisAttempt
+    ? await fetchAndExtractWithRevalidation(
+        config,
+        opts,
+        true,
+        deps.priorContentFingerprint === undefined ? undefined : { priorFingerprint: deps.priorContentFingerprint },
+      )
     : await fetchAndExtract(config, opts);
   return { far, latencyMs: now() - startedAt };
 }
@@ -560,7 +598,7 @@ type TraverseCoreFetchResult = Omit<TraversePipelineSourceResult, "itemCount" | 
 async function runCoreFetchAndExtract(
   src: IngestionSourceConfig,
   deps: TraversePipelineDeps
-): Promise<{ far: FetchAndExtractResult; core: TraverseCoreFetchResult }> {
+): Promise<{ far: FetchAndExtractOutcome; core: TraverseCoreFetchResult }> {
   const log = deps.log ?? ((m: string) => console.log(m));
   const now = deps.now ?? (() => Date.now());
 
@@ -724,7 +762,20 @@ async function runCoreFetchAndExtract(
   // BEFORE the `!far.extraction` failure branch below would mislabel it. Only
   // reachable on the plain revalidating recrawl path — a rendered attempt never
   // sets `revalidate`, so it can never land here.
-  if (far.fetch.snapshot?.notModified) {
+  if (far.contentFingerprint !== undefined) core.contentFingerprint = far.contentFingerprint;
+  // Unchanged-content check matched: the page's prepared text is what the last
+  // complete extraction read, so there was no provider call. Like the 304
+  // below, this is a successful freshness check, not a fetch failure.
+  if (far.contentUnchanged) {
+    core.contentUnchanged = true;
+    if (far.fetch.snapshot?.notModified) core.notModified = true;
+    core.ok = true;
+    return { far, core };
+  }
+  // A 304 that still has an extraction is the unchanged-content check deciding
+  // the re-served body was never fully extracted; it is handled as a normal
+  // extraction below.
+  if (far.fetch.snapshot?.notModified && !far.extraction) {
     core.notModified = true;
     core.ok = true;
     return { far, core };
@@ -750,9 +801,23 @@ async function runCoreFetchAndExtract(
   core.tokensUsed = far.extraction.totalTokensUsed;
   core.providerCalls = far.extraction.providerCalls;
   core.model = far.extraction.raw?.model ?? null;
+  if (far.extraction.raw?.modelSource) core.modelSource = far.extraction.raw.modelSource;
+  if (far.extraction.coverage) core.coverage = far.extraction.coverage;
+  if (far.extraction.preparedArtifact) core.preparedArtifact = far.extraction.preparedArtifact;
   core.ok = !core.extractionError;
 
   return { far, core };
+}
+
+/**
+ * A sweep creates or matches one camp per item BY its name, so an item that
+ * collapsed several programs (see `AssembledItem.multiProgram`) is not routed.
+ * This is the note that says so, instead of a silent zero.
+ */
+function unroutedMultiProgramWarnings(items: readonly AssembledItem[]): string[] {
+  return items
+    .filter((item) => item.multiProgram)
+    .map((item) => `not routed: ${multiProgramWarning(item.multiProgram!)}`);
 }
 
 /**
@@ -878,6 +943,7 @@ async function runTraverseCrawlPipelineForSource(
       // page/depth caps bound the number of pages, so total spend stays bounded.
       maxProviderCalls: deps.maxProviderCalls ?? DEFAULT_MAX_PROVIDER_CALLS_PER_SOURCE,
       maxTotalTokens: deps.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS_PER_SOURCE,
+      ...(page.sourceRef ? { preparedArtifact: { sourceSnapshotRef: page.sourceRef } } : {}),
     });
 
     result.providerCalls += extraction.providerCalls;
@@ -897,6 +963,7 @@ async function runTraverseCrawlPipelineForSource(
     }
 
     const items = assembleItems(extraction.proposals);
+    result.warnings.push(...unroutedMultiProgramWarnings(items).map((w) => `[crawl ${page.url}] ${w}`));
     if (items.length === 0) continue;
 
     const itemNames = items.map((item) => itemDisplayName(item));
@@ -976,7 +1043,9 @@ export async function runTraversePipelineForSource(
     return result;
   }
 
-  const itemNames = assembleItems(far.extraction.proposals).map((item) => itemDisplayName(item));
+  const assembled = assembleItems(far.extraction.proposals);
+  result.warnings.push(...unroutedMultiProgramWarnings(assembled));
+  const itemNames = assembled.map((item) => itemDisplayName(item));
   const currentByItemName = deps.currentByItemNames
     ? await deps.currentByItemNames(src.key, itemNames)
     : undefined;

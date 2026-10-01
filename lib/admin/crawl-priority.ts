@@ -27,6 +27,7 @@
  * (one shared query, not a second one re-fetched for display fields).
  */
 import { getPool } from '@/lib/db';
+import { asCrawlSchemaError } from './crawl-repository';
 
 /** Base-priority vocabulary this resolver's SQL branches on. Does NOT
  * include `'specific'`/`'ids'`/`'campId'`-style lookups — those stay
@@ -42,6 +43,8 @@ export interface CrawlCandidate {
   dataConfidence: string;
   registrationStatus: string;
   lastVerifiedAt: string | null;
+  /** When a crawl of this camp last completed. Null = never crawled. */
+  lastCrawledAt: string | null;
   missingFieldCount: number;
   priorityScore: number;
 }
@@ -85,7 +88,7 @@ export async function resolveCrawlCandidates(
   // route; 'stale' and 'all' both fall through with no extra WHERE clause,
   // differing only via priorityScore ordering — same as before extraction).
   if (opts.priority === 'never_crawled') {
-    whereClause += ` AND "lastVerifiedAt" IS NULL`;
+    whereClause += ` AND "lastCrawledAt" IS NULL`;
   } else if (opts.priority === 'coming_soon') {
     whereClause += ` AND "registrationStatus" = 'COMING_SOON'`;
   } else if (opts.priority === 'missing') {
@@ -96,14 +99,18 @@ export async function resolveCrawlCandidates(
     `
     SELECT
       id, name, "communitySlug", "websiteUrl", "dataConfidence", "registrationStatus",
-      "lastVerifiedAt",
+      "lastVerifiedAt", "lastCrawledAt",
       (CASE WHEN description = '' OR description IS NULL THEN 1 ELSE 0 END +
        CASE WHEN neighborhood = '' OR neighborhood IS NULL THEN 1 ELSE 0 END +
        CASE WHEN "registrationStatus" = 'UNKNOWN' THEN 1 ELSE 0 END) AS "missingFieldCount",
       (
-        -- Staleness score: days since last verified (max 180 pts)
+        -- Staleness score: days since a crawl last tried this camp (max 180
+        -- pts; never tried = 180). Keyed on the crawl attempt, not on
+        -- "lastVerifiedAt": a crawl does not verify a camp, so a score keyed
+        -- on verification never dropped after a crawl and the same camps were
+        -- reselected on every run.
         LEAST(180, COALESCE(
-          EXTRACT(DAY FROM (NOW() - "lastVerifiedAt"))::int,
+          EXTRACT(DAY FROM (NOW() - "lastCrawlAttemptAt"))::int,
           180
         )) +
         -- Missing fields (30 pts each, max 90)
@@ -121,11 +128,11 @@ export async function resolveCrawlCandidates(
       ) AS "priorityScore"
     FROM "Camp"
     WHERE ${whereClause}
-    ORDER BY "priorityScore" DESC, "lastVerifiedAt" ASC NULLS FIRST
+    ORDER BY "priorityScore" DESC, "lastCrawlAttemptAt" ASC NULLS FIRST, id ASC
     LIMIT $${params.length + 1}
   `,
     [...params, opts.limit]
-  );
+  ).catch((err: unknown) => { throw asCrawlSchemaError(err); });
 
   return result.rows;
 }

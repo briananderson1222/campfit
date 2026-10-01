@@ -1,4 +1,4 @@
-import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog } from '@/lib/admin/crawl-repository';
+import { createCrawlRun, updateCrawlRunProgress, completeCrawlRun, appendCrawlError, appendCrawlLog, failStaleCrawlRuns } from '@/lib/admin/crawl-repository';
 import type { CrawlProgressEvent, CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
 import { hitOutputCap, unreadRangeCount, type ExtractionIncompleteness } from './extraction-completeness';
 
@@ -81,6 +81,9 @@ export type ItemOutcome =
       /** List fields withheld / filled on that incomplete run; persisted with the marker. */
       withheldListFields?: readonly string[];
       populatedListFields?: readonly string[];
+      modelSource?: CrawlCampLogEntry['modelSource'];
+      coverage?: CrawlCampLogEntry['coverage'];
+      skipped?: CrawlCampLogEntry['skipped'];
     }
   | {
       status: 'error';
@@ -114,10 +117,24 @@ export interface CrawlRunTracker {
   setTotalCamps(totalCamps: number): Promise<void>;
   /** Finalizes the run: derives FAILED/COMPLETED exactly as before, writes the full errorLog, emits `completed`, returns the final `CrawlRun`. */
   finish(): Promise<CrawlRun>;
+  /**
+   * End the run as FAILED because the run itself threw (not one camp). The
+   * error is added to the run's error log. Never throws: it is called from a
+   * catch block whose original error must still propagate.
+   */
+  fail(error: unknown): Promise<void>;
 }
 
 export async function startRun(options: StartRunOptions): Promise<CrawlRunTracker> {
   const emit = options.onProgress ?? (() => {});
+  // A run whose process died never wrote its final status. Close those out
+  // before starting another, so "RUNNING" always means a live run.
+  try {
+    const reaped = await failStaleCrawlRuns();
+    if (reaped.length > 0) console.warn(`[crawl] marked ${reaped.length} stale RUNNING run(s) FAILED: ${reaped.join(', ')}`);
+  } catch (err) {
+    console.warn(`[crawl] stale-run cleanup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
   const run = await createCrawlRun({
     triggeredBy: options.triggeredBy,
     trigger: options.trigger ?? 'MANUAL',
@@ -180,6 +197,9 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
         durationMs: outcome.durationMs, processedAt: new Date().toISOString(),
         ...(outcome.providerAction ? { providerAction: outcome.providerAction } : {}),
         ...(outcome.warnings && outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
+        ...(outcome.modelSource ? { modelSource: outcome.modelSource } : {}),
+        ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
+        ...(outcome.skipped ? { skipped: outcome.skipped } : {}),
         ...(outcome.incomplete
           ? {
               incomplete: {
@@ -228,5 +248,15 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
     return finalRun as CrawlRun;
   }
 
-  return { run, emit, recordItemOutcome, recordUnhandledError, setTotalCamps, finish };
+  async function fail(error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    errorLog.push({ campId: 'run', error: `run aborted: ${message}`, url: '' });
+    try {
+      await completeCrawlRun(run.id, 'FAILED', errorLog);
+    } catch (err) {
+      console.error(`[crawl] could not record run ${run.id} as FAILED: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { run, emit, recordItemOutcome, recordUnhandledError, setTotalCamps, finish, fail };
 }
