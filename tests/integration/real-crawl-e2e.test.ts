@@ -192,7 +192,8 @@ afterEach(async () => {
   const pool = getTestPool();
   await pool.query(`DROP TRIGGER IF EXISTS block_proposal_insert ON "CampChangeProposal"`);
   await pool.query(`ALTER TABLE "Camp" ADD COLUMN IF NOT EXISTS "lastCrawlAttemptAt" TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS "lastExtractedContentDigest" TEXT`);
-  await pool.query(`UPDATE "CrawlSchedule" SET enabled = false`);
+  // Back to the migration defaults: another suite asserts them, and file order varies.
+  await pool.query(`UPDATE "CrawlSchedule" SET enabled = false, priority = 'stale', "batchSize" = 5, "updatedBy" = NULL`);
   delete process.env.TRAVERSE_CHUNK_SIZE;
   delete process.env.CRON_SECRET;
   await pool.query(`TRUNCATE "Camp" RESTART IDENTITY CASCADE;`);
