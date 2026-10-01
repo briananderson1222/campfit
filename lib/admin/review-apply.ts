@@ -1063,11 +1063,6 @@ async function applyRelationField(
   if (field === 'schedules') {
     const reconciliation = await applyScheduleReconciliation(client, proposal.campId, diff.new as IncomingScheduleSnapshot[]);
     orphaned = reconciliation.orphaned;
-
-    await client.query(
-      `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ schedules: fieldSource }), proposal.campId],
-    );
   } else {
     const table = RELATION_TABLES[field];
     await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
@@ -1090,6 +1085,14 @@ async function applyRelationField(
       }
     }
   }
+
+  // Every approved list records its source, like a scalar. `ageGroups` and
+  // `pricing` used to record none, so a later crawl could not tell that a
+  // reviewer had approved them.
+  await client.query(
+    `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
+    [JSON.stringify({ [field]: fieldSource }), proposal.campId],
+  );
 
   return {
     changeLog: {

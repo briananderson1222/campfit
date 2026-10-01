@@ -55,6 +55,7 @@ import { itemDisplayName } from "./traverse-extractor";
 import type { AssembledItem } from "./traverse-item-grouping";
 import { assembledItemToDiffInputs } from "./traverse-diff-inputs";
 import { computeDiff, computeOverallConfidence } from "./diff-engine";
+import { withholdDecidedChanges, type DecidedFieldSource } from "./decided-changes";
 import type { IngestionSourceConfig } from "./sources";
 
 
@@ -74,7 +75,7 @@ export interface TraverseRecrawlOptions {
   /** the known camp's full current row — `computeDiff`'s `current` (old-value diffing / populate-vs-update). */
   current: Camp;
   /** the known camp's `fieldSources` — `computeDiff` flags changes to fields approved in the last 30 days. */
-  fieldSources?: Record<string, { approvedAt?: string }>;
+  fieldSources?: Record<string, DecidedFieldSource>;
   /**
    * Admin-authored `CrawlSiteHint` rows for this camp's domain, already
    * fetched by the caller (mirrors `crawl-pipeline.ts`:269-274's legacy
@@ -486,10 +487,13 @@ export async function runTraverseRecrawlForCamp(
     ),
     fetchResult.incomplete,
   );
-  const proposedChanges = withheld.changes;
+  // A change the reviewer already decided from the same evidence is not asked again.
+  const decided = withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {});
+  const proposedChanges = decided.changes;
   const operatorWarnings = [
     ...(fetchResult.incomplete ? [describeIncompleteness(fetchResult.incomplete)] : []),
     ...withheld.warnings,
+    ...decided.warnings,
     ...item.operatorWarnings,
   ];
 
@@ -524,6 +528,7 @@ export async function runTraverseRecrawlForCamp(
       ...(Object.keys(item.refusedValues).length > 0 ? { refusedValues: item.refusedValues } : {}),
       ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
       ...(item.multiProgram ? { multiProgram: item.multiProgram } : {}),
+      ...(decided.decided.length > 0 ? { alreadyDecided: decided.decided } : {}),
     },
     ...shared,
   };

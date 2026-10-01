@@ -691,6 +691,117 @@ describe('a recrawl a reviewer asks for never loses the pending proposal', () =>
   });
 });
 
+describe('a crawl after an approval does not ask the reviewer again', () => {
+  /** The same reading, worded the way a second model run words it. */
+  function reworded(proposals: readonly unknown[]): unknown[] {
+    return (proposals as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => {
+      // Same excerpt, a slightly different value.
+      if (proposal.fieldPath === 'items[].applicationUrl') return { ...proposal, value: 'https://register.pineridge.example/apply/' };
+      // Same value, cited from the emphasised copy of the same words.
+      if (proposal.fieldPath.startsWith('items[].ageGroups[].') && proposal.excerpt === 'Ages 8 - 10') return { ...proposal, excerpt: '*Ages 8 - 10*' };
+      return proposal;
+    });
+  }
+
+  it('withholds a reworded reading of approved evidence, and still proposes a real change', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [first] = await proposalsFor(campId);
+    await approveAll(first!);
+
+    // The approval changed the camp, so the page is read once more.
+    fixture.proposals = reworded(recorded.programs);
+    const after = await crawl([campId]);
+    expect(modelRequests()).toBe(2);
+    expect(after.entry(campId).status).toBe('no_changes');
+    expect(after.run.newProposals).toBe(0);
+    expect((await proposalsFor(campId)).map((p) => p.status)).toEqual(['APPROVED']);
+    // What was withheld is said, on the crawl log.
+    expect(after.entry(campId).warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^applicationUrl: not proposed again — the page text it cites is the text a reviewer approved on \d{4}-\d{2}-\d{2}$/),
+      expect.stringMatching(/^ageGroups: not proposed again — the entries have the values a reviewer approved on \d{4}-\d{2}-\d{2}, only their cited text differs$/),
+    ]));
+    expect((await campRow(campId)).applicationUrl).toBe('https://register.pineridge.example/apply');
+
+    // That settles it: the same page is not read a third time.
+    const settled = await crawl([campId]);
+    expect(modelRequests()).toBe(2);
+    expect(settled.entry(campId).skipped).toBe('content_unchanged');
+
+    // The page really changes (a price): that is proposed.
+    fixture.html = listingHtml().replace('$3,850', '$3,950');
+    fixture.proposals = (reworded(recorded.programs) as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => ({
+      ...proposal,
+      value: proposal.value === 3850 ? 3950 : proposal.value,
+      excerpt: proposal.excerpt.replace('$3,850', '$3,950'),
+    }));
+    const changed = await crawl([campId]);
+    expect(modelRequests()).toBe(3);
+    expect(changed.entry(campId).status).toBe('ok');
+    const proposals = await proposalsFor(campId);
+    expect(proposals.map((p) => p.status)).toEqual(['APPROVED', 'PENDING']);
+    expect(Object.keys(proposals[1]!.proposedChanges)).toEqual(['pricing']);
+    expect((proposals[1]!.proposedChanges.pricing!.new as { amount: number }[]).map((row) => row.amount).sort()).toEqual([3950, 7400]);
+  });
+});
+
+describe('crawl timestamps come from the database clock', () => {
+  it('stamps a proposal after the per-camp lock, so the last writer is the latest proposal', async () => {
+    const campId = await seedCamp();
+    const runId = await seedRun();
+    const holder = await getTestPool().connect();
+    let released: Date;
+    let writing: Promise<string>;
+    try {
+      await holder.query('BEGIN');
+      await holder.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`camp-proposal:${campId}`]);
+      // The writer's transaction starts now and waits for the lock.
+      writing = createProposal({
+        campId, crawlRunId: runId, sourceUrl: CAMP_URL, rawExtraction: { via: 'traverse-recrawl' },
+        proposedChanges: { city: { old: 'Florissant', new: 'Divide', mode: 'update', sourceUrl: CAMP_URL } },
+        overallConfidence: 1, extractionModel: 'traverse:gpt-6.1-sol',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      released = (await holder.query<{ at: Date }>('SELECT clock_timestamp() AS at')).rows[0]!.at;
+      await holder.query('COMMIT');
+    } finally {
+      holder.release();
+    }
+    const id = await writing!;
+    const { rows } = await getTestPool().query<{ createdAt: Date }>(`SELECT "createdAt" FROM "CampChangeProposal" WHERE id = $1`, [id]);
+    // Stamped after the lock was granted, not when the transaction began.
+    expect(rows[0]!.createdAt.getTime()).toBeGreaterThanOrEqual(released!.getTime());
+  });
+
+  it('records an unchanged page\'s freshness on the database clock, whatever the application clock says', async () => {
+    const pool = getTestPool();
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+
+    // Every value written to "lastCrawledAt" from here on, with the database time of the write.
+    await pool.query(`CREATE TABLE crawled_at_log (written TIMESTAMPTZ, at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp())`);
+    await pool.query(`CREATE OR REPLACE FUNCTION log_crawled_at() RETURNS trigger AS $$ BEGIN INSERT INTO crawled_at_log (written) VALUES (NEW."lastCrawledAt"); RETURN NEW; END $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER log_crawled_at BEFORE UPDATE OF "lastCrawledAt" ON "Camp" FOR EACH ROW EXECUTE FUNCTION log_crawled_at()`);
+    try {
+      // An application clock one hour ahead of the database.
+      vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: Date.now() + 3_600_000 });
+      const second = await crawl([campId]);
+      expect(second.entry(campId).skipped).toBe('content_unchanged');
+      const { rows } = await pool.query<{ off: number }>(`SELECT abs(extract(epoch FROM (written - at)))::float AS off FROM crawled_at_log`);
+      // The unchanged-page write and the attempt write.
+      expect(rows).toHaveLength(2);
+      for (const row of rows) expect(row.off).toBeLessThan(60);
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS log_crawled_at ON "Camp"`);
+      await pool.query(`DROP TABLE IF EXISTS crawled_at_log`);
+    }
+  });
+});
+
 describe('the unchanged-page skip only applies to a settled result', () => {
   it('retries a crawl whose proposal could not be written', async () => {
     const campId = await seedCamp();
