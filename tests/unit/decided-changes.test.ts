@@ -53,7 +53,19 @@ describe('withholdDecidedChanges', () => {
     }
   });
 
-  it('always proposes an enum list or a folded object: one excerpt cannot vouch for the rest', () => {
+  it('withholds any approved field, an enum list included, when the page text is the text it was approved from', () => {
+    const changes: ProposedChanges = { campTypes: { old: ['SCHOOL_BREAK', 'SUMMER_DAY'], new: ['SCHOOL_BREAK'], excerpt: 'Spring Safari' } };
+    const source = { campTypes: { approvedAt: APPROVED_AT, excerpt: 'When school is out', contentFingerprint: 'sha256:aaa' } };
+    const same = withholdDecidedChanges(changes, source, 'sha256:aaa');
+    expect(same.changes).toEqual({});
+    expect(same.warnings).toEqual(['campTypes: not proposed again — the page text is unchanged since a reviewer approved this field on 2026-09-30']);
+    // A changed page, an unknown fingerprint, or an unapproved field is proposed.
+    expect(Object.keys(withholdDecidedChanges(changes, source, 'sha256:bbb').changes)).toEqual(['campTypes']);
+    expect(Object.keys(withholdDecidedChanges(changes, source).changes)).toEqual(['campTypes']);
+    expect(Object.keys(withholdDecidedChanges(changes, { campTypes: { contentFingerprint: 'sha256:aaa' } }, 'sha256:aaa').changes)).toEqual(['campTypes']);
+  });
+
+  it('on a changed page, always proposes an enum list or a folded object: one excerpt cannot vouch for the rest', () => {
     const changes: ProposedChanges = {
       campTypes: { old: ['SUMMER_DAY'], new: ['SUMMER_DAY', 'SLEEPAWAY'], excerpt: 'Day camp' },
       socialLinks: { old: { instagram: 'https://i.example/a' }, new: { instagram: 'https://i.example/a', x: 'https://x.example/a' }, excerpt: '[Instagram](https://i.example/a)' },

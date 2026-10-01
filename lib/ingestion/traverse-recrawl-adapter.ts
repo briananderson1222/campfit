@@ -488,7 +488,7 @@ export async function runTraverseRecrawlForCamp(
     fetchResult.incomplete,
   );
   // A change the reviewer already decided from the same evidence is not asked again.
-  const decided = withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {});
+  const decided = withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {}, fetchResult.contentFingerprint);
   const proposedChanges = decided.changes;
   const operatorWarnings = [
     ...(fetchResult.incomplete ? [describeIncompleteness(fetchResult.incomplete)] : []),
@@ -530,6 +530,9 @@ export async function runTraverseRecrawlForCamp(
       ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
       ...(item.multiProgram ? { multiProgram: item.multiProgram } : {}),
       ...(decided.decided.length > 0 ? { alreadyDecided: decided.decided } : {}),
+      // Which page text this proposal was read from; an approval copies it to
+      // the field's source so a later crawl of the same text does not re-ask.
+      ...(fetchResult.contentFingerprint ? { contentFingerprint: fetchResult.contentFingerprint } : {}),
     },
     ...shared,
   };

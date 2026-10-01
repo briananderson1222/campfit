@@ -703,16 +703,23 @@ describe('a crawl after an approval does not ask the reviewer again', () => {
     });
   }
 
+  // Two camp types, each cited from the page.
+  const campTypes = [
+    { fieldPath: 'items[].campTypes[]', value: 'SLEEPAWAY', confidence: 1, excerpt: 'Month-long Sessions', locator: null, occurrenceHint: 1 },
+    { fieldPath: 'items[].campTypes[]', value: 'SUMMER_DAY', confidence: 1, excerpt: '15 Day Sessions', locator: null, occurrenceHint: 1 },
+  ];
+
   it('withholds a reworded reading of approved evidence, and still proposes a real change', async () => {
     const campId = await seedCamp();
-    fixture.proposals = recorded.programs;
+    fixture.proposals = [...recorded.programs, ...campTypes];
     fixture.html = listingHtml();
     await crawl([campId]);
     const [first] = await proposalsFor(campId);
     await approveAll(first!);
 
     // The approval changed the camp, so the page is read once more.
-    fixture.proposals = reworded(recorded.programs);
+    // The second answer also leaves one camp type out, as a real model did.
+    fixture.proposals = [...reworded(recorded.programs), campTypes[0]];
     const after = await crawl([campId]);
     expect(modelRequests()).toBe(2);
     expect(after.entry(campId).status).toBe('no_changes');
@@ -720,9 +727,11 @@ describe('a crawl after an approval does not ask the reviewer again', () => {
     expect((await proposalsFor(campId)).map((p) => p.status)).toEqual(['APPROVED']);
     // What was withheld is said, on the crawl log.
     expect(after.entry(campId).warnings).toEqual(expect.arrayContaining([
-      expect.stringMatching(/^applicationUrl: not proposed again — the page text it cites is the text a reviewer approved on \d{4}-\d{2}-\d{2}$/),
-      expect.stringMatching(/^ageGroups: not proposed again — the entries have the values a reviewer approved on \d{4}-\d{2}-\d{2}, only their cited text differs$/),
+      expect.stringMatching(/^applicationUrl: not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
+      expect.stringMatching(/^ageGroups: not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
+      expect.stringMatching(/^campTypes: not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
     ]));
+    expect((await campRow(campId)).campTypes).toEqual(['SLEEPAWAY', 'SUMMER_DAY']);
     expect((await campRow(campId)).applicationUrl).toBe('https://register.pineridge.example/apply');
 
     // That settles it: the same page is not read a third time.
@@ -732,7 +741,7 @@ describe('a crawl after an approval does not ask the reviewer again', () => {
 
     // The page really changes (a price): that is proposed.
     fixture.html = listingHtml().replace('$3,850', '$3,950');
-    fixture.proposals = (reworded(recorded.programs) as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => ({
+    fixture.proposals = ([...reworded(recorded.programs), ...campTypes] as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => ({
       ...proposal,
       value: proposal.value === 3850 ? 3950 : proposal.value,
       excerpt: proposal.excerpt.replace('$3,850', '$3,950'),

@@ -9,14 +9,17 @@
  * A change is withheld only when the field was approved in review
  * (`fieldSources[field].approvedAt`) and the evidence is the evidence that
  * approval rested on:
+ *  - any field: the page text this crawl read is the text the approved
+ *    proposal was read from (the same content fingerprint, which also covers
+ *    the schema, the hints and the provider);
  *  - a single value: the new excerpt is the approved excerpt;
  *  - a row list (`ageGroups`, `schedules`, `pricing`): the new rows cite the
  *    same excerpts as the stored rows (their labels), or carry the same values
  *    as the stored rows under other labels.
  * Anything else is proposed: a different excerpt, a row added or removed, a
- * field never approved. Enum lists and `socialLinks` are always proposed,
- * because their one stored excerpt cites only their first entry and cannot
- * show that the rest is unchanged.
+ * field never approved. On a page whose text changed, enum lists and
+ * `socialLinks` are always proposed, because their one stored excerpt cites
+ * only their first entry and cannot show that the rest is unchanged.
  *
  * Every withheld field is reported, never dropped silently.
  */
@@ -27,13 +30,15 @@ import { projectAgeGroupDomain, projectPricingDomain, projectScheduleDomain, typ
 export interface DecidedFieldSource {
   approvedAt?: string;
   excerpt?: string | null;
+  /** Fingerprint of the page text the approved proposal was read from (content-fingerprint.ts). Absent on older approvals. */
+  contentFingerprint?: string | null;
 }
 
 export interface DecidedChange {
   field: string;
   approvedAt: string;
-  /** `same-excerpt`: the cited text is the approved text. `same-values`: the rows carry the stored values. */
-  reason: 'same-excerpt' | 'same-values';
+  /** `same-page`: the whole page text is unchanged. `same-excerpt`: the cited text is the approved text. `same-values`: the rows carry the stored values. */
+  reason: 'same-page' | 'same-excerpt' | 'same-values';
 }
 
 const RELATION_FIELDS: readonly RelationField[] = ['ageGroups', 'schedules', 'pricing'];
@@ -60,7 +65,13 @@ function sameMultiset(left: readonly string[], right: readonly string[]): boolea
   return a.every((value, index) => value === b[index]);
 }
 
-function decidedReason(field: string, diff: ProposedChanges[string], source: DecidedFieldSource): DecidedChange['reason'] | null {
+function decidedReason(
+  field: string,
+  diff: ProposedChanges[string],
+  source: DecidedFieldSource,
+  contentFingerprint: string | undefined,
+): DecidedChange['reason'] | null {
+  if (contentFingerprint && source.contentFingerprint === contentFingerprint) return 'same-page';
   if ((RELATION_FIELDS as readonly string[]).includes(field)) {
     const relation = field as RelationField;
     const stored = rowsOf(diff.old);
@@ -85,17 +96,21 @@ function decidedReason(field: string, diff: ProposedChanges[string], source: Dec
 export function withholdDecidedChanges(
   changes: ProposedChanges,
   fieldSources: Readonly<Record<string, DecidedFieldSource | undefined>>,
+  /** Fingerprint of the page text this crawl read, when one was computed. */
+  contentFingerprint?: string,
 ): { changes: ProposedChanges; decided: DecidedChange[]; warnings: string[] } {
   const kept: ProposedChanges = {};
   const decided: DecidedChange[] = [];
   for (const [field, diff] of Object.entries(changes)) {
     const source = fieldSources[field];
-    const reason = source?.approvedAt ? decidedReason(field, diff, source) : null;
+    const reason = source?.approvedAt ? decidedReason(field, diff, source, contentFingerprint) : null;
     if (reason && source?.approvedAt) decided.push({ field, approvedAt: source.approvedAt, reason });
     else kept[field] = diff;
   }
   const warnings = decided.map((item) =>
-    item.reason === 'same-excerpt'
+    item.reason === 'same-page'
+      ? `${item.field}: not proposed again — the page text is unchanged since a reviewer approved this field on ${item.approvedAt.slice(0, 10)}`
+      : item.reason === 'same-excerpt'
       ? `${item.field}: not proposed again — the page text it cites is the text a reviewer approved on ${item.approvedAt.slice(0, 10)}`
       : `${item.field}: not proposed again — the entries have the values a reviewer approved on ${item.approvedAt.slice(0, 10)}, only their cited text differs`);
   return { changes: kept, decided, warnings };

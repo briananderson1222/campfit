@@ -85,6 +85,8 @@ export interface FieldSource {
   excerpt: string | null;
   sourceUrl: string;
   approvedAt: string; // ISO timestamp
+  /** Fingerprint of the page text the approved proposal was read from. Absent on approvals recorded before it was kept. */
+  contentFingerprint?: string;
 }
 
 export type ProposedChanges = Record<string, FieldDiff>;

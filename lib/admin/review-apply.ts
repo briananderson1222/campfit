@@ -944,6 +944,21 @@ async function lockAndCheckProposal(client: PoolClient, proposalId: string): Pro
   return new Set(statusCheck.rows[0]?.appliedFields ?? []);
 }
 
+/**
+ * The `fieldSources` entry an approval records: the cited excerpt, where it
+ * came from, when it was approved, and the fingerprint of the page text the
+ * proposal was read from (so a crawl of the same text does not ask again).
+ */
+function approvedFieldSource(proposal: CampChangeProposal, diff: FieldDiff, reviewedAt: string) {
+  const contentFingerprint = proposal.rawExtraction?.contentFingerprint;
+  return {
+    excerpt: diff.excerpt ?? null,
+    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
+    approvedAt: reviewedAt,
+    ...(typeof contentFingerprint === 'string' && contentFingerprint ? { contentFingerprint } : {}),
+  };
+}
+
 /** Writes one scalar Camp field + its fieldSources entry; returns the CampChangeLog entry to record for it. */
 async function applyScalarField(
   client: PoolClient,
@@ -953,11 +968,7 @@ async function applyScalarField(
   field: string,
   diff: FieldDiff,
 ): Promise<ChangeLogEntry> {
-  const fieldSource = {
-    excerpt: diff.excerpt ?? null,
-    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-    approvedAt: reviewedAt,
-  };
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
   await client.query(
     `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
     [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
@@ -1015,11 +1026,7 @@ async function applyEnumArrayField(
   field: string,
   diff: FieldDiff,
 ): Promise<ChangeLogEntry> {
-  const fieldSource = {
-    excerpt: diff.excerpt ?? null,
-    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-    approvedAt: reviewedAt,
-  };
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
   // Each list has a single-value twin column (`campType`, `category`) that
   // other code still reads. It must stay a member of the list: kept when it
   // still is one, otherwise moved to the list's first member.
@@ -1053,11 +1060,7 @@ async function applyRelationField(
   field: string,
   diff: FieldDiff,
 ): Promise<{ changeLog: ChangeLogEntry; orphaned?: readonly ExistingScheduleRow[] }> {
-  const fieldSource = {
-    excerpt: diff.excerpt ?? null,
-    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-    approvedAt: reviewedAt,
-  };
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
 
   let orphaned: readonly ExistingScheduleRow[] | undefined;
   if (field === 'schedules') {
