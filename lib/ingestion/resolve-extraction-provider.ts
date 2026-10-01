@@ -164,7 +164,18 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
         ...(receiptPath ? { receiptPath } : {}),
         ...(maxAttempts === undefined ? {} : { maxAttempts }),
       });
-  const provider = createRelayExtractionProvider({ runtime, maxTokens });
+  const dispatched = !(candidates.length === 1 && !receiptPath && maxAttempts === undefined);
+  // A Dispatch runtime's own id names no model, and the provider name is the
+  // identity recorded on proposals and hashed into the content fingerprint.
+  // Carry the configured profiles and models in it, so changing any of them
+  // is a different extractor.
+  const provider = createRelayExtractionProvider({
+    runtime,
+    maxTokens,
+    ...(dispatched
+      ? { name: `relay-extraction-provider:${runtime.id}[${profileSpecs.map((spec) => `${spec.profile}:${spec.model}`).join(",")}]` }
+      : {}),
+  });
 
   return { provider, ref, datumProvider: resolved?.provider ?? profileSpecs[0]!.profile, model, baseUrl, maxTokens };
 }

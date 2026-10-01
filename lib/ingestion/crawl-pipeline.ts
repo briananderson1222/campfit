@@ -45,7 +45,7 @@ import { resolveExtractionProvider } from './resolve-extraction-provider';
 import { createCampfitSnapshotStore } from './traverse-snapshot-store';
 import { startRun } from './crawl-run-tracker';
 import { createProposal } from '@/lib/admin/review-repository';
-import { asCrawlSchemaError, CrawlSchemaOutdatedError, recordUnstartedCrawlFailure, supersedePendingCampProposals } from '@/lib/admin/crawl-repository';
+import { asCrawlSchemaError, CrawlSchemaOutdatedError, recordUnstartedCrawlFailure } from '@/lib/admin/crawl-repository';
 import { recordCrawlAttempt, recordRecrawlFreshness } from './recrawl-freshness';
 import { recordExtractionMetrics } from '@/lib/admin/metrics-repository';
 import { buildDiscoveryFieldSources, discoverCampsFromUrl, filterNewDiscoveries } from './llm-discovery';
@@ -378,12 +378,7 @@ export interface CrawlOptions {
    * complete extraction. For a recrawl a person asked for.
    */
   forceExtract?: boolean;
-  /**
-   * Camp strategy: when this crawl writes a proposal for a camp, mark that
-   * camp's other PENDING proposals SKIPPED. Nothing is skipped when no
-   * proposal is written.
-   */
-  supersedePending?: boolean;
+
   /**
    * Per-source current-value resolver, forwarded as-is to
    * `traverse-pipeline.ts`'s `TraversePipelineDeps.currentByItemNames` for
@@ -862,11 +857,6 @@ async function runKnownCampStrategy(
                 snapshotBodyHash: result.snapshot.bodyHash,
               }));
               newProposalsDelta = 1;
-              // A reviewer-requested recrawl replaces what was pending, and
-              // only now that the replacement exists.
-              if (proposalId && options.supersedePending) {
-                await supersedePendingCampProposals(camp.id, proposalId);
-              }
             }
 
             // Provider matching — ensure camp is linked to a Provider by domain
@@ -922,7 +912,6 @@ async function runKnownCampStrategy(
         try {
           const recorded = await recordCrawlAttempt(pool, {
             campId: camp.id,
-            attemptedAt: new Date(),
             completed: crawlCompleted,
             ...(extractedContentDigest ? { extractedContentDigest } : {}),
           });

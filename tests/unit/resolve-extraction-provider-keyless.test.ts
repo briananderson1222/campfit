@@ -30,6 +30,21 @@ describe("extraction provider resolution without an API key", () => {
     expect(resolved.baseUrl).toBeUndefined();
   });
 
+  it("names every configured profile and model when requests go through Dispatch", () => {
+    // A Dispatch runtime's id names no model. The provider name is what a
+    // proposal records and what the content fingerprint hashes.
+    process.env.TRAVERSE_RUNTIME_PROFILES = "codex:gpt-6.1-sol,claude-code:sonnet";
+    const two = resolveExtractionProvider().provider.name;
+    expect(two).toBe("relay-extraction-provider:campfit-extraction-dispatch[codex:gpt-6.1-sol,claude-code:sonnet]");
+
+    process.env.TRAVERSE_RUNTIME_PROFILES = "codex:gpt-6.1-sol";
+    process.env.TRAVERSE_DISPATCH_RECEIPT_PATH = "/dev/null";
+    const withReceipts = resolveExtractionProvider().provider.name;
+    expect(withReceipts).toBe("relay-extraction-provider:campfit-extraction-dispatch[codex:gpt-6.1-sol]");
+    process.env.TRAVERSE_RUNTIME_PROFILES = "codex:gpt-7-next";
+    expect(resolveExtractionProvider().provider.name).not.toBe(withReceipts);
+  });
+
   it("still requires the key for the default hosted runtime", () => {
     expect(() => resolveExtractionProvider()).toThrow(/ZAI_API_KEY/);
   });

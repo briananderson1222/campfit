@@ -47,8 +47,15 @@ export async function recordRecrawlFreshness(
 
 export interface RecordCrawlAttemptInput {
   campId: string;
-  /** when the attempt finished (injected for deterministic tests). */
-  attemptedAt: Date;
+  /**
+   * When the attempt finished. Omit it (the crawl pipeline does) to stamp the
+   * DATABASE clock, `now()`. The skip rule compares these columns with
+   * `CampChangeLog."changedAt"` and proposal `"reviewedAt"`, which the
+   * database stamps; an application clock a few milliseconds off the
+   * database's would make "changed since the last crawl" wrong either way.
+   * Pass a value only to pin the time in a test.
+   */
+  attemptedAt?: Date;
   /** the crawl completed for this camp (any outcome that is not an error). */
   completed: boolean;
   /** fingerprint to remember, only when a COMPLETE extraction read that text. Omit to keep the stored one. */
@@ -62,11 +69,11 @@ export interface RecordCrawlAttemptInput {
 export async function recordCrawlAttempt(pool: Pool, input: RecordCrawlAttemptInput): Promise<boolean> {
   const result = await pool.query(
     `UPDATE "Camp"
-        SET "lastCrawlAttemptAt" = $1,
-            "lastCrawledAt" = CASE WHEN $2::boolean THEN $1 ELSE "lastCrawledAt" END,
+        SET "lastCrawlAttemptAt" = COALESCE($1::timestamptz, now()),
+            "lastCrawledAt" = CASE WHEN $2::boolean THEN COALESCE($1::timestamptz, now()) ELSE "lastCrawledAt" END,
             "lastExtractedContentDigest" = COALESCE($3, "lastExtractedContentDigest")
       WHERE id = $4`,
-    [input.attemptedAt, input.completed, input.extractedContentDigest ?? null, input.campId]
+    [input.attemptedAt ?? null, input.completed, input.extractedContentDigest ?? null, input.campId]
   );
   return (result.rowCount ?? 0) > 0;
 }

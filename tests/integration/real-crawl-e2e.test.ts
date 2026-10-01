@@ -7,6 +7,7 @@
  * Each block is one defect a live crawl exposed. The page, the model answer and
  * the request noise come from tests/fixtures/real-crawl.
  */
+import os from 'node:os';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createInMemorySnapshotStore, parseSnapshotSourceRef, type SnapshotStore } from '@kontourai/traverse/fetch';
 import type { ExtractionProvider } from '@kontourai/traverse';
@@ -22,6 +23,8 @@ const fixture = vi.hoisted(() => ({
   providerFails: false,
   /** Every provider call after the first fails: a multi-chunk page is read only in part. */
   failAfterFirstCall: false,
+  /** Model the replay runtime reports; part of the provider's identity. */
+  model: 'gpt-6.1-sol',
   /** Extra oracle responses tried before the default 200. */
   responses: [] as Record<string, unknown>[],
   store: null as unknown,
@@ -29,7 +32,7 @@ const fixture = vi.hoisted(() => ({
 
 vi.mock('@/lib/ingestion/resolve-extraction-provider', () => ({
   resolveExtractionProvider: () => {
-    const { provider, runtime } = createReplayProvider(fixture.proposals);
+    const { provider, runtime } = createReplayProvider(fixture.proposals, fixture.model);
     fixture.runtimes.push(runtime as ReplayRuntime);
     let calls = 0;
     const failing: ExtractionProvider = {
@@ -81,7 +84,8 @@ vi.mock('@/lib/admin/access', async (importOriginal) => ({
 
 import { buildReviewSessionEvents, type ReviewQueueSessionState } from '@kontourai/survey/review-workbench';
 import { getPool as getProductionPool } from '@/lib/db';
-import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
+import { runCrawlPipeline, skipEligibleFingerprint } from '@/lib/ingestion/crawl-pipeline';
+import { SNAPSHOT_STORE_ROOT } from '@/lib/ingestion/traverse-snapshot-store';
 import {
   applyBatchAcceptedClaims,
   applyProposalReview,
@@ -180,6 +184,8 @@ afterEach(async () => {
   fixture.runtimes = [];
   fixture.providerFails = false;
   fixture.failAfterFirstCall = false;
+  fixture.model = 'gpt-6.1-sol';
+  vi.useRealTimers();
   fixture.responses = [];
   fixture.store = null;
   requireAdminAccessMock.mockReset();
@@ -216,6 +222,10 @@ describe('a crawl of a multi-program listing page produces a reviewable, applica
 
     // Three programs, un-indexed: no one program's name becomes the camp's.
     expect(proposal!.proposedChanges.name).toBeUndefined();
+    // What assembly left out reaches the stored proposal, for the review page.
+    expect(proposal!.rawExtraction.droppedEntries).toEqual([
+      'schedules: "**First Session:** June 6th - July 6th, 2027" was left out because it has the same values as "**First Session:** June 6 - July 6th, 2027"',
+    ]);
     expect(storedMultiProgram(proposal!.rawExtraction)).toEqual({
       names: ['Pine Ridge Junior Camp', 'High Meadow Ranch for Girls', 'Big Creek Ranch for Boys'],
       withheldFields: ['name'],
@@ -379,6 +389,22 @@ describe('values outside a field\'s schema are flagged, never proposed, never re
     const after = (await getProposal(proposalId))!;
     expect(after.status).toBe('PENDING');
     expect(after.appliedFields ?? []).toEqual([]);
+  });
+
+  it('refuses to empty an enum list', async () => {
+    const campId = await seedCamp();
+    await getTestPool().query(`UPDATE "Camp" SET "campTypes" = ARRAY['SLEEPAWAY'] WHERE id = $1`, [campId]);
+    const proposalId = await createProposal({
+      campId, crawlRunId: await seedRun(), sourceUrl: CAMP_URL, rawExtraction: { via: 'traverse-recrawl' },
+      proposedChanges: { campTypes: { old: ['SLEEPAWAY'], new: [], mode: 'update', confidence: 1, sourceUrl: CAMP_URL } },
+      overallConfidence: 1, extractionModel: 'traverse:gpt-6.1-sol',
+    });
+    const session = await openSession((await getProposal(proposalId))!);
+    const refusal = await applyProposalReview({ proposalId, reviewSessionId: session.id, reviewer: REVIEWER, keepPending: false })
+      .then(() => null, (error: unknown) => error);
+    expect(refusal).toBeInstanceOf(ReviewApplyValueError);
+    expect((refusal as Error).message).toContain('"campTypes" would be emptied');
+    expect((await campRow(campId)).campTypes).toEqual(['SLEEPAWAY']);
   });
 
   it('writes an approved campTypes list to the column it reports as applied', async () => {
@@ -624,6 +650,45 @@ describe('a recrawl a reviewer asks for never loses the pending proposal', () =>
     const after = await proposalsFor(campId);
     expect(after.map((p) => [p.id, p.status])).toEqual([[pending!.id, 'PENDING']]);
   });
+
+  it('keeps the pending proposal when the replacement cannot be written', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [pending] = await proposalsFor(campId);
+    const pool = getTestPool();
+    await pool.query(`CREATE OR REPLACE FUNCTION block_proposal_insert() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'fixture: proposal insert blocked'; END $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER block_proposal_insert BEFORE INSERT ON "CampChangeProposal" FOR EACH ROW EXECUTE FUNCTION block_proposal_insert()`);
+
+    const run = await manualRecrawl(campId);
+    expect(run.errorCount).toBe(1);
+    // The insert failed, so nothing was superseded.
+    expect((await proposalsFor(campId)).map((p) => [p.id, p.status])).toEqual([[pending!.id, 'PENDING']]);
+  });
+
+  it('leaves exactly one pending proposal when two recrawls finish together', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+
+    for (let round = 0; round < 4; round++) {
+      await Promise.all([manualRecrawl(campId), manualRecrawl(campId)]);
+      const statuses = (await proposalsFor(campId)).map((p) => p.status);
+      expect(statuses.filter((status) => status === 'PENDING')).toHaveLength(1);
+      expect(statuses.filter((status) => status === 'SKIPPED')).toHaveLength(statuses.length - 1);
+    }
+
+    // The same guarantee at the write itself, with nothing else in the way.
+    const runId = await seedRun();
+    await Promise.all(Array.from({ length: 8 }, () => createProposal({
+      campId, crawlRunId: runId, sourceUrl: CAMP_URL, rawExtraction: { via: 'traverse-recrawl' },
+      proposedChanges: { city: { old: 'Florissant', new: 'Divide', mode: 'update', sourceUrl: CAMP_URL } },
+      overallConfidence: 1, extractionModel: 'traverse:gpt-6.1-sol',
+    })));
+    expect((await proposalsFor(campId)).filter((p) => p.status === 'PENDING')).toHaveLength(1);
+  });
 });
 
 describe('the unchanged-page skip only applies to a settled result', () => {
@@ -674,7 +739,11 @@ describe('the unchanged-page skip only applies to a settled result', () => {
     expect((await campRow(campId)).lastExtractedContentDigest).toMatch(/^sha256:/);
   });
 
-  it('proposes again after a rejection, and once more after the camp data changes', async () => {
+  // The rule compares "last crawl" with "decided/changed since". Both are
+  // stamped by the database, so an application clock that runs behind or
+  // ahead of it (here by 25 ms and by 5 s) changes nothing.
+  it.each([0, -25, 25, -5000, 5000])('proposes again after a rejection, and once more after the camp data changes (app clock %i ms off the database)', async (skewMs) => {
+    if (skewMs !== 0) vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: Date.now() + skewMs });
     const campId = await seedCamp();
     fixture.proposals = recorded.programs;
     fixture.html = listingHtml();
@@ -781,8 +850,71 @@ describe('a database that has not had the crawl-state migration', () => {
     expect(response.status).toBe(500);
     expect((await response.json()).error).toContain('migration 022_camp_crawl_attempt_and_content_digest');
 
+    requireAdminAccessMock.mockResolvedValue({ access: { email: REVIEWER } });
+    const manual = await recrawlRoute(
+      new Request(`http://localhost/api/admin/camps/${campId}/crawl`, { method: 'POST', body: '{}' }),
+      { params: Promise.resolve({ campId }) },
+    );
+    expect(manual.status).toBe(500);
+    expect((await manual.json()).error).toContain('npm run db:migrate');
+
     const runs = await pool.query(`SELECT status, trigger, "errorLog" FROM "CrawlRun" ORDER BY "startedAt"`);
-    expect(runs.rows.map((row) => [row.trigger, row.status])).toEqual([['MANUAL', 'FAILED'], ['SCHEDULED', 'FAILED']]);
+    expect(runs.rows.map((row) => [row.trigger, row.status])).toEqual([['MANUAL', 'FAILED'], ['SCHEDULED', 'FAILED'], ['MANUAL', 'FAILED']]);
     expect(runs.rows[0].errorLog[0].error).toContain('npm run db:migrate');
+  });
+});
+
+describe('what the skip is keyed on', () => {
+  const settled = { lastExtractedContentDigest: 'sha256:abc', latestProposalStatus: null, latestProposalDecidedSinceCrawl: null, changedSinceCrawl: false };
+
+  it('decides each case of the settled-result rule', () => {
+    expect(skipEligibleFingerprint(settled, false)).toBe('sha256:abc');
+    expect(skipEligibleFingerprint(settled, true)).toBeNull();
+    expect(skipEligibleFingerprint({ ...settled, lastExtractedContentDigest: null }, false)).toBeNull();
+    expect(skipEligibleFingerprint({ ...settled, latestProposalStatus: 'REJECTED', latestProposalDecidedSinceCrawl: true }, false)).toBeNull();
+    expect(skipEligibleFingerprint({ ...settled, latestProposalStatus: 'SKIPPED', latestProposalDecidedSinceCrawl: true }, false)).toBeNull();
+    // Rejected before the last crawl: that crawl already read the page again.
+    expect(skipEligibleFingerprint({ ...settled, latestProposalStatus: 'REJECTED', latestProposalDecidedSinceCrawl: false }, false)).toBe('sha256:abc');
+    expect(skipEligibleFingerprint({ ...settled, latestProposalStatus: 'APPROVED', changedSinceCrawl: true }, false)).toBeNull();
+    // Pending wins over "data changed": the pending proposal carries this page's reading.
+    expect(skipEligibleFingerprint({ ...settled, latestProposalStatus: 'PENDING', changedSinceCrawl: true }, false)).toBe('sha256:abc');
+  });
+
+  it('keeps skipping a camp with a pending proposal after its data changes (a partial approval)', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [pending] = await proposalsFor(campId);
+    await getTestPool().query(
+      `INSERT INTO "CampChangeLog" ("campId", "proposalId", "changedBy", "fieldName", "oldValue", "newValue") VALUES ($1, $2, $3, 'applicationUrl', NULL, 'x')`,
+      [campId, pending!.id, REVIEWER],
+    );
+
+    const again = await crawl([campId]);
+    expect(modelRequests()).toBe(1);
+    expect(again.entry(campId).skipped).toBe('content_unchanged');
+    expect((await proposalsFor(campId)).map((p) => p.status)).toEqual(['PENDING']);
+  });
+
+  it('reads an unchanged page again when the model changes', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    await crawl([campId]);
+    expect(modelRequests()).toBe(1);
+
+    fixture.model = 'gpt-7-next';
+    const other = await crawl([campId]);
+    expect(modelRequests()).toBe(2);
+    expect(other.entry(campId).skipped).toBeUndefined();
+  });
+});
+
+describe('test isolation', () => {
+  it('writes snapshots under a temp directory, not the developer\'s local store', () => {
+    expect(SNAPSHOT_STORE_ROOT.startsWith(os.tmpdir())).toBe(true);
+    expect(SNAPSHOT_STORE_ROOT).not.toContain('.kontourai');
   });
 });

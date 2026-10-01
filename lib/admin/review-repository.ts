@@ -30,28 +30,42 @@ export async function createProposal(opts: {
   snapshotRef?: string | null;
   snapshotBodyHash?: string | null;
 }): Promise<string> {
-  const pool = getPool();
-
-  // Supersede any older PENDING proposals for this camp — newer crawl takes precedence
-  await pool.query(
-    `UPDATE "CampChangeProposal"
-     SET status = 'SKIPPED',
-         "reviewerNotes" = COALESCE("reviewerNotes", '') || ' [Superseded by newer crawl]',
-         "reviewedAt" = now()
-     WHERE "campId" = $1 AND status = 'PENDING'`,
-    [opts.campId]
-  );
-
-  const result = await pool.query(
-    `INSERT INTO "CampChangeProposal"
-       ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel", "snapshotRef", "snapshotBodyHash")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-    [opts.campId, opts.crawlRunId, opts.sourceUrl,
-     JSON.stringify(opts.rawExtraction), JSON.stringify(opts.proposedChanges),
-     opts.overallConfidence, opts.extractionModel,
-     opts.snapshotRef ?? null, opts.snapshotBodyHash ?? null]
-  );
-  return result.rows[0].id;
+  // The new proposal supersedes the camp's older PENDING ones. Insert and
+  // supersede are one transaction, insert first: if the insert fails nothing
+  // is skipped, so a pending proposal is only ever replaced by one that
+  // exists. A per-camp transaction lock serializes concurrent writers, so two
+  // crawls of one camp finishing together leave exactly one PENDING (the
+  // later one), never zero and never two.
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`camp-proposal:${opts.campId}`]);
+    const result = await client.query<{ id: string }>(
+      `INSERT INTO "CampChangeProposal"
+         ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel", "snapshotRef", "snapshotBodyHash")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [opts.campId, opts.crawlRunId, opts.sourceUrl,
+       JSON.stringify(opts.rawExtraction), JSON.stringify(opts.proposedChanges),
+       opts.overallConfidence, opts.extractionModel,
+       opts.snapshotRef ?? null, opts.snapshotBodyHash ?? null]
+    );
+    const id = result.rows[0]!.id;
+    await client.query(
+      `UPDATE "CampChangeProposal"
+       SET status = 'SKIPPED',
+           "reviewerNotes" = COALESCE("reviewerNotes", '') || ' [Superseded by newer crawl]',
+           "reviewedAt" = now()
+       WHERE "campId" = $1 AND status = 'PENDING' AND id <> $2`,
+      [opts.campId, id]
+    );
+    await client.query('COMMIT');
+    return id;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**

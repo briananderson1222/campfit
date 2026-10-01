@@ -38,17 +38,17 @@ export interface ReplayRuntime extends ModelRuntime {
 }
 
 /** A model runtime that answers every request with the recorded tool input, the way the codex CLI runtime reported it. */
-export function createReplayRuntime(proposals: readonly unknown[]): ReplayRuntime {
+export function createReplayRuntime(proposals: readonly unknown[], model = "gpt-6.1-sol"): ReplayRuntime {
   const requests: ModelInvocationRequest[] = [];
   return {
-    id: "codex:gpt-6.1-sol",
+    id: `codex:${model}`,
     requests,
     capabilities: () => ({ structuredTools: true, structuredToolsFidelity: "native", streaming: false, abort: true, usage: true }),
     async invoke(request) {
       requests.push(request);
       return {
         provider: "codex",
-        model: "gpt-6.1-sol",
+        model,
         modelSource: "configured",
         outputText: "",
         toolCalls: [{ id: `call-${requests.length}`, name: request.tools![0]!.name, input: { proposals } }],
@@ -60,7 +60,7 @@ export function createReplayRuntime(proposals: readonly unknown[]): ReplayRuntim
   };
 }
 
-export function createReplayProvider(proposals: readonly unknown[]): { provider: ExtractionProvider; runtime: ReplayRuntime } {
-  const runtime = createReplayRuntime(proposals);
+export function createReplayProvider(proposals: readonly unknown[], model?: string): { provider: ExtractionProvider; runtime: ReplayRuntime } {
+  const runtime = createReplayRuntime(proposals, model);
   return { provider: createRelayExtractionProvider({ runtime, maxTokens: 2048 }), runtime };
 }

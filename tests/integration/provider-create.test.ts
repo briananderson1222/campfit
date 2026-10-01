@@ -86,7 +86,10 @@ beforeAll(async () => {
   pool = getTestPool();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Start from no providers whatever an earlier suite left behind; the
+  // assertions below count rows.
+  await pool.query(`TRUNCATE "Provider" CASCADE`);
   requireAdminAccessMock.mockReset();
   requireAdminAccessMock.mockResolvedValue(ADMIN_ACCESS);
 });

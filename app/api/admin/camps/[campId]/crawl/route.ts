@@ -3,7 +3,7 @@ import { logAndMapPublicEgressError } from '@/lib/security/public-egress-error';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
-import { getCampCrawlTarget } from '@/lib/admin/crawl-repository';
+import { CrawlSchemaOutdatedError, getCampCrawlTarget } from '@/lib/admin/crawl-repository';
 
 export const maxDuration = 300;
 
@@ -22,8 +22,8 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   if (!camp.websiteUrl) return NextResponse.json({ error: 'Camp has no websiteUrl to crawl' }, { status: 400 });
 
   // A reviewer asked for this recrawl: extract even if the page text is
-  // unchanged, and let the proposal it writes replace what is pending. The
-  // pending proposal is NOT skipped up front; if the crawl writes nothing
+  // unchanged. The pending proposal is NOT skipped up front: writing the new
+  // proposal supersedes it (createProposal), and if the crawl writes nothing
   // (no changes, an error) it must survive.
 
   // Fire-and-forget — same pattern as /api/admin/crawl/start
@@ -45,7 +45,6 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     campIds: [params.campId],
     model,
     forceExtract: true,
-    supersedePending: true,
     onProgress: (event) => {
       if (event.type === 'started') resolveRunId(event.runId);
     },
@@ -63,6 +62,8 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     ]);
     return NextResponse.json({ runId });
   } catch (err) {
+    // An operator-fixable setup fault: say what to do, not "request failed".
+    if (err instanceof CrawlSchemaOutdatedError) return NextResponse.json({ error: err.message }, { status: 500 });
     return NextResponse.json({ error: logAndMapPublicEgressError('[camps/crawl] failed to start:', err) }, { status: 500 });
   }
 }

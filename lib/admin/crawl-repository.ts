@@ -21,20 +21,6 @@ export async function getCampCrawlTarget(campId: string): Promise<{ id: string; 
   return rows[0];
 }
 
-/**
- * Mark a camp's OTHER pending proposals SKIPPED once `replacementId` exists.
- * A pending proposal is only ever superseded by a proposal that was actually
- * written; a recrawl that produces nothing leaves it for the reviewer.
- */
-export async function supersedePendingCampProposals(campId: string, replacementId: string): Promise<number> {
-  const result = await getPool().query(
-    `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
-     WHERE "campId" = $1 AND status = 'PENDING' AND id <> $2`,
-    [campId, replacementId]
-  );
-  return result.rowCount ?? 0;
-}
-
 /** A crawl query hit a column that only exists after a migration this database has not had. */
 export class CrawlSchemaOutdatedError extends Error {
   constructor(cause: unknown) {
