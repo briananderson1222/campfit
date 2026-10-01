@@ -340,6 +340,33 @@ requirement-status aggregation **promotes an all-`assumed` requirement to
 `dataConfidence: 'VERIFIED'` end-to-end through
 `refreshCampVerificationCache`.
 
+## Review approval as evidence
+
+A field policy needs both `crawl_observation` and `human_attestation`
+evidence. `review-apply.ts` used to record only the crawl observation for an
+approved field, so the claim derived `proposed`: approving one field moved an
+attested claim down and the Camp to `PLACEHOLDER`, and no Camp could reach
+`VERIFIED` through review.
+
+`recordAppliedFieldEvidence` now also records the reviewer's decision as
+`human_attestation` evidence, but only for a field approved against a checked
+citation (the excerpt matched the proposal's stored snapshot exactly). An
+approval with no checked citation still records the crawl observation alone
+and stays `proposed`. Two approvals stand for a requirement that is not the
+field itself:
+
+- `campTypes` / `categories` also record on their single-value twins
+  (`campType`, `category`), which are the claim-set requirements. Applying the
+  list keeps the twin a member of it.
+- `schedules` records a `dates` claim for each session left on the Camp, and a
+  `time` claim only for a session that states a start and an end time. A
+  session with no stated time keeps `sessions-verified` open. The crawl schema
+  does not extract session times, so a Camp whose sessions came from a crawl
+  cannot yet satisfy that requirement through review.
+
+`applyProposalReview` returns the re-derived `dataConfidence` and the
+requirements still missing; the approve route passes them through.
+
 ## Accepted gaps
 
 - **`PROVIDER`/`PERSON` + non-claim-set fields stay legacy-only.**
