@@ -37,6 +37,7 @@ import type {
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, ITEM_FIELD_PATHS } from "./traverse-schema";
 import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
+import { plainLabel } from "./traverse-diff-inputs";
 import { describeIncompleteness, extractionIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
 import { compareValue } from "./lookout-diff-adapter";
@@ -137,7 +138,7 @@ export function itemToProposedChanges(
     changes["ageGroups"] = {
       old: null,
       new: item.ageGroups.map((ag) => ({
-        label: ag.label,
+        label: plainLabel(ag.label),
         minAge: ag.minAge,
         maxAge: ag.maxAge,
         minGrade: null,
@@ -153,7 +154,7 @@ export function itemToProposedChanges(
     changes["schedules"] = {
       old: null,
       new: item.schedules.map((s) => ({
-        label: s.label,
+        label: plainLabel(s.label),
         startDate: s.startDate,
         endDate: s.endDate,
         startTime: null,
@@ -171,7 +172,7 @@ export function itemToProposedChanges(
     changes["pricing"] = {
       old: null,
       new: item.pricing.map((p) => ({
-        label: p.label,
+        label: plainLabel(p.label),
         amount: p.amount,
         unit: p.unit,
         durationWeeks: null,
@@ -276,6 +277,7 @@ export function buildTraverseItemProposalRecords(
         warnings: [...(result.warnings ?? []), ...item.warnings],
         ...(result.preparedArtifact ? { preparedArtifact: result.preparedArtifact } : {}),
         ...(Object.keys(item.refusedValues).length > 0 ? { refusedValues: item.refusedValues } : {}),
+        ...(Object.keys(item.conflictingValues).length > 0 ? { conflictingValues: item.conflictingValues } : {}),
         ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
         ...(incomplete ? { incomplete } : {}),
         ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),

@@ -90,6 +90,24 @@ export function refusedValuesNotice(entry: { field: string; values: readonly str
   return `${listFieldLabel(entry.field).replace(/^./, (c) => c.toUpperCase())}: the extraction also returned ${shown}${more}, which ${verb} not valid for this field and ${verb} not proposed.`;
 }
 
+/**
+ * Fields for which the page stated more than one distinct value
+ * (`rawExtraction.conflictingValues`). None was proposed.
+ */
+export function storedConflictingValues(rawExtraction: Record<string, unknown> | null | undefined): Array<{ field: string; values: string[] }> {
+  const stored = rawExtraction?.conflictingValues;
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return [];
+  return Object.entries(stored as Record<string, unknown>)
+    .map(([field, values]) => ({ field, values: storedFieldList(values) }))
+    .filter((entry) => entry.values.length > 1);
+}
+
+export function conflictingValuesNotice(entry: { field: string; values: readonly string[] }): string {
+  const shown = entry.values.slice(0, 6).map((value) => `"${value}"`).join(', ');
+  const more = entry.values.length > 6 ? ` and ${entry.values.length - 6} more` : '';
+  return `${entry.field.replace(/^./, (c) => c.toUpperCase())}: the page states ${entry.values.length} different values (${shown}${more}). None is proposed; check the page and edit the field manually if one is right.`;
+}
+
 /** Entries the extraction left out of a list because an entry with the same values was kept (`rawExtraction.droppedEntries`). */
 export function storedDroppedEntries(rawExtraction: Record<string, unknown> | null | undefined): string[] {
   return storedFieldList(rawExtraction?.droppedEntries);

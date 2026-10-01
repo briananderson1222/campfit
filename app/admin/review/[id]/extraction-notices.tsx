@@ -1,7 +1,9 @@
 import {
+  conflictingValuesNotice,
   multiProgramNotice,
   populatedListNotice,
   refusedValuesNotice,
+  storedConflictingValues,
   storedDroppedEntries,
   storedMultiProgram,
   storedRefusedValues,
@@ -25,6 +27,7 @@ export function ExtractionNotices({ rawExtraction }: { rawExtraction: Record<str
   const refused = storedRefusedValues(rawExtraction);
   const multiProgram = storedMultiProgram(rawExtraction);
   const dropped = storedDroppedEntries(rawExtraction);
+  const conflicting = storedConflictingValues(rawExtraction);
   return (
     <>
       {multiProgram && (
@@ -38,6 +41,14 @@ export function ExtractionNotices({ rawExtraction }: { rawExtraction: Record<str
           <p className="font-semibold">Entries left out of the proposed lists</p>
           <ul className="mt-0.5 space-y-1">
             {dropped.map((note, index) => <li key={`dropped-${index}`}>{note}</li>)}
+          </ul>
+        </div>
+      )}
+      {conflicting.length > 0 && (
+        <div role="status" data-testid="conflicting-value-notices" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">Conflicting values on the page</p>
+          <ul className="mt-0.5 space-y-1">
+            {conflicting.map((entry) => <li key={`conflict-${entry.field}`}>{conflictingValuesNotice(entry)}</li>)}
           </ul>
         </div>
       )}

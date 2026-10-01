@@ -697,8 +697,8 @@ describe('a crawl after an approval does not ask the reviewer again', () => {
     return (proposals as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => {
       // Same excerpt, a slightly different value.
       if (proposal.fieldPath === 'items[].applicationUrl') return { ...proposal, value: 'https://register.pineridge.example/apply/' };
-      // Same value, cited from the emphasised copy of the same words.
-      if (proposal.fieldPath.startsWith('items[].ageGroups[].') && proposal.excerpt === 'Ages 8 - 10') return { ...proposal, excerpt: '*Ages 8 - 10*' };
+      // Same value, cited with a line more of the page.
+      if (proposal.fieldPath.startsWith('items[].ageGroups[].') && proposal.excerpt === 'Ages 8 - 10') return { ...proposal, excerpt: '15 Day Sessions\n*Ages 8 - 10*' };
       return proposal;
     });
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { withholdDecidedChanges } from '@/lib/ingestion/decided-changes';
+import { plainLabel } from '@/lib/ingestion/traverse-diff-inputs';
 import type { ProposedChanges } from '@/lib/admin/types';
 
 const APPROVED_AT = '2026-09-30T12:00:00.000Z';
@@ -62,5 +63,17 @@ describe('withholdDecidedChanges', () => {
       socialLinks: { approvedAt: APPROVED_AT, excerpt: '[Instagram](https://i.example/a)' },
     });
     expect(Object.keys(result.changes).sort()).toEqual(['campTypes', 'socialLinks']);
+  });
+});
+
+describe('plainLabel', () => {
+  it('takes the page preparation\'s Markdown out of a row label and leaves plain text alone', () => {
+    expect(plainLabel('**First Session:** June 6th - June 20th, 2027')).toBe('First Session: June 6th - June 20th, 2027');
+    expect(plainLabel('15 Day Sessions\n*Ages 8 - 10*\n**$3,850**')).toBe('15 Day Sessions Ages 8 - 10 $3,850');
+    expect(plainLabel('## [Pine Ridge Junior Camp](/camps/juniors-ages-8-10)')).toBe('Pine Ridge Junior Camp');
+    expect(plainLabel('Ages 8 - 10')).toBe('Ages 8 - 10');
+    // Not emphasis: a lone asterisk, a multiplication, an underscore inside a word.
+    expect(plainLabel('$450 per week * sibling discount')).toBe('$450 per week * sibling discount');
+    expect(plainLabel('2 * 3 sessions, see camp_fees')).toBe('2 * 3 sessions, see camp_fees');
   });
 });

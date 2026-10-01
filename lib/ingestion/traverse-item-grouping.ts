@@ -194,6 +194,13 @@ export interface AssembledItem {
    */
   refusedValues: Record<string, string[]>;
   /**
+   * Scalar fields for which the page states more than one distinct value
+   * (Traverse 4.1 asks for one proposal per distinct value), with the values.
+   * None of them is taken as the field's value: picking the first would hide
+   * the disagreement from the reviewer. Each is also an operator warning.
+   */
+  conflictingValues: Record<string, string[]>;
+  /**
    * Entries left out of a proposed list or object because another entry with
    * the same values was kept: a session on the same dates under another label,
    * a second URL for the same social platform. One sentence each, for the
@@ -466,6 +473,11 @@ export function multiProgramWarning(multiProgram: { names: readonly string[]; wi
     + "; list fields combine every program's entries";
 }
 
+/** The operator-facing sentence for one entry of {@link AssembledItem.conflictingValues}. */
+export function conflictingValuesWarning(field: string, values: readonly string[]): string {
+  return `${field}: the page states ${values.length} different values (${values.map((value) => `"${value}"`).join(", ")}) — none is proposed; a reviewer must choose`;
+}
+
 /** Keep the first row for each key; report how many repeats were dropped. */
 function dedupeRows<T extends { label: string }>(
   rows: readonly T[],
@@ -543,6 +555,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     const refusedValues: Record<string, string[]> = {};
     const refusalWarnings: string[] = [];
     const droppedEntries: string[] = [];
+    const conflictingValues: Record<string, string[]> = {};
     /**
      * Record every refused proposal under `field`, with one warning per
      * distinct reason. `warn: false` for a list family whose dropped rows are
@@ -582,6 +595,14 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       // when every program states the same one. The name never is.
       if (collapsedPrograms && (scalarPath === "name" || distinctValues(valid.map((fp) => fp.candidateValue)).length > 1)) {
         withheldProgramFields.push(scalarPath);
+        continue;
+      }
+      // One program, several distinct values for one field: a conflict the
+      // reviewer must see, not a choice to make for them.
+      const stated = distinctValues(valid.map((fp) => fp.candidateValue));
+      if (stated.length > 1) {
+        conflictingValues[scalarPath] = stated;
+        operatorWarnings.push(conflictingValuesWarning(scalarPath, stated));
         continue;
       }
       scalars[scalarPath] = valid[0];
@@ -758,6 +779,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       warnings,
       operatorWarnings,
       refusedValues,
+      conflictingValues,
       droppedEntries,
       ...(multiProgram ? { multiProgram } : {}),
     });
