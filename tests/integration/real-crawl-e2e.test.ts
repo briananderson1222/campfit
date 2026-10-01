@@ -190,6 +190,8 @@ afterEach(async () => {
   delete process.env.TRAVERSE_CHUNK_SIZE;
   delete process.env.CRON_SECRET;
   await pool.query(`TRUNCATE "Camp" RESTART IDENTITY CASCADE;`);
+  // A crawl links the camp to a provider it creates; other suites count providers.
+  await pool.query(`TRUNCATE "Provider" RESTART IDENTITY CASCADE;`);
   await pool.query(`TRUNCATE "CrawlRun" RESTART IDENTITY CASCADE;`);
   await pool.query(`TRUNCATE "SurfaceClaimDefinition", "SurfaceVerificationPolicy", "SurfaceClaimGroup" RESTART IDENTITY CASCADE;`);
 });
