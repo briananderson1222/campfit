@@ -69,6 +69,7 @@ export async function fetchAndExtractWithRevalidation(
     ? fingerprintSnapshotContent(snapshot.bodyBytes ?? snapshot.body, snapshot.contentType, {
         targetSchema: opts.targetSchema,
         fieldHints: opts.fieldHints,
+        provider: opts.provider.name,
       })
     : undefined;
   if (unchanged && contentFingerprint !== undefined && contentFingerprint === unchanged.priorFingerprint) {

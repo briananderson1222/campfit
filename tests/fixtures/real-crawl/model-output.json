@@ -1,5 +1,5 @@
 {
-  "_comment": "Structured-tool input a real crawl's model returned, replayed through the real Relay extraction provider. Field paths are un-indexed (the structured-output schema only admits declared paths); the model's own item index survives only in `locator`, which Traverse replaces with a verified chars: offset. `programs` is a clean multi-program listing answer. `invalidValues` are the out-of-schema values real runs returned: enum text outside the allowed set, dates with no year, capitalised platform names. Names and URLs are fictional.",
+  "_comment": "Structured-tool input a real crawl's model returned, replayed through the real Relay extraction provider. Field paths are un-indexed (the structured-output schema only admits declared paths); the model's own item index survives only in `locator`, which Traverse replaces with a verified chars: offset. `programs` is a clean multi-program listing answer. `invalidValues` are the out-of-schema values real runs returned: enum text outside the allowed set, dates with no year, capitalised platform names. Names and URLs are fictional. The second winter session carries a year the model supplied (\"2026-12-22\") although its excerpt states none. `duplicates` are entries whose values repeat another entry's: a second link for a platform already listed.",
   "programs": [
     {
       "fieldPath": "items[].name",
@@ -293,7 +293,7 @@
     },
     {
       "fieldPath": "items[].schedules[].startDate",
-      "value": "December 22",
+      "value": "2026-12-22",
       "confidence": 1,
       "excerpt": "Too Hot to Handle: December 22",
       "locator": null,
@@ -301,7 +301,7 @@
     },
     {
       "fieldPath": "items[].schedules[].endDate",
-      "value": "December 22",
+      "value": "2026-12-22",
       "confidence": 1,
       "excerpt": "Too Hot to Handle: December 22",
       "locator": null,
@@ -352,6 +352,42 @@
       "value": "https://www.youtube.com/user/pineridgecamps",
       "confidence": 1,
       "excerpt": "[YouTube](https://www.youtube.com/user/pineridgecamps)",
+      "locator": null,
+      "occurrenceHint": 1
+    }
+  ],
+  "duplicates": [
+    {
+      "fieldPath": "items[].socialLinks[].platform",
+      "value": "Instagram",
+      "confidence": 1,
+      "excerpt": "[Ranch Instagram](https://www.instagram.com/pineridgeranch/)",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].socialLinks[].url",
+      "value": "https://www.instagram.com/pineridgeranch/",
+      "confidence": 1,
+      "excerpt": "[Ranch Instagram](https://www.instagram.com/pineridgeranch/)",
+      "locator": null,
+      "occurrenceHint": 1
+    }
+  ],
+  "mixedEnumList": [
+    {
+      "fieldPath": "items[].campTypes[]",
+      "value": "SLEEPAWAY",
+      "confidence": 1,
+      "excerpt": "Month-long Sessions",
+      "locator": null,
+      "occurrenceHint": 1
+    },
+    {
+      "fieldPath": "items[].campTypes[]",
+      "value": "DAY",
+      "confidence": 1,
+      "excerpt": "Winter Break Day Camps",
       "locator": null,
       "occurrenceHint": 1
     }

@@ -20,6 +20,8 @@ const fixture = vi.hoisted(() => ({
   /** Every model request of the current test, across runs. */
   runtimes: [] as { requests: unknown[] }[],
   providerFails: false,
+  /** Every provider call after the first fails: a multi-chunk page is read only in part. */
+  failAfterFirstCall: false,
   /** Extra oracle responses tried before the default 200. */
   responses: [] as Record<string, unknown>[],
   store: null as unknown,
@@ -29,8 +31,16 @@ vi.mock('@/lib/ingestion/resolve-extraction-provider', () => ({
   resolveExtractionProvider: () => {
     const { provider, runtime } = createReplayProvider(fixture.proposals);
     fixture.runtimes.push(runtime as ReplayRuntime);
-    const failing: ExtractionProvider = { ...provider, extract: async () => { throw new Error('fixture: provider unavailable'); } };
-    return { provider: fixture.providerFails ? failing : provider, ref: 'replay', datumProvider: 'codex', model: 'gpt-6.1-sol', maxTokens: 2048 };
+    let calls = 0;
+    const failing: ExtractionProvider = {
+      ...provider,
+      extract: async (input) => {
+        calls += 1;
+        if (fixture.providerFails || (fixture.failAfterFirstCall && calls > 1)) throw new Error('fixture: provider unavailable');
+        return provider.extract(input);
+      },
+    };
+    return { provider: fixture.providerFails || fixture.failAfterFirstCall ? failing : provider, ref: 'replay', datumProvider: 'codex', model: 'gpt-6.1-sol', maxTokens: 2048 };
   },
 }));
 
@@ -73,12 +83,13 @@ import { buildReviewSessionEvents, type ReviewQueueSessionState } from '@kontour
 import { getPool as getProductionPool } from '@/lib/db';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import {
+  applyBatchAcceptedClaims,
   applyProposalReview,
   ReviewApplyCitationError,
   ReviewApplyValueError,
 } from '@/lib/admin/review-apply';
-import { createProposal, getProposal } from '@/lib/admin/review-repository';
-import { failStaleCrawlRuns, getCrawlRun } from '@/lib/admin/crawl-repository';
+import { createProposal, getCampProposalHistoryBatch, getProposal, updateProposalStatus } from '@/lib/admin/review-repository';
+import { CrawlSchemaOutdatedError, failStaleCrawlRuns, getCrawlRun } from '@/lib/admin/crawl-repository';
 import { resolveCrawlCandidates } from '@/lib/admin/crawl-priority';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
@@ -91,6 +102,8 @@ import { campLogModelLine, campLogOutcomeNote } from '@/app/admin/crawls/camp-lo
 import { campfitVocabulary } from '@/lib/trust-vocabulary';
 import type { CampChangeProposal } from '@/lib/admin/types';
 import { POST as approveRoute } from '@/app/api/admin/review/[id]/approve/route';
+import { POST as recrawlRoute } from '@/app/api/admin/camps/[campId]/crawl/route';
+import { GET as cronRoute } from '@/app/api/cron/crawl/route';
 
 const REVIEWER = 'reviewer@campfit.test';
 const CAMP_NAME = 'Pine Ridge Camps';
@@ -166,10 +179,16 @@ afterEach(async () => {
   fixture.html = '';
   fixture.runtimes = [];
   fixture.providerFails = false;
+  fixture.failAfterFirstCall = false;
   fixture.responses = [];
   fixture.store = null;
   requireAdminAccessMock.mockReset();
   const pool = getTestPool();
+  await pool.query(`DROP TRIGGER IF EXISTS block_proposal_insert ON "CampChangeProposal"`);
+  await pool.query(`ALTER TABLE "Camp" ADD COLUMN IF NOT EXISTS "lastCrawlAttemptAt" TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS "lastExtractedContentDigest" TEXT`);
+  await pool.query(`UPDATE "CrawlSchedule" SET enabled = false`);
+  delete process.env.TRAVERSE_CHUNK_SIZE;
+  delete process.env.CRON_SECRET;
   await pool.query(`TRUNCATE "Camp" RESTART IDENTITY CASCADE;`);
   await pool.query(`TRUNCATE "CrawlRun" RESTART IDENTITY CASCADE;`);
   await pool.query(`TRUNCATE "SurfaceClaimDefinition", "SurfaceVerificationPolicy", "SurfaceClaimGroup" RESTART IDENTITY CASCADE;`);
@@ -303,7 +322,7 @@ describe('values outside a field\'s schema are flagged, never proposed, never re
     expect(refused).toEqual({
       registrationStatus: ['SOLD_OUT'],
       registrationOpenDate: ['January 14'],
-      schedules: ['December 21', 'December 22'],
+      schedules: ['December 21', '2026-12-22'],
       campTypes: ['DAY_CAMP', 'DAY'],
     });
     expect(entry(campId).warnings).toContain(
@@ -362,18 +381,27 @@ describe('values outside a field\'s schema are flagged, never proposed, never re
 
   it('writes an approved campTypes list to the column it reports as applied', async () => {
     const campId = await seedCamp();
-    const proposalId = await createProposal({
+    const propose = async (list: string[]) => createProposal({
       campId,
       crawlRunId: await seedRun(),
       sourceUrl: CAMP_URL,
       rawExtraction: { via: 'traverse-recrawl' },
-      proposedChanges: { campTypes: { old: [], new: ['SLEEPAWAY', 'SUMMER_DAY'], mode: 'populate', confidence: 1, sourceUrl: CAMP_URL } },
+      proposedChanges: { campTypes: { old: [], new: list, mode: 'populate', confidence: 1, sourceUrl: CAMP_URL } },
       overallConfidence: 1,
       extractionModel: 'traverse:gpt-6.1-sol',
     });
-    const applied = await approveAll((await getProposal(proposalId))!);
+    const singular = async () => (await getTestPool().query(`SELECT "campType" FROM "Camp" WHERE id = $1`, [campId])).rows[0].campType;
+
+    // The camp is seeded SLEEPAWAY. It stays the single type while the list still has it.
+    const applied = await approveAll((await getProposal(await propose(['SUMMER_DAY', 'SLEEPAWAY'])))!);
     expect(applied.appliedFields).toEqual(['campTypes']);
-    expect((await campRow(campId)).campTypes).toEqual(['SLEEPAWAY', 'SUMMER_DAY']);
+    expect((await campRow(campId)).campTypes).toEqual(['SUMMER_DAY', 'SLEEPAWAY']);
+    expect(await singular()).toBe('SLEEPAWAY');
+
+    // A list without it: the single type follows the list instead of contradicting it.
+    await approveAll((await getProposal(await propose(['FAMILY'])))!);
+    expect((await campRow(campId)).campTypes).toEqual(['FAMILY']);
+    expect(await singular()).toBe('FAMILY');
   });
 });
 
@@ -543,5 +571,216 @@ describe('a run never stays RUNNING after it stopped', () => {
     expect((await status(fresh.rows[0]!.id)).status).toBe('RUNNING');
     // Idempotent: nothing left to reap.
     expect(await failStaleCrawlRuns()).toEqual([]);
+  });
+});
+
+describe('a recrawl a reviewer asks for never loses the pending proposal', () => {
+  async function manualRecrawl(campId: string) {
+    requireAdminAccessMock.mockResolvedValue({ access: { email: REVIEWER } });
+    const response = await recrawlRoute(
+      new Request(`http://localhost/api/admin/camps/${campId}/crawl`, { method: 'POST', body: '{}' }),
+      { params: Promise.resolve({ campId }) },
+    );
+    expect(response.status).toBe(200);
+    const { runId } = await response.json();
+    // The route returns once the run has started; wait for it to end.
+    for (let i = 0; i < 100; i++) {
+      const run = await getCrawlRun(runId);
+      if (run && run.status !== 'RUNNING') return run;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('manual recrawl did not finish');
+  }
+
+  it('extracts an unchanged page again and replaces the pending proposal only once the new one exists', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [pending] = await proposalsFor(campId);
+    expect(modelRequests()).toBe(1);
+
+    const run = await manualRecrawl(campId);
+    expect(run.status).toBe('COMPLETED');
+    // Forced: the unchanged page was read again, not skipped.
+    expect(modelRequests()).toBe(2);
+    expect(run.campLog[0]!.skipped).toBeUndefined();
+    const after = await proposalsFor(campId);
+    expect(after.map((p) => [p.id === pending!.id, p.status])).toEqual([[true, 'SKIPPED'], [false, 'PENDING']]);
+  });
+
+  it('leaves the pending proposal pending when the recrawl writes nothing', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [pending] = await proposalsFor(campId);
+
+    fixture.providerFails = true;
+    const run = await manualRecrawl(campId);
+    expect(run.status).toBe('FAILED');
+    const after = await proposalsFor(campId);
+    expect(after.map((p) => [p.id, p.status])).toEqual([[pending!.id, 'PENDING']]);
+  });
+});
+
+describe('the unchanged-page skip only applies to a settled result', () => {
+  it('retries a crawl whose proposal could not be written', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    const pool = getTestPool();
+    await pool.query(`CREATE OR REPLACE FUNCTION block_proposal_insert() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'fixture: proposal insert blocked'; END $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER block_proposal_insert BEFORE INSERT ON "CampChangeProposal" FOR EACH ROW EXECUTE FUNCTION block_proposal_insert()`);
+
+    const first = await crawl([campId]);
+    expect(first.run.errorCount).toBe(1);
+    expect(first.stored.errorLog.at(-1)!.error).toContain('proposal insert blocked');
+    expect(await proposalsFor(campId)).toHaveLength(0);
+    // Nothing durable came of this crawl, so nothing says the page was read.
+    const row = await campRow(campId);
+    expect(row.lastExtractedContentDigest).toBeNull();
+    expect(row.lastCrawledAt).toBeNull();
+    expect(row.lastCrawlAttemptAt).not.toBeNull();
+
+    await pool.query(`DROP TRIGGER block_proposal_insert ON "CampChangeProposal"`);
+    const second = await crawl([campId]);
+    expect(second.entry(campId).status).toBe('ok');
+    expect(second.entry(campId).skipped).toBeUndefined();
+    expect(await proposalsFor(campId)).toHaveLength(1);
+  });
+
+  it('does not record an incomplete read as the text that was extracted', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    process.env.TRAVERSE_CHUNK_SIZE = '1000';
+    fixture.failAfterFirstCall = true;
+
+    const first = await crawl([campId]);
+    expect(first.entry(campId).incomplete?.reason).toBe('provider-failure');
+    expect((await campRow(campId)).lastExtractedContentDigest).toBeNull();
+
+    // Same page, provider healthy: it is read in full, not skipped.
+    fixture.failAfterFirstCall = false;
+    delete process.env.TRAVERSE_CHUNK_SIZE;
+    const before = modelRequests();
+    const second = await crawl([campId]);
+    expect(modelRequests()).toBeGreaterThan(before);
+    expect(second.entry(campId).skipped).toBeUndefined();
+    expect(second.entry(campId).incomplete).toBeUndefined();
+    expect((await campRow(campId)).lastExtractedContentDigest).toMatch(/^sha256:/);
+  });
+
+  it('proposes again after a rejection, and once more after the camp data changes', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [first] = await proposalsFor(campId);
+
+    // Pending: the proposal already carries this page's reading.
+    await crawl([campId]);
+    expect(modelRequests()).toBe(1);
+
+    // Rejected: the page still says it, so it is read and proposed again.
+    await updateProposalStatus(first!.id, 'REJECTED', REVIEWER, 'not now');
+    const afterReject = await crawl([campId]);
+    expect(modelRequests()).toBe(2);
+    expect(afterReject.entry(campId).status).toBe('ok');
+    const [, second] = await proposalsFor(campId);
+    expect(second!.status).toBe('PENDING');
+    expect(Object.keys(second!.proposedChanges).sort()).toEqual(['ageGroups', 'applicationUrl', 'pricing', 'schedules']);
+
+    // Approved: the stored data changed after the last crawl, so the page is
+    // compared against it once more. Nothing differs now, and that settles it.
+    await approveAll(second!);
+    const afterApprove = await crawl([campId]);
+    expect(modelRequests()).toBe(3);
+    expect(afterApprove.entry(campId).status).toBe('no_changes');
+    expect(afterApprove.entry(campId).skipped).toBeUndefined();
+    const settled = await crawl([campId]);
+    expect(modelRequests()).toBe(3);
+    expect(settled.entry(campId).skipped).toBe('content_unchanged');
+    expect(await proposalsFor(campId)).toHaveLength(2);
+  });
+});
+
+describe('batch accept runs the same checks as a single approve', () => {
+  async function twoCorroboratingProposals(campId: string) {
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    await crawl([campId], { forceExtract: true });
+    const proposals = await proposalsFor(campId);
+    expect(proposals).toHaveLength(2);
+    return proposals;
+  }
+  const batch = async (campId: string, proposalId: string, field: string) =>
+    applyBatchAcceptedClaims(getTestPool(), {
+      selections: [{ proposalId, field }],
+      actor: REVIEWER,
+      historyByCamp: await getCampProposalHistoryBatch(getTestPool(), [campId]),
+    });
+
+  it('applies a corroborated field whose excerpt cites the prepared text', async () => {
+    const campId = await seedCamp();
+    const [, second] = await twoCorroboratingProposals(campId);
+    const result = await batch(campId, second!.id, 'applicationUrl');
+    expect(result.outcomes).toEqual([{ proposalId: second!.id, field: 'applicationUrl', status: 'applied' }]);
+    expect((await campRow(campId)).applicationUrl).toBe('https://register.pineridge.example/apply');
+  });
+
+  it('refuses an inexact citation and writes nothing', async () => {
+    const campId = await seedCamp();
+    const [, second] = await twoCorroboratingProposals(campId);
+    await getTestPool().query(
+      `UPDATE "CampChangeProposal" SET "proposedChanges" = jsonb_set("proposedChanges", '{applicationUrl,excerpt}', $2::jsonb) WHERE id = $1`,
+      [second!.id, JSON.stringify('[Enroll Today?](https://register.pineridge.example/apply)')],
+    );
+    const result = await batch(campId, second!.id, 'applicationUrl');
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes[0]!.status).toBe('error');
+    expect(result.outcomes[0]!.message).toContain('does not match the stored source text exactly');
+    expect((await campRow(campId)).applicationUrl).toBeNull();
+  });
+
+  it('refuses a value outside the allowed set with the same message as a single approve', async () => {
+    const campId = await seedCamp();
+    const changes = { registrationStatus: { old: 'OPEN', new: 'SOLD_OUT', mode: 'update' as const, confidence: 1, sourceUrl: CAMP_URL } };
+    const make = async () => createProposal({
+      campId, crawlRunId: await seedRun(), sourceUrl: CAMP_URL, rawExtraction: { via: 'traverse-recrawl' },
+      proposedChanges: changes, overallConfidence: 1, extractionModel: 'traverse:gpt-6.1-sol',
+    });
+    await make();
+    const second = await make();
+    const result = await batch(campId, second, 'registrationStatus');
+    expect(result.outcomes[0]!.status).toBe('error');
+    expect(result.outcomes[0]!.message).toContain('"registrationStatus" has value(s) that are not allowed: "SOLD_OUT"');
+    expect((await campRow(campId)).registrationStatus).toBe('OPEN');
+  });
+});
+
+describe('a database that has not had the crawl-state migration', () => {
+  it('fails the crawl with an instruction and a FAILED run, from the pipeline and from the cron route', async () => {
+    const campId = await seedCamp();
+    const pool = getTestPool();
+    await pool.query(`ALTER TABLE "Camp" DROP COLUMN "lastCrawlAttemptAt", DROP COLUMN "lastExtractedContentDigest"`);
+
+    const thrown = await runCrawlPipeline({ triggeredBy: 'test:real-crawl', trigger: 'MANUAL', campIds: [campId] })
+      .then(() => null, (error: unknown) => error);
+    expect(thrown).toBeInstanceOf(CrawlSchemaOutdatedError);
+    expect((thrown as Error).message).toContain('npm run db:migrate');
+
+    process.env.CRON_SECRET = 'test-secret';
+    await pool.query(`INSERT INTO "CrawlSchedule" (id, enabled, priority, "batchSize") VALUES ('default', true, 'stale', 1)
+                      ON CONFLICT (id) DO UPDATE SET enabled = true, priority = 'stale', "batchSize" = 1`);
+    const response = await cronRoute(new Request('http://localhost/api/cron/crawl', { headers: { authorization: 'Bearer test-secret' } }));
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toContain('migration 022_camp_crawl_attempt_and_content_digest');
+
+    const runs = await pool.query(`SELECT status, trigger, "errorLog" FROM "CrawlRun" ORDER BY "startedAt"`);
+    expect(runs.rows.map((row) => [row.trigger, row.status])).toEqual([['MANUAL', 'FAILED'], ['SCHEDULED', 'FAILED']]);
+    expect(runs.rows[0].errorLog[0].error).toContain('npm run db:migrate');
   });
 });

@@ -96,8 +96,8 @@ async function seedCamp(opts: { ageGroups?: boolean } = {}): Promise<string> {
   const campId = camp.rows[0]!.id;
   await pool.query(
     `INSERT INTO "CampSchedule" (id, "campId", label, "startDate", "endDate", "startTime", "endTime", "earlyDropOff")
-     VALUES ('live-week-1', $1, 'Week 1: Nature', '2027-06-07', '2027-06-11', '09:00', '15:00', NULL),
-            ('live-week-2', $1, 'Week 2: Rivers', '2027-06-14', '2027-06-18', '09:00', '15:00', '08:00')`,
+     VALUES ('live-week-1', $1, 'Week 1: Nature 2027', '2027-06-07', '2027-06-11', '09:00', '15:00', NULL),
+            ('live-week-2', $1, 'Week 2: Rivers 2027', '2027-06-14', '2027-06-18', '09:00', '15:00', '08:00')`,
     [campId],
   );
   await pool.query(
@@ -149,10 +149,10 @@ async function approveAll(proposal: CampChangeProposal) {
 
 const SESSION_SPECS: StubProposalSpec[] = [
   { fieldPath: 'items[0].name', candidateValue: CAMP_NAME, needle: CAMP_NAME },
-  { fieldPath: 'items[0].schedules[0].startDate', candidateValue: '2027-06-07', needle: 'Week 1: Nature' },
-  { fieldPath: 'items[0].schedules[0].endDate', candidateValue: '2027-06-11', needle: 'Week 1: Nature' },
-  { fieldPath: 'items[0].schedules[1].startDate', candidateValue: '2027-06-21', needle: 'Week 3: Peaks' },
-  { fieldPath: 'items[0].schedules[1].endDate', candidateValue: '2027-06-25', needle: 'Week 3: Peaks' },
+  { fieldPath: 'items[0].schedules[0].startDate', candidateValue: '2027-06-07', needle: 'Week 1: Nature 2027' },
+  { fieldPath: 'items[0].schedules[0].endDate', candidateValue: '2027-06-11', needle: 'Week 1: Nature 2027' },
+  { fieldPath: 'items[0].schedules[1].startDate', candidateValue: '2027-06-21', needle: 'Week 3: Peaks 2027' },
+  { fieldPath: 'items[0].schedules[1].endDate', candidateValue: '2027-06-25', needle: 'Week 3: Peaks 2027' },
 ];
 
 const previousChunkSize = process.env.TRAVERSE_CHUNK_SIZE;
@@ -173,7 +173,7 @@ describe('list updates wait for a complete run, end to end', () => {
     failLaterChunks = true;
     const campId = await seedCamp();
     specs = [...SESSION_SPECS, { fieldPath: 'items[0].city', candidateValue: 'Denver', needle: 'Denver, Colorado' }];
-    html = page(['Denver, Colorado', 'Week 1: Nature June 7-11', 'Week 3: Peaks June 21-25']);
+    html = page(['Denver, Colorado', 'Week 1: Nature 2027 June 7-11', 'Week 3: Peaks 2027 June 21-25']);
 
     const { entry, proposalIds } = await crawl(campId);
     expect(entry.incomplete?.reason).toBe('provider-failure');
@@ -218,7 +218,7 @@ describe('list updates wait for a complete run, end to end', () => {
     failLaterChunks = true;
     const campId = await seedCamp();
     specs = SESSION_SPECS;
-    html = page(['Week 1: Nature June 7-11', 'Week 3: Peaks June 21-25']);
+    html = page(['Week 1: Nature 2027 June 7-11', 'Week 3: Peaks 2027 June 21-25']);
 
     const { entry, proposalIds } = await crawl(campId);
     expect(entry.incomplete).toBeUndefined();
@@ -235,7 +235,7 @@ describe('list updates wait for a complete run, end to end', () => {
       `SELECT id, label, "archivedAt" IS NOT NULL AS archived FROM "CampSchedule" WHERE "campId" = $1 ORDER BY "startDate"`, [campId],
     );
     expect(rows.rows.map((row) => [row.label, row.archived])).toEqual([
-      ['Week 1: Nature', false], ['Week 2: Rivers', true], ['Week 3: Peaks', false],
+      ['Week 1: Nature 2027', false], ['Week 2: Rivers 2027', true], ['Week 3: Peaks 2027', false],
     ]);
     expect(rows.rows[0]!.id).toBe('live-week-1');
   });

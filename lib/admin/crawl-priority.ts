@@ -27,6 +27,7 @@
  * (one shared query, not a second one re-fetched for display fields).
  */
 import { getPool } from '@/lib/db';
+import { asCrawlSchemaError } from './crawl-repository';
 
 /** Base-priority vocabulary this resolver's SQL branches on. Does NOT
  * include `'specific'`/`'ids'`/`'campId'`-style lookups — those stay
@@ -131,7 +132,7 @@ export async function resolveCrawlCandidates(
     LIMIT $${params.length + 1}
   `,
     [...params, opts.limit]
-  );
+  ).catch((err: unknown) => { throw asCrawlSchemaError(err); });
 
   return result.rows;
 }

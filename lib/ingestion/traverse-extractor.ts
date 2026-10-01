@@ -276,6 +276,7 @@ export function buildTraverseItemProposalRecords(
         warnings: [...(result.warnings ?? []), ...item.warnings],
         ...(result.preparedArtifact ? { preparedArtifact: result.preparedArtifact } : {}),
         ...(Object.keys(item.refusedValues).length > 0 ? { refusedValues: item.refusedValues } : {}),
+        ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
         ...(incomplete ? { incomplete } : {}),
         ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
       },

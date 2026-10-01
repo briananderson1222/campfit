@@ -21,12 +21,57 @@ export async function getCampCrawlTarget(campId: string): Promise<{ id: string; 
   return rows[0];
 }
 
-export async function skipPendingCampProposals(campId: string): Promise<void> {
-  await getPool().query(
+/**
+ * Mark a camp's OTHER pending proposals SKIPPED once `replacementId` exists.
+ * A pending proposal is only ever superseded by a proposal that was actually
+ * written; a recrawl that produces nothing leaves it for the reviewer.
+ */
+export async function supersedePendingCampProposals(campId: string, replacementId: string): Promise<number> {
+  const result = await getPool().query(
     `UPDATE "CampChangeProposal" SET status = 'SKIPPED'
-     WHERE "campId" = $1 AND status = 'PENDING'`,
-    [campId]
+     WHERE "campId" = $1 AND status = 'PENDING' AND id <> $2`,
+    [campId, replacementId]
   );
+  return result.rowCount ?? 0;
+}
+
+/** A crawl query hit a column that only exists after a migration this database has not had. */
+export class CrawlSchemaOutdatedError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'The database is missing crawl-state columns (migration 022_camp_crawl_attempt_and_content_digest). '
+      + 'Run `npm run db:migrate` against this database, then crawl again.',
+      { cause },
+    );
+    this.name = 'CrawlSchemaOutdatedError';
+  }
+
+  /** Set once a FAILED run was written for this error, so it is not recorded twice. */
+  recorded = false;
+}
+
+/** Postgres `undefined_column`. Rethrown as {@link CrawlSchemaOutdatedError} so the operator is told what to do. */
+export function asCrawlSchemaError(err: unknown): unknown {
+  return (err as { code?: unknown } | null)?.code === '42703' ? new CrawlSchemaOutdatedError(err) : err;
+}
+
+/**
+ * Leave a FAILED run on record for a crawl that could not even start, so the
+ * failure shows in the crawl monitor instead of only in a server log.
+ * Best-effort: never throws.
+ */
+export async function recordUnstartedCrawlFailure(opts: {
+  triggeredBy: string;
+  trigger: 'MANUAL' | 'SCHEDULED';
+  campIds?: string[];
+  error: string;
+}): Promise<void> {
+  try {
+    const run = await createCrawlRun({ triggeredBy: opts.triggeredBy, trigger: opts.trigger, campIds: opts.campIds, totalCamps: 0 });
+    await completeCrawlRun(run.id, 'FAILED', [{ campId: 'run', url: '', error: opts.error }]);
+  } catch (err) {
+    console.error(`[crawl] could not record the failed start: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function getLatestCrawlRunsForAdmin(): Promise<CrawlRun[]> {
@@ -187,8 +232,11 @@ export const STALE_CRAWL_RUN_MS = 30 * 60 * 1000;
 /**
  * Mark RUNNING runs with no progress for `staleAfterMs` as FAILED. Progress is
  * the newest camp-log entry, or the start time when nothing was logged. Called
- * when a new run starts, so no scheduler or background job is needed. A run
- * that was only slow and later finishes overwrites this with its real status.
+ * when a new run starts, so no scheduler or background job is needed.
+ *
+ * A late completion wins: a run that was only slow and later finishes
+ * overwrites FAILED with the status it actually reached, because that status
+ * is the true one. The note stays in its error log.
  */
 export async function failStaleCrawlRuns(staleAfterMs: number = STALE_CRAWL_RUN_MS): Promise<string[]> {
   const pool = getPool();

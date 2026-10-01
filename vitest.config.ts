@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
@@ -14,6 +15,10 @@ export default defineConfig({
     // Running files in parallel workers would let one file's TRUNCATE/seed clobber
     // another's rows mid-run, so integration files must execute serially.
     fileParallelism: false,
+    // Several suites write snapshots through the filesystem store and delete
+    // its root afterwards. Keep that away from a developer's real local
+    // snapshots under .kontourai/.
+    env: { CAMPFIT_SNAPSHOT_STORE_ROOT: path.join(os.tmpdir(), "campfit-test-snapshots") },
   },
   resolve: {
     alias: {

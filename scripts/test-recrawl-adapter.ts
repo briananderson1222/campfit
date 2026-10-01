@@ -178,9 +178,9 @@ function makeValidatorFetchOptions(
 }
 
 /** A provider whose `extract()` counts calls then throws — proves, independently of telemetry, that extraction never runs on a 304. */
-function makeThrowingProvider(counter: { calls: number }): ExtractionProvider {
+function makeThrowingProvider(counter: { calls: number }, name = "throwing-on-304"): ExtractionProvider {
   return {
-    name: "throwing-on-304",
+    name,
     async extract(): Promise<ProviderExtractionOutput> {
       counter.calls++;
       throw new Error("extract() must never be called on a 304 (campfit#77 AC1)");
@@ -1080,7 +1080,9 @@ async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
     websiteUrl: "https://avid4.com/day-camps/colorado/",
     campName: "Mountain Explorers Day Camp",
     current: makeCamp({ id: "camp-304", city: "" }),
-    provider: makeThrowingProvider(providerCounter),
+    // Same provider identity as the seed: the fingerprint covers it, so a
+    // different model would (correctly) be asked to read the page again.
+    provider: makeThrowingProvider(providerCounter, "stub-extraction-provider:stub-304-seed"),
     store,
     mode: "live-with-capture",
     fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "304-when-validated", probe),

@@ -58,6 +58,7 @@ import { NextResponse } from 'next/server';
 import { runCrawlPipeline } from '@/lib/ingestion/crawl-pipeline';
 import { getSchedule } from '@/lib/admin/schedule-repository';
 import { resolveCrawlCandidates } from '@/lib/admin/crawl-priority';
+import { CrawlSchemaOutdatedError, recordUnstartedCrawlFailure } from '@/lib/admin/crawl-repository';
 
 export const maxDuration = 300; // same ceiling as the five existing re-crawl routes
 
@@ -135,6 +136,12 @@ export async function GET(request: Request) {
     });
   } catch (err) {
     console.error('[cron/crawl] scheduled crawl failed:', err);
+    // Candidate selection failed before any run existed. Leave a FAILED run
+    // so the missing migration shows in the crawl monitor. (The pipeline
+    // records its own when it is the one that hits this.)
+    if (err instanceof CrawlSchemaOutdatedError && !err.recorded) {
+      await recordUnstartedCrawlFailure({ triggeredBy: 'cron:scheduled-crawl', trigger: 'SCHEDULED', error: err.message });
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Scheduled crawl failed' },
       { status: 500 },

@@ -90,6 +90,11 @@ export function refusedValuesNotice(entry: { field: string; values: readonly str
   return `${listFieldLabel(entry.field).replace(/^./, (c) => c.toUpperCase())}: the extraction also returned ${shown}${more}, which ${verb} not valid for this field and ${verb} not proposed.`;
 }
 
+/** Entries the extraction left out of a list because an entry with the same values was kept (`rawExtraction.droppedEntries`). */
+export function storedDroppedEntries(rawExtraction: Record<string, unknown> | null | undefined): string[] {
+  return storedFieldList(rawExtraction?.droppedEntries);
+}
+
 /** Programs a multi-program page listed, when the extraction could not separate them into items. */
 export function storedMultiProgram(rawExtraction: Record<string, unknown> | null | undefined): { names: string[]; withheldFields: string[] } | null {
   const stored = rawExtraction?.multiProgram;

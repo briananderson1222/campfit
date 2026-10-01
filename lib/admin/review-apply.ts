@@ -127,6 +127,9 @@ function assertApplicableValues(changes: ProposedChanges, fields: readonly strin
     if (invalid.length > 0) {
       failing.push(field);
       problems.push(`"${field}" has value(s) that are not allowed: ${invalid.map((value) => `"${value}"`).join(', ')}`);
+    } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field) && Array.isArray(diff.new) && diff.new.length === 0) {
+      failing.push(field);
+      problems.push(`"${field}" would be emptied, which leaves the camp without one`);
     } else if (!hasApplyPath(field, diff)) {
       failing.push(field);
       problems.push(`"${field}" has no way to be applied in the proposed shape`);
@@ -950,6 +953,11 @@ async function applyScalarField(
  * checked against the allowed set by {@link assertApplicableValues} before the
  * transaction wrote anything.
  */
+const ENUM_ARRAY_TWIN: Record<string, { column: string; type: string }> = {
+  campTypes: { column: 'campType', type: 'CampType' },
+  categories: { column: 'category', type: 'CampCategory' },
+};
+
 async function applyEnumArrayField(
   client: PoolClient,
   proposal: CampChangeProposal,
@@ -963,8 +971,16 @@ async function applyEnumArrayField(
     sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
     approvedAt: reviewedAt,
   };
+  // Each list has a single-value twin column (`campType`, `category`) that
+  // other code still reads. It must stay a member of the list: kept when it
+  // still is one, otherwise moved to the list's first member.
+  const twin = ENUM_ARRAY_TWIN[field]!;
   const result = await client.query(
-    `UPDATE "Camp" SET "${field}" = $1::text[], "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
+    `UPDATE "Camp"
+        SET "${field}" = $1::text[],
+            "${twin.column}" = CASE WHEN "${twin.column}"::text = ANY($1::text[]) THEN "${twin.column}" ELSE ($1::text[])[1]::"${twin.type}" END,
+            "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb
+      WHERE id = $3`,
     [diff.new as string[], JSON.stringify({ [field]: fieldSource }), proposal.campId]
   );
   if (result.rowCount !== 1) throw new Error(`Applying "${field}" updated ${result.rowCount ?? 0} camp rows, expected 1.`);

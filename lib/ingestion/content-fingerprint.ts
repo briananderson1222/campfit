@@ -10,8 +10,8 @@
  * The extraction never reads those bytes. It reads the prepared text (scripts
  * and page chrome removed), and that text is stable across fetches of an
  * unchanged page. The fingerprint is the SHA-256 of that prepared text together
- * with the extraction request (schema and hints), so a changed schema or hint
- * re-extracts an unchanged page once.
+ * with the extraction request (schema, hints and provider identity), so a
+ * changed schema, hint or model re-extracts an unchanged page once.
  *
  * One token in the prepared text does change per request and is removed before
  * hashing: Cloudflare's email obfuscation rewrites every `mailto:` link to
@@ -34,13 +34,19 @@ export function normalizePreparedTextForFingerprint(preparedText: string): strin
 export interface ContentFingerprintRequest {
   readonly targetSchema: readonly TargetFieldSchema[];
   readonly fieldHints?: Readonly<Record<string, string>>;
+  /**
+   * Identity of the extraction provider (its `name`, which carries the runtime
+   * profile and model). A different model can read the same text differently,
+   * so changing it re-extracts an unchanged page once.
+   */
+  readonly provider?: string;
 }
 
 /** Fingerprint of prepared text for one extraction request. `sha256:<hex>`. */
 export function fingerprintPreparedText(preparedText: string, request: ContentFingerprintRequest): string {
   const hints = Object.entries(request.fieldHints ?? {}).sort(([left], [right]) => left.localeCompare(right));
   const hash = createHash("sha256");
-  hash.update(JSON.stringify({ v: FINGERPRINT_VERSION, schema: request.targetSchema, hints }));
+  hash.update(JSON.stringify({ v: FINGERPRINT_VERSION, schema: request.targetSchema, hints, provider: request.provider ?? null }));
   hash.update("\0");
   hash.update(normalizePreparedTextForFingerprint(preparedText), "utf8");
   return `sha256:${hash.digest("hex")}`;

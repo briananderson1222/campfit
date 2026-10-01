@@ -20,12 +20,8 @@ import type { SnapshotStore } from "@kontourai/traverse/fetch";
 import { createSupabaseSnapshotStore } from "@/lib/ingestion/supabase-snapshot-store";
 
 /** Root dir for captured snapshots — gitignored under `.kontourai/`. */
-export const SNAPSHOT_STORE_ROOT = path.join(
-  process.cwd(),
-  ".kontourai",
-  "campfit",
-  "snapshots"
-);
+export const SNAPSHOT_STORE_ROOT = process.env.CAMPFIT_SNAPSHOT_STORE_ROOT
+  || path.join(process.cwd(), ".kontourai", "campfit", "snapshots");
 
 /**
  * Honest, contactable fetch identity for CampFit's traverse fetch path. Robots

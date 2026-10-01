@@ -111,10 +111,12 @@ function isIsoCalendarDate(value: unknown): boolean {
  * where such a value is refused: it is never part of a proposed change, and it
  * is reported (see `AssembledItem.refusedValues`).
  *
+ * A date must also have its year in the excerpt it cites.
+ *
  * An enum is matched ignoring case and surrounding space and returned in its
  * declared spelling ("Instagram" is `instagram`); nothing looser than that.
  */
-function screenValue(relPath: string, value: unknown): { ok: true; value: unknown } | { ok: false; why: string } {
+function screenValue(relPath: string, value: unknown, excerpt: string): { ok: true; value: unknown } | { ok: false; why: string } {
   const field = SCHEMA_BY_REL_PATH.get(relPath);
   if (!field) return { ok: true, value };
   switch (field.type) {
@@ -127,7 +129,13 @@ function screenValue(relPath: string, value: unknown): { ok: true; value: unknow
         : { ok: true, value: canonical };
     }
     case "date":
-      return isIsoCalendarDate(value) ? { ok: true, value } : { ok: false, why: "not a full calendar date (YYYY-MM-DD)" };
+      if (!isIsoCalendarDate(value)) return { ok: false, why: "not a full calendar date (YYYY-MM-DD)" };
+      // A provider asked for YYYY-MM-DD will supply a year the text does not
+      // state ("December 21" becomes this year, or next). The cited excerpt
+      // must carry the year, or the date is a guess.
+      return excerpt.includes((value as string).slice(0, 4))
+        ? { ok: true, value }
+        : { ok: false, why: "its year is not stated in the cited text" };
     case "number":
       return typeof value === "number" && Number.isFinite(value) ? { ok: true, value } : { ok: false, why: "not a number" };
     case "boolean":
@@ -186,6 +194,13 @@ export interface AssembledItem {
    */
   refusedValues: Record<string, string[]>;
   /**
+   * Entries left out of a proposed list or object because another entry with
+   * the same values was kept: a session on the same dates under another label,
+   * a second URL for the same social platform. One sentence each, for the
+   * review page. Exact repeats are not listed.
+   */
+  droppedEntries: string[];
+  /**
    * Present when this one item carries more than one distinct `name`: the
    * page lists several programs and the provider did not separate them (the
    * structured-output schema only admits un-indexed paths, so no `items[N]`
@@ -212,7 +227,7 @@ export interface AssembledItem {
 }
 
 function toFieldProposal(p: ExtractionProposal, relPath: string): FieldProposal {
-  const screened = screenValue(relPath, p.candidateValue);
+  const screened = screenValue(relPath, p.candidateValue, p.provenance.excerpt);
   return {
     candidateValue: screened.ok ? screened.value : p.candidateValue,
     ...(screened.ok ? {} : { refused: screened.why }),
@@ -452,16 +467,28 @@ export function multiProgramWarning(multiProgram: { names: readonly string[]; wi
 }
 
 /** Keep the first row for each key; report how many repeats were dropped. */
-function dedupeRows<T>(rows: readonly T[], key: (row: T) => string): { rows: T[]; dropped: number } {
-  const seen = new Set<string>();
+function dedupeRows<T extends { label: string }>(
+  rows: readonly T[],
+  key: (row: T) => string,
+): { rows: T[]; dropped: number; droppedLabels: { kept: string; dropped: string }[] } {
+  const seen = new Map<string, T>();
   const kept: T[] = [];
+  const droppedLabels: { kept: string; dropped: string }[] = [];
+  let dropped = 0;
   for (const row of rows) {
     const k = key(row);
-    if (seen.has(k)) continue;
-    seen.add(k);
+    const first = seen.get(k);
+    if (first) {
+      dropped++;
+      // Same values under a different label is a row a reviewer may want
+      // (another program's session on the same dates), so it is reported.
+      if (first.label !== row.label) droppedLabels.push({ kept: first.label, dropped: row.label });
+      continue;
+    }
+    seen.set(k, row);
     kept.push(row);
   }
-  return { rows: kept, dropped: rows.length - kept.length };
+  return { rows: kept, dropped, droppedLabels };
 }
 
 function parsePricingUnit(fp: FieldProposal | undefined): PricingUnit | null {
@@ -515,6 +542,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     const operatorWarnings: string[] = [];
     const refusedValues: Record<string, string[]> = {};
     const refusalWarnings: string[] = [];
+    const droppedEntries: string[] = [];
     /**
      * Record every refused proposal under `field`, with one warning per
      * distinct reason. `warn: false` for a list family whose dropped rows are
@@ -638,8 +666,11 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       complete.push({ amount, unit, label, locator, ...withConfidence(rowConfidence(row)) });
     }
     const pricingRows = dedupeRows(complete, (row) => JSON.stringify([row.amount, row.unit, row.label]));
-    for (const [family, dropped] of [["ageGroups", ageGroupRows.dropped], ["schedules", scheduleRows.dropped], ["pricing", pricingRows.dropped]] as const) {
-      if (dropped > 0) warnings.push(`${family}: ${dropped} repeated entr${dropped === 1 ? "y" : "ies"} dropped`);
+    for (const [family, result] of [["ageGroups", ageGroupRows], ["schedules", scheduleRows], ["pricing", pricingRows]] as const) {
+      if (result.dropped > 0) warnings.push(`${family}: ${result.dropped} repeated entr${result.dropped === 1 ? "y" : "ies"} dropped`);
+      for (const pair of result.droppedLabels) {
+        droppedEntries.push(`${family}: "${pair.dropped}" was left out because it has the same values as "${pair.kept}"`);
+      }
     }
     if (droppedPricing > 0 && pricingRows.rows.length > 0) {
       operatorWarnings.push(
@@ -655,8 +686,18 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     for (const enumField of ENUM_ARRAY_SCHEMA_PATHS) {
       const fieldEntries = entries.filter((e) => e.relPath === `${enumField}[]`);
       const result = assembleEnumArrayEntries(fieldEntries);
-      enumArrayResults[enumField] = result.rows;
       refuse(enumField, result.refused);
+      // The list replaces the stored one when approved. With any member
+      // refused, the remainder is not the page's list, so nothing is proposed.
+      if (result.refused.length > 0) {
+        if (result.rows.length > 0) {
+          operatorWarnings.push(
+            `${enumField} change withheld: ${result.rows.map((row) => `"${row.value}"`).join(", ")} not proposed because other value(s) for this list were not valid — approving a partial list would replace the stored one`
+          );
+        }
+      } else {
+        enumArrayResults[enumField] = result.rows;
+      }
       warnings.push(...result.warnings);
     }
 
@@ -679,7 +720,12 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
         if (row.size > 0) warnings.push(`socialLinks entry "${rowExcerpt(row)}" dropped: it needs both a platform and a url`);
         continue;
       }
-      if (platform in socialLinks) continue;
+      if (platform in socialLinks) {
+        if (socialLinks[platform] !== url.candidateValue.trim()) {
+          droppedEntries.push(`socialLinks: a second ${platform} link (${url.candidateValue.trim()}) was left out; ${socialLinks[platform]} was kept`);
+        }
+        continue;
+      }
       socialLinks[platform] = url.candidateValue.trim();
       socialProposals.push(url);
     }
@@ -712,6 +758,7 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
       warnings,
       operatorWarnings,
       refusedValues,
+      droppedEntries,
       ...(multiProgram ? { multiProgram } : {}),
     });
   }

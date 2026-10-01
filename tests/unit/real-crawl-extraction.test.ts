@@ -131,15 +131,49 @@ describe("values that do not fit their field's declared type", () => {
     expect(item!.refusedValues).toEqual({
       registrationStatus: ["SOLD_OUT"],
       registrationOpenDate: ["January 14"],
-      schedules: ["December 21", "December 22"],
+      schedules: ["December 21", "2026-12-22"],
       campTypes: ["DAY_CAMP", "DAY"],
     });
-    // "December 21" has no year: not a session date. The list change waits.
+    // "December 21" has no year: not a session date. "2026-12-22" has one, but
+    // the model supplied it: the excerpt says only "December 22". Neither is
+    // a session date the page states. The list change waits.
     expect(item!.schedules).toEqual([]);
     expect(item!.operatorWarnings).toContain(
       '2 session entries dropped (e.g. "Too Cold to Hold: December 21", "Too Hot to Handle: December 22"): no full calendar date (YYYY-MM-DD) was extracted — a date the page does not state in full is not emitted',
     );
     expect(assembledItemToDiffInputs(item!).extracted.campTypes).toBeUndefined();
     expect(assembledItemToDiffInputs(item!).extracted.schedules).toBeUndefined();
+  });
+});
+
+describe("a list is proposed whole or not at all", () => {
+  it("withholds an enum list when any member is invalid, instead of proposing the valid remainder", async () => {
+    const recorded = loadModelOutput();
+    const { result } = await extractListing([...recorded.programs, ...recorded.mixedEnumList]);
+    const [item] = assembleItems(result.proposals);
+    // SLEEPAWAY alone would REPLACE the stored list when approved.
+    expect(item!.campTypes).toEqual([]);
+    expect(item!.refusedValues.campTypes).toEqual(["DAY"]);
+    expect(item!.operatorWarnings).toContain(
+      'campTypes change withheld: "SLEEPAWAY" not proposed because other value(s) for this list were not valid — approving a partial list would replace the stored one',
+    );
+    expect(assembledItemToDiffInputs(item!).extracted.campTypes).toBeUndefined();
+  });
+
+  it("names the entries it left out because another entry had the same values", async () => {
+    const recorded = loadModelOutput();
+    const { result } = await extractListing([...recorded.programs, ...recorded.invalidValues, ...recorded.duplicates]);
+    const [item] = assembleItems(result.proposals);
+    expect((item!.scalars.socialLinks?.candidateValue as Record<string, string>).instagram).toBe("https://www.instagram.com/pineridgecamps/");
+    expect(item!.droppedEntries).toContain(
+      "socialLinks: a second instagram link (https://www.instagram.com/pineridgeranch/) was left out; https://www.instagram.com/pineridgecamps/ was kept",
+    );
+
+    const clean = assembleItems((await extractListing(recorded.programs)).result.proposals)[0]!;
+    // Two programs run a session on the same dates under different wording.
+    // An identical repeat ("**Second Session:** July 10th - Aug. 9th, 2027" twice) is not listed.
+    expect(clean.droppedEntries).toEqual([
+      'schedules: "**First Session:** June 6th - July 6th, 2027" was left out because it has the same values as "**First Session:** June 6 - July 6th, 2027"',
+    ]);
   });
 });

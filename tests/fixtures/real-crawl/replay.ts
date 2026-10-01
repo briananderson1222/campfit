@@ -17,6 +17,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export interface RecordedModelOutput {
   programs: unknown[];
   invalidValues: unknown[];
+  duplicates: unknown[];
+  mixedEnumList: unknown[];
 }
 
 export function loadModelOutput(): RecordedModelOutput {

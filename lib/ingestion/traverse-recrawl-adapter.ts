@@ -522,6 +522,7 @@ export async function runTraverseRecrawlForCamp(
       ...(fetchResult.modelSource ? { modelSource: fetchResult.modelSource } : {}),
       ...(coverage ? { coverage } : {}),
       ...(Object.keys(item.refusedValues).length > 0 ? { refusedValues: item.refusedValues } : {}),
+      ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
       ...(item.multiProgram ? { multiProgram: item.multiProgram } : {}),
     },
     ...shared,
