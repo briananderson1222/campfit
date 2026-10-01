@@ -168,12 +168,14 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
   // A Dispatch runtime's own id names no model, and the provider name is the
   // identity recorded on proposals and hashed into the content fingerprint.
   // Carry the configured profiles and models in it, so changing any of them
-  // is a different extractor.
+  // is a different extractor. Traverse refuses a provider name outside
+  // `[A-Za-z0-9._:@/+~-]` before any model call, so the list is joined with
+  // `/` and `+` (brackets and commas made every Dispatch crawl fail).
   const provider = createRelayExtractionProvider({
     runtime,
     maxTokens,
     ...(dispatched
-      ? { name: `relay-extraction-provider:${runtime.id}[${profileSpecs.map((spec) => `${spec.profile}:${spec.model}`).join(",")}]` }
+      ? { name: `relay-extraction-provider:${runtime.id}/${profileSpecs.map((spec) => `${spec.profile}:${spec.model}`).join("+")}` }
       : {}),
   });
 
