@@ -399,6 +399,13 @@ describe('a crawl advances the crawl clock, not the verification clock', () => {
     // Same score otherwise: the camp that has waited longest is first.
     expect((await resolveCrawlCandidates({ priority: 'stale', limit: 10 })).map((c) => c.id)).toEqual([waiting, crawled]);
     expect((await resolveCrawlCandidates({ priority: 'stale', limit: 1 })).map((c) => c.id)).toEqual([waiting]);
+
+    // Once both were crawled today, the one crawled longer ago goes first.
+    // A reviewer verifying it in between changes nothing: the queue keys on
+    // the crawl clock, not on "lastVerifiedAt".
+    await crawl([waiting]);
+    await getTestPool().query(`UPDATE "Camp" SET "lastVerifiedAt" = now() WHERE id = $1`, [crawled]);
+    expect((await resolveCrawlCandidates({ priority: 'stale', limit: 10 })).map((c) => c.id)).toEqual([crawled, waiting]);
   });
 
   it('a failed crawl records the attempt only, so a failing camp rotates behind an untried one', async () => {
