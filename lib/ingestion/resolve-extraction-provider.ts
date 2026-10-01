@@ -94,7 +94,7 @@ export interface ResolvedExtractionProvider {
   provider: ExtractionProvider;
   /** The datum ref that was resolved (TRAVERSE_ROLE or "extraction-default"). */
   ref: string;
-  /** Provider id datum resolved to (e.g. "zai", "anthropic"). */
+  /** Provider id datum resolved to (e.g. "zai", "anthropic"), or the first runtime profile's name when no API-key provider is in use. */
   datumProvider: string;
   /** Model id actually passed to the SDK (after TRAVERSE_MODEL override, if any). */
   model: string;
@@ -119,10 +119,6 @@ function persistDispatchReceipt(receiptPath: string, receipt: DispatchReceipt): 
  */
 export function resolveExtractionProvider(): ResolvedExtractionProvider {
   const ref = process.env.TRAVERSE_ROLE || "extraction-default";
-  const resolved = resolve(ref);
-
-  const model = process.env.TRAVERSE_MODEL || resolved.model;
-  const baseUrl = process.env.ANTHROPIC_BASE_URL || resolved.baseUrl;
   const maxTokens = process.env.TRAVERSE_MAX_TOKENS
     ? Number(process.env.TRAVERSE_MAX_TOKENS)
     : DEFAULT_EXTRACTION_MAX_TOKENS;
@@ -131,18 +127,26 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const profileValues = configuredProfiles.length > 0
-    ? configuredProfiles
-    : [`anthropic:${model}`];
+  const configuredSpecs = configuredProfiles.map((value) => parseModelRuntimeProfile(value));
+  // The datum role names the API-key provider behind the `anthropic` profile.
+  // It is resolved only when that profile is in use, so a run whose profiles
+  // are all CLI runtimes needs no API key (and none is read).
+  const usesApiKeyProvider = configuredSpecs.length === 0 || configuredSpecs.some((spec) => spec.profile === "anthropic");
+  const resolved = usesApiKeyProvider ? resolve(ref) : undefined;
+
+  const model = process.env.TRAVERSE_MODEL || resolved?.model || configuredSpecs[0]!.model;
+  const baseUrl = resolved ? process.env.ANTHROPIC_BASE_URL || resolved.baseUrl : undefined;
+  const profileSpecs = configuredSpecs.length > 0
+    ? configuredSpecs
+    : [parseModelRuntimeProfile(`anthropic:${model}`)];
   const allowPromptedStructuredOutput = process.env.TRAVERSE_ALLOW_PROMPTED_STRUCTURED_OUTPUT === "true";
-  const candidates = profileValues.map((value, index) => {
-    const spec = parseModelRuntimeProfile(value);
+  const candidates = profileSpecs.map((spec, index) => {
     const runtime = createModelRuntimeProfile({
       ...spec,
       cwd: process.cwd(),
       allowPromptedStructuredOutput,
       ...(spec.profile === "anthropic"
-        ? { apiKey: resolved.apiKey, maxRetries: DEFAULT_EXTRACTION_MAX_RETRIES, ...(baseUrl ? { baseUrl } : {}) }
+        ? { apiKey: resolved!.apiKey, maxRetries: DEFAULT_EXTRACTION_MAX_RETRIES, ...(baseUrl ? { baseUrl } : {}) }
         : {}),
     });
     return { id: `candidate-${index}`, runtime };
@@ -162,7 +166,7 @@ export function resolveExtractionProvider(): ResolvedExtractionProvider {
       });
   const provider = createRelayExtractionProvider({ runtime, maxTokens });
 
-  return { provider, ref, datumProvider: resolved.provider, model, baseUrl, maxTokens };
+  return { provider, ref, datumProvider: resolved?.provider ?? profileSpecs[0]!.profile, model, baseUrl, maxTokens };
 }
 
 function createCampfitDispatchRuntime(

@@ -70,6 +70,42 @@ export function storedPopulatedListFields(rawExtraction: Record<string, unknown>
   return storedFieldList(rawExtraction?.populatedListFields);
 }
 
+/**
+ * Values the extraction proposed that failed their field's type check (an
+ * enum member outside the allowed set, a date with no year), keyed by field.
+ * They are not part of any proposed change; the review page says so.
+ */
+export function storedRefusedValues(rawExtraction: Record<string, unknown> | null | undefined): Array<{ field: string; values: string[] }> {
+  const stored = rawExtraction?.refusedValues;
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return [];
+  return Object.entries(stored as Record<string, unknown>)
+    .map(([field, values]) => ({ field, values: storedFieldList(values) }))
+    .filter((entry) => entry.values.length > 0);
+}
+
+export function refusedValuesNotice(entry: { field: string; values: readonly string[] }): string {
+  const shown = entry.values.slice(0, 6).map((value) => `"${value}"`).join(', ');
+  const more = entry.values.length > 6 ? ` and ${entry.values.length - 6} more` : '';
+  const verb = entry.values.length === 1 ? 'is' : 'are';
+  return `${listFieldLabel(entry.field).replace(/^./, (c) => c.toUpperCase())}: the extraction also returned ${shown}${more}, which ${verb} not valid for this field and ${verb} not proposed.`;
+}
+
+/** Programs a multi-program page listed, when the extraction could not separate them into items. */
+export function storedMultiProgram(rawExtraction: Record<string, unknown> | null | undefined): { names: string[]; withheldFields: string[] } | null {
+  const stored = rawExtraction?.multiProgram;
+  if (!stored || typeof stored !== 'object') return null;
+  const names = storedFieldList((stored as { names?: unknown }).names);
+  if (names.length < 2) return null;
+  return { names, withheldFields: storedFieldList((stored as { withheldFields?: unknown }).withheldFields) };
+}
+
+export function multiProgramNotice(multiProgram: { names: readonly string[]; withheldFields: readonly string[] }): string {
+  const others = multiProgram.withheldFields.filter((field) => field !== 'name');
+  return `This page lists ${multiProgram.names.length} programs (${multiProgram.names.join(', ')}). The camp's name is not proposed from any one of them`
+    + (others.length > 0 ? `, and neither ${others.length === 1 ? 'is' : 'are'} ${others.join(', ')}, where the programs differ` : '')
+    + '. Sessions, pricing and age groups below combine every program on the page.';
+}
+
 function storedFieldList(fields: unknown): string[] {
   if (!Array.isArray(fields)) return [];
   return fields.filter((field): field is string => typeof field === 'string' && field.length > 0);

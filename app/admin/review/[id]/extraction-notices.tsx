@@ -1,5 +1,9 @@
 import {
+  multiProgramNotice,
   populatedListNotice,
+  refusedValuesNotice,
+  storedMultiProgram,
+  storedRefusedValues,
   storedExtractionIncompleteness,
   storedPopulatedListFields,
   storedWithheldListFields,
@@ -17,8 +21,21 @@ export function ExtractionNotices({ rawExtraction }: { rawExtraction: Record<str
   const incomplete = storedExtractionIncompleteness(rawExtraction);
   const withheld = storedWithheldListFields(rawExtraction);
   const populated = storedPopulatedListFields(rawExtraction);
+  const refused = storedRefusedValues(rawExtraction);
+  const multiProgram = storedMultiProgram(rawExtraction);
   return (
     <>
+      {multiProgram && (
+        <div role="status" data-testid="multi-program-notice" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">Multi-program page</p>
+          <p className="mt-0.5">{multiProgramNotice(multiProgram)}</p>
+        </div>
+      )}
+      {refused.length > 0 && (
+        <ul role="status" data-testid="refused-value-notices" className="mb-4 space-y-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {refused.map((entry) => <li key={`refused-${entry.field}`}>{refusedValuesNotice(entry)}</li>)}
+        </ul>
+      )}
       {incomplete && (
         <div role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-semibold">Incomplete extraction ({incomplete.reason})</p>

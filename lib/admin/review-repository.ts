@@ -344,7 +344,10 @@ export async function getRankedReviewQueue(opts: {
   const campIds = Array.from(new Set(rows.map((row) => row.campId)));
   const historyByCamp = await getCampProposalHistoryBatch(pool, campIds);
 
-  const snapshotResolutions = await resolveProposalSnapshots(rows, { store: opts.snapshotStore });
+  const snapshotResolutions = await resolveProposalSnapshots(
+    rows.map((row) => ({ ...row, preparedArtifact: row.rawExtraction?.preparedArtifact })),
+    { store: opts.snapshotStore },
+  );
   const ranked: RankedProposal[] = rows.map((proposal, index) => {
     const history = historyByCamp.get(proposal.campId) ?? [];
     const fieldCorroboration: Record<string, FieldCorroboration> = {};
@@ -397,12 +400,14 @@ export interface ReviewedShadowProposalRow {
   readonly proposedChanges: ProposedChanges;
   readonly snapshotRef: string | null;
   readonly snapshotBodyHash: string | null;
+  readonly preparedArtifact?: unknown;
 }
 
 /** Read-only source rows for the offline shadow precision report. */
 export async function getReviewedShadowProposals(): Promise<ReviewedShadowProposalRow[]> {
   const { rows } = await getPool().query<ReviewedShadowProposalRow>(
-    `SELECT id, status, "overallConfidence", "proposedChanges", "snapshotRef", "snapshotBodyHash"
+    `SELECT id, status, "overallConfidence", "proposedChanges", "snapshotRef", "snapshotBodyHash",
+            "rawExtraction"->'preparedArtifact' AS "preparedArtifact"
      FROM "CampChangeProposal"
      WHERE status IN ('APPROVED', 'REJECTED')
      ORDER BY "createdAt" ASC, id ASC`,

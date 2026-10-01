@@ -111,14 +111,15 @@ function testItemToProposedChangesExactSerialization() {
         extractor: "fixture",
       },
     },
-    ageGroups: [{ label: "Ages 6-12", minAge: 6, maxAge: 12, confidence: 0.8 }],
-    schedules: [{ label: "June 3-7", startDate: "2026-06-03", endDate: "2026-06-07", confidence: 0.82 }],
-    pricing: [{ label: "$425 per week", amount: 425, unit: "PER_WEEK", confidence: 0.84 }],
+    ageGroups: [{ label: "Ages 6-12", locator: "chars:40-49", minAge: 6, maxAge: 12, confidence: 0.8 }],
+    schedules: [{ label: "June 3-7", locator: "chars:50-58", startDate: "2026-06-03", endDate: "2026-06-07", confidence: 0.82 }],
+    pricing: [{ label: "$425 per week", locator: "chars:60-73", amount: 425, unit: "PER_WEEK", confidence: 0.84 }],
     campTypes: [],
     categories: [],
     allProposals: [],
     warnings: [],
     operatorWarnings: [],
+    refusedValues: {},
   };
 
   const serialized = JSON.stringify(itemToProposedChanges(
@@ -128,7 +129,7 @@ function testItemToProposedChangesExactSerialization() {
   ));
   assert.equal(
     serialized,
-    '{"name":{"old":"Old camp name","new":"New camp name","confidence":0.91,"mode":"update","excerpt":"New camp name","sourceUrl":"https://example.test/first-pass"},"city":{"old":"","new":"Boulder","confidence":0.2,"mode":"populate","excerpt":"Boulder, Colorado","sourceUrl":"https://example.test/first-pass"},"ageGroups":{"old":null,"new":[{"label":"Ages 6-12","minAge":6,"maxAge":12,"minGrade":null,"maxGrade":null}],"confidence":0.8,"mode":"add_items","excerpt":"Ages 6-12","sourceUrl":"https://example.test/first-pass"},"schedules":{"old":null,"new":[{"label":"June 3-7","startDate":"2026-06-03","endDate":"2026-06-07","startTime":null,"endTime":null,"earlyDropOff":null,"latePickup":null}],"confidence":0.82,"mode":"add_items","excerpt":"June 3-7","sourceUrl":"https://example.test/first-pass"},"pricing":{"old":null,"new":[{"label":"$425 per week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"confidence":0.84,"mode":"add_items","excerpt":"$425 per week","sourceUrl":"https://example.test/first-pass"}}',
+    '{"name":{"old":"Old camp name","new":"New camp name","confidence":0.91,"mode":"update","excerpt":"New camp name","locator":"chars:0-13","sourceUrl":"https://example.test/first-pass"},"city":{"old":"","new":"Boulder","confidence":0.2,"mode":"populate","excerpt":"Boulder, Colorado","locator":"chars:20-37","sourceUrl":"https://example.test/first-pass"},"ageGroups":{"old":null,"new":[{"label":"Ages 6-12","minAge":6,"maxAge":12,"minGrade":null,"maxGrade":null}],"confidence":0.8,"mode":"add_items","excerpt":"Ages 6-12","locator":"chars:40-49","sourceUrl":"https://example.test/first-pass"},"schedules":{"old":null,"new":[{"label":"June 3-7","startDate":"2026-06-03","endDate":"2026-06-07","startTime":null,"endTime":null,"earlyDropOff":null,"latePickup":null}],"confidence":0.82,"mode":"add_items","excerpt":"June 3-7","locator":"chars:50-58","sourceUrl":"https://example.test/first-pass"},"pricing":{"old":null,"new":[{"label":"$425 per week","amount":425,"unit":"PER_WEEK","durationWeeks":null,"ageQualifier":null,"discountNotes":null}],"confidence":0.84,"mode":"add_items","excerpt":"$425 per week","locator":"chars:60-73","sourceUrl":"https://example.test/first-pass"}}',
     "first-pass proposal output must retain a changed scalar below the recrawl 0.3 floor and preserve scalar modes, relation defaults, provenance, and key order byte-for-byte"
   );
 
@@ -498,7 +499,11 @@ async function testFieldParityFullFields() {
     { fieldPath: "items[].lunchIncluded", candidateValue: true, needle: "Lunch and snacks are included every day." },
     { fieldPath: "items[].contactEmail", candidateValue: "camps@avid4.com", needle: "camps@avid4.com" },
     { fieldPath: "items[].contactPhone", candidateValue: "(303) 555-0142", needle: "(303) 555-0142" },
-    { fieldPath: "items[].socialLinks", candidateValue: { instagram: "https://instagram.com/avid4adventure" }, needle: "https://instagram.com/avid4adventure" },
+    // socialLinks is extracted as rows of two scalar leaves (the structured
+    // output schema carries scalar values only) and folded back into the one
+    // { platform: url } object the Camp column stores.
+    { fieldPath: "items[].socialLinks[].platform", candidateValue: "instagram", needle: "https://instagram.com/avid4adventure" },
+    { fieldPath: "items[].socialLinks[].url", candidateValue: "https://instagram.com/avid4adventure", needle: "https://instagram.com/avid4adventure" },
     { fieldPath: "items[].state", candidateValue: "CO", needle: "CO 80301" },
     { fieldPath: "items[].zip", candidateValue: "80301", needle: "CO 80301" },
     { fieldPath: "items[].interestingDetails", candidateValue: "Campers get to keep a reusable water bottle from our sponsor.", needle: "Campers get to keep a reusable water bottle from our sponsor." },

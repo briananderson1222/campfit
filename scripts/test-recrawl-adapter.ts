@@ -1084,9 +1084,14 @@ async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
     store,
     mode: "live-with-capture",
     fetchOptions: makeValidatorFetchOptions(html, etag, lastModified, "304-when-validated", probe),
+    // What the crawl pipeline passes: the fingerprint the seed's complete
+    // extraction recorded. A 304 skips extraction only when the re-served
+    // body is the text that extraction read.
+    priorContentFingerprint: seed.contentFingerprint,
     log: () => {},
   });
 
+  assert.ok(seed.contentFingerprint, "a completed extraction reports the fingerprint of the text it read");
   assert.equal(providerCounter.calls, 0, "extract() must never be called on a 304 (throwing-provider counter proves it)");
   assert.equal(result.ok, true, "a 304 is a successful freshness check");
   assert.equal(result.notModified, true, "a 304 must surface notModified: true");
@@ -1266,12 +1271,12 @@ async function testCrawlPipelineWiresNotModifiedToFreshnessSeam() {
   const source = fs.readFileSync(path.join(ROOT_DIR, "lib/ingestion/crawl-pipeline.ts"), "utf8");
   assert.match(
     source,
-    /import\s*{\s*recordRecrawlFreshness\s*}\s*from\s*['"]\.\/recrawl-freshness['"]/,
+    /import\s*{[^}]*\brecordRecrawlFreshness\b[^}]*}\s*from\s*['"]\.\/recrawl-freshness['"]/,
     "crawl-pipeline must import the crawl-freshness seam"
   );
   assert.match(
     source,
-    /else if \(result\.notModified\)/,
+    /else if \(result\.notModified \|\| result\.contentUnchanged\)/,
     "crawl-pipeline must branch on result.notModified BEFORE the changed-page proposal block"
   );
   assert.match(

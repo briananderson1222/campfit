@@ -25,8 +25,14 @@ export function campLogOutcomeCounts(entries: readonly Pick<CrawlCampLogEntry, '
 }
 
 /** The expanded row's explanation line, or null when the outcome needs none. */
-export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'incomplete' | 'fieldsChanged'>): string | null {
+export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'incomplete' | 'fieldsChanged' | 'skipped'>): string | null {
   const outcome = campLogOutcome(entry);
+  if (outcome === 'unchanged' && entry.skipped === 'content_unchanged') {
+    return 'Page text unchanged since the last complete extraction — not re-read by the model';
+  }
+  if (outcome === 'unchanged' && entry.skipped === 'not_modified') {
+    return 'Page not modified since the last fetch (HTTP 304) — not re-read by the model';
+  }
   if (outcome === 'unchanged') return 'No changes detected — data looks current';
   if (outcome !== 'incomplete' || !entry.incomplete) return null;
   const ranges = entry.incomplete.unreadRanges > 0
@@ -49,6 +55,25 @@ export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'in
   }
   const effect = parts.join(' ');
   return `Extraction incomplete (${entry.incomplete.reason}): ${ranges}. ${effect}`;
+}
+
+/**
+ * The "Model:" line: the model id, where that id came from, and how much of
+ * the page was read. A configured id is what the run asked for, not proof of
+ * which model answered, so it is labelled.
+ */
+export function campLogModelLine(entry: Pick<CrawlCampLogEntry, 'model' | 'modelSource' | 'coverage' | 'skipped'>): string {
+  if (entry.skipped) return 'Model: not run (page unchanged)';
+  const source = entry.modelSource === 'provider-reported'
+    ? ' (reported by the provider)'
+    : entry.modelSource === 'configured'
+      ? ' (configured id; the provider did not report one)'
+      : '';
+  const coverage = entry.coverage
+    ? ` · read ${entry.coverage.complete} of ${entry.coverage.ranges} text range(s)`
+      + (entry.coverage.outputTruncated > 0 ? `, ${entry.coverage.outputTruncated} cut off at the output cap` : '')
+    : '';
+  return `Model: ${entry.model}${source}${coverage}`;
 }
 
 /**

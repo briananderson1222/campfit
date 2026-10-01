@@ -27,6 +27,8 @@ interface Seed {
   communitySlug: string;
   websiteUrl: string;
   lastVerifiedAt: string | null;
+  /** When a crawl last completed for this camp (also its last attempt). Omitted = never crawled. */
+  lastCrawledAt?: string;
   registrationStatus: "UNKNOWN" | "OPEN" | "COMING_SOON" | "CLOSED";
   dataConfidence: "PLACEHOLDER" | "STALE" | "VERIFIED";
   description: string;
@@ -34,7 +36,7 @@ interface Seed {
 }
 
 // Known-by-construction seed set exercising every branch the pre-extraction
-// SQL had: never_crawled (lastVerifiedAt IS NULL), coming_soon, missing
+// SQL had: never_crawled (lastCrawledAt IS NULL), coming_soon, missing
 // (blank description/neighborhood/UNKNOWN status), and plain staleness
 // scoring for the rest.
 const SEEDS: Seed[] = [
@@ -63,6 +65,7 @@ const SEEDS: Seed[] = [
     communitySlug: "denver",
     websiteUrl: "https://very-stale.example.com",
     lastVerifiedAt: "2020-01-01T00:00:00.000Z",
+    lastCrawledAt: "2020-01-01T00:00:00.000Z",
     registrationStatus: "OPEN",
     dataConfidence: "STALE",
     description: "has a description",
@@ -73,16 +76,44 @@ const SEEDS: Seed[] = [
     communitySlug: "denver",
     websiteUrl: "https://recent.example.com",
     lastVerifiedAt: new Date().toISOString(),
+    lastCrawledAt: new Date().toISOString(),
     registrationStatus: "OPEN",
     dataConfidence: "VERIFIED",
     description: "has a description",
     neighborhood: "lodo",
   },
   {
+    // Crawled, and no reviewer has verified anything yet. A crawl is not a
+    // verification, so "lastVerifiedAt" stays NULL — and that must not make
+    // the scheduler think the camp was never crawled.
+    slug: "crawled-not-verified",
+    communitySlug: "denver",
+    websiteUrl: "https://crawled-not-verified.example.com",
+    lastVerifiedAt: null,
+    lastCrawledAt: new Date().toISOString(),
+    registrationStatus: "OPEN",
+    dataConfidence: "VERIFIED",
+    description: "has a description",
+    neighborhood: "baker",
+  },
+  {
+    // The reverse: verified by a person (e.g. seeded from a curated sheet),
+    // never crawled.
+    slug: "verified-never-crawled",
+    communitySlug: "denver",
+    websiteUrl: "https://verified-never-crawled.example.com",
+    lastVerifiedAt: new Date().toISOString(),
+    registrationStatus: "OPEN",
+    dataConfidence: "VERIFIED",
+    description: "has a description",
+    neighborhood: "wash-park",
+  },
+  {
     slug: "coming-soon",
     communitySlug: "boulder",
     websiteUrl: "https://coming-soon.example.com",
     lastVerifiedAt: "2024-06-01T00:00:00.000Z",
+    lastCrawledAt: "2024-06-01T00:00:00.000Z",
     registrationStatus: "COMING_SOON",
     dataConfidence: "VERIFIED",
     description: "has a description",
@@ -93,6 +124,7 @@ const SEEDS: Seed[] = [
     communitySlug: "boulder",
     websiteUrl: "https://missing.example.com",
     lastVerifiedAt: "2024-06-01T00:00:00.000Z",
+    lastCrawledAt: "2024-06-01T00:00:00.000Z",
     registrationStatus: "UNKNOWN",
     dataConfidence: "VERIFIED",
     description: "",
@@ -118,8 +150,9 @@ async function seedCamps(): Promise<void> {
     await pool.query(
       `INSERT INTO "Camp"
         (id, slug, name, "campType", category, "communitySlug", "websiteUrl",
-         "lastVerifiedAt", "registrationStatus", "dataConfidence", description, neighborhood)
-       VALUES ($1, $2, $2, 'SUMMER_DAY', 'SPORTS', $3, $4, $5, $6, $7, $8, $9)`,
+         "lastVerifiedAt", "registrationStatus", "dataConfidence", description, neighborhood,
+         "lastCrawledAt", "lastCrawlAttemptAt")
+       VALUES ($1, $2, $2, 'SUMMER_DAY', 'SPORTS', $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
       [
         randomUUID(),
         s.slug,
@@ -130,6 +163,7 @@ async function seedCamps(): Promise<void> {
         s.dataConfidence,
         s.description,
         s.neighborhood,
+        s.lastCrawledAt ?? null,
       ],
     );
   }
@@ -148,14 +182,16 @@ afterAll(async () => {
 });
 
 describe("resolveCrawlCandidates (AC1)", () => {
-  it("never_crawled: only camps with lastVerifiedAt IS NULL, and only crawlable ones", async () => {
+  it("never_crawled: only camps no crawl has completed for, whatever their verification state, and only crawlable ones", async () => {
     await seedCamps();
 
     const rows = await resolveCrawlCandidates({ priority: "never_crawled", limit: 10 });
 
     // Look up ids by slug since ids are DB-generated randomUUID()s.
     const slugs = await sluggify(rows);
-    expect(slugs.sort()).toEqual(["never-crawled-1", "never-crawled-2"].sort());
+    // "verified-never-crawled" is in (verified is not crawled);
+    // "crawled-not-verified" is out (it was crawled).
+    expect(slugs.sort()).toEqual(["never-crawled-1", "never-crawled-2", "verified-never-crawled"].sort());
   });
 
   it("never_crawled: excludes camps without a crawlable websiteUrl", async () => {
@@ -181,12 +217,12 @@ describe("resolveCrawlCandidates (AC1)", () => {
     expect(slugs.sort()).toEqual(["never-crawled-1", "missing-fields"].sort());
   });
 
-  it("stale: ordered by priorityScore DESC, lastVerifiedAt ASC NULLS FIRST, and limit applied", async () => {
+  it("stale: ordered by priorityScore DESC, then longest since a crawl attempt first, and limit applied", async () => {
     await seedCamps();
     const rows = await resolveCrawlCandidates({ priority: "stale", limit: 2 });
     expect(rows).toHaveLength(2);
 
-    // Never-crawled camps (NULL lastVerifiedAt → 180pt staleness ceiling)
+    // Never-crawled camps (no crawl attempt → 180pt staleness ceiling)
     // score at least as high as any dated row, and NULLS FIRST breaks ties
     // among equal top scores — so the top of a stale-priority ranking must
     // be dominated by the never-crawled/highest-scoring rows, matching the

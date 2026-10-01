@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { CrawlModal } from '@/app/admin/crawl-modal';
 import { SchedulePanel } from './schedule-panel';
 import type { CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
-import { campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote, outputCapCount } from './camp-log-view';
+import { campLogModelLine, campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote, outputCapCount } from './camp-log-view';
 
 function durationLabel(startedAt: string, completedAt: string | null, isRunning = false): string {
   const end = isRunning ? Date.now() : (completedAt ? new Date(completedAt).getTime() : Date.now());
@@ -93,7 +93,7 @@ function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
             <ExternalLink className="w-3 h-3 shrink-0" />
             {entry.url}
           </a>
-          <p className="text-xs text-bark-300">Model: {entry.model}</p>
+          <p className="text-xs text-bark-300">{campLogModelLine(entry)}</p>
 
           {entry.warnings && entry.warnings.length > 0 && (
             <ul className="text-xs text-amber-800 space-y-0.5 list-disc pl-4">

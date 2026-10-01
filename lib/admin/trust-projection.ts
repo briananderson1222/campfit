@@ -14,6 +14,7 @@ import {
 
 import type { FieldDiff, ProposedChanges } from './types';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
+import type { CitationSpace } from './citation-text';
 import {
   campfitVocabulary,
   type CampfitScalarClaimType,
@@ -34,7 +35,29 @@ export interface CampReviewTrustInputArgs {
   reviewerNotes?: string | null;
   feedbackTags?: string[];
   snapshotRef?: string;
-  snapshotBody?: string;
+  /** See {@link ReviewCitationSource}. */
+  citation?: ReviewCitationSource;
+}
+
+/**
+ * The exact text a proposal's excerpts are checked against, and which text it
+ * is: the prepared text the extraction read (bound by digest to the snapshot;
+ * see citation-text.ts), or the raw snapshot body for a proposal that predates
+ * that record. `preparedArtifact` travels onto the evidence so a later reader
+ * resolves the locator in the same text.
+ */
+export interface ReviewCitationSource {
+  readonly text: string;
+  readonly space: CitationSpace;
+  readonly preparedArtifact?: unknown;
+}
+
+/** An approved field whose excerpt is not an exact citation of the stored source. Refused, never loosened. */
+export class ReviewCitationMismatchError extends Error {
+  constructor(readonly field: string) {
+    super(`Approved crawl field "${field}" lacks an exact stored-snapshot citation.`);
+    this.name = 'ReviewCitationMismatchError';
+  }
 }
 
 export interface CampAttestationTrustInputArgs {
@@ -78,7 +101,7 @@ export function buildCampReviewSurveyInput(args: CampReviewTrustInputArgs): Surv
       reviewerNotes: args.reviewerNotes,
       feedbackTags: args.feedbackTags,
       snapshotRef: args.snapshotRef,
-      snapshotBody: args.snapshotBody,
+      citation: args.citation,
     }));
   }
 
@@ -167,7 +190,7 @@ function campReviewResolution(args: {
   reviewerNotes?: string | null;
   feedbackTags?: string[];
   snapshotRef?: string;
-  snapshotBody?: string;
+  citation?: ReviewCitationSource;
 }) {
   const approved = args.status === 'verified';
   const decisionEffect = approved
@@ -322,21 +345,21 @@ function proposedCampReviewObservation(args: {
   selected: boolean;
   decisionEffect: string;
   snapshotRef?: string;
-  snapshotBody?: string;
+  citation?: ReviewCitationSource;
 }): SurveyObservationInput {
   const rejectionReason = args.selected
     ? undefined
     : rejectedProposedCandidateReason(args.reviewerNotes);
 
-  const excerptResolution = args.diff.excerpt && args.snapshotBody
-    ? resolveReviewExcerpt(args.diff.excerpt, args.snapshotBody)
+  const excerptResolution = args.diff.excerpt && args.citation
+    ? resolveReviewExcerpt(args.diff.excerpt, args.citation.text, args.diff.locator)
     : undefined;
   // A present immutable snapshot opts this observation into source-citation
   // enrichment and must resolve exactly. Snapshotless legacy proposals still
   // record their general review provenance, but do not carry the excerpt as
   // evidence (and therefore cannot be displayed as citation-verified).
   if (args.selected && args.diff.excerpt && args.snapshotRef && excerptResolution?.state !== 'verified') {
-    throw new Error(`Approved crawl field "${args.field}" lacks an exact stored-snapshot citation.`);
+    throw new ReviewCitationMismatchError(args.field);
   }
   return fieldObservation({
     id: campObservationId(args.campId, args.field, args.proposalId, 'proposed'),
@@ -360,6 +383,11 @@ function proposedCampReviewObservation(args: {
       metadata: {
         mode: args.diff.mode,
         oldValue: args.diff.old,
+        // Which text `locator` indexes. Absent on evidence written before
+        // this was recorded, which always meant the raw snapshot body.
+        ...(excerptResolution?.state === 'verified' && args.citation?.space === 'prepared'
+          ? { citationSpace: args.citation.space, preparedArtifact: args.citation.preparedArtifact }
+          : {}),
       },
     },
     candidate: {

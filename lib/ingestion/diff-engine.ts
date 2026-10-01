@@ -53,13 +53,18 @@ const ARRAY_FIELDS = ['ageGroups', 'schedules', 'pricing'] as const;
 
 const ENUM_ARRAY_FIELDS = ['campTypes', 'categories'] as const;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function computeDiff(
   current: Camp,
   extracted: Partial<CampInput>,
   confidence: Record<string, number>,
   excerpts: Record<string, string> = {},
   fieldSources: Record<string, { approvedAt?: string }> = {},
-  sourceUrl = ''
+  sourceUrl = '',
+  locators: Record<string, string> = {},
 ): ProposedChanges {
   const changes: ProposedChanges = {};
   const now = Date.now();
@@ -68,10 +73,16 @@ export function computeDiff(
   for (const field of SCALAR_FIELDS) {
     const conf = knownConfidence(confidence, field);
 
-    const extractedVal = (extracted as Record<string, unknown>)[field];
+    let extractedVal = (extracted as Record<string, unknown>)[field];
     if (extractedVal === undefined || extractedVal === null) continue;
 
     const currentVal = (current as unknown as Record<string, unknown>)[field];
+    // A page that links only some of a camp's profiles is not evidence the
+    // others were removed, and approving replaces the stored object. Extracted
+    // links are therefore merged over the current ones, never substituted.
+    if (field === 'socialLinks' && isPlainObject(extractedVal) && isPlainObject(currentVal)) {
+      extractedVal = { ...currentVal, ...extractedVal };
+    }
 
     const comparison = compareValue(currentVal, extractedVal, normalizeScalar);
     if (comparison.changed && comparison.change) {
@@ -80,7 +91,7 @@ export function computeDiff(
         ...comparison.change,
         ...reviewSignals(conf, fieldSources[field], now),
         mode: isEmpty ? 'populate' : 'update',
-        ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
+        ...projectProvenance({ excerpt: excerpts[field], sourceUrl, locator: locators[field] }),
       };
     }
   }
@@ -106,7 +117,7 @@ export function computeDiff(
         ...comparison.change,
         ...reviewSignals(conf, fieldSources[field], now),
         mode: isEmpty ? 'populate' : 'update',
-        ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
+        ...projectProvenance({ excerpt: excerpts[field], sourceUrl, locator: locators[field] }),
       };
     }
   }
@@ -135,7 +146,7 @@ export function computeDiff(
         ...relation.change,
         ...reviewSignals(conf, fieldSources[field], now),
         mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
-        ...projectProvenance({ excerpt: excerpts[field], sourceUrl }),
+        ...projectProvenance({ excerpt: excerpts[field], sourceUrl, locator: locators[field] }),
       };
     }
   }

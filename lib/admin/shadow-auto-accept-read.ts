@@ -3,13 +3,17 @@ import { parseAnySnapshotSourceRef, type Snapshot, type SnapshotStore } from '@k
 
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 
+import { resolveCitationText } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import type { CampChangeProposal } from './types';
 
 type ShadowSnapshotProposal = Pick<
   CampChangeProposal,
   'snapshotRef' | 'snapshotBodyHash' | 'proposedChanges'
->;
+> & {
+  /** The prepared-text identity the extraction recorded (`rawExtraction.preparedArtifact`), when it did. */
+  readonly preparedArtifact?: unknown;
+};
 
 /** Pure exact-evidence check once the immutable snapshot bytes are available. */
 export function isProposalSnapshotResolved(
@@ -19,7 +23,7 @@ export function isProposalSnapshotResolved(
   const diffs = Object.values(proposal.proposedChanges);
   return diffs.length > 0 && diffs.every((diff) =>
     typeof diff.excerpt === 'string'
-    && resolveReviewExcerpt(diff.excerpt, snapshotBody).state === 'verified'
+    && resolveReviewExcerpt(diff.excerpt, snapshotBody, diff.locator).state === 'verified'
   );
 }
 
@@ -48,7 +52,11 @@ async function resolveWithStore(
       || snapshot.url !== parsed.url
       || snapshot.fetchedAt !== parsed.fetchedAt
       || actualSnapshotHash(snapshot) !== parsed.bodyHash) return false;
-    return isProposalSnapshotResolved(proposal, snapshot.body);
+    // Excerpts are checked against the text the extraction read (see
+    // citation-text.ts); a prepared text that cannot be reproduced exactly
+    // resolves nothing.
+    const citation = resolveCitationText({ snapshotRef: proposal.snapshotRef, snapshot, preparedArtifact: proposal.preparedArtifact });
+    return citation.ok && isProposalSnapshotResolved(proposal, citation.text);
   } catch {
     return false;
   }

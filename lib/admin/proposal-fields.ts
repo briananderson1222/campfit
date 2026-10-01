@@ -26,6 +26,12 @@ export const CAMP_SCALAR_FIELDS: readonly string[] = [
 ];
 
 /** Relation fields (`FieldDiff.new` is an array of child rows) and the table each one replaces. */
+/**
+ * Enum-list columns on Camp (`TEXT[]`). A proposal for one of these replaces
+ * the stored list, after every member is checked against the allowed set.
+ */
+export const CAMP_ENUM_ARRAY_FIELDS: readonly string[] = ['campTypes', 'categories'];
+
 export const CAMP_RELATION_TABLES: Record<string, string> = {
   ageGroups: 'CampAgeGroup',
   schedules: 'CampSchedule',

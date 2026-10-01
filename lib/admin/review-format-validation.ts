@@ -48,6 +48,14 @@ const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
 export function checkFieldFormat(field: string, value: unknown): FieldFormatState {
   if (value == null || value === '') return 'uncheckable';
 
+  // socialLinks is extracted as rows and stored as one `{ platform: url }` object.
+  if (field === 'socialLinks') {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      && Object.values(value).every((url) => typeof url === 'string')
+      ? 'valid'
+      : 'invalid';
+  }
+
   if (SCALAR_SCHEMA_PATH_SET.has(field)) {
     const entry = CAMP_TARGET_SCHEMA.find((s) => s.path === ITEMS_ARRAY_PREFIX + field);
     if (!entry) return 'uncheckable';
@@ -63,6 +71,24 @@ export function checkFieldFormat(field: string, value: unknown): FieldFormatStat
   }
 
   return 'uncheckable';
+}
+
+/**
+ * The members of `value` that are not allowed for an enum-typed `field` (a
+ * scalar enum such as `category`, or an enum list such as `campTypes`). Empty
+ * when the field is not enum-typed, the value is empty, or every member is
+ * allowed. A non-array value for an enum list is itself reported.
+ */
+export function invalidEnumMembers(field: string, value: unknown): string[] {
+  if (value == null || value === '') return [];
+  if (ENUM_ARRAY_SCHEMA_PATH_SET.has(field)) {
+    const allowed = CAMP_TARGET_SCHEMA.find((s) => s.path === `${ITEMS_ARRAY_PREFIX}${field}[]`)?.enumValues ?? [];
+    if (!Array.isArray(value)) return [String(value)];
+    return value.filter((member) => !allowed.includes(member as string)).map((member) => String(member));
+  }
+  const entry = CAMP_TARGET_SCHEMA.find((s) => s.path === ITEMS_ARRAY_PREFIX + field);
+  if (entry?.type !== 'enum') return [];
+  return (entry.enumValues ?? []).includes(value as string) ? [] : [String(value)];
 }
 
 function checkScalarValue(
@@ -81,11 +107,6 @@ function checkScalarValue(
       return typeof value === 'string' && ISO_DATE_PREFIX.test(value);
     case 'enum':
       return typeof value === 'string' && (enumValues ?? []).includes(value);
-    case 'object':
-      // socialLinks is the one SCALAR_SCHEMA_PATHS member declared `object`
-      // — check it's a plain object, not the array/object shape itself
-      // (no per-key schema declared to check further).
-      return typeof value === 'object' && value !== null && !Array.isArray(value);
     case 'array':
       return Array.isArray(value);
     default:

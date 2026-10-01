@@ -17,8 +17,23 @@ export interface TrustDisplay {
   excerpt?: string;
 }
 
+/**
+ * Key of the text an evidence record's locator indexes, in the map passed to
+ * {@link projectTrustDisplay}. Evidence approved from a proposal that recorded
+ * its prepared text cites that text (`metadata.citationSpace === 'prepared'`),
+ * identified by the snapshot AND the prepared-artifact ref; all other evidence
+ * cites the raw snapshot body, keyed by `sourceRef` alone as before.
+ */
+export function citationTextKey(evidence: Pick<Evidence, 'sourceRef' | 'metadata'>): string {
+  const artifactRef = (evidence.metadata?.preparedArtifact as { ref?: unknown } | undefined)?.ref;
+  return evidence.metadata?.citationSpace === 'prepared' && typeof artifactRef === 'string'
+    ? `${evidence.sourceRef}\n${artifactRef}`
+    : evidence.sourceRef ?? '';
+}
+
 export function projectTrustDisplay(
   bundle: TrustBundle,
+  /** Citation texts keyed by {@link citationTextKey}. A missing entry degrades to "stale / unresolvable". */
   snapshotBodies: Readonly<Record<string, string | undefined>>,
   claimId?: string,
   now: Date = new Date(),
@@ -55,7 +70,7 @@ export function projectTrustDisplay(
     if (evidence.sourceRef && evidence.sourceLocator && evidence.excerptOrSummary) {
       const resolution = resolveReviewExcerpt(
         evidence.excerptOrSummary,
-        snapshotBodies[evidence.sourceRef],
+        snapshotBodies[citationTextKey(evidence)],
         evidence.sourceLocator,
       );
       if (resolution.state === 'verified') {

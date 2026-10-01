@@ -175,6 +175,42 @@ export async function completeCrawlRun(
   );
 }
 
+/**
+ * How long a RUNNING run may go without recording progress before it is
+ * treated as dead. A run's process can be killed without a chance to write its
+ * final status (a serverless function hitting its time limit, a crash, a
+ * deploy), which would otherwise leave the row RUNNING forever. Well above the
+ * slowest observed single-camp extraction, so a live run is not reaped.
+ */
+export const STALE_CRAWL_RUN_MS = 30 * 60 * 1000;
+
+/**
+ * Mark RUNNING runs with no progress for `staleAfterMs` as FAILED. Progress is
+ * the newest camp-log entry, or the start time when nothing was logged. Called
+ * when a new run starts, so no scheduler or background job is needed. A run
+ * that was only slow and later finishes overwrites this with its real status.
+ */
+export async function failStaleCrawlRuns(staleAfterMs: number = STALE_CRAWL_RUN_MS): Promise<string[]> {
+  const pool = getPool();
+  const note = [{
+    campId: 'run',
+    url: '',
+    error: `Run recorded no progress for over ${Math.round(staleAfterMs / 60000)} minute(s) and never finished; its process likely crashed or was stopped. Marked FAILED when a later run started.`,
+  }];
+  const result = await pool.query<{ id: string }>(
+    `UPDATE "CrawlRun" r
+        SET status = 'FAILED', "completedAt" = now(), "errorLog" = COALESCE(r."errorLog", '[]'::jsonb) || $2::jsonb
+      WHERE r.status = 'RUNNING'
+        AND COALESCE(
+              (SELECT max((entry->>'processedAt')::timestamptz) FROM jsonb_array_elements(r."campLog") AS entry),
+              r."startedAt"
+            ) < now() - ($1::double precision * interval '1 millisecond')
+      RETURNING r.id`,
+    [staleAfterMs, JSON.stringify(note)]
+  );
+  return result.rows.map((row) => row.id);
+}
+
 export async function getCrawlRun(id: string): Promise<CrawlRun | null> {
   const pool = getPool();
   const result = await pool.query(`SELECT * FROM "CrawlRun" WHERE id = $1`, [id]);
