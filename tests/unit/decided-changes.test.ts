@@ -1,80 +1,64 @@
 import { describe, expect, it } from 'vitest';
 import { withholdDecidedChanges } from '@/lib/ingestion/decided-changes';
 import { plainLabel } from '@/lib/ingestion/traverse-diff-inputs';
+import { campLogHeldBackLabel, campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
 import type { ProposedChanges } from '@/lib/admin/types';
 
 const APPROVED_AT = '2026-09-30T12:00:00.000Z';
+const PAGE = 'sha256:aaa';
 const age = (label: string, minAge: number, maxAge: number) => ({ label, minAge, maxAge, minGrade: null, maxGrade: null });
 
 describe('withholdDecidedChanges', () => {
-  it('withholds a reworded value that cites the excerpt a reviewer approved', () => {
+  it('withholds any approved field, an enum list included, when the page text is the text it was approved from', () => {
     const changes: ProposedChanges = {
-      description: { old: 'A week of outdoor science.', new: 'One week of outdoor science.', excerpt: 'Spend  a week\non outdoor science.' },
+      campTypes: { old: ['SCHOOL_BREAK', 'SUMMER_DAY'], new: ['SCHOOL_BREAK'], excerpt: 'Spring Safari' },
+      description: { old: 'A week of outdoor science.', new: 'One week of outdoor science.', excerpt: 'Spend a week on outdoor science.' },
     };
-    const result = withholdDecidedChanges(changes, { description: { approvedAt: APPROVED_AT, excerpt: 'Spend a week on outdoor science.' } });
+    const source = { approvedAt: APPROVED_AT, contentFingerprint: PAGE };
+    const result = withholdDecidedChanges(changes, { campTypes: source, description: source }, PAGE);
     expect(result.changes).toEqual({});
-    expect(result.decided).toEqual([{ field: 'description', approvedAt: APPROVED_AT, reason: 'same-excerpt' }]);
-    expect(result.warnings).toEqual(['description: not proposed again — the page text it cites is the text a reviewer approved on 2026-09-30']);
+    expect(result.decided).toEqual([{ field: 'campTypes', approvedAt: APPROVED_AT }, { field: 'description', approvedAt: APPROVED_AT }]);
+    expect(result.warnings[0]).toBe('campTypes: read differently this time but not proposed again — the page text is unchanged since a reviewer approved this field on 2026-09-30');
   });
 
-  it('proposes a value that cites different page text', () => {
-    const changes: ProposedChanges = { description: { old: 'A week of outdoor science.', new: 'Two weeks of outdoor science.', excerpt: 'Now two weeks of outdoor science.' } };
-    const result = withholdDecidedChanges(changes, { description: { approvedAt: APPROVED_AT, excerpt: 'Spend a week on outdoor science.' } });
-    expect(Object.keys(result.changes)).toEqual(['description']);
+  it('proposes everything once the page text differs, whatever the excerpts and row labels say', () => {
+    const source = { approvedAt: APPROVED_AT, excerpt: 'Ages 6 - 10', contentFingerprint: PAGE };
+    const changes: ProposedChanges = {
+      // The same excerpt, a different value.
+      city: { old: 'Golden', new: 'Boulder', excerpt: 'Ages 6 - 10' },
+      // The same row label, a different value: a header-cited row whose price or age moved.
+      ageGroups: { old: [age('Ages 6 - 10', 6, 10)], new: [age('Ages 6 - 10', 6, 11)], excerpt: 'Ages 6 - 10' },
+      // The same values under another label.
+      pricing: { old: [{ label: '15 Day Sessions', amount: 3850, unit: 'PER_SESSION' }], new: [{ label: 'Two weeks', amount: 3850, unit: 'PER_SESSION' }], excerpt: 'Two weeks' },
+    };
+    const result = withholdDecidedChanges(changes, { city: source, ageGroups: source, pricing: source }, 'sha256:bbb');
+    expect(Object.keys(result.changes)).toEqual(['city', 'ageGroups', 'pricing']);
     expect(result.decided).toEqual([]);
   });
 
-  it('proposes a field no reviewer approved, even with the same excerpt', () => {
+  it('proposes when this read has no fingerprint (an incomplete read) or the approval recorded none', () => {
+    const changes: ProposedChanges = { city: { old: 'Golden', new: 'Boulder', excerpt: 'Located in Boulder.' } };
+    expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT, contentFingerprint: PAGE } }).changes)).toEqual(['city']);
+    expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT } }, PAGE).changes)).toEqual(['city']);
+    expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT, contentFingerprint: null } }, PAGE).changes)).toEqual(['city']);
+  });
+
+  it('proposes a field no reviewer approved, even on the same page text', () => {
     const changes: ProposedChanges = { city: { old: 'Denver', new: 'Golden', excerpt: 'Located in Golden.' } };
-    expect(Object.keys(withholdDecidedChanges(changes, {}).changes)).toEqual(['city']);
-    // An attested or discovered source has an excerpt but no approval.
-    expect(Object.keys(withholdDecidedChanges(changes, { city: { excerpt: 'Located in Golden.' } }).changes)).toEqual(['city']);
-    // An approval that recorded no excerpt decided nothing about this text.
-    expect(Object.keys(withholdDecidedChanges({ city: { old: 'Denver', new: 'Golden' } }, { city: { approvedAt: APPROVED_AT, excerpt: null } }).changes)).toEqual(['city']);
+    expect(Object.keys(withholdDecidedChanges(changes, {}, PAGE).changes)).toEqual(['city']);
+    expect(Object.keys(withholdDecidedChanges(changes, { city: { contentFingerprint: PAGE } }, PAGE).changes)).toEqual(['city']);
   });
+});
 
-  it('withholds a row list that cites the stored rows\' excerpts, or carries their values', () => {
-    const sameExcerpts: ProposedChanges = { ageGroups: { old: [age('Ages 6 - 10', 6, 10)], new: [age('Ages 6 - 10', 6, 11)], excerpt: 'Ages 6 - 10' } };
-    expect(withholdDecidedChanges(sameExcerpts, { ageGroups: { approvedAt: APPROVED_AT } }).decided.map((d) => d.reason)).toEqual(['same-excerpt']);
-
-    const sameValues: ProposedChanges = { ageGroups: { old: [age('Ages 6 - 10', 6, 10)], new: [age('*Ages 6 - 10*', 6, 10)], excerpt: '*Ages 6 - 10*' } };
-    const result = withholdDecidedChanges(sameValues, { ageGroups: { approvedAt: APPROVED_AT } });
-    expect(result.changes).toEqual({});
-    expect(result.warnings).toEqual(['ageGroups: not proposed again — the entries have the values a reviewer approved on 2026-09-30, only their cited text differs']);
-  });
-
-  it('proposes a row list with an added, removed or changed row', () => {
-    const source = { ageGroups: { approvedAt: APPROVED_AT, excerpt: 'Ages 6 - 10' } };
-    const added: ProposedChanges = { ageGroups: { old: [age('Ages 6 - 10', 6, 10)], new: [age('Ages 6 - 10', 6, 10), age('Ages 11 - 13', 11, 13)], excerpt: 'Ages 6 - 10' } };
-    const removed: ProposedChanges = { ageGroups: { old: [age('Ages 6 - 10', 6, 10), age('Ages 11 - 13', 11, 13)], new: [age('Ages 6 - 10', 6, 10)], excerpt: 'Ages 6 - 10' } };
-    const changed: ProposedChanges = { ageGroups: { old: [age('Ages 6 - 10', 6, 10)], new: [age('Ages 7 - 10', 7, 10)], excerpt: 'Ages 7 - 10' } };
-    for (const changes of [added, removed, changed]) {
-      expect(Object.keys(withholdDecidedChanges(changes, source).changes)).toEqual(['ageGroups']);
-    }
-  });
-
-  it('withholds any approved field, an enum list included, when the page text is the text it was approved from', () => {
-    const changes: ProposedChanges = { campTypes: { old: ['SCHOOL_BREAK', 'SUMMER_DAY'], new: ['SCHOOL_BREAK'], excerpt: 'Spring Safari' } };
-    const source = { campTypes: { approvedAt: APPROVED_AT, excerpt: 'When school is out', contentFingerprint: 'sha256:aaa' } };
-    const same = withholdDecidedChanges(changes, source, 'sha256:aaa');
-    expect(same.changes).toEqual({});
-    expect(same.warnings).toEqual(['campTypes: not proposed again — the page text is unchanged since a reviewer approved this field on 2026-09-30']);
-    // A changed page, an unknown fingerprint, or an unapproved field is proposed.
-    expect(Object.keys(withholdDecidedChanges(changes, source, 'sha256:bbb').changes)).toEqual(['campTypes']);
-    expect(Object.keys(withholdDecidedChanges(changes, source).changes)).toEqual(['campTypes']);
-    expect(Object.keys(withholdDecidedChanges(changes, { campTypes: { contentFingerprint: 'sha256:aaa' } }, 'sha256:aaa').changes)).toEqual(['campTypes']);
-  });
-
-  it('on a changed page, always proposes an enum list or a folded object: one excerpt cannot vouch for the rest', () => {
-    const changes: ProposedChanges = {
-      campTypes: { old: ['SUMMER_DAY'], new: ['SUMMER_DAY', 'SLEEPAWAY'], excerpt: 'Day camp' },
-      socialLinks: { old: { instagram: 'https://i.example/a' }, new: { instagram: 'https://i.example/a', x: 'https://x.example/a' }, excerpt: '[Instagram](https://i.example/a)' },
-    };
-    const result = withholdDecidedChanges(changes, {
-      campTypes: { approvedAt: APPROVED_AT, excerpt: 'Day camp' },
-      socialLinks: { approvedAt: APPROVED_AT, excerpt: '[Instagram](https://i.example/a)' },
-    });
-    expect(Object.keys(result.changes).sort()).toEqual(['campTypes', 'socialLinks']);
+describe('a crawl that held something back does not read as plain "no changes"', () => {
+  it('labels the row and explains it', () => {
+    const entry = { status: 'no_changes' as const, fieldsChanged: [], notProposedAgain: ['campTypes', 'city'] };
+    expect(campLogHeldBackLabel(entry)).toBe('2 not re-proposed');
+    expect(campLogOutcomeNote(entry)).toBe(
+      'No new proposal — 2 field(s) were read differently but not proposed again, because a reviewer approved them from this same page text: campTypes, city. Recrawl from the review page to ask again.',
+    );
+    expect(campLogHeldBackLabel({})).toBeNull();
+    expect(campLogOutcomeNote({ status: 'no_changes', fieldsChanged: [] })).toBe('No changes detected — data looks current');
   });
 });
 

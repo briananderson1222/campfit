@@ -227,6 +227,8 @@ export interface TraverseRecrawlResult {
   withheldListFields?: string[];
   /** Empty list fields filled from an incomplete run; they may be missing entries. */
   populatedListFields?: string[];
+  /** Fields read differently but not proposed, because a reviewer approved them from this same page text. */
+  notProposedAgain?: string[];
   /** display name of the item traverse matched to this camp. Null on a no-items/ambiguous failure (nothing was matched). */
   matchedItemName: string | null;
   /** how many items traverse grouped out of the page (1 on a normal single-camp page; >1 on a shared listing page). */
@@ -474,7 +476,7 @@ export async function runTraverseRecrawlForCamp(
   }
 
   const item = selection.item;
-  const { extracted, confidence, excerpts, locators } = assembledItemToDiffInputs(item);
+  const { extracted, confidence, excerpts, locators, rowCitations } = assembledItemToDiffInputs(item);
   const withheld = withholdListChangesFromIncompleteRun(
     computeDiff(
       opts.current,
@@ -484,11 +486,16 @@ export async function runTraverseRecrawlForCamp(
       opts.fieldSources ?? {},
       opts.websiteUrl,
       locators,
+      rowCitations,
     ),
     fetchResult.incomplete,
   );
-  // A change the reviewer already decided from the same evidence is not asked again.
-  const decided = withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {}, fetchResult.contentFingerprint);
+  // The page text a COMPLETE read is identified by. An incomplete read has
+  // none: it did not see the whole page, so nothing approved from it may
+  // later stand for "the page still says this".
+  const completeReadFingerprint = fetchResult.incomplete ? undefined : fetchResult.contentFingerprint;
+  // A change to a field a reviewer approved from this same page text is not asked again.
+  const decided = withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {}, completeReadFingerprint);
   const proposedChanges = decided.changes;
   const operatorWarnings = [
     ...(fetchResult.incomplete ? [describeIncompleteness(fetchResult.incomplete)] : []),
@@ -508,6 +515,7 @@ export async function runTraverseRecrawlForCamp(
     ...(fetchResult.incomplete ? { incomplete: fetchResult.incomplete } : {}),
     ...(withheld.withheldFields.length > 0 ? { withheldListFields: withheld.withheldFields } : {}),
     ...(withheld.populatedFields.length > 0 ? { populatedListFields: withheld.populatedFields } : {}),
+    ...(decided.decided.length > 0 ? { notProposedAgain: decided.decided.map((entry) => entry.field) } : {}),
     rawExtraction: {
       via: "traverse-recrawl",
       campId: opts.campId,
@@ -530,9 +538,10 @@ export async function runTraverseRecrawlForCamp(
       ...(item.droppedEntries.length > 0 ? { droppedEntries: item.droppedEntries } : {}),
       ...(item.multiProgram ? { multiProgram: item.multiProgram } : {}),
       ...(decided.decided.length > 0 ? { alreadyDecided: decided.decided } : {}),
-      // Which page text this proposal was read from; an approval copies it to
-      // the field's source so a later crawl of the same text does not re-ask.
-      ...(fetchResult.contentFingerprint ? { contentFingerprint: fetchResult.contentFingerprint } : {}),
+      // Which page text this proposal was read from, for a complete read
+      // only; an approval copies it to the field's source so a later crawl of
+      // the same text does not re-ask.
+      ...(completeReadFingerprint ? { contentFingerprint: completeReadFingerprint } : {}),
     },
     ...shared,
   };

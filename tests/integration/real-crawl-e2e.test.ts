@@ -102,7 +102,7 @@ import { loadClaimBundle } from '@/lib/admin/claim-store';
 import { resolveCitationText } from '@/lib/admin/citation-text';
 import { resolveReviewExcerpt } from '@/lib/admin/review-excerpt-resolution';
 import { storedMultiProgram, storedRefusedValues } from '@/lib/admin/proposal-extraction-status';
-import { campLogModelLine, campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
+import { campLogHeldBackLabel, campLogModelLine, campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
 import { campfitVocabulary } from '@/lib/trust-vocabulary';
 import type { CampChangeProposal } from '@/lib/admin/types';
 import { POST as approveRoute } from '@/app/api/admin/review/[id]/approve/route';
@@ -692,10 +692,11 @@ describe('a recrawl a reviewer asks for never loses the pending proposal', () =>
   });
 });
 
-describe('a crawl after an approval does not ask the reviewer again', () => {
+describe('a crawl after an approval does not ask the reviewer again about the same page', () => {
+  type Answer = { fieldPath: string; value: unknown; excerpt: string };
   /** The same reading, worded the way a second model run words it. */
   function reworded(proposals: readonly unknown[]): unknown[] {
-    return (proposals as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => {
+    return (proposals as Answer[]).map((proposal) => {
       // Same excerpt, a slightly different value.
       if (proposal.fieldPath === 'items[].applicationUrl') return { ...proposal, value: 'https://register.pineridge.example/apply/' };
       // Same value, cited with a line more of the page.
@@ -703,46 +704,50 @@ describe('a crawl after an approval does not ask the reviewer again', () => {
       return proposal;
     });
   }
-
   // Two camp types, each cited from the page.
   const campTypes = [
     { fieldPath: 'items[].campTypes[]', value: 'SLEEPAWAY', confidence: 1, excerpt: 'Month-long Sessions', locator: null, occurrenceHint: 1 },
     { fieldPath: 'items[].campTypes[]', value: 'SUMMER_DAY', confidence: 1, excerpt: '15 Day Sessions', locator: null, occurrenceHint: 1 },
   ];
 
-  it('withholds a reworded reading of approved evidence, and still proposes a real change', async () => {
+  it('withholds a different reading of the same page text, says so, and proposes everything once the page changes', async () => {
     const campId = await seedCamp();
     fixture.proposals = [...recorded.programs, ...campTypes];
     fixture.html = listingHtml();
     await crawl([campId]);
     const [first] = await proposalsFor(campId);
+    // Every row of a proposed list carries its own citation.
+    expect(first!.proposedChanges.schedules!.rowCitations).toHaveLength((first!.proposedChanges.schedules!.new as unknown[]).length);
+    expect(first!.rawExtraction.contentFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
     await approveAll(first!);
 
-    // The approval changed the camp, so the page is read once more.
-    // The second answer also leaves one camp type out, as a real model did.
+    // The approval changed the camp, so the page is read once more. The
+    // second answer also leaves one camp type out, as a real model did.
     fixture.proposals = [...reworded(recorded.programs), campTypes[0]];
     const after = await crawl([campId]);
     expect(modelRequests()).toBe(2);
     expect(after.entry(campId).status).toBe('no_changes');
     expect(after.run.newProposals).toBe(0);
     expect((await proposalsFor(campId)).map((p) => p.status)).toEqual(['APPROVED']);
-    // What was withheld is said, on the crawl log.
+    // What was withheld is named on the crawl log, and the row is labelled.
+    expect([...after.entry(campId).notProposedAgain!].sort()).toEqual(['ageGroups', 'applicationUrl', 'campTypes']);
+    expect(campLogHeldBackLabel(after.entry(campId))).toBe('3 not re-proposed');
+    expect(campLogOutcomeNote(after.entry(campId))).toMatch(/^No new proposal — 3 field\(s\) were read differently but not proposed again/);
     expect(after.entry(campId).warnings).toEqual(expect.arrayContaining([
-      expect.stringMatching(/^applicationUrl: not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
-      expect.stringMatching(/^ageGroups: not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
-      expect.stringMatching(/^campTypes: not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
+      expect.stringMatching(/^campTypes: read differently this time but not proposed again — the page text is unchanged since a reviewer approved this field on \d{4}-\d{2}-\d{2}$/),
     ]));
-    expect((await campRow(campId)).campTypes).toEqual(['SLEEPAWAY', 'SUMMER_DAY']);
     expect((await campRow(campId)).applicationUrl).toBe('https://register.pineridge.example/apply');
+    expect((await campRow(campId)).campTypes).toEqual(['SLEEPAWAY', 'SUMMER_DAY']);
 
     // That settles it: the same page is not read a third time.
     const settled = await crawl([campId]);
     expect(modelRequests()).toBe(2);
     expect(settled.entry(campId).skipped).toBe('content_unchanged');
 
-    // The page really changes (a price): that is proposed.
+    // The page changes (a price). Nothing is withheld any more: every field
+    // the model now reads differently is proposed, the reworded ones included.
     fixture.html = listingHtml().replace('$3,850', '$3,950');
-    fixture.proposals = ([...reworded(recorded.programs), ...campTypes] as { fieldPath: string; value: unknown; excerpt: string }[]).map((proposal) => ({
+    fixture.proposals = ([...reworded(recorded.programs), ...campTypes] as Answer[]).map((proposal) => ({
       ...proposal,
       value: proposal.value === 3850 ? 3950 : proposal.value,
       excerpt: proposal.excerpt.replace('$3,850', '$3,950'),
@@ -750,10 +755,86 @@ describe('a crawl after an approval does not ask the reviewer again', () => {
     const changed = await crawl([campId]);
     expect(modelRequests()).toBe(3);
     expect(changed.entry(campId).status).toBe('ok');
+    expect(changed.entry(campId).notProposedAgain).toBeUndefined();
     const proposals = await proposalsFor(campId);
     expect(proposals.map((p) => p.status)).toEqual(['APPROVED', 'PENDING']);
-    expect(Object.keys(proposals[1]!.proposedChanges)).toEqual(['pricing']);
-    expect((proposals[1]!.proposedChanges.pricing!.new as { amount: number }[]).map((row) => row.amount).sort()).toEqual([3950, 7400]);
+    expect(Object.keys(proposals[1]!.proposedChanges).sort()).toEqual(['ageGroups', 'applicationUrl', 'pricing']);
+  });
+
+  it('proposes a changed price on a changed page even when its row cites text that does not hold the price', async () => {
+    const campId = await seedCamp();
+    // The junior tier is cited by its header, which states no amount.
+    const headerCited = (amount: number) => (recorded.programs as Answer[]).map((proposal) =>
+      proposal.fieldPath.startsWith('items[].pricing[].') && proposal.excerpt.startsWith('15 Day Sessions')
+        ? { ...proposal, excerpt: '15 Day Sessions', value: proposal.value === 3850 ? amount : proposal.value }
+        : proposal);
+    fixture.proposals = headerCited(3850);
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    await approveAll((await proposalsFor(campId))[0]!);
+    expect((await listRows(campId)).prices.map((row) => row.amount)).toEqual([3850, 7400]);
+
+    fixture.html = listingHtml().replace('$3,850', '$3,950');
+    fixture.proposals = headerCited(3950);
+    const changed = await crawl([campId]);
+
+    expect(changed.entry(campId).status).toBe('ok');
+    const [, second] = await proposalsFor(campId);
+    expect(second!.status).toBe('PENDING');
+    expect((second!.proposedChanges.pricing!.new as { amount: number }[]).map((row) => row.amount).sort()).toEqual([3850, 7400].map((n) => (n === 3850 ? 3950 : n)));
+  });
+
+  it('never treats a list approved from an incomplete read as the page\'s list', async () => {
+    const campId = await seedCamp();
+    // The part of the page that was read held only the first program.
+    fixture.proposals = (recorded.programs as (Answer & { locator: string })[]).filter((proposal) => proposal.locator.startsWith('items[0]'));
+    fixture.html = listingHtml();
+    process.env.TRAVERSE_CHUNK_SIZE = '1000';
+    fixture.failAfterFirstCall = true;
+    const partial = await crawl([campId]);
+    expect(partial.entry(campId).incomplete?.reason).toBe('provider-failure');
+    const [first] = await proposalsFor(campId);
+    // An incomplete read records no page fingerprint for an approval to copy.
+    expect(first!.rawExtraction.contentFingerprint).toBeUndefined();
+    await approveAll(first!);
+    const sources = (await getTestPool().query<{ fieldSources: Record<string, { contentFingerprint?: string }> }>(`SELECT "fieldSources" FROM "Camp" WHERE id = $1`, [campId])).rows[0]!.fieldSources;
+    expect(Object.values(sources).some((source) => source.contentFingerprint !== undefined)).toBe(false);
+    const partialRows = await listRows(campId);
+
+    // The same page, read in full: what the partial read missed is proposed.
+    fixture.failAfterFirstCall = false;
+    delete process.env.TRAVERSE_CHUNK_SIZE;
+    fixture.proposals = recorded.programs;
+    const full = await crawl([campId]);
+    expect(full.entry(campId).incomplete).toBeUndefined();
+    expect(full.entry(campId).status).toBe('ok');
+    expect(full.entry(campId).notProposedAgain).toBeUndefined();
+    const [, second] = await proposalsFor(campId);
+    expect(second!.status).toBe('PENDING');
+    const proposedSessions = (second!.proposedChanges.schedules?.new as unknown[] | undefined)?.length ?? 0;
+    expect(proposedSessions).toBeGreaterThan(partialRows.sessions.length);
+  });
+
+  it('returns the re-derived verification from the approve route', async () => {
+    const campId = await seedCamp();
+    fixture.proposals = recorded.programs;
+    fixture.html = listingHtml();
+    await crawl([campId]);
+    const [proposal] = await proposalsFor(campId);
+    const session = await openSession(proposal!);
+    requireAdminAccessMock.mockResolvedValue({ access: { email: REVIEWER } });
+
+    const response = await approveRoute(
+      new Request(`http://localhost/api/admin/review/${proposal!.id}/approve`, { method: 'POST', body: JSON.stringify({ reviewSessionId: session.id }) }),
+      { params: Promise.resolve({ id: proposal!.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.verification.dataConfidence).toBe('PLACEHOLDER');
+    expect(body.verification.missingRequirements.map((requirement: { id: string }) => requirement.id)).toEqual(
+      ['description', 'campType', 'category', 'registrationStatus', 'city', 'websiteUrl', 'sessions-verified'],
+    );
   });
 });
 

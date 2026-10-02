@@ -65,6 +65,7 @@ export function computeDiff(
   fieldSources: Record<string, { approvedAt?: string }> = {},
   sourceUrl = '',
   locators: Record<string, string> = {},
+  rowCitations: Record<string, { excerpt: string; locator?: string }[]> = {},
 ): ProposedChanges {
   const changes: ProposedChanges = {};
   const now = Date.now();
@@ -118,6 +119,7 @@ export function computeDiff(
         ...reviewSignals(conf, fieldSources[field], now),
         mode: isEmpty ? 'populate' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl, locator: locators[field] }),
+        ...(rowCitations[field] ? { rowCitations: rowCitations[field] } : {}),
       };
     }
   }
@@ -147,6 +149,7 @@ export function computeDiff(
         ...reviewSignals(conf, fieldSources[field], now),
         mode: currentItems.length === 0 ? 'populate' : isAdditive ? 'add_items' : 'update',
         ...projectProvenance({ excerpt: excerpts[field], sourceUrl, locator: locators[field] }),
+        ...(rowCitations[field] ? { rowCitations: rowCitations[field] } : {}),
       };
     }
   }

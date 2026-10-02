@@ -15,6 +15,12 @@ export interface CrawlCampLogEntry {
   /** Extraction notes an operator must see even when no proposal was created (e.g. a dropped price tier). */
   warnings?: string[];
   /**
+   * Fields this run read differently from the stored value but did not
+   * propose, because a reviewer approved them from this same page text. A
+   * `no_changes` entry with this set is not "the page agrees with the data".
+   */
+  notProposedAgain?: string[];
+  /**
    * Present when the extraction did not read all of the page's text
    * (Traverse's partial reason, and how many text ranges were not fully read).
    * An `ok`/`no_changes` entry with this set is an incomplete run, not a
@@ -78,6 +84,13 @@ export interface FieldDiff {
    */
   locator?: string;
   sourceUrl?: string;   // URL of the page the excerpt was found on
+  /**
+   * For a list field, where each proposed row was read: one entry per row of
+   * `new`, in order. `excerpt` above is only the first row's. Absent on
+   * proposals written before it was recorded; such a list has no per-row
+   * citation to check.
+   */
+  rowCitations?: { excerpt: string; locator?: string }[];
   mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions
 }
 

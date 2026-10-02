@@ -57,6 +57,7 @@
  * caller needs to build that round-trip later; this module just doesn't
  * assume the round-trip's other half exists yet.
  */
+import { plainLabel } from '@/lib/ingestion/plain-label';
 import type { PoolClient } from 'pg';
 
 import {
@@ -106,9 +107,16 @@ export interface ScheduleReconciliationResult {
   readonly orphaned: readonly ExistingScheduleRow[];
 }
 
-/** Trimmed, case-insensitive `label` + `startDate` + `endDate` — the natural key a human/crawl already treats as "the same session" (plan line ~194). */
-function scheduleNaturalKey(label: string, startDate: string | null, endDate: string | null): string {
-  return `${label.trim().toLowerCase()}|${startDate ?? ''}|${endDate ?? ''}`;
+/**
+ * Trimmed, case-insensitive `label` + `startDate` + `endDate` — the natural key a human/crawl already treats as "the same session" (plan line ~194).
+ *
+ * The label is compared as plain text. Crawled labels used to keep the page
+ * preparation's Markdown (`**First Session:** …`) and are now stored without
+ * it; comparing them raw would archive and recreate every such session, and
+ * revoke its claims, on the first approval after that change.
+ */
+export function scheduleNaturalKey(label: string, startDate: string | null, endDate: string | null): string {
+  return `${plainLabel(label).toLowerCase()}|${startDate ?? ''}|${endDate ?? ''}`;
 }
 
 /**

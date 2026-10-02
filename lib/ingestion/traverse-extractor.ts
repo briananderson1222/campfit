@@ -147,6 +147,7 @@ export function itemToProposedChanges(
       ...reportedConfidence(meanReportedConfidence(item.ageGroups.map((ag) => ag.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.ageGroups[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.ageGroups[0].locator }),
+      rowCitations: item.ageGroups.map((row) => ({ excerpt: row.label, ...(row.locator ? { locator: row.locator } : {}) })),
     };
   }
 
@@ -165,6 +166,7 @@ export function itemToProposedChanges(
       ...reportedConfidence(meanReportedConfidence(item.schedules.map((s) => s.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.schedules[0].locator }),
+      rowCitations: item.schedules.map((row) => ({ excerpt: row.label, ...(row.locator ? { locator: row.locator } : {}) })),
     };
   }
 
@@ -182,6 +184,7 @@ export function itemToProposedChanges(
       ...reportedConfidence(meanReportedConfidence(item.pricing.map((p) => p.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.pricing[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.pricing[0].locator }),
+      rowCitations: item.pricing.map((row) => ({ excerpt: row.label, ...(row.locator ? { locator: row.locator } : {}) })),
     };
   }
 

@@ -890,6 +890,7 @@ async function runKnownCampStrategy(
               incomplete: result.incomplete,
               withheldListFields: result.withheldListFields,
               populatedListFields: result.populatedListFields,
+              notProposedAgain: result.notProposedAgain,
               modelSource: result.modelSource,
               coverage: result.coverage,
             });

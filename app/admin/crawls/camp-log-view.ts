@@ -25,8 +25,11 @@ export function campLogOutcomeCounts(entries: readonly Pick<CrawlCampLogEntry, '
 }
 
 /** The expanded row's explanation line, or null when the outcome needs none. */
-export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'incomplete' | 'fieldsChanged' | 'skipped'>): string | null {
+export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'incomplete' | 'fieldsChanged' | 'skipped' | 'notProposedAgain'>): string | null {
   const outcome = campLogOutcome(entry);
+  const held = entry.notProposedAgain ?? [];
+  // Not "the page agrees with the data": the model read these differently.
+  if (outcome === 'unchanged' && held.length > 0) return `No new proposal — ${notProposedAgainNote(held)}`;
   if (outcome === 'unchanged' && entry.skipped === 'content_unchanged') {
     return 'Page text unchanged since the last complete extraction — not re-read by the model';
   }
@@ -55,6 +58,17 @@ export function campLogOutcomeNote(entry: Pick<CrawlCampLogEntry, 'status' | 'in
   }
   const effect = parts.join(' ');
   return `Extraction incomplete (${entry.incomplete.reason}): ${ranges}. ${effect}`;
+}
+
+/** What a run held back because a reviewer already approved it from the same page text. */
+export function notProposedAgainNote(fields: readonly string[]): string {
+  return `${fields.length} field(s) were read differently but not proposed again, because a reviewer approved them from this same page text: ${fields.join(', ')}. Recrawl from the review page to ask again.`;
+}
+
+/** Short label for the row itself, so such a run does not read as a plain "no changes". */
+export function campLogHeldBackLabel(entry: Pick<CrawlCampLogEntry, 'notProposedAgain'>): string | null {
+  const count = entry.notProposedAgain?.length ?? 0;
+  return count > 0 ? `${count} not re-proposed` : null;
 }
 
 /**

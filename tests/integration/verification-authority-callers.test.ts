@@ -46,7 +46,7 @@
  *   lib/admin/verification-authority.ts:536:export async function refreshCampVerificationCache(...
  *   lib/admin/review-apply.ts:<N>:      await refreshCampVerificationCache(proposal.campId);   [applyProposalReview]
  *   lib/admin/review-apply.ts:<N>:    await refreshCampVerificationCache(proposal.campId);      [applyBatchAcceptedFieldsForProposal]
- *   lib/admin/review-apply.ts:<N>:    await recordEvidence(pool, { claim: args.draft, ... });     [recordReviewedClaim]
+ *   lib/admin/review-apply.ts:<N>:    await recordEvidence(pool, { claim: args.draft, ... });     [recordApprovedClaim]
  *   lib/admin/bulk-attestation.ts:<N>:    await recordEvidence(pool, { claim, evidence, event });
  *   lib/admin/bulk-attestation.ts:<N>:  const cacheResult = await refreshCampVerificationCache(campId, { now });
  *   lib/admin/claim-store.ts:890:export async function recordEvidence(...
@@ -183,10 +183,10 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
     // applyProposalReview: the interactive single-proposal path.
     // applyBatchAcceptedFieldsForProposal: the batch path's private helper
     // (applyBatchAcceptedClaims delegates to it per proposal group).
-    // recordReviewedClaim: the one writer of an approved claim's evidence,
-    // reached only from recordAppliedFieldEvidence, which both paths call
+    // recordApprovedClaim: the one writer of an approved claim's evidence,
+    // reached only through recordAppliedFieldEvidence, which both paths call
     // after their apply transaction commits.
-    expect(enclosingFunctions).toEqual(new Set(['applyProposalReview', 'recordReviewedClaim', 'applyBatchAcceptedFieldsForProposal']));
+    expect(enclosingFunctions).toEqual(new Set(['applyProposalReview', 'recordApprovedClaim', 'applyBatchAcceptedFieldsForProposal']));
   });
 
   /**
