@@ -28,6 +28,29 @@ export async function updateCampAttestationAuditTrail(
   );
 }
 
+/**
+ * Forget which page text these fields were approved from. A crawl withholds a
+ * change to a field approved from the same page text (decided-changes.ts);
+ * once a person edits the field by hand, the stored value is no longer the
+ * approved one, so the page's reading must be proposed again.
+ */
+export async function clearApprovedPageFingerprints(
+  queryable: { query: (text: string, values: unknown[]) => Promise<unknown> },
+  campId: string,
+  fields: readonly string[],
+): Promise<void> {
+  if (fields.length === 0) return;
+  await queryable.query(
+    `UPDATE "Camp" c
+        SET "fieldSources" = (
+          SELECT COALESCE(jsonb_object_agg(e.key,
+                   CASE WHEN e.key = ANY($2::text[]) AND jsonb_typeof(e.value) = 'object' THEN e.value - 'contentFingerprint' ELSE e.value END), '{}'::jsonb)
+            FROM jsonb_each(c."fieldSources") AS e)
+      WHERE c.id = $1 AND c."fieldSources" IS NOT NULL AND jsonb_typeof(c."fieldSources") = 'object'`,
+    [campId, [...fields]],
+  );
+}
+
 const ADMIN_CAMP_EDITABLE_FIELDS = new Set([
   'name', 'organizationName', 'providerId', 'websiteUrl', 'description', 'notes', 'interestingDetails',
   'campType', 'category', 'campTypes', 'categories', 'registrationStatus', 'registrationOpenDate',
@@ -50,6 +73,7 @@ export async function updateAdminCampFields(
     campId,
     ...updates.map(([, value]) => value ?? null),
   ]);
+  await clearApprovedPageFingerprints(db(), campId, updates.map(([field]) => field));
   return current;
 }
 
@@ -79,6 +103,7 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
         [campId, ag.label.trim(), ag.minAge ?? null, ag.maxAge ?? null, ag.minGrade ?? null, ag.maxGrade ?? null]);
     }
     await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [campId]);
+    await clearApprovedPageFingerprints(client, campId, ['ageGroups']);
     await client.query('COMMIT');
     await writeChangeLogs([{
       campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous.rows,

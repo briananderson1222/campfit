@@ -81,6 +81,7 @@ export type ItemOutcome =
       /** List fields withheld / filled on that incomplete run; persisted with the marker. */
       withheldListFields?: readonly string[];
       populatedListFields?: readonly string[];
+      notProposedAgain?: readonly string[];
       modelSource?: CrawlCampLogEntry['modelSource'];
       coverage?: CrawlCampLogEntry['coverage'];
       skipped?: CrawlCampLogEntry['skipped'];
@@ -199,6 +200,7 @@ export async function startRun(options: StartRunOptions): Promise<CrawlRunTracke
         ...(outcome.warnings && outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
         ...(outcome.modelSource ? { modelSource: outcome.modelSource } : {}),
         ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
+        ...(outcome.notProposedAgain?.length ? { notProposedAgain: [...outcome.notProposedAgain] } : {}),
         ...(outcome.skipped ? { skipped: outcome.skipped } : {}),
         ...(outcome.incomplete
           ? {

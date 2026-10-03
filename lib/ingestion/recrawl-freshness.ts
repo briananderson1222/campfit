@@ -24,8 +24,13 @@ import type { Pool } from 'pg';
 export interface RecordRecrawlFreshnessInput {
   /** the exact camp whose page was found unchanged — the sole UPDATE target. */
   campId: string;
-  /** the freshness instant to record on `lastCrawledAt` (injected for deterministic tests). */
-  checkedAt: Date;
+  /**
+   * The instant to record on `lastCrawledAt`. Omit it (the crawl pipeline
+   * does) to stamp the DATABASE clock, for the reason given on
+   * {@link RecordCrawlAttemptInput.attemptedAt}. Pass a value only to pin the
+   * time in a test.
+   */
+  checkedAt?: Date;
 }
 
 /**
@@ -39,8 +44,8 @@ export async function recordRecrawlFreshness(
   input: RecordRecrawlFreshnessInput
 ): Promise<boolean> {
   const result = await pool.query(
-    'UPDATE "Camp" SET "lastCrawledAt" = $1 WHERE id = $2',
-    [input.checkedAt, input.campId]
+    'UPDATE "Camp" SET "lastCrawledAt" = COALESCE($1::timestamptz, now()) WHERE id = $2',
+    [input.checkedAt ?? null, input.campId]
   );
   return (result.rowCount ?? 0) > 0;
 }

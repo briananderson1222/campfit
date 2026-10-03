@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildRelayExtractionSchema } from "@kontourai/traverse/relay";
+import { enumFieldsLeftUnrestricted } from "@kontourai/traverse/anthropic";
 
 import { CAMP_FIELD_HINTS, CAMP_TARGET_SCHEMA } from "@/lib/ingestion/traverse-schema";
 import { runTraverseExtraction } from "@/lib/ingestion/traverse-extractor";
@@ -13,6 +14,16 @@ import { assembledItemToDiffInputs } from "@/lib/ingestion/traverse-diff-inputs"
 import { createReplayProvider, listingHtml, loadModelOutput } from "../fixtures/real-crawl/replay";
 
 const SOURCE_REF = "https://pineridge.example/dates-rates";
+
+interface ItemVariant {
+  properties: { fieldPath: { enum: string[] }; value: Record<string, unknown> };
+}
+
+/** The per-value-type proposal item schemas of the strict tool schema. */
+function itemVariants(schema: unknown): ItemVariant[] {
+  const items = (schema as { properties: { proposals: { items: { anyOf?: ItemVariant[] } & ItemVariant } } }).properties.proposals.items;
+  return items.anyOf ?? [items];
+}
 
 async function extractListing(proposals: readonly unknown[]) {
   const { provider, runtime } = createReplayProvider(proposals);
@@ -24,11 +35,33 @@ describe("the extraction schema is expressible to the real Relay provider", () =
   it("builds the strict structured-output schema for every target field", () => {
     // Traverse's own builder throws for any `object` or `array` target. This
     // is the call that failed every extraction.
-    const schema = buildRelayExtractionSchema(CAMP_TARGET_SCHEMA) as {
-      properties: { proposals: { items: { properties: { fieldPath: { enum: string[] } } } } };
-    };
-    expect(schema.properties.proposals.items.properties.fieldPath.enum).toEqual(CAMP_TARGET_SCHEMA.map((field) => field.path));
+    const variants = itemVariants(buildRelayExtractionSchema(CAMP_TARGET_SCHEMA));
+    // Traverse 4.1: one item variant per value type, each naming its fields.
+    expect(variants.flatMap((variant) => variant.properties.fieldPath.enum).sort()).toEqual(CAMP_TARGET_SCHEMA.map((field) => field.path).sort());
     expect(CAMP_TARGET_SCHEMA.filter((field) => field.type === "object" || field.type === "array")).toEqual([]);
+  });
+
+  it("restricts every enum field to its own values, and types numbers and booleans", () => {
+    const variants = itemVariants(buildRelayExtractionSchema(CAMP_TARGET_SCHEMA));
+    const valueSchemaOf = (fieldPath: string) => variants.find((variant) => variant.properties.fieldPath.enum.includes(fieldPath))!.properties.value;
+
+    // Traverse restricts at most MAX_ENUM_VALUE_VARIANTS distinct enum sets;
+    // a field past that is a plain string again. None of ours may be.
+    expect(enumFieldsLeftUnrestricted(CAMP_TARGET_SCHEMA)).toEqual([]);
+    const enumFields = CAMP_TARGET_SCHEMA.filter((field) => field.type === "enum");
+    expect(enumFields.map((field) => field.path)).toEqual([
+      "items[].category", "items[].registrationStatus", "items[].socialLinks[].platform",
+      "items[].pricing[].unit", "items[].campTypes[]", "items[].categories[]",
+    ]);
+    for (const field of enumFields) {
+      expect(valueSchemaOf(field.path), field.path).toEqual({ type: "string", enum: field.enumValues });
+    }
+    // The values a real model returned before the schema carried them.
+    expect((valueSchemaOf("items[].campTypes[]") as { enum: string[] }).enum).not.toContain("DAY");
+    expect((valueSchemaOf("items[].registrationStatus") as { enum: string[] }).enum).not.toContain("SOLD_OUT");
+    expect(valueSchemaOf("items[].pricing[].amount")).toEqual({ type: "number" });
+    expect(valueSchemaOf("items[].ageGroups[].minAge")).toEqual({ type: "number" });
+    expect(valueSchemaOf("items[].lunchIncluded")).toEqual({ type: "boolean" });
   });
 
   it("runs a whole extraction through the real provider and keeps every grounded proposal", async () => {
@@ -95,6 +128,36 @@ describe("a multi-program page whose programs arrive un-indexed", () => {
     const [item] = assembleItems(result.proposals);
     expect(item!.scalars.applicationUrl).toBeUndefined();
     expect(item!.multiProgram?.withheldFields).toEqual(["name", "applicationUrl"]);
+  });
+
+  it("flags a field the page states two values for, instead of taking the first", async () => {
+    const onlyFirst = loadModelOutput().programs.filter((proposal) => String((proposal as { locator: string }).locator).startsWith("items[0]"));
+    // Traverse 4.1 asks for one proposal per distinct value. The page links the
+    // enrolment form three times; here one answer reads a different address.
+    const second = { fieldPath: "items[].applicationUrl", value: "https://register.pineridge.example/apply-now", confidence: 1, excerpt: "[Enroll Today!](https://register.pineridge.example/apply)", locator: "items[0]", occurrenceHint: 2 };
+    const { result } = await extractListing([...onlyFirst, second]);
+    const [item] = assembleItems(result.proposals);
+
+    expect(item!.multiProgram).toBeUndefined();
+    expect(item!.scalars.applicationUrl).toBeUndefined();
+    expect(assembledItemToDiffInputs(item!).extracted.applicationUrl).toBeUndefined();
+    expect(item!.conflictingValues).toEqual({
+      applicationUrl: ["https://register.pineridge.example/apply", "https://register.pineridge.example/apply-now"],
+    });
+    expect(item!.operatorWarnings).toContain(
+      'applicationUrl: the page states 2 different values ("https://register.pineridge.example/apply", "https://register.pineridge.example/apply-now") — none is proposed; a reviewer must choose',
+    );
+    // The other fields are untouched.
+    expect(item!.scalars.name?.candidateValue).toBe("Pine Ridge Junior Camp");
+  });
+
+  it("proposes a value the page states twice", async () => {
+    const onlyFirst = loadModelOutput().programs.filter((proposal) => String((proposal as { locator: string }).locator).startsWith("items[0]"));
+    const again = { fieldPath: "items[].applicationUrl", value: "https://register.pineridge.example/apply", confidence: 1, excerpt: "[Enroll Today!](https://register.pineridge.example/apply)", locator: "items[0]", occurrenceHint: 2 };
+    const { result } = await extractListing([...onlyFirst, again]);
+    const [item] = assembleItems(result.proposals);
+    expect(item!.conflictingValues).toEqual({});
+    expect(item!.scalars.applicationUrl?.candidateValue).toBe("https://register.pineridge.example/apply");
   });
 
   it("still proposes the name on a page with one program", async () => {

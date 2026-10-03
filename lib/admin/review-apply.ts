@@ -58,10 +58,16 @@ import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accep
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
 import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
+import { appendEvent, appendEvidence, persistClaim } from './claim-store';
+import { sessionClaimId } from './verification-policy';
+import { SESSION_SUBJECT_TYPE } from './session-identity';
+import { createHash } from 'node:crypto';
+import { campfitSessionVocabulary } from '../trust-vocabulary';
+import type { DataConfidence } from '@/lib/types';
 import { buildCampReviewTrustInput, campCanonicalClaimId, type ReviewCitationSource } from './trust-projection';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from './survey-review-apply';
 import { getSurveyReviewEvents } from './survey-review-events';
-import { applyScheduleReconciliation, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
+import { applyScheduleReconciliation, scheduleNaturalKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
@@ -135,6 +141,18 @@ function assertApplicableValues(changes: ProposedChanges, fields: readonly strin
       problems.push(`"${field}" has no way to be applied in the proposed shape`);
     }
   }
+  // A single value and its list approved together must agree. Applying both
+  // would leave the column holding a value one of the two decisions did not
+  // approve.
+  for (const [list, twin] of Object.entries(ENUM_ARRAY_TWIN)) {
+    const single = changes[twin.column];
+    const members = changes[list]?.new;
+    if (!fields.includes(list) || !fields.includes(twin.column) || !single || !Array.isArray(members)) continue;
+    if (!members.includes(String(single.new))) {
+      failing.push(twin.column);
+      problems.push(`"${twin.column}" (${String(single.new)}) is not one of the approved "${list}" (${members.join(', ')})`);
+    }
+  }
   if (problems.length > 0) {
     throw new ReviewApplyValueError(`Cannot apply: ${problems.join('; ')}. Nothing was applied. Keep the current value or edit the field manually.`, failing);
   }
@@ -206,6 +224,17 @@ export interface AppliedReview {
    * here instead of being silently swallowed.
    */
   readonly provenanceErrors: readonly ProvenanceError[];
+  /**
+   * The camp's verification as re-derived after this apply, with every
+   * Verified Camp requirement that is not yet verified. Absent when nothing
+   * was applied or the re-derivation failed (see `provenanceErrors`).
+   */
+  readonly verification?: AppliedReviewVerification;
+}
+
+export interface AppliedReviewVerification {
+  readonly dataConfidence: DataConfidence;
+  readonly missingRequirements: readonly { readonly id: string; readonly title: string; readonly status: string }[];
 }
 
 export class ReviewApplyProposalNotFoundError extends Error {
@@ -306,6 +335,9 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // below — see this module's header comment on why the evidence-recording
   // step can't run inside this function's own transaction `client`.
   let reviewTrustBundle: TrustBundle | undefined;
+  // Applied fields whose excerpt was checked as an exact citation of the
+  // stored source inside the transaction (see reviewedWithCitation).
+  const facts = newAppliedFacts();
   // V3 fix (HIGH, review-code.md): Session rows archived by this round's
   // `schedules` reconciliation (if any) — captured inside the transaction,
   // consumed AFTER `COMMIT` by `revokeArchivedSessionClaims` (below), same
@@ -334,6 +366,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       ? await exactProposalSnapshot(proposal)
       : undefined;
     if (proposalSnapshot) assertExactCitations(decision.effectiveChanges, appliedFields, proposalSnapshot.citation);
+    facts.citations = checkCitations(decision.effectiveChanges, appliedFields, proposalSnapshot?.citation);
 
     // Builds the Review Decision's Claim/Evidence/VerificationEvent shapes
     // for every field in this round (approved and rejected alike) — kept as
@@ -365,9 +398,9 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       if (SCALAR_FIELDS.includes(field)) {
         changeLogs.push(await applyScalarField(client, proposal, reviewer, decision.reviewedAt, field, diff));
       } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field)) {
-        changeLogs.push(await applyEnumArrayField(client, proposal, reviewer, decision.reviewedAt, field, diff));
+        changeLogs.push(await applyEnumArrayField(client, proposal, reviewer, decision.reviewedAt, field, diff, facts));
       } else if (field in RELATION_TABLES && Array.isArray(diff.new)) {
-        const relationResult = await applyRelationField(client, proposal, reviewer, decision.reviewedAt, field, diff);
+        const relationResult = await applyRelationField(client, proposal, reviewer, decision.reviewedAt, field, diff, facts);
         changeLogs.push(relationResult.changeLog);
         if (relationResult.orphaned && relationResult.orphaned.length > 0) {
           orphanedSessions.push(...relationResult.orphaned);
@@ -415,16 +448,29 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // via `provenanceErrors` instead — changelog/metrics (`recordProvenance`,
   // below) still run regardless of whether these succeed.
   const postCommitProvenanceErrors: ProvenanceError[] = [];
+  let verification: AppliedReviewVerification | undefined;
   if (appliedFields.length > 0) {
     try {
-      await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, appliedFields, reviewTrustBundle!);
+      await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, appliedFields, reviewTrustBundle!, {
+        kind: 'review',
+        reviewer,
+        reviewedAt: decision.reviewedAt,
+        changes: decision.effectiveChanges,
+        facts,
+      });
     } catch (err) {
       console.error('recordAppliedFieldEvidence failed (non-fatal):', err);
       postCommitProvenanceErrors.push({ step: 'recordAppliedFieldEvidence', message: String(err) });
     }
 
     try {
-      await refreshCampVerificationCache(proposal.campId);
+      const refreshed = await refreshCampVerificationCache(proposal.campId);
+      verification = {
+        dataConfidence: refreshed.dataConfidence,
+        missingRequirements: refreshed.rollup.requirements
+          .filter((requirement) => requirement.required && requirement.status !== 'verified')
+          .map((requirement) => ({ id: requirement.id, title: requirement.title, status: requirement.status })),
+      };
     } catch (err) {
       console.error('refreshCampVerificationCache failed (non-fatal):', err);
       postCommitProvenanceErrors.push({ step: 'refreshCampVerificationCache', message: String(err) });
@@ -508,6 +554,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     rejectedFields: decision.rejectedFields,
     kept: keepPending,
     provenanceErrors,
+    ...(verification ? { verification } : {}),
   };
 }
 
@@ -680,6 +727,7 @@ async function applyBatchAcceptedFieldsForProposal(
   let keepPending = false;
   let reviewTrustBundle: TrustBundle | undefined;
   let narrowedChanges: ProposedChanges = {};
+  const facts = newAppliedFacts();
 
   try {
     await client.query('BEGIN');
@@ -700,6 +748,7 @@ async function applyBatchAcceptedFieldsForProposal(
         ? await exactProposalSnapshot(proposal)
         : undefined;
       if (proposalSnapshot) assertExactCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot.citation);
+      facts.citations = checkCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot?.citation);
       reviewTrustBundle = buildCampReviewTrustInput({
         proposalId: proposal.id,
         campId: proposal.campId,
@@ -745,7 +794,13 @@ async function applyBatchAcceptedFieldsForProposal(
   }
 
   try {
-    await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle!);
+    await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle!, {
+      kind: 'batch-accept',
+      reviewer: actor,
+      reviewedAt,
+      changes: narrowedChanges,
+      facts,
+    });
     await refreshCampVerificationCache(proposal.campId);
   } catch (err) {
     console.error('applyBatchAcceptedClaims: recordAppliedFieldEvidence/refreshCampVerificationCache failed (non-fatal):', err);
@@ -800,6 +855,79 @@ async function applyBatchAcceptedFieldsForProposal(
 /** Snapshot bytes are required only when an approved diff claims a source excerpt. */
 export function approvedFieldsRequireSnapshot(changes: ProposedChanges, approvedFields: readonly string[]): boolean {
   return approvedFields.some((field) => Boolean(changes[field]?.excerpt?.trim()));
+}
+
+/** One proposed list row's citation, as checked against the stored source text. */
+interface RowCitationCheck {
+  readonly checked: boolean;
+  readonly excerpt?: string;
+  /** The `chars:` locator the excerpt resolved to. Set only when `checked`. */
+  readonly locator?: string;
+}
+
+/** Whether an applied field's value was checked against the stored source text, and for a list, row by row. */
+interface CitationCheck {
+  /** Every part of the approved value cites the stored source exactly. */
+  readonly reviewed: boolean;
+  /** For a list field with per-row citations: one entry per row of the approved list. */
+  readonly rows?: readonly RowCitationCheck[];
+}
+
+/**
+ * Which applied fields were approved against a checked citation.
+ *
+ * - No stored snapshot was loaded: nothing was checked.
+ * - A single value: it carries an excerpt (which `assertExactCitations` has
+ *   already confirmed matches the stored text exactly).
+ * - A list: every row carries its own citation (`FieldDiff.rowCitations`) and
+ *   every one matches the stored text exactly. The list's `excerpt` is only
+ *   its first row's, so a list with no per-row citations, or with any row
+ *   that does not match, is not reviewed as a whole. Rows that do match are
+ *   still reported individually (a session is attested row by row).
+ */
+function checkCitations(changes: ProposedChanges, fields: readonly string[], citation: ReviewCitationSource | undefined): Map<string, CitationCheck> {
+  const checks = new Map<string, CitationCheck>();
+  for (const field of fields) {
+    const diff = changes[field];
+    if (!diff || !citation) {
+      checks.set(field, { reviewed: false });
+      continue;
+    }
+    if (!Array.isArray(diff.new)) {
+      checks.set(field, { reviewed: Boolean(diff.excerpt?.trim()) });
+      continue;
+    }
+    const citations = diff.rowCitations;
+    if (!Array.isArray(citations) || citations.length !== diff.new.length || diff.new.length === 0) {
+      checks.set(field, { reviewed: false });
+      continue;
+    }
+    const rows = citations.map((row): RowCitationCheck => {
+      const excerpt = typeof row?.excerpt === 'string' ? row.excerpt : '';
+      if (!excerpt.trim()) return { checked: false };
+      const resolved = resolveReviewExcerpt(excerpt, citation.text, row.locator);
+      return resolved.state === 'verified' ? { checked: true, excerpt, locator: resolved.locator } : { checked: false, excerpt };
+    });
+    checks.set(field, { reviewed: rows.every((row) => row.checked), rows });
+  }
+  return checks;
+}
+
+/** What the apply transaction learned that the evidence written after it needs. */
+interface AppliedFacts {
+  citations: Map<string, CitationCheck>;
+  /** For each applied enum list: whether applying it changed its single-value twin column. */
+  twinChanged: Map<string, boolean>;
+  /** Each session's `startTime|endTime` before this apply, by `CampSchedule.id`. */
+  previousSessionTimes: Map<string, string>;
+}
+
+function newAppliedFacts(): AppliedFacts {
+  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map() };
+}
+
+function sessionTimeKey(row: { startTime?: string | null; endTime?: string | null }): string {
+  return `${row.startTime?.trim() ?? ''}|${row.endTime?.trim() ?? ''}`;
 }
 
 /** General review provenance always builds; snapshot citation is optional enrichment. */
@@ -895,6 +1023,24 @@ async function lockAndCheckProposal(client: PoolClient, proposalId: string): Pro
   return new Set(statusCheck.rows[0]?.appliedFields ?? []);
 }
 
+/**
+ * The `fieldSources` entry an approval records: the cited excerpt, where it
+ * came from, when it was approved, and the fingerprint of the page text the
+ * proposal was read from in full (so a crawl of the same text does not ask
+ * again). A proposal made from an incomplete read records no fingerprint.
+ */
+function approvedFieldSource(proposal: CampChangeProposal, diff: FieldDiff, reviewedAt: string) {
+  // A proposal from an incomplete read never carries one (the adapter does not
+  // store it); the second check keeps that true for any other writer.
+  const contentFingerprint = proposal.rawExtraction?.incomplete ? undefined : proposal.rawExtraction?.contentFingerprint;
+  return {
+    excerpt: diff.excerpt ?? null,
+    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
+    approvedAt: reviewedAt,
+    ...(typeof contentFingerprint === 'string' && contentFingerprint ? { contentFingerprint } : {}),
+  };
+}
+
 /** Writes one scalar Camp field + its fieldSources entry; returns the CampChangeLog entry to record for it. */
 async function applyScalarField(
   client: PoolClient,
@@ -904,11 +1050,7 @@ async function applyScalarField(
   field: string,
   diff: FieldDiff,
 ): Promise<ChangeLogEntry> {
-  const fieldSource = {
-    excerpt: diff.excerpt ?? null,
-    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-    approvedAt: reviewedAt,
-  };
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
   await client.query(
     `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
     [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
@@ -965,25 +1107,25 @@ async function applyEnumArrayField(
   reviewedAt: string,
   field: string,
   diff: FieldDiff,
+  facts: AppliedFacts,
 ): Promise<ChangeLogEntry> {
-  const fieldSource = {
-    excerpt: diff.excerpt ?? null,
-    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-    approvedAt: reviewedAt,
-  };
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
   // Each list has a single-value twin column (`campType`, `category`) that
   // other code still reads. It must stay a member of the list: kept when it
   // still is one, otherwise moved to the list's first member.
   const twin = ENUM_ARRAY_TWIN[field]!;
-  const result = await client.query(
+  const before = await client.query<{ twin: string | null }>(`SELECT "${twin.column}"::text AS twin FROM "Camp" WHERE id = $1 FOR UPDATE`, [proposal.campId]);
+  const result = await client.query<{ twin: string | null }>(
     `UPDATE "Camp"
         SET "${field}" = $1::text[],
             "${twin.column}" = CASE WHEN "${twin.column}"::text = ANY($1::text[]) THEN "${twin.column}" ELSE ($1::text[])[1]::"${twin.type}" END,
             "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb
-      WHERE id = $3`,
+      WHERE id = $3
+      RETURNING "${twin.column}"::text AS twin`,
     [diff.new as string[], JSON.stringify({ [field]: fieldSource }), proposal.campId]
   );
   if (result.rowCount !== 1) throw new Error(`Applying "${field}" updated ${result.rowCount ?? 0} camp rows, expected 1.`);
+  facts.twinChanged.set(field, before.rows[0]?.twin !== result.rows[0]?.twin);
   const empty = !Array.isArray(diff.old) || diff.old.length === 0;
   return {
     campId: proposal.campId,
@@ -1003,22 +1145,21 @@ async function applyRelationField(
   reviewedAt: string,
   field: string,
   diff: FieldDiff,
+  facts: AppliedFacts,
 ): Promise<{ changeLog: ChangeLogEntry; orphaned?: readonly ExistingScheduleRow[] }> {
-  const fieldSource = {
-    excerpt: diff.excerpt ?? null,
-    sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
-    approvedAt: reviewedAt,
-  };
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
 
   let orphaned: readonly ExistingScheduleRow[] | undefined;
   if (field === 'schedules') {
+    // A matched session keeps its id; whether its time changed decides if an
+    // earlier time claim still describes it.
+    const before = await client.query<{ id: string; startTime: string | null; endTime: string | null }>(
+      `SELECT id, "startTime", "endTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`,
+      [proposal.campId],
+    );
+    for (const row of before.rows) facts.previousSessionTimes.set(row.id, sessionTimeKey(row));
     const reconciliation = await applyScheduleReconciliation(client, proposal.campId, diff.new as IncomingScheduleSnapshot[]);
     orphaned = reconciliation.orphaned;
-
-    await client.query(
-      `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
-      [JSON.stringify({ schedules: fieldSource }), proposal.campId],
-    );
   } else {
     const table = RELATION_TABLES[field];
     await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
@@ -1041,6 +1182,14 @@ async function applyRelationField(
       }
     }
   }
+
+  // Every approved list records its source, like a scalar. `ageGroups` and
+  // `pricing` used to record none, so a later crawl could not tell that a
+  // reviewer had approved them.
+  await client.query(
+    `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
+    [JSON.stringify({ [field]: fieldSource }), proposal.campId],
+  );
 
   return {
     changeLog: {
@@ -1092,6 +1241,10 @@ async function applyRelationField(
  * the row it came from" convention `claim-store-backfill.ts` already
  * establishes (there, the legacy row; here, the approving
  * `CampChangeProposal`) — rather than reusing the bundle's own ids verbatim.
+ *
+ * The bundle's event always says `verified`. What is recorded does not: see
+ * `recordApprovedClaim`, which writes `verified` only for a value a reviewer
+ * approved against a checked citation, and `proposed` otherwise.
  */
 async function recordAppliedFieldEvidence(
   pool: Pool,
@@ -1099,37 +1252,309 @@ async function recordAppliedFieldEvidence(
   proposalId: string,
   appliedFields: readonly string[],
   reviewTrustBundle: TrustBundle,
+  review: ReviewDecisionRecord,
 ): Promise<void> {
+  // One field's failure must not leave the others with no evidence: each is
+  // recorded on its own, and every failure is reported together at the end.
+  const failures: string[] = [];
   for (const field of appliedFields) {
-    const claimId = campCanonicalClaimId(campId, field);
-    const claim = reviewTrustBundle.claims.find((candidate) => candidate.id === claimId);
-    const evidence = reviewTrustBundle.evidence.find((candidate) => candidate.claimId === claimId);
-    const event = reviewTrustBundle.events.find((candidate) => candidate.claimId === claimId);
-    if (!claim || !evidence || !event) {
-      throw new Error(
-        `recordAppliedFieldEvidence: expected buildCampReviewTrustInput's bundle to contain a ` +
-          `Claim/Evidence/Event for "${claimId}" (field "${field}"), found ` +
-          `${claim ? 'a claim' : 'NO claim'}, ${evidence ? 'evidence' : 'NO evidence'}, ${event ? 'an event' : 'NO event'}.`,
-      );
+    try {
+      await recordAppliedField(pool, campId, proposalId, field, appliedFields, reviewTrustBundle, review);
+    } catch (err) {
+      failures.push(`${field}: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    const draft: ClaimDefinitionDraft = {
-      id: claim.id,
-      subjectType: claim.subjectType,
-      subjectId: claim.subjectId,
-      facet: claim.facet,
-      claimType: claim.claimType,
-      fieldOrBehavior: claim.fieldOrBehavior,
-      impactLevel: claim.impactLevel,
-      metadata: claim.metadata,
-    };
-
-    const evidenceId = `evidence.${claimId}.review.${proposalId}`;
-    const scopedEvidence: Evidence = { ...evidence, id: evidenceId };
-    const scopedEvent: VerificationEvent = { ...event, id: `event.${claimId}.review.${proposalId}`, evidenceIds: [evidenceId] };
-
-    await recordEvidence(pool, { claim: draft, evidence: scopedEvidence, event: scopedEvent });
   }
+  if (failures.length > 0) {
+    throw new Error(`recordAppliedFieldEvidence: evidence was not recorded for ${failures.length} of ${appliedFields.length} applied field(s) — ${failures.join('; ')}`);
+  }
+}
+
+async function recordAppliedField(
+  pool: Pool,
+  campId: string,
+  proposalId: string,
+  field: string,
+  appliedFields: readonly string[],
+  reviewTrustBundle: TrustBundle,
+  review: ReviewDecisionRecord,
+): Promise<void> {
+  const claimId = campCanonicalClaimId(campId, field);
+  const claim = reviewTrustBundle.claims.find((candidate) => candidate.id === claimId);
+  const evidence = reviewTrustBundle.evidence.find((candidate) => candidate.claimId === claimId);
+  const event = reviewTrustBundle.events.find((candidate) => candidate.claimId === claimId);
+  if (!claim || !evidence || !event) {
+    throw new Error(
+      `expected buildCampReviewTrustInput's bundle to contain a Claim/Evidence/Event for "${claimId}", found ` +
+        `${claim ? 'a claim' : 'NO claim'}, ${evidence ? 'evidence' : 'NO evidence'}, ${event ? 'an event' : 'NO event'}.`,
+    );
+  }
+
+  const draft: ClaimDefinitionDraft = {
+    id: claim.id,
+    subjectType: claim.subjectType,
+    subjectId: claim.subjectId,
+    facet: claim.facet,
+    claimType: claim.claimType,
+    fieldOrBehavior: claim.fieldOrBehavior,
+    impactLevel: claim.impactLevel,
+    metadata: claim.metadata,
+  };
+  const diff = review.changes[field];
+  const check = review.facts.citations.get(field) ?? { reviewed: false };
+  const reviewed = countsAsReview(review) && check.reviewed;
+  await recordApprovedClaim(pool, { draft, evidence, event, proposalId, field, value: diff?.new, reviewed, review });
+
+  // The single-value twin of an enum list (`campType`, `category`) is what
+  // the Verified Camp Claim Set requires. Applying the list keeps the twin a
+  // member of it, so a reviewed list (every member cited) stands for the
+  // twin. An unreviewed list that moved the twin takes the twin's claim out
+  // of verified; one that left it alone says nothing about it. When the twin
+  // itself was approved in this proposal, that decision is the twin's.
+  const twin = ENUM_ARRAY_TWIN[field];
+  if (twin && !appliedFields.includes(twin.column) && (reviewed || review.facts.twinChanged.get(field))) {
+    await recordApprovedClaim(pool, {
+      draft: { ...draft, id: campCanonicalClaimId(campId, twin.column), fieldOrBehavior: twin.column },
+      evidence,
+      event,
+      proposalId,
+      field,
+      via: field,
+      value: diff?.new,
+      reviewed,
+      review,
+    });
+  }
+
+  // Each session the approved list leaves on the camp is its own claim subject.
+  if (field === 'schedules' && diff) {
+    await recordSessionClaims(pool, { campId, proposalId, diff, check, evidence, review });
+  }
+}
+
+/** Who decided the applied fields, how, when, and what the apply transaction learned. */
+interface ReviewDecisionRecord {
+  /** `review`: a reviewer decided each field in the review session. `batch-accept`: fields accepted in bulk by the exact-corroboration rule. */
+  readonly kind: 'review' | 'batch-accept';
+  readonly reviewer: string;
+  readonly reviewedAt: string;
+  readonly changes: ProposedChanges;
+  readonly facts: AppliedFacts;
+}
+
+/**
+ * Whether a batch accept counts as the human evidence a field policy needs.
+ * It does not: nobody looked at each value against its citation; a rule
+ * matched two crawls. Set to `true` to let a batch-accepted field with a
+ * checked citation count like an individually reviewed one.
+ */
+const BATCH_ACCEPT_COUNTS_AS_REVIEW = false;
+
+function countsAsReview(review: ReviewDecisionRecord): boolean {
+  return review.kind === 'review' || BATCH_ACCEPT_COUNTS_AS_REVIEW;
+}
+
+/** Digest of the approved value, so the decision evidence names what was attested. */
+function valueDigest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
+}
+
+/**
+ * Persist one approved claim.
+ *
+ * The camp and session field policies require both `crawl_observation` and
+ * `human_attestation` evidence, and Surface counts every evidence record ever
+ * attached to a claim. So the status this approval leaves rests on the EVENT
+ * it writes, which is always the claim's latest:
+ *
+ *  - Reviewed (a reviewer approved this value against a citation that was
+ *    checked): the crawl observation, the reviewer's decision as
+ *    `human_attestation` evidence carrying the value's digest, and a
+ *    `verified` event citing both.
+ *  - Not reviewed (no checked citation, or a batch accept): the crawl
+ *    observation and a `proposed` event. The value was applied but nobody
+ *    attested it, so the claim is not verified, whatever evidence an earlier
+ *    approval of a different value left behind.
+ *
+ * The decision evidence is written before the event that cites it, so a
+ * failure in between leaves no `verified` event behind.
+ */
+async function recordApprovedClaim(
+  pool: Pool,
+  args: {
+    readonly draft: ClaimDefinitionDraft;
+    readonly evidence: Evidence;
+    readonly event: VerificationEvent;
+    readonly proposalId: string;
+    readonly field: string;
+    /** The applied list this claim is recorded through (a twin column, a session). Keeps its ids apart from a direct approval's. */
+    readonly via?: string;
+    readonly value: unknown;
+    readonly reviewed: boolean;
+    readonly review: ReviewDecisionRecord;
+  },
+): Promise<void> {
+  const claimId = args.draft.id!;
+  const suffix = `${args.proposalId}${args.via ? `.via.${args.via}` : ''}`;
+  const evidenceId = `evidence.${claimId}.review.${suffix}`;
+  const batch = args.review.kind === 'batch-accept';
+  const reviewKind = batch ? 'batch-accept' : 'crawl-proposal';
+  const sourceEvidence: Evidence = { ...args.evidence, id: evidenceId, claimId, metadata: { ...args.evidence.metadata, reviewKind } };
+  const eventId = `event.${claimId}.review.${suffix}`;
+
+  if (!args.reviewed) {
+    const { verifiedAt: _verifiedAt, ...event } = args.event;
+    await recordEvidence(pool, {
+      claim: args.draft,
+      evidence: sourceEvidence,
+      event: {
+        ...event,
+        id: eventId,
+        claimId,
+        status: 'proposed',
+        evidenceIds: [evidenceId],
+        ...(batch ? { method: 'batch-accept' } : {}),
+        notes: batch
+          ? 'Accepted in a batch by the exact-corroboration rule. Applied, not individually reviewed, so not verified.'
+          : 'Approved without a citation checked against the stored source. Applied, not verified.',
+      },
+    });
+    return;
+  }
+
+  const decisionEvidence: Evidence = {
+    id: `evidence.${claimId}.review-decision.${suffix}`,
+    claimId,
+    evidenceType: 'human_attestation',
+    method: 'attestation',
+    sourceRef: `campfit-reviewer:${args.review.reviewer}`,
+    sourceLocator: `proposal:${args.proposalId}:field:${args.field}`,
+    excerptOrSummary: batch
+      ? `${args.review.reviewer} batch-accepted the proposed "${args.field}" value under the exact-corroboration rule; its citation matched the stored source.`
+      : `Reviewer ${args.review.reviewer} approved the proposed "${args.field}" value; its citation matched the stored source.`,
+    observedAt: args.review.reviewedAt,
+    collectedBy: args.review.reviewer,
+    integrityRef: valueDigest(args.value),
+    metadata: {
+      proposalId: args.proposalId,
+      reviewKind,
+      trustProducer: 'campfit.crawl-review',
+      decision: 'approved',
+      citationChecked: true,
+      ...(args.via ? { recordedThrough: args.via } : {}),
+    },
+  };
+  await persistClaim(pool, args.draft);
+  await appendEvidence(pool, decisionEvidence);
+  // The source citation stays last: the trust display reads an event's last
+  // evidence id as the citation to show.
+  await recordEvidence(pool, {
+    claim: args.draft,
+    evidence: sourceEvidence,
+    event: { ...args.event, id: eventId, claimId, status: 'verified', evidenceIds: [decisionEvidence.id, evidenceId], ...(batch ? { method: 'batch-accept' } : {}) },
+  });
+}
+
+/**
+ * Record what an applied `schedules` list says about each session, row by row.
+ *
+ * A session is matched to the proposal row it came from by the same natural
+ * key the apply used. Only a row whose own citation was checked is attested:
+ * `dates` always, `time` only when the row states a start and an end time.
+ * A session the reviewer was not shown, or whose row cites nothing that was
+ * checked, gets no new claim.
+ *
+ * A `time` claim describes one time. When this apply changed or removed a
+ * matched session's time and did not attest the new one, the earlier claim is
+ * invalidated, so it stops reading as verified for a value it never covered.
+ */
+async function recordSessionClaims(
+  pool: Pool,
+  args: {
+    readonly campId: string;
+    readonly proposalId: string;
+    readonly diff: FieldDiff;
+    readonly check: CitationCheck;
+    readonly evidence: Evidence;
+    readonly review: ReviewDecisionRecord;
+  },
+): Promise<void> {
+  const { rows: sessions } = await pool.query<{ id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }>(
+    `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "startTime", "endTime"
+       FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`,
+    [args.campId],
+  );
+  const byKey = new Map(sessions.map((row) => [scheduleNaturalKey(row.label, row.startDate, row.endDate), row] as const));
+  const proposed = Array.isArray(args.diff.new) ? (args.diff.new as IncomingScheduleSnapshot[]) : [];
+
+  for (const [index, incoming] of proposed.entries()) {
+    const session = byKey.get(scheduleNaturalKey(incoming.label, incoming.startDate, incoming.endDate));
+    if (!session) continue;
+    const citation = args.check.rows?.[index];
+    const attested = countsAsReview(args.review) && citation?.checked === true;
+    const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
+    const record = (attribute: 'dates' | 'time', value: unknown) =>
+      recordApprovedClaim(pool, {
+        draft: {
+          id: sessionClaimId(session.id, attribute),
+          subjectType: SESSION_SUBJECT_TYPE,
+          subjectId: session.id,
+          facet: campfitSessionVocabulary.facet,
+          claimType: campfitSessionVocabulary.claimTypes[attribute],
+          fieldOrBehavior: attribute,
+          impactLevel: 'medium',
+          metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
+        },
+        // This row's own citation, not the list's first row's.
+        evidence: { ...args.evidence, sourceLocator: citation!.locator, excerptOrSummary: citation!.excerpt ?? args.evidence.excerptOrSummary },
+        event: {
+          id: sessionClaimId(session.id, attribute),
+          claimId: sessionClaimId(session.id, attribute),
+          status: 'verified',
+          type: 'verification',
+          actor: args.review.reviewer,
+          method: 'survey-review',
+          evidenceIds: [],
+          createdAt: args.review.reviewedAt,
+          verifiedAt: args.review.reviewedAt,
+        },
+        proposalId: args.proposalId,
+        field: 'schedules',
+        via: 'schedules',
+        value,
+        reviewed: true,
+        review: args.review,
+      });
+
+    if (attested) await record('dates', [session.startDate, session.endDate]);
+    if (attested && timeStated) {
+      await record('time', [session.startTime, session.endTime]);
+      continue;
+    }
+    // The time was not attested by this approval. An earlier claim stands
+    // only if it describes the same time.
+    const previous = args.review.facts.previousSessionTimes.get(session.id);
+    const unchanged = timeStated && previous !== undefined && previous === sessionTimeKey(session);
+    if (!unchanged) await invalidateClaim(pool, sessionClaimId(session.id, 'time'), args.proposalId, args.review, timeStated
+      ? 'The session time was changed by an approval that did not attest the new time.'
+      : 'The session no longer states a time.');
+  }
+}
+
+/** Append an invalidation to a claim that exists; a claim never recorded has nothing to invalidate. */
+async function invalidateClaim(pool: Pool, claimId: string, proposalId: string, review: ReviewDecisionRecord, notes: string): Promise<void> {
+  const existing = await pool.query(`SELECT 1 FROM "SurfaceClaimDefinition" WHERE id = $1`, [claimId]);
+  if ((existing.rowCount ?? 0) === 0) return;
+  await appendEvent(pool, {
+    id: `event.${claimId}.review.${proposalId}.invalidated`,
+    claimId,
+    status: 'revoked',
+    type: 'invalidation',
+    actor: review.reviewer,
+    method: 'review-apply',
+    evidenceIds: [],
+    createdAt: review.reviewedAt,
+    notes,
+  });
 }
 
 /**

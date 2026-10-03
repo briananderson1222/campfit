@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { CrawlModal } from '@/app/admin/crawl-modal';
 import { SchedulePanel } from './schedule-panel';
 import type { CrawlRun, CrawlCampLogEntry } from '@/lib/admin/types';
-import { campLogModelLine, campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote, outputCapCount } from './camp-log-view';
+import { campLogHeldBackLabel, campLogModelLine, campLogOutcome, campLogOutcomeCounts, campLogOutcomeNote, outputCapCount } from './camp-log-view';
 
 function durationLabel(startedAt: string, completedAt: string | null, isRunning = false): string {
   const end = isRunning ? Date.now() : (completedAt ? new Date(completedAt).getTime() : Date.now());
@@ -44,6 +44,7 @@ function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
   const [expanded, setExpanded] = useState(false);
   const outcome = campLogOutcome(entry);
   const note = campLogOutcomeNote(entry);
+  const heldBack = campLogHeldBackLabel(entry);
 
   return (
     <div className={cn(
@@ -68,6 +69,12 @@ function CampLogRow({ entry }: { entry: CrawlCampLogEntry }) {
         {outcome === 'incomplete' && (
           <span className="text-xs px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded-md font-semibold shrink-0">
             Incomplete
+          </span>
+        )}
+
+        {heldBack && (
+          <span data-testid="not-reproposed-label" className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-900 rounded-md font-medium shrink-0">
+            {heldBack}
           </span>
         )}
 

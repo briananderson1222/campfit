@@ -41,6 +41,13 @@ describe('review page extraction notices', () => {
     expect(html).toContain('and neither is description, where the programs differ');
   });
 
+  it('lists a field the page states several values for', () => {
+    const html = render({ via: 'traverse-recrawl', conflictingValues: { city: ['Denver', 'Golden'] } });
+    expect(html).toContain('data-testid="conflicting-value-notices"');
+    expect(html).toContain('Conflicting values on the page');
+    expect(html).toContain('City: the page states 2 different values (&quot;Denver&quot;, &quot;Golden&quot;). None is proposed; check the page and edit the field manually if one is right.');
+  });
+
   it('renders nothing for a complete run', () => {
     expect(render({ via: 'traverse-recrawl' })).toBe('');
     expect(render(null)).toBe('');

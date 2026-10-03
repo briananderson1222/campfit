@@ -45,6 +45,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       kept: result.kept,
       appliedFields: result.appliedFields.length,
       ...(result.provenanceErrors.length ? { provenanceErrors: result.provenanceErrors } : {}),
+      ...(result.verification ? { verification: result.verification } : {}),
     });
   } catch (error) {
     if (error instanceof ReviewApplyProposalNotFoundError || error instanceof ReviewApplySessionNotFoundError) {

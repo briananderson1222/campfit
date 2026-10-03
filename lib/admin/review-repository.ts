@@ -40,10 +40,14 @@ export async function createProposal(opts: {
   try {
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`camp-proposal:${opts.campId}`]);
+    // `createdAt` is stamped here, after the lock, not by the column default
+    // (`now()`, the transaction's start, taken before the lock wait). Whoever
+    // takes the lock last then also has the latest `createdAt`, so the crawl's
+    // "latest proposal" (ordered by `createdAt`) is the surviving PENDING one.
     const result = await client.query<{ id: string }>(
       `INSERT INTO "CampChangeProposal"
-         ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel", "snapshotRef", "snapshotBodyHash")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+         ("campId", "crawlRunId", "sourceUrl", "rawExtraction", "proposedChanges", "overallConfidence", "extractionModel", "snapshotRef", "snapshotBodyHash", "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, clock_timestamp()) RETURNING id`,
       [opts.campId, opts.crawlRunId, opts.sourceUrl,
        JSON.stringify(opts.rawExtraction), JSON.stringify(opts.proposedChanges),
        opts.overallConfidence, opts.extractionModel,

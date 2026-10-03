@@ -289,7 +289,9 @@ describe("applyProposalReview", () => {
       `SELECT status FROM "SurfaceVerificationEvent" WHERE "claimId" = $1`,
       [descriptionClaimId],
     );
-    expect(eventRows.rows).toEqual([{ status: "verified" }]);
+    // This proposal has no stored snapshot, so its excerpt was never checked:
+    // the value is applied, and the claim's event says proposed, not verified.
+    expect(eventRows.rows).toEqual([{ status: "proposed" }]);
   });
 
   it("case 2: keepPending applies fields, keeps proposal PENDING at priority -1, and merges appliedFields", async () => {
