@@ -10,7 +10,7 @@ import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPric
 import { isValidHttpUrl } from './onboarding-validation';
 import { writeChangeLogs } from './changelog-repository';
 import { RepositoryConnectionError } from './repository-errors';
-import { refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
+import { lockCampForClaimWrites, refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
 
 function db() {
   return getPool();
@@ -74,6 +74,7 @@ export async function updateAdminCampFields(
   let current: Record<string, unknown> | undefined;
   try {
     await client.query('BEGIN');
+    await lockCampForClaimWrites(client, campId);
     const { rows } = await client.query<Record<string, unknown>>(`SELECT * FROM "Camp" WHERE id = $1 FOR UPDATE`, [campId]);
     current = rows[0];
     if (!current) {
@@ -115,6 +116,7 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
   });
   try {
     await client.query('BEGIN');
+    await lockCampForClaimWrites(client, campId);
     const previous = await client.query(
       `SELECT label, "minAge", "maxAge", "minGrade", "maxGrade"
        FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);

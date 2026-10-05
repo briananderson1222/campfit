@@ -367,10 +367,13 @@ as verified by events, not by evidence:
   excerpt on the page writes a `proposed` event, whether it came from a review
   or a batch accept. If any of
   it cannot be written, the whole apply is rolled back and nothing changes.
-- **Order does not depend on the application clock.** Every apply and edit
-  takes a per-camp lock and stamps its events with the database clock, never
-  earlier than one millisecond after the camp's newest event, so a later
-  change always wins.
+- **Order does not depend on the application clock.** Every apply, batch
+  accept, edit and attestation (`bulkAttestCamp`, the attest route) runs in
+  one transaction that takes its locks first, in one order: the per-camp
+  `camp-claims` lock, then the claim-store subject locks (camp, then its
+  sessions), then rows (`lockCampForClaimWrites` in `unreviewed-change.ts`).
+  Events are stamped with the database clock, never earlier than one
+  millisecond after the camp's newest event, so a later change always wins.
 
 "On the page" means the excerpt occurs verbatim in the stored page text. It
 does not show that the excerpt supports the value; the review page lists each
@@ -387,13 +390,15 @@ What counts as reviewed for a list (`ageGroups`, `pricing`, `schedules`,
   the two must agree or the apply is refused.
 - `schedules` is recorded per kept session whose own row's excerpt is on the
   page: a `dates` claim, and a `time` claim when the row states a start and an
-  end time. A proposal that lists one session twice is refused. A session with
+  end time. Exact duplicate rows are one session; sessions that share a label
+  and dates (a morning and an afternoon session) are told apart by their
+  times, so among those a time change replaces the session. A session with
   no stated time has no `time` claim, so `sessions-verified` stays open; the
   crawl schema has no session time field, so a list approved from a crawl
   carries no times today.
 
 A batch accept is recorded as its own kind (`batch-accept` on the evidence and
-the event). Like a review, it verifies a field only when the field's cited
+the event), and the trust display shows it as "Accepted in batch". Like a review, it verifies a field only when the field's cited
 excerpt is on the stored page; an uncited batch-accepted field stays
 `proposed`. Batch accept selects single values only, never lists. Only a
 counted approval records the page fingerprint that later withholds a

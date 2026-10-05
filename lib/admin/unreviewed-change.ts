@@ -15,7 +15,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
-import { appendEvent } from './claim-store';
+import { acquireSubjectAdvisoryLock, appendEvent } from './claim-store';
+import { SESSION_SUBJECT_TYPE } from './session-identity';
+import { campfitVocabulary } from '../trust-vocabulary';
 import { campCanonicalClaimId } from './trust-projection';
 import { refreshCampVerificationCache } from './verification-authority';
 
@@ -54,11 +56,36 @@ export async function withdrawVerification(
 }
 
 /**
- * Serialise every change to one camp's claims: an apply, an edit. Taken at
- * the start of the transaction that changes values and claims.
+ * Serialise every change to one camp's claims: an apply, a batch accept, an
+ * edit, an attestation. Taken at the start of the transaction that changes
+ * values and claims.
  */
 export async function lockCampClaims(client: PoolClient, campId: string): Promise<void> {
   await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`camp-claims:${campId}`]);
+}
+
+/**
+ * LOCK ORDER — every transaction that changes a camp's values or its claims
+ * takes its locks in this order, as its first statements, so two of them can
+ * wait on each other but never deadlock:
+ *
+ *   1. `camp-claims:<campId>`            (lockCampClaims)
+ *   2. the claim-store subject locks     (acquireSubjectAdvisoryLock): the
+ *      camp subject, then each of the camp's sessions in id order
+ *   3. rows ("Camp", "CampChangeProposal", "CampSchedule", ...)
+ *
+ * The subject locks are what the claim store's locked-client writers
+ * (`persistClaimOnLockedClient`, `recordEvidenceOnLockedClient`) require:
+ * their save deletes claims missing from the store they loaded, so a writer
+ * holding only the subject lock (e.g. `persistClaim`) must not run in
+ * between. A session created later in the same transaction is locked when
+ * its first claim is written; no other transaction can know its id yet.
+ */
+export async function lockCampForClaimWrites(client: PoolClient, campId: string): Promise<void> {
+  await lockCampClaims(client, campId);
+  await acquireSubjectAdvisoryLock(client, campfitVocabulary.subjectType, campId);
+  const { rows } = await client.query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 ORDER BY id`, [campId]);
+  for (const { id } of rows) await acquireSubjectAdvisoryLock(client, SESSION_SUBJECT_TYPE, id);
 }
 
 /**
@@ -89,7 +116,7 @@ export async function withdrawEditedFields(
   fields: readonly string[],
   opts: { actor: string; method: string; notes: string },
 ): Promise<void> {
-  await lockCampClaims(client, campId);
+  await lockCampForClaimWrites(client, campId);
   const at = await nextClaimEventTime(client, campId);
   await withdrawVerification(client, editedCampClaimIds(campId, fields), { ...opts, createdAt: at.toISOString() });
 }

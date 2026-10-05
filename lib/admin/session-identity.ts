@@ -91,6 +91,54 @@ export interface ExistingScheduleRow {
   readonly label: string;
   readonly startDate: string | null;
   readonly endDate: string | null;
+  readonly startTime?: string | null;
+  readonly endTime?: string | null;
+}
+
+type SessionKeyFields = { label: string; startDate: string | null; endDate: string | null; startTime?: string | null; endTime?: string | null };
+
+function exactSessionKey(row: SessionKeyFields): string {
+  return `${scheduleNaturalKey(row.label, row.startDate, row.endDate)}|${row.startTime?.trim() ?? ''}|${row.endTime?.trim() ?? ''}`;
+}
+
+/**
+ * Proposed sessions with exact duplicates (same plain-text label, dates and
+ * times) collapsed into one: they are the same session listed twice.
+ */
+export function distinctSessions<T extends SessionKeyFields>(rows: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = exactSessionKey(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * The key two sessions are matched on. Normally label and dates
+ * (`scheduleNaturalKey`), so a session whose time changes keeps its identity.
+ * When that key is shared by more than one session on either side (a morning
+ * and an afternoon session with the same label and dates), those sessions are
+ * told apart by their times as well.
+ */
+export function sessionMatchKey(
+  incoming: readonly SessionKeyFields[],
+  existing: readonly SessionKeyFields[] = [],
+): (row: SessionKeyFields) => string {
+  const shared = new Set<string>();
+  for (const side of [incoming, existing]) {
+    const counts = new Map<string, number>();
+    for (const row of side) {
+      const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of counts) if (count > 1) shared.add(key);
+  }
+  return (row) => {
+    const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+    return shared.has(key) ? exactSessionKey(row) : key;
+  };
 }
 
 export interface ScheduleReconciliationResult {
@@ -130,20 +178,22 @@ export function scheduleNaturalKey(label: string, startDate: string | null, endD
 export async function applyScheduleReconciliation(
   client: PoolClient,
   campId: string,
-  incoming: readonly IncomingScheduleSnapshot[],
+  incomingRows: readonly IncomingScheduleSnapshot[],
 ): Promise<ScheduleReconciliationResult> {
   const { rows: existing } = await client.query<ExistingScheduleRow>(
-    `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate"
+    `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "startTime", "endTime"
      FROM "CampSchedule"
      WHERE "campId" = $1 AND "archivedAt" IS NULL`,
     [campId],
   );
 
+  const sessions = distinctSessions(incomingRows);
+  const keyOf = sessionMatchKey(sessions, existing);
   const { matched, orphaned, created } = matchClaimSubjects<IncomingScheduleSnapshot, ExistingScheduleRow>({
     existing,
-    incoming,
-    existingKey: (row) => scheduleNaturalKey(row.label, row.startDate, row.endDate),
-    incomingKey: (row) => scheduleNaturalKey(row.label, row.startDate, row.endDate),
+    incoming: sessions,
+    existingKey: keyOf,
+    incomingKey: keyOf,
     existingId: (row) => row.id,
   });
 

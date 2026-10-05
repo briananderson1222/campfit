@@ -1,10 +1,10 @@
 import { clearApprovedPageFingerprints } from './camp-repository';
-import { refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
+import { lockCampForClaimWrites, nextClaimEventTime, refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
 import { getPool } from '@/lib/db';
 import type { PoolClient } from 'pg';
 import { buildCampAttestationTrustInput } from './trust-projection';
 import { refreshCampVerificationCache } from './verification-authority';
-import { acquireSubjectAdvisoryLock, recordEvidenceOnLockedClient } from './claim-store';
+import { recordEvidenceOnLockedClient } from './claim-store';
 import { VERIFIED_CAMP_FIELDS } from './verification-policy';
 import { buildSnapshotSourceRef, parseAnySnapshotSourceRef } from '@kontourai/traverse/fetch';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
@@ -40,6 +40,7 @@ async function updateAssistantEntityFields(
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
+    if (table === 'Camp') await lockCampForClaimWrites(client, id);
     await client.query(
       `UPDATE "${table}" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
       [id, ...entries.map(([, value]) => value ?? null)],
@@ -356,12 +357,16 @@ export async function recordCampAttestationEvidence(args: {
   let legacyResult: unknown;
   try {
     await client.query('BEGIN');
-    await acquireSubjectAdvisoryLock(client, firstClaim.subjectType, firstClaim.subjectId);
+    // The canonical lock order (unreviewed-change.ts), and a database-clock
+    // stamp after the camp's newest event, so an attestation and an edit of
+    // the same camp are ordered by when they committed.
+    await lockCampForClaimWrites(client, args.campId);
+    const at = (await nextClaimEventTime(client, args.campId)).toISOString();
     for (const claim of trustBundle.claims) {
       const evidence = trustBundle.evidence.find((item) => item.claimId === claim.id);
       if (!evidence) throw new Error(`Missing attestation Evidence for Claim "${claim.id}".`);
       const event = trustBundle.events.find((item) => item.claimId === claim.id);
-      await recordEvidenceOnLockedClient(pool, client, { claim, evidence, event });
+      await recordEvidenceOnLockedClient(pool, client, { claim, evidence, event: event ? { ...event, createdAt: at } : undefined });
     }
     if (args.legacyWrite) legacyResult = await args.legacyWrite(client, sourceCitation);
     await client.query('COMMIT');

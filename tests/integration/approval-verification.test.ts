@@ -3,7 +3,7 @@
  * (`Camp.dataConfidence`), through the real review-apply path against a
  * throwaway Postgres. The stored snapshot is real; only its store is in memory.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildSnapshotSourceRef, createInMemorySnapshotStore, sha256Hex, type SnapshotStore } from '@kontourai/traverse/fetch';
 import { buildReviewSessionEvents, type ReviewQueueSessionState } from '@kontourai/survey/review-workbench';
@@ -18,10 +18,11 @@ import { getPool as getProductionPool } from '@/lib/db';
 import { applyProposalReview } from '@/lib/admin/review-apply';
 import { getProposal } from '@/lib/admin/review-repository';
 import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
-import { appendEvidence, persistClaim } from '@/lib/admin/claim-store';
+import { acquireSubjectAdvisoryLock, appendEvent, appendEvidence, persistClaim } from '@/lib/admin/claim-store';
 import { replaceAdminCampAgeGroups, updateAdminCampFields } from '@/lib/admin/camp-repository';
 import { updateAssistantCampFields } from '@/lib/admin/entity-admin-repository';
-import { applyBatchAcceptedClaims, ReviewApplyEvidenceError, ReviewApplyValueError } from '@/lib/admin/review-apply';
+import { applyBatchAcceptedClaims, isTransientDatabaseError, ReviewApplyEvidenceError, ReviewApplyValueError } from '@/lib/admin/review-apply';
+import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { getCampProposalHistoryBatch } from '@/lib/admin/review-repository';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
@@ -338,7 +339,8 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     const refusal = await review(proposal.id, 'all').then(() => null, (error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(ReviewApplyEvidenceError);
-    expect((refusal as Error).message).toMatch(/^Nothing was applied: the review record for "city" could not be written/);
+    expect((refusal as Error).message).toMatch(/^Nothing was applied: the review record for "city" cannot be written \(.*\)\. Trying again will not help/);
+    expect((refusal as ReviewApplyEvidenceError).transient).toBe(false);
     const camp = await getTestPool().query<{ city: string; websiteUrl: string }>(`SELECT city, "websiteUrl" FROM "Camp" WHERE id = $1`, [campId]);
     expect(camp.rows[0]).toEqual({ city: '', websiteUrl: '' });
     const { rows } = await getTestPool().query<{ n: number }>(
@@ -400,6 +402,12 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
         fingerprint: 'sha256:page-one',
       });
       expect(await dataConfidence(campId)).toBe('VERIFIED');
+      // Shown as a batch accept, not as an individual review.
+      const display = (await loadCampTrustDisplays(campId, ['city'])).fields.city!;
+      expect(display).toMatchObject({
+        evidenceState: 'verified_current', label: 'Accepted in batch', acceptedInBatch: true,
+        accessibleName: `Accepted in a batch by the exact-corroboration rule (${REVIEWER}); the cited excerpt is on the current source page`,
+      });
     });
 
     it('an uncited batch-accepted field stays proposed and records no withholding fingerprint', async () => {
@@ -529,7 +537,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       expect(await missing(campId)).toEqual({ dataConfidence: 'VERIFIED', unverified: [] });
     });
 
-    it('sessions: a proposal listing one session twice is refused, and a changed time stays unverified through later uncited approvals', async () => {
+    it('sessions: an exact duplicate row is one session, and a changed time stays unverified through later uncited approvals', async () => {
       const campId = await seedCamp();
       const s2 = (startTime: string, endTime: string) => ({ ...session(true), label: 'Session Two', startDate: '2027-06-14', endDate: '2027-06-18', startTime, endTime });
       const first = fullChanges({ sessionTimes: true });
@@ -541,16 +549,12 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       const duplicated = await seedProposal(campId, {
         schedules: listDiff(before, [session(true), { ...session(true), label: '**Session One**' }, s2('10:00', '16:00')], [SESSION_ONE, SESSION_ONE, SESSION_TWO]),
       }, { snapshot: false });
-      const refusal = await review(duplicated.id, 'all').then(() => null, (error: unknown) => error);
-      expect(refusal).toBeInstanceOf(ReviewApplyValueError);
-      expect((refusal as Error).message).toContain('"schedules" lists the same session more than once ("**Session One**")');
-      const { rows: unchanged } = await getTestPool().query<{ n: number }>(`SELECT count(*)::int AS n FROM "CampSchedule" WHERE "campId" = $1 AND "startTime" = '10:00'`, [campId]);
-      expect(unchanged[0]!.n).toBe(0);
-
-      const changed = await seedProposal(campId, { schedules: listDiff(before, [session(true), s2('10:00', '16:00')], [SESSION_ONE, SESSION_TWO]) }, { snapshot: false });
-      const second = await review(changed.id, 'all');
+      const second = await review(duplicated.id, 'all');
       expect(second.provenanceErrors).toEqual([]);
       expect(second.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['sessions-verified']);
+      const { rows: sessions } = await getTestPool().query<{ label: string; startTime: string }>(
+        `SELECT label, "startTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY "startDate"`, [campId]);
+      expect(sessions).toEqual([{ label: 'Session One', startTime: '09:00' }, { label: 'Session Two', startTime: '10:00' }]);
 
       const again = await seedProposal(campId, { schedules: listDiff([session(true), s2('10:00', '16:00')], [session(true), s2('10:00', '16:00')], [SESSION_ONE, SESSION_TWO]) }, { snapshot: false });
       const third = await review(again.id, 'all');
@@ -592,5 +596,134 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       `SELECT "fieldSources"->'city' AS source FROM "Camp" WHERE id = $1`, [campId]);
     expect(rows[0]!.source.approvedAt).toBeTruthy();
     expect(rows[0]!.source.contentFingerprint).toBeUndefined();
+  });
+  it('morning and afternoon sessions with the same label and dates are two sessions, each attested on its own row', async () => {
+    const campId = await seedCamp();
+    const changes = fullChanges({ sessionTimes: true });
+    const pm = { ...session(true), startTime: '13:00', endTime: '16:00' };
+    changes.schedules = listDiff([], [session(true), pm], [SESSION_ONE, SESSION_TWO]);
+    const proposal = await seedProposal(campId, changes, { snapshot: true });
+
+    const applied = await review(proposal.id, 'all');
+
+    expect(applied.appliedFields).toHaveLength(9);
+    expect(applied.verification?.dataConfidence).toBe('VERIFIED');
+    const { rows } = await getTestPool().query<{ startTime: string; claims: number }>(
+      `SELECT s."startTime", (SELECT count(*)::int FROM "SurfaceClaimDefinition" d WHERE d."subjectId" = s.id) AS claims
+         FROM "CampSchedule" s WHERE s."campId" = $1 AND s."archivedAt" IS NULL ORDER BY s."startTime"`, [campId]);
+    expect(rows).toEqual([{ startTime: '09:00', claims: 2 }, { startTime: '13:00', claims: 2 }]);
+
+    // A later list that changes the afternoon session's end time: still two
+    // sessions, the morning one keeps its id. (Among sessions that share a
+    // label and dates, the time is part of the identity, so the afternoon one
+    // is replaced, not edited.)
+    const amId = (await getTestPool().query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 AND "startTime" = '09:00'`, [campId])).rows[0]!.id;
+    const again = await seedProposal(campId, { schedules: listDiff([session(true), pm], [session(true), { ...pm, endTime: '16:30' }], [SESSION_ONE, SESSION_TWO]) }, { snapshot: false });
+    await review(again.id, 'all');
+    const after = await getTestPool().query<{ id: string; endTime: string }>(
+      `SELECT id, "endTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY "startTime"`, [campId]);
+    expect(after.rows.map((row) => row.endTime)).toEqual(['15:00', '16:30']);
+    expect(after.rows[0]!.id).toBe(amId);
+  });
+
+  it('a deterministic evidence failure says retrying will not help; a transient one says try again', async () => {
+    expect(isTransientDatabaseError(Object.assign(new Error('deadlock detected'), { code: '40P01' }))).toBe(true);
+    expect(isTransientDatabaseError(Object.assign(new Error('could not serialize'), { code: '40001' }))).toBe(true);
+    expect(isTransientDatabaseError(Object.assign(new Error('connection failure'), { code: '08006' }))).toBe(true);
+    expect(isTransientDatabaseError(Object.assign(new Error('duplicate key'), { code: '23505' }))).toBe(false);
+    const deterministic = new ReviewApplyEvidenceError('city', Object.assign(new Error('duplicate key'), { code: '23505' }));
+    expect(deterministic.transient).toBe(false);
+    expect(deterministic.message).toBe('Nothing was applied: the review record for "city" cannot be written (duplicate key). Trying again will not help: keep the current value for "city" (or reject it) and apply the rest, or report this.');
+    expect(new ReviewApplyEvidenceError(null, Object.assign(new Error('deadlock detected'), { code: '40P01' })).message)
+      .toBe('Nothing was applied: the record of the changed fields could not be written because the database was busy (deadlock detected). The proposal is still pending; try again.');
+  });
+
+  it('an edit withdraws a field even when its newest event was stamped in the future by an application clock', async () => {
+    const campId = await seedCamp();
+    expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
+    const claimId = `camp.${campId}.field.city`;
+    // An attestation written by an application clock five minutes fast.
+    await appendEvent(getTestPool(), {
+      id: `event.${claimId}.fast-clock`, claimId, status: 'assumed', type: 'verification', actor: REVIEWER, method: 'attestation',
+      evidenceIds: (await getTestPool().query<{ id: string }>(`SELECT id FROM "SurfaceEvidence" WHERE "claimId" = $1 LIMIT 1`, [claimId])).rows.map((row) => row.id),
+      createdAt: new Date(Date.now() + 300_000).toISOString(),
+    });
+
+    await updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER);
+
+    expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+  });
+
+  describe('concurrent changes to one camp', () => {
+    const latestCity = async (campId: string) => {
+      const { rows } = await getTestPool().query<{ status: string; integrity: string | null; city: string }>(
+        `SELECT e.status, ev."integrityRef" AS integrity, c.city FROM "SurfaceVerificationEvent" e
+           LEFT JOIN "SurfaceEvidence" ev ON ev.id = e."evidenceIds"[1] JOIN "Camp" c ON c.id = $1
+          WHERE e."claimId" = 'camp.' || $1 || '.field.city' ORDER BY e."createdAt" DESC, e.id DESC LIMIT 1`, [campId]);
+      return rows[0];
+    };
+
+    it('an attestation racing an edit never verifies a value it did not read, and nothing deadlocks', async () => {
+      for (let round = 0; round < 6; round++) {
+        const campId = await seedCamp();
+        const outcomes = await Promise.allSettled([bulkAttestCamp(campId, REVIEWER), updateAdminCampFields(campId, [['city', `Boulder ${round}`]], REVIEWER)]);
+        expect(outcomes.map((outcome) => outcome.status)).toEqual(['fulfilled', 'fulfilled']);
+        const latest = (await latestCity(campId))!;
+        expect(latest.city).toBe(`Boulder ${round}`);
+        // Either the edit came last (not verified), or the attestation did, of the edited value.
+        if (latest.status === 'assumed') expect(latest.integrity).toBe(createHash('sha256').update(JSON.stringify(`Boulder ${round}`)).digest('hex'));
+        else expect(latest.status).toBe('proposed');
+      }
+    });
+
+    it('a review apply racing an edit ends either applied-and-reviewed or edited-and-unverified, and nothing deadlocks', async () => {
+      for (let round = 0; round < 6; round++) {
+        const campId = await seedCamp();
+        const proposal = await seedProposal(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true });
+        const outcomes = await Promise.allSettled([review(proposal.id, 'all'), updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER)]);
+        expect(outcomes.map((outcome) => outcome.status)).toEqual(['fulfilled', 'fulfilled']);
+        const latest = (await latestCity(campId))!;
+        if (latest.city === 'Golden') expect(latest.status).toBe('verified');
+        else expect([latest.city, latest.status]).toEqual(['Boulder', 'proposed']);
+      }
+    });
+
+    it('a claim another writer adds while an apply is writing its evidence is not erased', async () => {
+      const pool = getTestPool();
+      const campId = await seedCamp();
+      const proposal = await seedProposal(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true });
+      // Hold the apply between loading the camp's claims and saving them, once.
+      await pool.query(`CREATE SEQUENCE IF NOT EXISTS hold_once`);
+      await pool.query(`CREATE OR REPLACE FUNCTION hold_policy_upsert() RETURNS trigger AS $$ BEGIN IF nextval('hold_once') = 1 THEN PERFORM pg_sleep(1.5); END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
+      await pool.query(`CREATE TRIGGER hold_policy_upsert BEFORE INSERT OR UPDATE ON "SurfaceVerificationPolicy" FOR EACH ROW EXECUTE FUNCTION hold_policy_upsert()`);
+      try {
+        const applying = review(proposal.id, 'all');
+        for (let i = 0; i < 100; i++) {
+          const { rows } = await pool.query(`SELECT 1 FROM pg_stat_activity WHERE wait_event = 'PgSleep'`);
+          if (rows.length > 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        // A writer that holds only the claim-store subject lock (as the
+        // claim store's own writers do) adds a claim for the same camp.
+        const other = await pool.connect();
+        try {
+          await other.query('BEGIN');
+          await acquireSubjectAdvisoryLock(other, 'public-directory.camp', campId);
+          await other.query(
+            `INSERT INTO "SurfaceClaimDefinition" (id, "subjectType", "subjectId", "claimType", "fieldOrBehavior") VALUES ($1, 'public-directory.camp', $2, 'public-data.field', 'description')`,
+            [`camp.${campId}.field.description`, campId]);
+          await other.query('COMMIT');
+        } finally {
+          other.release();
+        }
+        await applying;
+      } finally {
+        await pool.query(`DROP TRIGGER IF EXISTS hold_policy_upsert ON "SurfaceVerificationPolicy"`);
+        await pool.query(`DROP FUNCTION IF EXISTS hold_policy_upsert()`);
+        await pool.query(`DROP SEQUENCE IF EXISTS hold_once`);
+      }
+      const { rows } = await pool.query(`SELECT 1 FROM "SurfaceClaimDefinition" WHERE id = $1`, [`camp.${campId}.field.description`]);
+      expect(rows).toHaveLength(1);
+    });
   });
 });

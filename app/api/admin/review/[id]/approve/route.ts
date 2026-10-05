@@ -72,7 +72,10 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     }
     if (error instanceof ReviewApplyEvidenceError) {
       console.error('Approve error (nothing applied):', error);
-      return NextResponse.json({ error: error.message, fields: [error.field] }, { status: 503 });
+      return NextResponse.json(
+        { error: error.message, ...(error.field ? { fields: [error.field] } : {}) },
+        { status: error.transient ? 503 : 422 },
+      );
     }
     console.error('Approve error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

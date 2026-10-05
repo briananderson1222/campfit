@@ -15,6 +15,8 @@ export interface TrustDisplay {
   sourceRef?: string;
   locator?: string;
   excerpt?: string;
+  /** Set when the value was accepted in a batch by the exact-corroboration rule, not reviewed one by one. */
+  acceptedInBatch?: true;
 }
 
 /**
@@ -73,6 +75,16 @@ export function projectTrustDisplay(
         snapshotBodies[citationTextKey(evidence)],
         evidence.sourceLocator,
       );
+      // A batch accept is its own kind of decision; say so instead of
+      // presenting it as an individual review.
+      const batch = evidence.metadata?.reviewKind === 'batch-accept' || event.method === 'batch-accept';
+      if (resolution.state === 'verified' && batch) {
+        return {
+          evidenceState: 'verified_current', trustOrigin: origin, label: 'Accepted in batch', acceptedInBatch: true,
+          accessibleName: `Accepted in a batch by the exact-corroboration rule (${actor}); the cited excerpt is on the current source page`,
+          actor, at, sourceRef: evidence.sourceRef, locator: resolution.locator, excerpt: evidence.excerptOrSummary,
+        };
+      }
       if (resolution.state === 'verified') {
         return {
           evidenceState: 'verified_current', trustOrigin: origin, label: 'Verified',

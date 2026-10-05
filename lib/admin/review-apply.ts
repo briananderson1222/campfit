@@ -58,8 +58,8 @@ import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accep
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
 import { refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
-import { appendEvidence, persistClaimOnLockedClient, recordEvidenceOnLockedClient } from './claim-store';
-import { lockCampClaims, nextClaimEventTime, withdrawVerification } from './unreviewed-change';
+import { acquireSubjectAdvisoryLock, appendEvidence, persistClaimOnLockedClient, recordEvidenceOnLockedClient } from './claim-store';
+import { lockCampForClaimWrites, nextClaimEventTime, withdrawVerification } from './unreviewed-change';
 import { sessionClaimId } from './verification-policy';
 import { SESSION_SUBJECT_TYPE } from './session-identity';
 import { campfitSessionVocabulary } from '../trust-vocabulary';
@@ -67,7 +67,7 @@ import type { DataConfidence } from '@/lib/types';
 import { buildCampReviewTrustInput, campCanonicalClaimId, type ReviewCitationSource } from './trust-projection';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from './survey-review-apply';
 import { getSurveyReviewEvents } from './survey-review-events';
-import { applyScheduleReconciliation, scheduleNaturalKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
+import { applyScheduleReconciliation, distinctSessions, sessionMatchKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
@@ -139,21 +139,6 @@ function assertApplicableValues(changes: ProposedChanges, fields: readonly strin
     } else if (!hasApplyPath(field, diff)) {
       failing.push(field);
       problems.push(`"${field}" has no way to be applied in the proposed shape`);
-    }
-  }
-  // Two proposed sessions that are the same session (same plain-text label
-  // and dates) cannot be told apart once applied: refused, not guessed.
-  if (fields.includes('schedules') && Array.isArray(changes.schedules?.new)) {
-    const seen = new Set<string>();
-    const repeated: string[] = [];
-    for (const row of changes.schedules!.new as IncomingScheduleSnapshot[]) {
-      const key = scheduleNaturalKey(String(row?.label ?? ''), row?.startDate ?? null, row?.endDate ?? null);
-      if (seen.has(key)) repeated.push(String(row?.label ?? ''));
-      seen.add(key);
-    }
-    if (repeated.length > 0) {
-      failing.push('schedules');
-      problems.push(`"schedules" lists the same session more than once (${repeated.map((label) => `"${label}"`).join(', ')})`);
     }
   }
   // A single value and its list approved together must agree. Applying both
@@ -285,11 +270,36 @@ export class ReviewApplyValueError extends Error {
   }
 }
 
-/** The record of an approval could not be written, so nothing was applied (the apply is retryable). */
+/**
+ * Postgres error classes that a retry can clear: serialization failure,
+ * deadlock, lock not available, query canceled, server shutting down, too many
+ * connections, and every connection exception (08xxx).
+ */
+const TRANSIENT_PG_CODES = new Set(['40001', '40P01', '55P03', '57014', '57P01', '57P02', '57P03', '53300']);
+
+export function isTransientDatabaseError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string') return TRANSIENT_PG_CODES.has(code) || code.startsWith('08');
+  const message = error instanceof Error ? error.message : String(error);
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|Connection terminated|timeout exceeded/i.test(message);
+}
+
+/**
+ * The record of an approval could not be written, so nothing was applied.
+ * `transient`: a retry can succeed (HTTP 503). Otherwise retrying the same
+ * decision fails the same way (HTTP 422), and the message says what to do.
+ */
 export class ReviewApplyEvidenceError extends Error {
-  constructor(readonly field: string, cause: unknown) {
-    super(`Nothing was applied: the review record for "${field}" could not be written (${cause instanceof Error ? cause.message : String(cause)}). The proposal is still pending; try again.`);
+  readonly transient: boolean;
+  constructor(readonly field: string | null, cause: unknown) {
+    const transient = isTransientDatabaseError(cause);
+    const what = field ? `the review record for "${field}"` : 'the record of the changed fields';
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(transient
+      ? `Nothing was applied: ${what} could not be written because the database was busy (${detail}). The proposal is still pending; try again.`
+      : `Nothing was applied: ${what} cannot be written (${detail}). Trying again will not help${field ? `: keep the current value for "${field}" (or reject it) and apply the rest` : ''}, or report this.`);
     this.name = 'ReviewApplyEvidenceError';
+    this.transient = transient;
   }
 }
 
@@ -365,8 +375,9 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   try {
     await client.query('BEGIN');
 
+    // Canonical lock order (unreviewed-change.ts): camp, subjects, then rows.
+    await lockCampForClaimWrites(client, proposal.campId);
     const alreadyAppliedFields = await lockAndCheckProposal(client, proposalId);
-    await lockCampClaims(client, proposal.campId);
 
     // Re-filter the derived approvedFields against the row's authoritative,
     // freshly-locked appliedFields — idempotency under the lock. Two
@@ -438,7 +449,8 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     // under the per-camp lock, so a later change always wins.
     if (appliedFields.length > 0) {
       const at = await nextClaimEventTime(client, proposal.campId);
-      await withdrawChangedClaims(client, proposal.campId, appliedFields, facts, reviewer, at);
+      await withdrawChangedClaims(client, proposal.campId, appliedFields, facts, reviewer, at)
+        .catch((err: unknown) => { throw new ReviewApplyEvidenceError(null, err); });
       // In the same transaction: the values and the record of who reviewed
       // them land together or not at all.
       await recordAppliedFieldEvidence({ pool, client, at: new Date(at.getTime() + 1).toISOString() }, proposal.campId, proposal.id, appliedFields, reviewTrustBundle!, {
@@ -739,8 +751,8 @@ async function applyBatchAcceptedFieldsForProposal(
     // Authoritative re-check under FOR UPDATE — same race guard
     // applyProposalReview relies on (see lockAndCheckProposal's own
     // comment).
+    await lockCampForClaimWrites(client, proposal.campId);
     alreadyAppliedFields = await lockAndCheckProposal(client, proposal.id);
-    await lockCampClaims(client, proposal.campId);
     newlyAppliedFields = fields.filter((field) => !alreadyAppliedFields.has(field));
 
     // Validate immutable snapshot identity and construct every canonical
@@ -782,7 +794,8 @@ async function applyBatchAcceptedFieldsForProposal(
 
     if (newlyAppliedFields.length > 0) {
       const at = await nextClaimEventTime(client, proposal.campId);
-      await withdrawChangedClaims(client, proposal.campId, newlyAppliedFields, facts, actor, at);
+      await withdrawChangedClaims(client, proposal.campId, newlyAppliedFields, facts, actor, at)
+        .catch((err: unknown) => { throw new ReviewApplyEvidenceError(null, err); });
       await recordAppliedFieldEvidence({ pool, client, at: new Date(at.getTime() + 1).toISOString() }, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle!, {
         kind: 'batch-accept',
         reviewer: actor,
@@ -1514,8 +1527,8 @@ async function recordApprovedClaim(
  * Record what an applied `schedules` list says about each session it kept.
  *
  * Each session on the camp is matched to the proposal row it came from by the
- * same natural key the apply used (a proposal that lists one session twice is
- * refused before anything is written). A session is attested only when its
+ * same key the apply used (exact duplicate rows are one session; sessions with
+ * the same label and dates are told apart by their times). A session is attested only when its
  * own row's cited excerpt is on the stored page: `dates` always, `time` only
  * when the row states a start and an end time. A session the reviewer was not
  * shown, or whose row's excerpt is not on the page, gets no new claim.
@@ -1543,17 +1556,23 @@ async function recordSessionClaims(
     [args.campId],
   );
   const proposed = Array.isArray(args.diff.new) ? (args.diff.new as IncomingScheduleSnapshot[]) : [];
+  // The same keys the apply matched on (session-identity.ts): exact
+  // duplicates are one session; sessions that share a label and dates are
+  // told apart by their times.
+  const keyOf = sessionMatchKey(distinctSessions(proposed));
   const rowIndexByKey = new Map<string, number>();
   for (const [index, row] of proposed.entries()) {
-    const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+    const key = keyOf(row);
     if (!rowIndexByKey.has(key)) rowIndexByKey.set(key, index);
   }
 
   for (const session of sessions) {
-    const index = rowIndexByKey.get(scheduleNaturalKey(session.label, session.startDate, session.endDate));
+    const index = rowIndexByKey.get(keyOf(session));
     const citation = index === undefined ? undefined : args.check.rows?.[index];
     if (!citation?.checked) continue;
     const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
+    // A session created by this apply was not locked up front (its id did not exist yet).
+    await acquireSubjectAdvisoryLock(w.client, SESSION_SUBJECT_TYPE, session.id);
     const attributes: ('dates' | 'time')[] = timeStated ? ['dates', 'time'] : ['dates'];
     for (const attribute of attributes) {
       const claimId = sessionClaimId(session.id, attribute);
