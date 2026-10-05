@@ -360,34 +360,71 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     expect((await sources()).city!.contentFingerprint).toBeUndefined();
     expect((await sources()).city!.approvedAt).toBeTruthy();
   });
-  it('a batch accept applies the value but is not the human review a verified requirement needs', async () => {
-    const campId = await seedCamp();
-    expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
+  describe('batch accept', () => {
     const run = async () => (await getTestPool().query<{ id: string }>(
       `INSERT INTO "CrawlRun" ("triggeredBy", trigger, "totalCamps", status, "completedAt") VALUES ('test', 'MANUAL', 1, 'COMPLETED', now()) RETURNING id`)).rows[0]!.id;
-    const city = { city: fullChanges({ sessionTimes: true }).city! };
-    await seedProposal(campId, city, { snapshot: true, crawlRunId: await run() });
-    const second = await seedProposal(campId, city, { snapshot: true, crawlRunId: await run() });
+    async function batchAccept(campId: string, changes: ProposedChanges, field: string, opts: { snapshot: boolean }) {
+      await seedProposal(campId, changes, { ...opts, crawlRunId: await run(), contentFingerprint: 'sha256:page-one' });
+      const second = await seedProposal(campId, changes, { ...opts, crawlRunId: await run(), contentFingerprint: 'sha256:page-one' });
+      return {
+        proposalId: second.id,
+        result: await applyBatchAcceptedClaims(getTestPool(), {
+          selections: [{ proposalId: second.id, field }],
+          actor: REVIEWER,
+          historyByCamp: await getCampProposalHistoryBatch(getTestPool(), [campId]),
+        }),
+      };
+    }
+    const records = async (campId: string, field: string) => {
+      const claimId = `camp.${campId}.field.${field}`;
+      const evidence = await getTestPool().query<{ evidenceType: string; kind: string | null; summary: string }>(
+        `SELECT "evidenceType", metadata->>'reviewKind' AS kind, "excerptOrSummary" AS summary FROM "SurfaceEvidence" WHERE "claimId" = $1 AND id LIKE '%.review%' ORDER BY "evidenceType"::text`, [claimId]);
+      const latest = await getTestPool().query<{ status: string; method: string }>(
+        `SELECT status, method FROM "SurfaceVerificationEvent" WHERE "claimId" = $1 ORDER BY "createdAt" DESC, id DESC LIMIT 1`, [claimId]);
+      const source = await getTestPool().query<{ fp: string | null }>(`SELECT "fieldSources"->$2->>'contentFingerprint' AS fp FROM "Camp" WHERE id = $1`, [campId, field]);
+      return { evidence: evidence.rows, latest: latest.rows[0], fingerprint: source.rows[0]!.fp };
+    };
 
-    const result = await applyBatchAcceptedClaims(getTestPool(), {
-      selections: [{ proposalId: second.id, field: 'city' }],
-      actor: REVIEWER,
-      historyByCamp: await getCampProposalHistoryBatch(getTestPool(), [campId]),
+    it('a batch-accepted field whose excerpt is on the page counts, recorded as a batch accept', async () => {
+      const campId = await seedCamp();
+      expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
+      const { proposalId, result } = await batchAccept(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, 'city', { snapshot: true });
+
+      expect(result.outcomes).toEqual([{ proposalId, field: 'city', status: 'applied' }]);
+      expect(await records(campId, 'city')).toEqual({
+        evidence: [
+          { evidenceType: 'crawl_observation', kind: 'batch-accept', summary: expect.any(String) },
+          { evidenceType: 'human_attestation', kind: 'batch-accept', summary: `${REVIEWER} batch-accepted the proposed "city" value under the exact-corroboration rule; its cited excerpt is on the stored page.` },
+        ],
+        latest: { status: 'verified', method: 'batch-accept' },
+        fingerprint: 'sha256:page-one',
+      });
+      expect(await dataConfidence(campId)).toBe('VERIFIED');
     });
 
-    expect(result.outcomes).toEqual([{ proposalId: second.id, field: 'city', status: 'applied' }]);
-    const claimId = `camp.${campId}.field.city`;
-    const evidence = await getTestPool().query<{ evidenceType: string; kind: string | null }>(
-      `SELECT "evidenceType", metadata->>'reviewKind' AS kind FROM "SurfaceEvidence" WHERE "claimId" = $1 AND id LIKE '%.review%' ORDER BY id`, [claimId]);
-    expect(evidence.rows).toEqual([{ evidenceType: 'crawl_observation', kind: 'batch-accept' }]);
-    const latest = await getTestPool().query<{ status: string; method: string; notes: string }>(
-      `SELECT status, method, notes FROM "SurfaceVerificationEvent" WHERE "claimId" = $1 ORDER BY "createdAt" DESC LIMIT 1`, [claimId]);
-    expect(latest.rows[0]).toEqual({
-      status: 'proposed', method: 'batch-accept',
-      notes: 'Accepted in a batch by the exact-corroboration rule. Applied, not individually reviewed, so not verified.',
+    it('an uncited batch-accepted field stays proposed and records no withholding fingerprint', async () => {
+      const campId = await seedCamp();
+      expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
+      const { result } = await batchAccept(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, 'city', { snapshot: false });
+
+      expect(result.outcomes[0]!.status).toBe('applied');
+      expect(await records(campId, 'city')).toEqual({
+        evidence: [{ evidenceType: 'crawl_observation', kind: 'batch-accept', summary: expect.any(String) }],
+        latest: { status: 'proposed', method: 'batch-accept' },
+        fingerprint: null,
+      });
+      expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
     });
-    // The attested city was replaced by a value nobody reviewed.
-    expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+
+    it('a list, even with one uncited row, is never batch-accepted', async () => {
+      const campId = await seedCamp();
+      const changes = fullChanges({ sessionTimes: true });
+      const rows = [...(changes.pricing!.new as unknown[]), { label: 'Extended day', amount: 90, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null }];
+      const { proposalId, result } = await batchAccept(campId, { pricing: listDiff([], rows, ['Tuition: $450 per week', 'Extended day: $90 (not on the page)']) }, 'pricing', { snapshot: true });
+
+      expect(result.outcomes).toEqual([{ proposalId, field: 'pricing', status: 'excluded_not_pending', message: 'Field is not a pending scalar Candidate Claim on this proposal.' }]);
+      expect((await records(campId, 'pricing')).latest).toBeUndefined();
+    });
   });
 
   it('a session stored with a Markdown label is matched, not archived and recreated, when its plain label is approved', async () => {

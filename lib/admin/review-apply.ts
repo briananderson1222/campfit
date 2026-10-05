@@ -754,7 +754,7 @@ async function applyBatchAcceptedFieldsForProposal(
         : undefined;
       if (proposalSnapshot) assertExactCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot.citation);
       facts.citations = checkCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot?.citation);
-      facts.countsAsReview = BATCH_ACCEPT_COUNTS_AS_REVIEW;
+      facts.countsAsReview = true;
       reviewTrustBundle = buildCampReviewTrustInput({
         proposalId: proposal.id,
         campId: proposal.campId,
@@ -1405,13 +1405,12 @@ interface ReviewDecisionRecord {
 }
 
 /**
- * Whether a batch accept counts as the human evidence a field policy needs.
- * It does not: nobody looked at each value against its citation; a rule
- * matched two crawls. Set to `true` to let a batch-accepted field with a
- * checked citation count like an individually reviewed one.
+ * Whether an apply can verify what it applies. Both a review session and a
+ * batch accept can (owner decision), but only for a field whose cited
+ * excerpt is on the stored page, per row for a list: `checkCitations`
+ * decides that, and an uncited field stays `proposed` either way. A batch
+ * accept is still recorded as its own kind (`batch-accept`).
  */
-const BATCH_ACCEPT_COUNTS_AS_REVIEW = false;
-
 function countsAsReview(review: ReviewDecisionRecord): boolean {
   return review.facts.countsAsReview;
 }
@@ -1472,7 +1471,7 @@ async function recordApprovedClaim(
         evidenceIds: [evidenceId],
         ...(batch ? { method: 'batch-accept' } : {}),
         notes: batch
-          ? 'Accepted in a batch by the exact-corroboration rule. Applied, not individually reviewed, so not verified.'
+          ? 'Accepted in a batch by the exact-corroboration rule without a cited excerpt found on the stored page. Applied, not verified.'
           : 'Approved without a cited excerpt found on the stored page. Applied, not verified.',
       },
     });

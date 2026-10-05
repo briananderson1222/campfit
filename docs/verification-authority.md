@@ -364,7 +364,8 @@ as verified by events, not by evidence:
   value a reviewer approved in a review session whose cited excerpt is on the
   stored page, `recordApprovedClaim` writes the crawl observation, the decision
   as `human_attestation` evidence and a `verified` event. An approval with no
-  excerpt on the page, or a batch accept, writes a `proposed` event. If any of
+  excerpt on the page writes a `proposed` event, whether it came from a review
+  or a batch accept. If any of
   it cannot be written, the whole apply is rolled back and nothing changes.
 - **Order does not depend on the application clock.** Every apply and edit
   takes a per-camp lock and stamps its events with the database clock, never
@@ -391,10 +392,12 @@ What counts as reviewed for a list (`ageGroups`, `pricing`, `schedules`,
   crawl schema has no session time field, so a list approved from a crawl
   carries no times today.
 
-A batch accept is its own review kind (`batch-accept`) and does not count as
-the human evidence a requirement needs (`BATCH_ACCEPT_COUNTS_AS_REVIEW` in
-`review-apply.ts`). Only a counted review records the page fingerprint that
-later withholds a re-proposal. Failures after commit (cache refresh,
+A batch accept is recorded as its own kind (`batch-accept` on the evidence and
+the event). Like a review, it verifies a field only when the field's cited
+excerpt is on the stored page; an uncited batch-accepted field stays
+`proposed`. Batch accept selects single values only, never lists. Only a
+counted approval records the page fingerprint that later withholds a
+re-proposal. Failures after commit (cache refresh,
 changelog, metrics) are reported as provenance errors, and the review page
 shows them instead of moving on.
 
