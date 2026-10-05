@@ -200,16 +200,11 @@ export interface ProvenanceError {
     | 'writeChangeLogs'
     | 'recordReviewDecision'
     /**
-     * V2 fix (HIGH, review-code.md): `recordAppliedFieldEvidence`/
-     * `refreshCampVerificationCache` run AFTER `COMMIT` (see this module's
-     * header comment) and were previously unguarded — a failure there used
-     * to propagate as an unhandled exception (a misleading 500 for an apply
-     * that had already durably succeeded) and silently skipped
-     * changelog/metrics provenance entirely. Both are now individually
-     * try/caught and reported here instead, exactly like the pre-existing
-     * writeChangeLogs/recordReviewDecision steps below.
+     * `refreshCampVerificationCache` runs after `COMMIT`; a failure is
+     * reported here, not thrown, because the apply already landed. (The
+     * evidence itself is recorded inside the transaction: its failure rolls
+     * the apply back and is thrown as `ReviewApplyEvidenceError`.)
      */
-    | 'recordAppliedFieldEvidence'
     | 'refreshCampVerificationCache'
     /**
      * V3 fix (HIGH, review-code.md): `revokeArchivedSessionClaims` (AC6) —

@@ -83,9 +83,9 @@ describe('plainLabel', () => {
 describe('after an approve, the review page', () => {
   it('moves on when everything was recorded, and stays to show what was not', () => {
     expect(approveOutcome({})).toEqual({ stay: false, message: null });
-    const outcome = approveOutcome({ provenanceErrors: [{ step: 'recordAppliedFieldEvidence', message: 'city: duplicate key' }] });
+    const outcome = approveOutcome({ provenanceErrors: [{ step: 'writeChangeLogs', message: 'change log write blocked' }] });
     expect(outcome.stay).toBe(true);
-    expect(outcome.message).toBe('Applied, but part of the review record could not be written (recordAppliedFieldEvidence). Fields without their evidence are not verified. city: duplicate key');
+    expect(outcome.message).toBe("Applied, but a follow-up step failed (writeChangeLogs): change log write blocked. The camp's verification status or history may be out of date until the next change.");
   });
 
   it('shows each proposed row next to the text it cites', () => {
