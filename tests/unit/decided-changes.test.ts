@@ -3,6 +3,10 @@ import { withholdDecidedChanges } from '@/lib/ingestion/decided-changes';
 import { plainLabel } from '@/lib/ingestion/traverse-diff-inputs';
 import { campLogHeldBackLabel, campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
 import type { ProposedChanges } from '@/lib/admin/types';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { approveOutcome } from '@/app/admin/review/[id]/approve-outcome';
+import { RowCitations } from '@/app/admin/review/[id]/row-citations';
 
 const APPROVED_AT = '2026-09-30T12:00:00.000Z';
 const PAGE = 'sha256:aaa';
@@ -41,6 +45,8 @@ describe('withholdDecidedChanges', () => {
     expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT, contentFingerprint: PAGE } }).changes)).toEqual(['city']);
     expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT } }, PAGE).changes)).toEqual(['city']);
     expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT, contentFingerprint: null } }, PAGE).changes)).toEqual(['city']);
+    // Neither side has one (an older approval, an incomplete read): not the same page.
+    expect(Object.keys(withholdDecidedChanges(changes, { city: { approvedAt: APPROVED_AT } }).changes)).toEqual(['city']);
   });
 
   it('proposes a field no reviewer approved, even on the same page text', () => {
@@ -71,5 +77,27 @@ describe('plainLabel', () => {
     // Not emphasis: a lone asterisk, a multiplication, an underscore inside a word.
     expect(plainLabel('$450 per week * sibling discount')).toBe('$450 per week * sibling discount');
     expect(plainLabel('2 * 3 sessions, see camp_fees')).toBe('2 * 3 sessions, see camp_fees');
+  });
+});
+
+describe('after an approve, the review page', () => {
+  it('moves on when everything was recorded, and stays to show what was not', () => {
+    expect(approveOutcome({})).toEqual({ stay: false, message: null });
+    const outcome = approveOutcome({ provenanceErrors: [{ step: 'recordAppliedFieldEvidence', message: 'city: duplicate key' }] });
+    expect(outcome.stay).toBe(true);
+    expect(outcome.message).toBe('Applied, but part of the review record could not be written (recordAppliedFieldEvidence). Fields without their evidence are not verified. city: duplicate key');
+  });
+
+  it('shows each proposed row next to the text it cites', () => {
+    const html = renderToStaticMarkup(createElement(RowCitations, { proposedChanges: {
+      schedules: { old: [], new: [{ label: 'Session One', startDate: '2027-06-07', endDate: '2027-06-11' }, { label: 'Session Two', startDate: '2027-06-14', endDate: '2027-06-18' }],
+        rowCitations: [{ excerpt: 'Session One: June 7 - June 11, 2027' }] },
+      city: { old: 'A', new: 'B', excerpt: 'B' },
+    } }));
+    expect(html).toContain('data-testid="row-citations"');
+    expect(html.match(/data-testid="row-citation"/g)).toHaveLength(2);
+    expect(html).toContain('Session One · 2027-06-07 – 2027-06-11</span><q class="break-words text-xs text-bark-500">Session One: June 7 - June 11, 2027</q>');
+    expect(html).toContain('Session Two · 2027-06-14 – 2027-06-18</span><q class="break-words text-xs text-bark-500">no citation</q>');
+    expect(renderToStaticMarkup(createElement(RowCitations, { proposedChanges: { city: { old: 'A', new: 'B' } } }))).toBe('');
   });
 });

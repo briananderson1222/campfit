@@ -1,3 +1,5 @@
+import { clearApprovedPageFingerprints } from './camp-repository';
+import { editedCampClaimIds, refreshAfterUnreviewedChange, withdrawVerification } from './unreviewed-change';
 import { getPool } from '@/lib/db';
 import type { PoolClient } from 'pg';
 import { buildCampAttestationTrustInput } from './trust-projection';
@@ -35,10 +37,29 @@ async function updateAssistantEntityFields(
     throw new Error(`Unsupported ${table.toLowerCase()} update field`);
   }
   const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
-  await getPool().query(
-    `UPDATE "${table}" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
-    [id, ...entries.map(([, value]) => value ?? null)],
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE "${table}" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
+      [id, ...entries.map(([, value]) => value ?? null)],
+    );
+    if (table === 'Camp') {
+      const fields = entries.map(([key]) => key);
+      await clearApprovedPageFingerprints(client, id, fields);
+      // The edited values were not reviewed: none of them reads as verified.
+      await withdrawVerification(client, editedCampClaimIds(id, fields), {
+        actor: 'admin-assistant', method: 'assistant-edit', notes: 'Edited through the admin assistant; the new value has not been reviewed.',
+      });
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  if (table === 'Camp') await refreshAfterUnreviewedChange(id);
 }
 
 export async function updateAssistantCampFields(campId: string, entries: [string, unknown][]): Promise<void> {

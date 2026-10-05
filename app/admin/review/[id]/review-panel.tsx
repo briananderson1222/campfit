@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import { approveOutcome } from './approve-outcome';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Check, X, Loader2, ChevronDown, ChevronUp, ExternalLink, GitBranch, Link2, Pencil, BookmarkCheck, Lightbulb, ShieldCheck, ShieldAlert, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
@@ -176,6 +177,13 @@ export function ReviewPanel({
         }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to apply proposal'));
+      const outcome = approveOutcome(await res.json().catch(() => null));
+      if (outcome.stay) {
+        setErrorMessage(outcome.message);
+        setLoading(null);
+        router.refresh();
+        return;
+      }
       if (keepPending) {
         // Stay on page — refresh to show updated applied state
         router.refresh();

@@ -19,7 +19,8 @@ import { applyProposalReview } from '@/lib/admin/review-apply';
 import { getProposal } from '@/lib/admin/review-repository';
 import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 import { appendEvidence, persistClaim } from '@/lib/admin/claim-store';
-import { updateAdminCampFields } from '@/lib/admin/camp-repository';
+import { replaceAdminCampAgeGroups, updateAdminCampFields } from '@/lib/admin/camp-repository';
+import { updateAssistantCampFields } from '@/lib/admin/entity-admin-repository';
 import { applyBatchAcceptedClaims, ReviewApplyValueError } from '@/lib/admin/review-apply';
 import { getCampProposalHistoryBatch } from '@/lib/admin/review-repository';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
@@ -29,6 +30,7 @@ import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 
 const REVIEWER = 'reviewer@campfit.test';
 const SESSION_ONE = 'Session One: June 7 - June 11, 2027, 9:00 AM - 3:00 PM';
+const SESSION_TWO = 'Session Two: June 14 - June 18, 2027, 9:00 AM - 3:00 PM';
 const URL = 'https://aspengrove.example.test/camp';
 
 /** The stored page. Every excerpt below is one of its lines, verbatim and unique. */
@@ -42,6 +44,7 @@ const PAGE = [
   'Ages 6 - 10',
   'Tuition: $450 per week',
   'Session One: June 7 - June 11, 2027, 9:00 AM - 3:00 PM',
+  'Session Two: June 14 - June 18, 2027, 9:00 AM - 3:00 PM',
 ].join('\n');
 
 function diff(old: unknown, next: unknown, excerpt: string): FieldDiff {
@@ -252,7 +255,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     const campId = await seedCamp();
     const changes = fullChanges({ sessionTimes: true });
     const ghost = { ...session(true), label: 'Session Two', startDate: '2027-06-14', endDate: '2027-06-18' };
-    changes.schedules = listDiff([], [session(true), ghost], [SESSION_ONE, 'Session Two: June 14 - June 18, 2027']);
+    changes.schedules = listDiff([], [session(true), ghost], [SESSION_ONE, 'Session Two: June 14 - June 18, 2027 (waitlist only)']);
     // A list with no per-row citations at all: only its first row was ever checked.
     changes.pricing = diff([], changes.pricing!.new, 'Tuition: $450 per week');
     const proposal = await seedProposal(campId, changes, { snapshot: true });
@@ -284,7 +287,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       `SELECT e.status FROM "SurfaceVerificationEvent" e JOIN "SurfaceClaimDefinition" d ON d.id = e."claimId"
         WHERE d."fieldOrBehavior" = 'time' ORDER BY e."createdAt" DESC, e.id DESC LIMIT 1`,
     );
-    expect(rows[0]!.status).toBe('revoked');
+    expect(rows[0]!.status).toBe('proposed');
   });
 
   it('approving a category together with a list that holds it records every field, with no id clash', async () => {
@@ -429,5 +432,99 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     const { rows } = await getTestPool().query<{ campType: string }>(`SELECT "campType" FROM "Camp" WHERE id = $1`, [campId]);
     expect(rows[0]!.campType).toBe('SUMMER_DAY');
     expect(applied.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['campType']);
+  });
+  describe('a value changed outside review is not verified', () => {
+    async function verifiedCamp(): Promise<string> {
+      const campId = await seedCamp();
+      const proposal = await seedProposal(campId, fullChanges({ sessionTimes: true }), { snapshot: true });
+      expect((await review(proposal.id, 'all')).verification?.dataConfidence).toBe('VERIFIED');
+      return campId;
+    }
+    const missing = async (campId: string) => {
+      const { rows } = await getTestPool().query<{ dataConfidence: string }>(`SELECT "dataConfidence" FROM "Camp" WHERE id = $1`, [campId]);
+      const latest = await getTestPool().query<{ field: string; status: string }>(
+        `SELECT DISTINCT ON (d.id) d."fieldOrBehavior" AS field, e.status FROM "SurfaceClaimDefinition" d
+           JOIN "SurfaceVerificationEvent" e ON e."claimId" = d.id WHERE d."subjectId" = $1
+          ORDER BY d.id, e."createdAt" DESC, e.id DESC`, [campId]);
+      return { dataConfidence: rows[0]!.dataConfidence, unverified: latest.rows.filter((row) => row.status !== 'verified' && row.status !== 'assumed').map((row) => row.field).sort() };
+    };
+
+    it('an admin edit of a field', async () => {
+      const campId = await verifiedCamp();
+      await updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER);
+      expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['city'] });
+    });
+
+    it('an admin edit of the age groups, which also forgets the approved page text', async () => {
+      const campId = await verifiedCamp();
+      await getTestPool().query(`UPDATE "Camp" SET "fieldSources" = jsonb_set("fieldSources", '{ageGroups,contentFingerprint}', '"sha256:page-one"') WHERE id = $1`, [campId]);
+      await replaceAdminCampAgeGroups(campId, [{ label: 'Ages 12 - 17', minAge: 12, maxAge: 17, minGrade: null, maxGrade: null }], REVIEWER);
+      expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['ageGroups'] });
+      const { rows } = await getTestPool().query<{ fp: string | null }>(`SELECT "fieldSources"->'ageGroups'->>'contentFingerprint' AS fp FROM "Camp" WHERE id = $1`, [campId]);
+      expect(rows[0]!.fp).toBeNull();
+    });
+
+    it('an assistant edit of a field', async () => {
+      const campId = await verifiedCamp();
+      await updateAssistantCampFields(campId, [['registrationStatus', 'FULL']]);
+      expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['registrationStatus'] });
+    });
+
+    it('an approval whose evidence cannot be written (fails closed)', async () => {
+      const campId = await seedCamp();
+      expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
+      const proposal = await seedProposal(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true });
+      // The id the city approval will use is already taken, so its evidence write fails.
+      const claimId = `camp.${campId}.field.city`;
+      await appendEvidence(getTestPool(), {
+        id: `evidence.${claimId}.review.${proposal.id}`, claimId, evidenceType: 'crawl_observation', method: 'extraction',
+        sourceRef: URL, excerptOrSummary: 'occupied', observedAt: new Date().toISOString(), collectedBy: 'fixture',
+      });
+
+      const applied = await review(proposal.id, 'all');
+
+      expect(applied.provenanceErrors.map((error) => error.step)).toEqual(['recordAppliedFieldEvidence']);
+      expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['city'] });
+    });
+
+    it('sessions: a proposal listing one session twice is refused, and a changed time stays unverified through later uncited approvals', async () => {
+      const campId = await seedCamp();
+      const s2 = (startTime: string, endTime: string) => ({ ...session(true), label: 'Session Two', startDate: '2027-06-14', endDate: '2027-06-18', startTime, endTime });
+      const first = fullChanges({ sessionTimes: true });
+      first.schedules = listDiff([], [session(true), s2('09:00', '15:00')], [SESSION_ONE, SESSION_TWO]);
+      const cited = await seedProposal(campId, first, { snapshot: true });
+      expect((await review(cited.id, 'all')).verification?.dataConfidence).toBe('VERIFIED');
+      const before = [session(true), s2('09:00', '15:00')];
+
+      const duplicated = await seedProposal(campId, {
+        schedules: listDiff(before, [session(true), { ...session(true), label: '**Session One**' }, s2('10:00', '16:00')], [SESSION_ONE, SESSION_ONE, SESSION_TWO]),
+      }, { snapshot: false });
+      const refusal = await review(duplicated.id, 'all').then(() => null, (error: unknown) => error);
+      expect(refusal).toBeInstanceOf(ReviewApplyValueError);
+      expect((refusal as Error).message).toContain('"schedules" lists the same session more than once ("**Session One**")');
+      const { rows: unchanged } = await getTestPool().query<{ n: number }>(`SELECT count(*)::int AS n FROM "CampSchedule" WHERE "campId" = $1 AND "startTime" = '10:00'`, [campId]);
+      expect(unchanged[0]!.n).toBe(0);
+
+      const changed = await seedProposal(campId, { schedules: listDiff(before, [session(true), s2('10:00', '16:00')], [SESSION_ONE, SESSION_TWO]) }, { snapshot: false });
+      const second = await review(changed.id, 'all');
+      expect(second.provenanceErrors).toEqual([]);
+      expect(second.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['sessions-verified']);
+
+      const again = await seedProposal(campId, { schedules: listDiff([session(true), s2('10:00', '16:00')], [session(true), s2('10:00', '16:00')], [SESSION_ONE, SESSION_TWO]) }, { snapshot: false });
+      const third = await review(again.id, 'all');
+      expect(third.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['sessions-verified']);
+      expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+    });
+  });
+
+  it('a list whose row citations do not cover every row is not reviewed', async () => {
+    const campId = await seedCamp();
+    const changes = fullChanges({ sessionTimes: true });
+    const two = [...(changes.pricing!.new as unknown[]), { label: 'Extended day', amount: 90, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null }];
+    changes.pricing = { ...listDiff([], two, ['Tuition: $450 per week']) };
+    const proposal = await seedProposal(campId, changes, { snapshot: true });
+    const applied = await review(proposal.id, 'all');
+    // A session's price options are inherited from the camp's pricing, so they go too.
+    expect(applied.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['pricing', 'sessions-verified']);
   });
 });

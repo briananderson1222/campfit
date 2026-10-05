@@ -348,51 +348,56 @@ approved field, so the claim derived `proposed`: approving one field moved an
 attested claim down and the Camp to `PLACEHOLDER`, and no Camp could reach
 `VERIFIED` through review.
 
-Surface counts every evidence record ever attached to a claim, so what an
-approval leaves behind is decided by the event it writes, which becomes the
-claim's latest (`recordApprovedClaim`):
+Surface counts every evidence record ever attached to a claim and derives the
+status from the claim's latest event. So a changed value is kept from reading
+as verified by events, not by evidence:
 
-- **Reviewed.** A reviewer approved the value in a review session and its
-  citation matched the proposal's stored snapshot exactly. Recorded: the crawl
-  observation, the decision as `human_attestation` evidence (with a digest of
-  the approved value), and a `verified` event.
-- **Not reviewed.** No stored snapshot, no excerpt, or a batch accept.
-  Recorded: the crawl observation and a `proposed` event. The value is applied
-  and the claim is not verified, including when an earlier approval of a
-  different value left human evidence on the same claim.
+- **Every change withdraws first.** Any path that changes a claim-set value
+  appends a `proposed` event to that field's claim in the same transaction as
+  the value (`unreviewed-change.ts`): a review apply (the applied fields, the
+  `campType`/`category` an applied list moved, and the time of every kept
+  session whose time changed), a manual admin edit (`updateAdminCampFields`,
+  `replaceAdminCampAgeGroups`) and an assistant edit
+  (`updateAssistantCampFields`). The cached `dataConfidence` is re-derived
+  afterwards.
+- **Only a reviewed value is verified again.** After the apply commits,
+  `recordApprovedClaim` writes, for a value a reviewer approved in a review
+  session whose cited excerpt is on the stored page, the crawl observation,
+  the decision as `human_attestation` evidence and a `verified` event stamped
+  after the withdrawal. If that write fails, the claim keeps the withdrawal:
+  it fails closed. An approval with no excerpt on the page, or a batch accept,
+  writes a `proposed` event.
+
+"On the page" means the excerpt occurs verbatim in the stored page text. It
+does not show that the excerpt supports the value; the review page lists each
+proposed row next to its cited text so the reviewer can judge that.
 
 What counts as reviewed for a list (`ageGroups`, `pricing`, `schedules`,
 `campTypes`, `categories`): every row carries its own citation
-(`FieldDiff.rowCitations`) and every one matches the stored text. The list's
-single `excerpt` cites only its first row.
-
-Approvals that stand for a requirement other than the field itself:
+(`FieldDiff.rowCitations`) and every one is on the page. The list's single
+`excerpt` cites only its first row.
 
 - `campTypes` / `categories` also record on their single-value twins
-  (`campType`, `category`), which are the claim-set requirements. A reviewed
-  list verifies the twin (applying the list keeps the twin a member of it). An
-  unreviewed list that moved the twin takes the twin out of verified. When the
-  twin was approved in the same proposal, that decision is the twin's, and the
-  two must agree or the apply is refused.
-- `schedules` is recorded per session, for the rows that were in the proposal
-  and whose own citation was checked: a `dates` claim, and a `time` claim when
-  the row states a start and an end time. A session with no stated time has no
-  `time` claim, so `sessions-verified` stays open; the crawl schema has no
-  session time field, so a list approved from a crawl carries no times today.
-  When an approval changes or removes a session's time without attesting the
-  new one, the earlier `time` claim is invalidated.
+  (`campType`, `category`), which are the claim-set requirements. When the
+  twin was approved in the same proposal, that decision is the twin's, and
+  the two must agree or the apply is refused.
+- `schedules` is recorded per kept session whose own row's excerpt is on the
+  page: a `dates` claim, and a `time` claim when the row states a start and an
+  end time. A proposal that lists one session twice is refused. A session with
+  no stated time has no `time` claim, so `sessions-verified` stays open; the
+  crawl schema has no session time field, so a list approved from a crawl
+  carries no times today.
 
-A batch accept is its own review kind (`batch-accept` on the evidence and the
-event) and does not count as the human evidence a requirement needs
-(`BATCH_ACCEPT_COUNTS_AS_REVIEW` in `review-apply.ts`).
+A batch accept is its own review kind (`batch-accept`) and does not count as
+the human evidence a requirement needs (`BATCH_ACCEPT_COUNTS_AS_REVIEW` in
+`review-apply.ts`). One field's evidence failing to record does not stop the
+others; every failure is reported as a `recordAppliedFieldEvidence`
+provenance error, and the review page shows it instead of moving on.
 
-One field's evidence failing to record does not stop the others; every
-failure is reported together as a `recordAppliedFieldEvidence` provenance
-error. `applyProposalReview` returns the re-derived `dataConfidence` and the
-requirements still missing; the approve route passes them through.
-
-Not covered: a manual admin edit of a field changes its value without writing
-any event, so a claim verified for the earlier value keeps its status.
+Not covered: if the cache refresh after a change fails as well, the stored
+`dataConfidence` is stale until the next refresh; the claims themselves are
+already withdrawn. Scripts that write camps directly (seed, CSV import) do not
+withdraw anything.
 
 ## Accepted gaps
 

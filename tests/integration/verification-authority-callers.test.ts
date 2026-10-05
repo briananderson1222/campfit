@@ -82,6 +82,8 @@ const ALLOWED_CALLER_FILES = new Set([
   'lib/admin/review-apply.ts',
   'lib/admin/entity-admin-repository.ts',
   'lib/admin/bulk-attestation.ts',
+  // Re-derives the cache after a manual or assistant edit (human-initiated).
+  'lib/admin/unreviewed-change.ts',
 ]);
 
 /** Definition-site lines (not calls) — excluded from the scan so the
@@ -203,6 +205,7 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
   it.each([
     ['lib/admin/entity-admin-repository.ts', ['recordCampAttestationEvidence']],
     ['lib/admin/bulk-attestation.ts', ['bulkAttestCamp']],
+    ['lib/admin/unreviewed-change.ts', ['refreshAfterUnreviewedChange']],
   ] as const)('%s\'s call sites resolve to exactly %j', (relativePath, expectedFunctions) => {
     const filePath = path.join(repoRoot, relativePath);
     const fileLines = fs.readFileSync(filePath, 'utf8').split('\n');

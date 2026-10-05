@@ -58,10 +58,10 @@ import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accep
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
 import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
-import { appendEvent, appendEvidence, persistClaim } from './claim-store';
+import { appendEvidence, persistClaim } from './claim-store';
+import { withdrawVerification } from './unreviewed-change';
 import { sessionClaimId } from './verification-policy';
 import { SESSION_SUBJECT_TYPE } from './session-identity';
-import { createHash } from 'node:crypto';
 import { campfitSessionVocabulary } from '../trust-vocabulary';
 import type { DataConfidence } from '@/lib/types';
 import { buildCampReviewTrustInput, campCanonicalClaimId, type ReviewCitationSource } from './trust-projection';
@@ -139,6 +139,21 @@ function assertApplicableValues(changes: ProposedChanges, fields: readonly strin
     } else if (!hasApplyPath(field, diff)) {
       failing.push(field);
       problems.push(`"${field}" has no way to be applied in the proposed shape`);
+    }
+  }
+  // Two proposed sessions that are the same session (same plain-text label
+  // and dates) cannot be told apart once applied: refused, not guessed.
+  if (fields.includes('schedules') && Array.isArray(changes.schedules?.new)) {
+    const seen = new Set<string>();
+    const repeated: string[] = [];
+    for (const row of changes.schedules!.new as IncomingScheduleSnapshot[]) {
+      const key = scheduleNaturalKey(String(row?.label ?? ''), row?.startDate ?? null, row?.endDate ?? null);
+      if (seen.has(key)) repeated.push(String(row?.label ?? ''));
+      seen.add(key);
+    }
+    if (repeated.length > 0) {
+      failing.push('schedules');
+      problems.push(`"schedules" lists the same session more than once (${repeated.map((label) => `"${label}"`).join(', ')})`);
     }
   }
   // A single value and its list approved together must agree. Applying both
@@ -412,6 +427,11 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     // before COMMIT — see transitionProposalStatus's own comment for why
     // that's what makes the FOR UPDATE re-check above actually close the
     // double-apply race.
+    // Fail closed: every claim whose value this apply changes is withdrawn
+    // from verified in this transaction. Only the evidence written after
+    // COMMIT re-verifies a value a reviewer attested, so if that write fails
+    // the claim stays unverified instead of vouching for the new value.
+    await withdrawChangedClaims(client, proposal.campId, appliedFields, facts, reviewer, decision.reviewedAt);
     await transitionProposalStatus(client, proposalId, keepPending, appliedFields, reviewer, decision.reviewerNotes, feedbackTags);
 
     await client.query('COMMIT');
@@ -774,6 +794,7 @@ async function applyBatchAcceptedFieldsForProposal(
     const stillUnapplied = unappliedProposalFields.filter((field) => !newlyAppliedFields.includes(field));
     keepPending = stillUnapplied.length > 0;
 
+    await withdrawChangedClaims(client, proposal.campId, newlyAppliedFields, facts, actor, reviewedAt);
     await transitionProposalStatus(client, proposal.id, keepPending, newlyAppliedFields, actor, BATCH_ACCEPT_REVIEWER_NOTES, undefined);
 
     await client.query('COMMIT');
@@ -857,30 +878,35 @@ export function approvedFieldsRequireSnapshot(changes: ProposedChanges, approved
   return approvedFields.some((field) => Boolean(changes[field]?.excerpt?.trim()));
 }
 
-/** One proposed list row's citation, as checked against the stored source text. */
+/** One proposed list row's citation: whether its excerpt is on the stored page. */
 interface RowCitationCheck {
+  /** The excerpt occurs verbatim on the stored page. Not a check that it supports this row's values. */
   readonly checked: boolean;
   readonly excerpt?: string;
   /** The `chars:` locator the excerpt resolved to. Set only when `checked`. */
   readonly locator?: string;
 }
 
-/** Whether an applied field's value was checked against the stored source text, and for a list, row by row. */
+/** Whether an applied field's cited excerpts are on the stored page, and for a list, row by row. */
 interface CitationCheck {
-  /** Every part of the approved value cites the stored source exactly. */
+  /** Every part of the approved value cites an excerpt that is on the stored page. */
   readonly reviewed: boolean;
   /** For a list field with per-row citations: one entry per row of the approved list. */
   readonly rows?: readonly RowCitationCheck[];
 }
 
 /**
- * Which applied fields were approved against a checked citation.
+ * Which applied fields were approved with their cited excerpts on the page.
+ *
+ * "Checked" means the excerpt occurs verbatim in the stored page text. It
+ * does not mean the excerpt supports the value: the reviewer sees each
+ * citation next to its row on the review page and judges that.
  *
  * - No stored snapshot was loaded: nothing was checked.
  * - A single value: it carries an excerpt (which `assertExactCitations` has
- *   already confirmed matches the stored text exactly).
+ *   already confirmed is on the stored page).
  * - A list: every row carries its own citation (`FieldDiff.rowCitations`) and
- *   every one matches the stored text exactly. The list's `excerpt` is only
+ *   every one is on the stored page. The list's `excerpt` is only
  *   its first row's, so a list with no per-row citations, or with any row
  *   that does not match, is not reviewed as a whole. Rows that do match are
  *   still reported individually (a session is attested row by row).
@@ -920,10 +946,42 @@ interface AppliedFacts {
   twinChanged: Map<string, boolean>;
   /** Each session's `startTime|endTime` before this apply, by `CampSchedule.id`. */
   previousSessionTimes: Map<string, string>;
+  /** Sessions this apply kept (same id) whose time it changed or removed. */
+  sessionsWithChangedTime: string[];
 }
 
 function newAppliedFacts(): AppliedFacts {
-  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map() };
+  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [] };
+}
+
+/**
+ * In the apply transaction: append a `proposed` event to every existing claim
+ * whose value this apply changed — each applied field, the single-value twin
+ * an applied list moved, and the time of every kept session whose time
+ * changed. Stamped just before `reviewedAt`, so the events written after
+ * COMMIT for reviewed values (stamped `reviewedAt`) are the latest.
+ */
+async function withdrawChangedClaims(
+  client: PoolClient,
+  campId: string,
+  appliedFields: readonly string[],
+  facts: AppliedFacts,
+  actor: string,
+  reviewedAt: string,
+): Promise<void> {
+  const claimIds = [
+    ...appliedFields.map((field) => campCanonicalClaimId(campId, field)),
+    ...Object.entries(ENUM_ARRAY_TWIN)
+      .filter(([list]) => appliedFields.includes(list) && facts.twinChanged.get(list))
+      .map(([, twin]) => campCanonicalClaimId(campId, twin.column)),
+    ...facts.sessionsWithChangedTime.map((sessionId) => sessionClaimId(sessionId, 'time')),
+  ];
+  await withdrawVerification(client, claimIds, {
+    actor,
+    method: 'review-apply',
+    notes: 'The value changed in a review apply; verified again only by the evidence recorded for this approval.',
+    createdAt: new Date(Date.parse(reviewedAt) - 1).toISOString(),
+  });
 }
 
 function sessionTimeKey(row: { startTime?: string | null; endTime?: string | null }): string {
@@ -1160,6 +1218,15 @@ async function applyRelationField(
     for (const row of before.rows) facts.previousSessionTimes.set(row.id, sessionTimeKey(row));
     const reconciliation = await applyScheduleReconciliation(client, proposal.campId, diff.new as IncomingScheduleSnapshot[]);
     orphaned = reconciliation.orphaned;
+    if (reconciliation.matchedIds.length > 0) {
+      const after = await client.query<{ id: string; startTime: string | null; endTime: string | null }>(
+        `SELECT id, "startTime", "endTime" FROM "CampSchedule" WHERE id = ANY($1::text[])`,
+        [reconciliation.matchedIds],
+      );
+      for (const row of after.rows) {
+        if (facts.previousSessionTimes.get(row.id) !== sessionTimeKey(row)) facts.sessionsWithChangedTime.push(row.id);
+      }
+    }
   } else {
     const table = RELATION_TABLES[field];
     await client.query(`DELETE FROM "${table}" WHERE "campId" = $1`, [proposal.campId]);
@@ -1302,7 +1369,7 @@ async function recordAppliedField(
   const diff = review.changes[field];
   const check = review.facts.citations.get(field) ?? { reviewed: false };
   const reviewed = countsAsReview(review) && check.reviewed;
-  await recordApprovedClaim(pool, { draft, evidence, event, proposalId, field, value: diff?.new, reviewed, review });
+  await recordApprovedClaim(pool, { draft, evidence, event, proposalId, field, reviewed, review });
 
   // The single-value twin of an enum list (`campType`, `category`) is what
   // the Verified Camp Claim Set requires. Applying the list keeps the twin a
@@ -1319,7 +1386,6 @@ async function recordAppliedField(
       proposalId,
       field,
       via: field,
-      value: diff?.new,
       reviewed,
       review,
     });
@@ -1353,11 +1419,6 @@ function countsAsReview(review: ReviewDecisionRecord): boolean {
   return review.kind === 'review' || BATCH_ACCEPT_COUNTS_AS_REVIEW;
 }
 
-/** Digest of the approved value, so the decision evidence names what was attested. */
-function valueDigest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
-}
-
 /**
  * Persist one approved claim.
  *
@@ -1368,7 +1429,7 @@ function valueDigest(value: unknown): string {
  *
  *  - Reviewed (a reviewer approved this value against a citation that was
  *    checked): the crawl observation, the reviewer's decision as
- *    `human_attestation` evidence carrying the value's digest, and a
+ *    `human_attestation` evidence, and a
  *    `verified` event citing both.
  *  - Not reviewed (no checked citation, or a batch accept): the crawl
  *    observation and a `proposed` event. The value was applied but nobody
@@ -1388,7 +1449,6 @@ async function recordApprovedClaim(
     readonly field: string;
     /** The applied list this claim is recorded through (a twin column, a session). Keeps its ids apart from a direct approval's. */
     readonly via?: string;
-    readonly value: unknown;
     readonly reviewed: boolean;
     readonly review: ReviewDecisionRecord;
   },
@@ -1415,7 +1475,7 @@ async function recordApprovedClaim(
         ...(batch ? { method: 'batch-accept' } : {}),
         notes: batch
           ? 'Accepted in a batch by the exact-corroboration rule. Applied, not individually reviewed, so not verified.'
-          : 'Approved without a citation checked against the stored source. Applied, not verified.',
+          : 'Approved without a cited excerpt found on the stored page. Applied, not verified.',
       },
     });
     return;
@@ -1429,17 +1489,16 @@ async function recordApprovedClaim(
     sourceRef: `campfit-reviewer:${args.review.reviewer}`,
     sourceLocator: `proposal:${args.proposalId}:field:${args.field}`,
     excerptOrSummary: batch
-      ? `${args.review.reviewer} batch-accepted the proposed "${args.field}" value under the exact-corroboration rule; its citation matched the stored source.`
-      : `Reviewer ${args.review.reviewer} approved the proposed "${args.field}" value; its citation matched the stored source.`,
+      ? `${args.review.reviewer} batch-accepted the proposed "${args.field}" value under the exact-corroboration rule; its cited excerpt is on the stored page.`
+      : `Reviewer ${args.review.reviewer} approved the proposed "${args.field}" value; its cited excerpt is on the stored page.`,
     observedAt: args.review.reviewedAt,
     collectedBy: args.review.reviewer,
-    integrityRef: valueDigest(args.value),
     metadata: {
       proposalId: args.proposalId,
       reviewKind,
       trustProducer: 'campfit.crawl-review',
       decision: 'approved',
-      citationChecked: true,
+      excerptOnPage: true,
       ...(args.via ? { recordedThrough: args.via } : {}),
     },
   };
@@ -1455,17 +1514,19 @@ async function recordApprovedClaim(
 }
 
 /**
- * Record what an applied `schedules` list says about each session, row by row.
+ * Record what an applied `schedules` list says about each session it kept.
  *
- * A session is matched to the proposal row it came from by the same natural
- * key the apply used. Only a row whose own citation was checked is attested:
- * `dates` always, `time` only when the row states a start and an end time.
- * A session the reviewer was not shown, or whose row cites nothing that was
- * checked, gets no new claim.
+ * Each session on the camp is matched to the proposal row it came from by the
+ * same natural key the apply used (a proposal that lists one session twice is
+ * refused before anything is written). A session is attested only when its
+ * own row's cited excerpt is on the stored page: `dates` always, `time` only
+ * when the row states a start and an end time. A session the reviewer was not
+ * shown, or whose row's excerpt is not on the page, gets no new claim.
  *
- * A `time` claim describes one time. When this apply changed or removed a
- * matched session's time and did not attest the new one, the earlier claim is
- * invalidated, so it stops reading as verified for a value it never covered.
+ * A time this apply changed was already withdrawn from verified inside the
+ * apply transaction (`withdrawChangedClaims`), so nothing here has to undo an
+ * earlier claim. Each session is recorded on its own; every failure is
+ * reported together at the end.
  */
 async function recordSessionClaims(
   pool: Pool,
@@ -1478,83 +1539,65 @@ async function recordSessionClaims(
     readonly review: ReviewDecisionRecord;
   },
 ): Promise<void> {
+  if (!countsAsReview(args.review)) return;
   const { rows: sessions } = await pool.query<{ id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }>(
     `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "startTime", "endTime"
        FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`,
     [args.campId],
   );
-  const byKey = new Map(sessions.map((row) => [scheduleNaturalKey(row.label, row.startDate, row.endDate), row] as const));
   const proposed = Array.isArray(args.diff.new) ? (args.diff.new as IncomingScheduleSnapshot[]) : [];
-
-  for (const [index, incoming] of proposed.entries()) {
-    const session = byKey.get(scheduleNaturalKey(incoming.label, incoming.startDate, incoming.endDate));
-    if (!session) continue;
-    const citation = args.check.rows?.[index];
-    const attested = countsAsReview(args.review) && citation?.checked === true;
-    const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
-    const record = (attribute: 'dates' | 'time', value: unknown) =>
-      recordApprovedClaim(pool, {
-        draft: {
-          id: sessionClaimId(session.id, attribute),
-          subjectType: SESSION_SUBJECT_TYPE,
-          subjectId: session.id,
-          facet: campfitSessionVocabulary.facet,
-          claimType: campfitSessionVocabulary.claimTypes[attribute],
-          fieldOrBehavior: attribute,
-          impactLevel: 'medium',
-          metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
-        },
-        // This row's own citation, not the list's first row's.
-        evidence: { ...args.evidence, sourceLocator: citation!.locator, excerptOrSummary: citation!.excerpt ?? args.evidence.excerptOrSummary },
-        event: {
-          id: sessionClaimId(session.id, attribute),
-          claimId: sessionClaimId(session.id, attribute),
-          status: 'verified',
-          type: 'verification',
-          actor: args.review.reviewer,
-          method: 'survey-review',
-          evidenceIds: [],
-          createdAt: args.review.reviewedAt,
-          verifiedAt: args.review.reviewedAt,
-        },
-        proposalId: args.proposalId,
-        field: 'schedules',
-        via: 'schedules',
-        value,
-        reviewed: true,
-        review: args.review,
-      });
-
-    if (attested) await record('dates', [session.startDate, session.endDate]);
-    if (attested && timeStated) {
-      await record('time', [session.startTime, session.endTime]);
-      continue;
-    }
-    // The time was not attested by this approval. An earlier claim stands
-    // only if it describes the same time.
-    const previous = args.review.facts.previousSessionTimes.get(session.id);
-    const unchanged = timeStated && previous !== undefined && previous === sessionTimeKey(session);
-    if (!unchanged) await invalidateClaim(pool, sessionClaimId(session.id, 'time'), args.proposalId, args.review, timeStated
-      ? 'The session time was changed by an approval that did not attest the new time.'
-      : 'The session no longer states a time.');
+  const rowIndexByKey = new Map<string, number>();
+  for (const [index, row] of proposed.entries()) {
+    const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+    if (!rowIndexByKey.has(key)) rowIndexByKey.set(key, index);
   }
-}
 
-/** Append an invalidation to a claim that exists; a claim never recorded has nothing to invalidate. */
-async function invalidateClaim(pool: Pool, claimId: string, proposalId: string, review: ReviewDecisionRecord, notes: string): Promise<void> {
-  const existing = await pool.query(`SELECT 1 FROM "SurfaceClaimDefinition" WHERE id = $1`, [claimId]);
-  if ((existing.rowCount ?? 0) === 0) return;
-  await appendEvent(pool, {
-    id: `event.${claimId}.review.${proposalId}.invalidated`,
-    claimId,
-    status: 'revoked',
-    type: 'invalidation',
-    actor: review.reviewer,
-    method: 'review-apply',
-    evidenceIds: [],
-    createdAt: review.reviewedAt,
-    notes,
-  });
+  const failures: string[] = [];
+  for (const session of sessions) {
+    const index = rowIndexByKey.get(scheduleNaturalKey(session.label, session.startDate, session.endDate));
+    const citation = index === undefined ? undefined : args.check.rows?.[index];
+    if (!citation?.checked) continue;
+    const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
+    const attributes: ('dates' | 'time')[] = timeStated ? ['dates', 'time'] : ['dates'];
+    for (const attribute of attributes) {
+      const claimId = sessionClaimId(session.id, attribute);
+      try {
+        await recordApprovedClaim(pool, {
+          draft: {
+            id: claimId,
+            subjectType: SESSION_SUBJECT_TYPE,
+            subjectId: session.id,
+            facet: campfitSessionVocabulary.facet,
+            claimType: campfitSessionVocabulary.claimTypes[attribute],
+            fieldOrBehavior: attribute,
+            impactLevel: 'medium',
+            metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
+          },
+          // This row's own citation, not the list's first row's.
+          evidence: { ...args.evidence, sourceLocator: citation.locator, excerptOrSummary: citation.excerpt ?? args.evidence.excerptOrSummary },
+          event: {
+            id: claimId,
+            claimId,
+            status: 'verified',
+            type: 'verification',
+            actor: args.review.reviewer,
+            method: 'survey-review',
+            evidenceIds: [],
+            createdAt: args.review.reviewedAt,
+            verifiedAt: args.review.reviewedAt,
+          },
+          proposalId: args.proposalId,
+          field: 'schedules',
+          via: 'schedules',
+          reviewed: true,
+          review: args.review,
+        });
+      } catch (err) {
+        failures.push(`${session.label} ${attribute}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+  if (failures.length > 0) throw new Error(`session claims not recorded — ${failures.join('; ')}`);
 }
 
 /**

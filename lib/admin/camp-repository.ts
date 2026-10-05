@@ -10,6 +10,7 @@ import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPric
 import { isValidHttpUrl } from './onboarding-validation';
 import { writeChangeLogs } from './changelog-repository';
 import { RepositoryConnectionError } from './repository-errors';
+import { editedCampClaimIds, refreshAfterUnreviewedChange, withdrawVerification } from './unreviewed-change';
 
 function db() {
   return getPool();
@@ -61,19 +62,42 @@ const ADMIN_CAMP_EDITABLE_FIELDS = new Set([
 export async function updateAdminCampFields(
   campId: string,
   updates: Array<[string, unknown]>,
+  actor = 'admin',
 ): Promise<Record<string, unknown> | null> {
   for (const [field] of updates) {
     if (!ADMIN_CAMP_EDITABLE_FIELDS.has(field)) throw new Error(`Invalid editable camp field: ${field}`);
   }
-  const { rows } = await db().query<Record<string, unknown>>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]);
-  const current = rows[0];
-  if (!current) return null;
-  const setClauses = updates.map(([field], index) => `"${field}" = $${index + 2}`).join(', ');
-  await db().query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = NOW() WHERE id = $1`, [
-    campId,
-    ...updates.map(([, value]) => value ?? null),
-  ]);
-  await clearApprovedPageFingerprints(db(), campId, updates.map(([field]) => field));
+  const fields = updates.map(([field]) => field);
+  const client = await db().connect().catch((error) => {
+    throw new RepositoryConnectionError(error);
+  });
+  let current: Record<string, unknown> | undefined;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query<Record<string, unknown>>(`SELECT * FROM "Camp" WHERE id = $1 FOR UPDATE`, [campId]);
+    current = rows[0];
+    if (!current) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const setClauses = updates.map(([field], index) => `"${field}" = $${index + 2}`).join(', ');
+    await client.query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = NOW() WHERE id = $1`, [
+      campId,
+      ...updates.map(([, value]) => value ?? null),
+    ]);
+    await clearApprovedPageFingerprints(client, campId, fields);
+    // The edited values were not reviewed: none of them reads as verified.
+    await withdrawVerification(client, editedCampClaimIds(campId, fields), {
+      actor, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await refreshAfterUnreviewedChange(campId);
   return current;
 }
 
@@ -104,7 +128,11 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
     }
     await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [campId]);
     await clearApprovedPageFingerprints(client, campId, ['ageGroups']);
+    await withdrawVerification(client, editedCampClaimIds(campId, ['ageGroups']), {
+      actor: changedBy, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
+    });
     await client.query('COMMIT');
+    await refreshAfterUnreviewedChange(campId);
     await writeChangeLogs([{
       campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous.rows,
       newValue: ageGroups.filter((row) => row.label?.trim()),

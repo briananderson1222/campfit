@@ -12,6 +12,7 @@ import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { ReviewDetailHeading } from './review-detail-heading';
 import { reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import { ExtractionNotices } from './extraction-notices';
+import { RowCitations } from './row-citations';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,6 +98,7 @@ export default async function ReviewDetailPage(
         </div>
       </div>
       <ExtractionNotices rawExtraction={proposal.rawExtraction} />
+      <RowCitations proposedChanges={proposal.proposedChanges} />
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">
