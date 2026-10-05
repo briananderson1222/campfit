@@ -597,28 +597,30 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     expect(rows[0]!.source.approvedAt).toBeTruthy();
     expect(rows[0]!.source.contentFingerprint).toBeUndefined();
   });
-  it('morning and afternoon sessions with the same label and dates are two sessions, each attested on its own row', async () => {
+  it('morning and afternoon sessions with the same label and dates are two sessions, each attested only on its own row', async () => {
     const campId = await seedCamp();
     const changes = fullChanges({ sessionTimes: true });
     const pm = { ...session(true), startTime: '13:00', endTime: '16:00' };
-    changes.schedules = listDiff([], [session(true), pm], [SESSION_ONE, SESSION_TWO]);
+    // The afternoon row cites text that is not on the page.
+    changes.schedules = listDiff([], [session(true), pm], [SESSION_ONE, 'Session One afternoon: 1:00 PM - 4:00 PM']);
     const proposal = await seedProposal(campId, changes, { snapshot: true });
 
     const applied = await review(proposal.id, 'all');
 
     expect(applied.appliedFields).toHaveLength(9);
-    expect(applied.verification?.dataConfidence).toBe('VERIFIED');
+    // The afternoon session is its own session, so its uncited row leaves it unattested.
+    expect(applied.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['sessions-verified']);
     const { rows } = await getTestPool().query<{ startTime: string; claims: number }>(
       `SELECT s."startTime", (SELECT count(*)::int FROM "SurfaceClaimDefinition" d WHERE d."subjectId" = s.id) AS claims
          FROM "CampSchedule" s WHERE s."campId" = $1 AND s."archivedAt" IS NULL ORDER BY s."startTime"`, [campId]);
-    expect(rows).toEqual([{ startTime: '09:00', claims: 2 }, { startTime: '13:00', claims: 2 }]);
+    expect(rows).toEqual([{ startTime: '09:00', claims: 2 }, { startTime: '13:00', claims: 0 }]);
 
     // A later list that changes the afternoon session's end time: still two
     // sessions, the morning one keeps its id. (Among sessions that share a
     // label and dates, the time is part of the identity, so the afternoon one
     // is replaced, not edited.)
     const amId = (await getTestPool().query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 AND "startTime" = '09:00'`, [campId])).rows[0]!.id;
-    const again = await seedProposal(campId, { schedules: listDiff([session(true), pm], [session(true), { ...pm, endTime: '16:30' }], [SESSION_ONE, SESSION_TWO]) }, { snapshot: false });
+    const again = await seedProposal(campId, { schedules: listDiff([session(true), pm], [session(true), { ...pm, endTime: '16:30' }], [SESSION_ONE, 'Session One afternoon']) }, { snapshot: false });
     await review(again.id, 'all');
     const after = await getTestPool().query<{ id: string; endTime: string }>(
       `SELECT id, "endTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY "startTime"`, [campId]);
@@ -688,42 +690,43 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       }
     });
 
-    it('a claim another writer adds while an apply is writing its evidence is not erased', async () => {
+    it('a claim-store writer waits for an apply to finish: the apply holds the camp\'s subject lock while it writes claims', async () => {
+      // The claim store's save deletes claims missing from the store it
+      // loaded, so a writer that holds only the subject lock must not commit
+      // in the middle of an apply. The erasure window itself is between two
+      // statements and cannot be held open from a test; this pins the lock
+      // that closes it.
       const pool = getTestPool();
       const campId = await seedCamp();
       const proposal = await seedProposal(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true });
-      // Hold the apply between loading the camp's claims and saving them, once.
       await pool.query(`CREATE SEQUENCE IF NOT EXISTS hold_once`);
-      await pool.query(`CREATE OR REPLACE FUNCTION hold_policy_upsert() RETURNS trigger AS $$ BEGIN IF nextval('hold_once') = 1 THEN PERFORM pg_sleep(1.5); END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
-      await pool.query(`CREATE TRIGGER hold_policy_upsert BEFORE INSERT OR UPDATE ON "SurfaceVerificationPolicy" FOR EACH ROW EXECUTE FUNCTION hold_policy_upsert()`);
+      await pool.query(`CREATE OR REPLACE FUNCTION hold_evidence_insert() RETURNS trigger AS $$ BEGIN IF nextval('hold_once') = 1 THEN PERFORM pg_sleep(1.5); END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
+      await pool.query(`CREATE TRIGGER hold_evidence_insert BEFORE INSERT ON "SurfaceEvidence" FOR EACH ROW EXECUTE FUNCTION hold_evidence_insert()`);
+      const finished: string[] = [];
       try {
-        const applying = review(proposal.id, 'all');
-        for (let i = 0; i < 100; i++) {
-          const { rows } = await pool.query(`SELECT 1 FROM pg_stat_activity WHERE wait_event = 'PgSleep'`);
-          if (rows.length > 0) break;
-          await new Promise((resolve) => setTimeout(resolve, 20));
+        const applying = review(proposal.id, 'all').then(() => { finished.push('apply'); });
+        let held = false;
+        for (let i = 0; i < 200 && !held; i++) {
+          held = (await pool.query(`SELECT 1 FROM pg_stat_activity WHERE wait_event = 'PgSleep'`)).rows.length > 0;
+          if (!held) await new Promise((resolve) => setTimeout(resolve, 20));
         }
-        // A writer that holds only the claim-store subject lock (as the
-        // claim store's own writers do) adds a claim for the same camp.
-        const other = await pool.connect();
-        try {
-          await other.query('BEGIN');
-          await acquireSubjectAdvisoryLock(other, 'public-directory.camp', campId);
-          await other.query(
-            `INSERT INTO "SurfaceClaimDefinition" (id, "subjectType", "subjectId", "claimType", "fieldOrBehavior") VALUES ($1, 'public-directory.camp', $2, 'public-data.field', 'description')`,
-            [`camp.${campId}.field.description`, campId]);
-          await other.query('COMMIT');
-        } finally {
-          other.release();
-        }
-        await applying;
+        expect(held).toBe(true);
+        const writing = persistClaim(pool, {
+          id: `camp.${campId}.field.description`, subjectType: 'public-directory.camp', subjectId: campId,
+          facet: 'public-directory.camp-profile', claimType: 'public-data.field', fieldOrBehavior: 'description',
+        }).then(() => { finished.push('writer'); });
+        // Still inside the apply's 1.5 s hold: the writer must be waiting.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(finished).toEqual([]);
+        await Promise.all([applying, writing]);
       } finally {
-        await pool.query(`DROP TRIGGER IF EXISTS hold_policy_upsert ON "SurfaceVerificationPolicy"`);
-        await pool.query(`DROP FUNCTION IF EXISTS hold_policy_upsert()`);
+        await pool.query(`DROP TRIGGER IF EXISTS hold_evidence_insert ON "SurfaceEvidence"`);
+        await pool.query(`DROP FUNCTION IF EXISTS hold_evidence_insert()`);
         await pool.query(`DROP SEQUENCE IF EXISTS hold_once`);
       }
-      const { rows } = await pool.query(`SELECT 1 FROM "SurfaceClaimDefinition" WHERE id = $1`, [`camp.${campId}.field.description`]);
-      expect(rows).toHaveLength(1);
-    });
+      expect([...finished].sort()).toEqual(['apply', 'writer']);
+      const { rows } = await pool.query(`SELECT id FROM "SurfaceClaimDefinition" WHERE "subjectId" = $1 ORDER BY id`, [campId]);
+      expect(rows.map((row) => row.id)).toEqual([`camp.${campId}.field.city`, `camp.${campId}.field.description`]);
+  });
   });
 });
