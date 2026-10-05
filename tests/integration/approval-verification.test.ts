@@ -21,7 +21,7 @@ import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 import { appendEvidence, persistClaim } from '@/lib/admin/claim-store';
 import { replaceAdminCampAgeGroups, updateAdminCampFields } from '@/lib/admin/camp-repository';
 import { updateAssistantCampFields } from '@/lib/admin/entity-admin-repository';
-import { applyBatchAcceptedClaims, ReviewApplyValueError } from '@/lib/admin/review-apply';
+import { applyBatchAcceptedClaims, ReviewApplyEvidenceError, ReviewApplyValueError } from '@/lib/admin/review-apply';
 import { getCampProposalHistoryBatch } from '@/lib/admin/review-repository';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
@@ -323,7 +323,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     expect(rows[0]!.category).toBe('SPORTS');
   });
 
-  it('one field whose evidence cannot be written does not strand the others', async () => {
+  it('a field whose evidence cannot be written refuses the whole apply and writes nothing', async () => {
     const campId = await seedCamp();
     const changes = fullChanges({ sessionTimes: true });
     const proposal = await seedProposal(campId, { city: changes.city!, websiteUrl: changes.websiteUrl! }, { snapshot: true });
@@ -335,17 +335,16 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       sourceRef: URL, excerptOrSummary: 'occupied', observedAt: new Date().toISOString(), collectedBy: 'fixture',
     });
 
-    const applied = await review(proposal.id, 'all');
+    const refusal = await review(proposal.id, 'all').then(() => null, (error: unknown) => error);
 
-    expect(applied.appliedFields).toEqual(['city', 'websiteUrl']);
-    expect(applied.provenanceErrors.map((error) => error.step)).toEqual(['recordAppliedFieldEvidence']);
-    expect(applied.provenanceErrors[0]!.message).toContain('city:');
-    expect(applied.provenanceErrors[0]!.message).not.toContain('websiteUrl:');
+    expect(refusal).toBeInstanceOf(ReviewApplyEvidenceError);
+    expect((refusal as Error).message).toMatch(/^Nothing was applied: the review record for "city" could not be written/);
+    const camp = await getTestPool().query<{ city: string; websiteUrl: string }>(`SELECT city, "websiteUrl" FROM "Camp" WHERE id = $1`, [campId]);
+    expect(camp.rows[0]).toEqual({ city: '', websiteUrl: '' });
     const { rows } = await getTestPool().query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM "SurfaceEvidence" WHERE "claimId" = $1 AND "evidenceType" = 'human_attestation'`,
-      [`camp.${campId}.field.websiteUrl`],
-    );
-    expect(rows[0]!.n).toBe(1);
+      `SELECT count(*)::int AS n FROM "SurfaceEvidence" WHERE "claimId" = $1`, [`camp.${campId}.field.websiteUrl`]);
+    expect(rows[0]!.n).toBe(0);
+    expect((await getProposal(proposal.id))!.status).toBe('PENDING');
   });
 
   it('a manual edit forgets which page text the field was approved from', async () => {
@@ -449,10 +448,12 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       return { dataConfidence: rows[0]!.dataConfidence, unverified: latest.rows.filter((row) => row.status !== 'verified' && row.status !== 'assumed').map((row) => row.field).sort() };
     };
 
-    it('an admin edit of a field', async () => {
+    it('an admin edit of a field, after which an admin can attest the camp again', async () => {
       const campId = await verifiedCamp();
       await updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER);
       expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['city'] });
+      expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
+      expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
     });
 
     it('an admin edit of the age groups, which also forgets the approved page text', async () => {
@@ -470,7 +471,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['registrationStatus'] });
     });
 
-    it('an approval whose evidence cannot be written (fails closed)', async () => {
+    it('an approval whose evidence cannot be written changes nothing (fails closed)', async () => {
       const campId = await seedCamp();
       expect((await bulkAttestCamp(campId, REVIEWER)).dataConfidence).toBe('VERIFIED');
       const proposal = await seedProposal(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true });
@@ -481,10 +482,14 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
         sourceRef: URL, excerptOrSummary: 'occupied', observedAt: new Date().toISOString(), collectedBy: 'fixture',
       });
 
-      const applied = await review(proposal.id, 'all');
+      const refusal = await review(proposal.id, 'all').then(() => null, (error: unknown) => error);
 
-      expect(applied.provenanceErrors.map((error) => error.step)).toEqual(['recordAppliedFieldEvidence']);
-      expect(await missing(campId)).toEqual({ dataConfidence: 'PLACEHOLDER', unverified: ['city'] });
+      // The value and its record land together or not at all: the camp keeps
+      // the value it was verified with.
+      expect(refusal).toBeInstanceOf(ReviewApplyEvidenceError);
+      const { rows } = await getTestPool().query<{ city: string }>(`SELECT city FROM "Camp" WHERE id = $1`, [campId]);
+      expect(rows[0]!.city).toBe('');
+      expect(await missing(campId)).toEqual({ dataConfidence: 'VERIFIED', unverified: [] });
     });
 
     it('sessions: a proposal listing one session twice is refused, and a changed time stays unverified through later uncited approvals', async () => {
@@ -526,5 +531,29 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     const applied = await review(proposal.id, 'all');
     // A session's price options are inherited from the camp's pricing, so they go too.
     expect(applied.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['pricing', 'sessions-verified']);
+  });
+  it.each([-300_000, 300_000])('a later uncited approval wins over a cited one whatever the application clock says (%i ms off)', async (skewMs) => {
+    const campId = await seedCamp();
+    const cited = await seedProposal(campId, fullChanges({ sessionTimes: true }), { snapshot: true });
+    expect((await review(cited.id, 'all')).verification?.dataConfidence).toBe('VERIFIED');
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: Date.now() + skewMs });
+    try {
+      const uncited = await seedProposal(campId, { city: diff('Golden', 'Boulder', 'Located in Boulder, Colorado.') }, { snapshot: false });
+      const applied = await review(uncited.id, 'all');
+      expect(applied.verification?.missingRequirements.map((requirement) => [requirement.id, requirement.status])).toEqual([['city', 'proposed']]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+  });
+
+  it('only a reviewed approval records the page text it was decided on', async () => {
+    const campId = await seedCamp();
+    const proposal = await seedProposal(campId, { city: diff('', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: false, contentFingerprint: 'sha256:page-one' });
+    await review(proposal.id, 'all');
+    const { rows } = await getTestPool().query<{ source: { contentFingerprint?: string; approvedAt?: string } }>(
+      `SELECT "fieldSources"->'city' AS source FROM "Camp" WHERE id = $1`, [campId]);
+    expect(rows[0]!.source.approvedAt).toBeTruthy();
+    expect(rows[0]!.source.contentFingerprint).toBeUndefined();
   });
 });

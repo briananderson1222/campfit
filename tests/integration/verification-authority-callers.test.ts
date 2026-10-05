@@ -72,7 +72,7 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = path.resolve(__dirname, '../..');
 const scanRoots = ['app', 'lib'].map((dir) => path.join(repoRoot, dir));
 
-const TARGET_CALLS = ['recordEvidence(', 'refreshCampVerificationCache('];
+const TARGET_CALLS = ['recordEvidence(', 'recordEvidenceOnLockedClient(', 'refreshCampVerificationCache('];
 
 /** The exact set of files allowed to contain a CALL (not the definition) of
  * either target. Any file outside this set containing a call fails the
@@ -89,7 +89,7 @@ const ALLOWED_CALLER_FILES = new Set([
 /** Definition-site lines (not calls) — excluded from the scan so the
  * function DECLARING `recordEvidence`/`refreshCampVerificationCache` is
  * never mistaken for a caller of itself. */
-const DEFINITION_LINE_PATTERNS = [/function\s+recordEvidence\s*\(/, /function\s+refreshCampVerificationCache\s*\(/];
+const DEFINITION_LINE_PATTERNS = [/function\s+recordEvidence\s*\(/, /function\s+recordEvidenceOnLockedClient\s*\(/, /function\s+refreshCampVerificationCache\s*\(/];
 
 function listSourceFiles(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });

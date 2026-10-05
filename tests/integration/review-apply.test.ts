@@ -45,6 +45,7 @@ import { getPool as getProductionPool } from "@/lib/db";
 import {
   applyProposalReview,
   ReviewApplyConflictError,
+  ReviewApplyEvidenceError,
   SurveyReviewSessionStaleError,
 } from "@/lib/admin/review-apply";
 import { getProposal } from "@/lib/admin/review-repository";
@@ -826,64 +827,33 @@ describe("applyProposalReview", () => {
     expect(campRow?.description).toBe("Description that should still be committed.");
   });
 
-  it("case 7 (V2 fix): a post-commit recordAppliedFieldEvidence/refreshCampVerificationCache failure is tolerated and surfaced via provenanceErrors, not thrown — the apply still succeeds, and changelog/metrics provenance still runs", async () => {
+  it("case 7: when the review record cannot be written, nothing is applied and the proposal stays pending", async () => {
     const pool = getTestPool();
     const { campId, proposalId, session } = await seedReview({
       campOverrides: { description: "" },
       proposedChanges: {
-        description: fieldDiff("", "V2 fix: still committed despite a broken ClaimStore write.", { mode: "populate" }),
+        description: fieldDiff("", "Not committed: the review record could not be written.", { mode: "populate" }),
       },
     });
 
     await decide(session, { description: "accept-proposed" });
 
-    // Force recordAppliedFieldEvidence's underlying appendEvidence call to
-    // fail post-commit, without touching lib/admin/review-apply.ts or
-    // claim-store.ts: rename "SurfaceEvidence" away for the duration of this
-    // call, then restore it (same technique as case 6's CrawlMetric rename).
+    // The evidence write runs inside the apply transaction. Make it fail by
+    // renaming its table for the duration of the call.
     await pool.query(`ALTER TABLE "SurfaceEvidence" RENAME TO "SurfaceEvidence_disabled_for_case7"`);
-    let result: Awaited<ReturnType<typeof applyProposalReview>>;
+    let refusal: unknown;
     try {
-      result = await applyProposalReview({
-        proposalId,
-        reviewSessionId: session.id,
-        reviewer: REVIEWER,
-        keepPending: false,
-      });
+      refusal = await applyProposalReview({ proposalId, reviewSessionId: session.id, reviewer: REVIEWER, keepPending: false })
+        .then(() => null, (error: unknown) => error);
     } finally {
       await pool.query(`ALTER TABLE "SurfaceEvidence_disabled_for_case7" RENAME TO "SurfaceEvidence"`);
     }
 
-    // The apply itself is not a 500/thrown exception — it still reports APPROVED.
-    expect(result.status).toBe("APPROVED");
-    expect(result.appliedFields).toEqual(["description"]);
-
-    // recordAppliedFieldEvidence's failure is surfaced, not silently dropped
-    // (refreshCampVerificationCache's own deriveCampVerification call also
-    // reads "SurfaceEvidence" via loadClaimBundle, so it fails too — both are
-    // expected and both non-fatal).
-    const steps = result.provenanceErrors.map((e) => e.step);
-    expect(steps).toContain("recordAppliedFieldEvidence");
-    expect(steps).toContain("refreshCampVerificationCache");
-    for (const provenanceError of result.provenanceErrors) {
-      expect(provenanceError.message).toBeTruthy();
-    }
-
-    // Camp fields + proposal status already committed before the post-commit
-    // provenance step ran — unaffected by its failure.
-    const proposalRow = await queryProposal(pool, proposalId);
-    expect(proposalRow?.status).toBe("APPROVED");
-    const campRow = await queryCamp(pool, campId);
-    expect(campRow?.description).toBe("V2 fix: still committed despite a broken ClaimStore write.");
-
-    // changelog/metrics provenance (recordProvenance, unaffected by the
-    // ClaimStore-write failure above) still ran — the CampChangeLog row for
-    // this field exists.
-    const changeLogRows = await pool.query(
-      `SELECT id FROM "CampChangeLog" WHERE "campId" = $1 AND "fieldName" = 'description'`,
-      [campId],
-    );
-    expect(changeLogRows.rows).toHaveLength(1);
+    expect(refusal).toBeInstanceOf(ReviewApplyEvidenceError);
+    expect((await queryProposal(pool, proposalId))?.status).toBe("PENDING");
+    expect((await queryCamp(pool, campId))?.description).toBe("");
+    const changeLogRows = await pool.query(`SELECT id FROM "CampChangeLog" WHERE "campId" = $1`, [campId]);
+    expect(changeLogRows.rows).toHaveLength(0);
   });
 
   it("case 8 (V3 fix, AC6 end-to-end): approving a Proposal that removes a Session with a persisted Claim, via the live applyProposalReview path, yields a revoked VerificationEvent for that Session's Claim", async () => {

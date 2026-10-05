@@ -782,6 +782,7 @@ async function runKnownCampStrategy(
                 // FetchError instead of a crash or a silent empty-shell fetch.
                 requiresRender: (camp as unknown as { requiresRender: boolean }).requiresRender,
                 priorContentFingerprint: skipEligibleFingerprint(camp, options.forceExtract === true),
+                askAgain: options.forceExtract === true,
               });
           const durationMs = Date.now() - startMs;
           const displayModel = withModelOverrideNote(result.model, options.model);

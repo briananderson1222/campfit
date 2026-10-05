@@ -5,6 +5,7 @@ import {
   applyProposalReview,
   ReviewApplyCitationError,
   ReviewApplyConflictError,
+  ReviewApplyEvidenceError,
   ReviewApplyProposalNotFoundError,
   ReviewApplyValueError,
   ReviewCitationMismatchError,
@@ -68,6 +69,10 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
         { error: error.message, ...('fields' in error && error.fields.length ? { fields: error.fields } : {}) },
         { status: 422 },
       );
+    }
+    if (error instanceof ReviewApplyEvidenceError) {
+      console.error('Approve error (nothing applied):', error);
+      return NextResponse.json({ error: error.message, fields: [error.field] }, { status: 503 });
     }
     console.error('Approve error:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

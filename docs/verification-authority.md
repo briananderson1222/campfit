@@ -349,7 +349,7 @@ attested claim down and the Camp to `PLACEHOLDER`, and no Camp could reach
 `VERIFIED` through review.
 
 Surface counts every evidence record ever attached to a claim and derives the
-status from the claim's latest event. So a changed value is kept from reading
+status from the claim's newest event. So a changed value is kept from reading
 as verified by events, not by evidence:
 
 - **Every change withdraws first.** Any path that changes a claim-set value
@@ -360,13 +360,16 @@ as verified by events, not by evidence:
   `replaceAdminCampAgeGroups`) and an assistant edit
   (`updateAssistantCampFields`). The cached `dataConfidence` is re-derived
   afterwards.
-- **Only a reviewed value is verified again.** After the apply commits,
-  `recordApprovedClaim` writes, for a value a reviewer approved in a review
-  session whose cited excerpt is on the stored page, the crawl observation,
-  the decision as `human_attestation` evidence and a `verified` event stamped
-  after the withdrawal. If that write fails, the claim keeps the withdrawal:
-  it fails closed. An approval with no excerpt on the page, or a batch accept,
-  writes a `proposed` event.
+- **Only a reviewed value is verified again, in the same transaction.** For a
+  value a reviewer approved in a review session whose cited excerpt is on the
+  stored page, `recordApprovedClaim` writes the crawl observation, the decision
+  as `human_attestation` evidence and a `verified` event. An approval with no
+  excerpt on the page, or a batch accept, writes a `proposed` event. If any of
+  it cannot be written, the whole apply is rolled back and nothing changes.
+- **Order does not depend on the application clock.** Every apply and edit
+  takes a per-camp lock and stamps its events with the database clock, never
+  earlier than one millisecond after the camp's newest event, so a later
+  change always wins.
 
 "On the page" means the excerpt occurs verbatim in the stored page text. It
 does not show that the excerpt supports the value; the review page lists each
@@ -390,14 +393,17 @@ What counts as reviewed for a list (`ageGroups`, `pricing`, `schedules`,
 
 A batch accept is its own review kind (`batch-accept`) and does not count as
 the human evidence a requirement needs (`BATCH_ACCEPT_COUNTS_AS_REVIEW` in
-`review-apply.ts`). One field's evidence failing to record does not stop the
-others; every failure is reported as a `recordAppliedFieldEvidence`
-provenance error, and the review page shows it instead of moving on.
+`review-apply.ts`). Only a counted review records the page fingerprint that
+later withholds a re-proposal. Failures after commit (cache refresh,
+changelog, metrics) are reported as provenance errors, and the review page
+shows them instead of moving on.
 
-Not covered: if the cache refresh after a change fails as well, the stored
+Not covered: if the cache refresh after a change fails, the stored
 `dataConfidence` is stale until the next refresh; the claims themselves are
 already withdrawn. Scripts that write camps directly (seed, CSV import) do not
-withdraw anything.
+withdraw anything. Admin attestation stamps its events with the application
+clock; an attestation stamped before an edit's withdrawal does not count, which
+leaves the field unverified until it is attested again.
 
 ## Accepted gaps
 

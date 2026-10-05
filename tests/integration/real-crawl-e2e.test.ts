@@ -739,9 +739,25 @@ describe('a crawl after an approval does not ask the reviewer again about the sa
     expect((await campRow(campId)).applicationUrl).toBe('https://register.pineridge.example/apply');
     expect((await campRow(campId)).campTypes).toEqual(['SLEEPAWAY', 'SUMMER_DAY']);
 
-    // That settles it: the same page is not read a third time.
+    // A reviewer's recrawl asks again: nothing is withheld.
+    requireAdminAccessMock.mockResolvedValue({ access: { email: REVIEWER } });
+    const forced = await recrawlRoute(new Request(`http://localhost/api/admin/camps/${campId}/crawl`, { method: 'POST', body: '{}' }), { params: Promise.resolve({ campId }) });
+    const { runId } = await forced.json();
+    let forcedRun = await getCrawlRun(runId);
+    for (let i = 0; i < 100 && forcedRun?.status === 'RUNNING'; i++) { await new Promise((resolve) => setTimeout(resolve, 50)); forcedRun = await getCrawlRun(runId); }
+    expect(forcedRun!.campLog[0]!.status).toBe('ok');
+    expect(forcedRun!.campLog[0]!.notProposedAgain).toBeUndefined();
+    const asked = (await proposalsFor(campId)).at(-1)!;
+    expect(Object.keys(asked.proposedChanges).sort()).toEqual(['ageGroups', 'applicationUrl', 'campTypes']);
+    await updateProposalStatus(asked.id, 'REJECTED', REVIEWER, 'already decided');
+    expect(modelRequests()).toBe(3);
+
+    // After the rejection the page is read once more (the settled-result
+    // rule), and the approved fields are withheld again; then it is settled.
+    const afterReject = await crawl([campId]);
+    expect(afterReject.entry(campId).notProposedAgain).toBeDefined();
+    expect(modelRequests()).toBe(4);
     const settled = await crawl([campId]);
-    expect(modelRequests()).toBe(2);
     expect(settled.entry(campId).skipped).toBe('content_unchanged');
 
     // The page changes (a price). Nothing is withheld any more: every field
@@ -753,12 +769,12 @@ describe('a crawl after an approval does not ask the reviewer again about the sa
       excerpt: proposal.excerpt.replace('$3,850', '$3,950'),
     }));
     const changed = await crawl([campId]);
-    expect(modelRequests()).toBe(3);
+    expect(modelRequests()).toBe(5);
     expect(changed.entry(campId).status).toBe('ok');
     expect(changed.entry(campId).notProposedAgain).toBeUndefined();
     const proposals = await proposalsFor(campId);
-    expect(proposals.map((p) => p.status)).toEqual(['APPROVED', 'PENDING']);
-    expect(Object.keys(proposals[1]!.proposedChanges).sort()).toEqual(['ageGroups', 'applicationUrl', 'pricing']);
+    expect(proposals.map((p) => p.status)).toEqual(['APPROVED', 'REJECTED', 'PENDING']);
+    expect(Object.keys(proposals[2]!.proposedChanges).sort()).toEqual(['ageGroups', 'applicationUrl', 'pricing']);
   });
 
   it('proposes a changed price on a changed page even when its row cites text that does not hold the price', async () => {

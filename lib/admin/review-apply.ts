@@ -35,12 +35,12 @@
  * comment, AC1). This module no longer computes `isFullyVerified`/coverage
  * itself, and no longer writes `dataConfidence` directly — `lib/admin/
  * verification.ts` (the module that used to) is retired by this slice.
- * `recordAppliedFieldEvidence`/`refreshCampVerificationCache` necessarily run
- * AFTER `COMMIT` (both go through `verification-authority.ts`'s own pool-
- * scoped calls, not this function's transaction `client`, so they need the
- * applied fields' writes to already be visible) — a rejected field's Current
- * Value claim is left exactly as-is: only `appliedFields` are iterated, never
- * `decision.rejectedFields`.
+ * `recordAppliedFieldEvidence` runs INSIDE the apply transaction, under a
+ * per-camp lock and stamped by the database clock, so a value and the record
+ * of how it was decided land together or not at all.
+ * `refreshCampVerificationCache` runs after `COMMIT` (it reads through its own
+ * pool connection). A rejected field's Current Value claim is left exactly
+ * as-is: only `appliedFields` are iterated, never `decision.rejectedFields`.
  */
 import type { Pool, PoolClient } from 'pg';
 import type { ClaimDefinitionDraft, Evidence, TrustBundle, VerificationEvent } from '@kontourai/surface';
@@ -57,9 +57,9 @@ import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
-import { recordEvidence, refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
-import { appendEvidence, persistClaim } from './claim-store';
-import { withdrawVerification } from './unreviewed-change';
+import { refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
+import { appendEvidence, persistClaimOnLockedClient, recordEvidenceOnLockedClient } from './claim-store';
+import { lockCampClaims, nextClaimEventTime, withdrawVerification } from './unreviewed-change';
 import { sessionClaimId } from './verification-policy';
 import { SESSION_SUBJECT_TYPE } from './session-identity';
 import { campfitSessionVocabulary } from '../trust-vocabulary';
@@ -290,6 +290,14 @@ export class ReviewApplyValueError extends Error {
   }
 }
 
+/** The record of an approval could not be written, so nothing was applied (the apply is retryable). */
+export class ReviewApplyEvidenceError extends Error {
+  constructor(readonly field: string, cause: unknown) {
+    super(`Nothing was applied: the review record for "${field}" could not be written (${cause instanceof Error ? cause.message : String(cause)}). The proposal is still pending; try again.`);
+    this.name = 'ReviewApplyEvidenceError';
+  }
+}
+
 export class ReviewApplyConflictError extends Error {
   constructor(message = 'Proposal has already been reviewed.') {
     super(message);
@@ -363,6 +371,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     await client.query('BEGIN');
 
     const alreadyAppliedFields = await lockAndCheckProposal(client, proposalId);
+    await lockCampClaims(client, proposal.campId);
 
     // Re-filter the derived approvedFields against the row's authoritative,
     // freshly-locked appliedFields — idempotency under the lock. Two
@@ -382,6 +391,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       : undefined;
     if (proposalSnapshot) assertExactCitations(decision.effectiveChanges, appliedFields, proposalSnapshot.citation);
     facts.citations = checkCitations(decision.effectiveChanges, appliedFields, proposalSnapshot?.citation);
+    facts.countsAsReview = true;
 
     // Builds the Review Decision's Claim/Evidence/VerificationEvent shapes
     // for every field in this round (approved and rejected alike) — kept as
@@ -411,7 +421,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
       if (!diff) continue;
 
       if (SCALAR_FIELDS.includes(field)) {
-        changeLogs.push(await applyScalarField(client, proposal, reviewer, decision.reviewedAt, field, diff));
+        changeLogs.push(await applyScalarField(client, proposal, reviewer, decision.reviewedAt, field, diff, facts));
       } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field)) {
         changeLogs.push(await applyEnumArrayField(client, proposal, reviewer, decision.reviewedAt, field, diff, facts));
       } else if (field in RELATION_TABLES && Array.isArray(diff.new)) {
@@ -428,10 +438,22 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     // that's what makes the FOR UPDATE re-check above actually close the
     // double-apply race.
     // Fail closed: every claim whose value this apply changes is withdrawn
-    // from verified in this transaction. Only the evidence written after
-    // COMMIT re-verifies a value a reviewer attested, so if that write fails
-    // the claim stays unverified instead of vouching for the new value.
-    await withdrawChangedClaims(client, proposal.campId, appliedFields, facts, reviewer, decision.reviewedAt);
+    // from verified, then only a value a reviewer attested is verified again,
+    // all in this transaction and stamped in order by the database clock
+    // under the per-camp lock, so a later change always wins.
+    if (appliedFields.length > 0) {
+      const at = await nextClaimEventTime(client, proposal.campId);
+      await withdrawChangedClaims(client, proposal.campId, appliedFields, facts, reviewer, at);
+      // In the same transaction: the values and the record of who reviewed
+      // them land together or not at all.
+      await recordAppliedFieldEvidence({ pool, client, at: new Date(at.getTime() + 1).toISOString() }, proposal.campId, proposal.id, appliedFields, reviewTrustBundle!, {
+        kind: 'review',
+        reviewer,
+        reviewedAt: decision.reviewedAt,
+        changes: decision.effectiveChanges,
+        facts,
+      });
+    }
     await transitionProposalStatus(client, proposalId, keepPending, appliedFields, reviewer, decision.reviewerNotes, feedbackTags);
 
     await client.query('COMMIT');
@@ -442,47 +464,14 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     client.release();
   }
 
-  // Verification-authority cutover (see this module's header comment): the
-  // old field-coverage-based, direct-`Camp.dataConfidence`-write
-  // `recomputeVerification` is retired. Each applied field's Review Decision
-  // becomes real, persisted Evidence on its canonical Claim
-  // (`recordAppliedFieldEvidence`), then `refreshCampVerificationCache`
-  // re-derives `dataConfidence`/`lastVerifiedAt` from the full Claim ledger —
-  // the only writer of those two columns now. No-op when nothing was applied
-  // this round (mirrors the old function's `appliedFieldCount === 0` guard),
-  // including the idempotent no-op case where every derived field was
-  // already applied under the lock. Runs for both a full apply and a
-  // `keepPending` partial apply alike — the module derives the Camp's true
-  // coverage from its persisted Claims on every call, so there is no
-  // separate "defer VERIFIED until the final round" flag to thread through
-  // here anymore.
-  // V2 fix (HIGH, review-code.md): this used to be unguarded — a failure
-  // here (e.g. a transient DB error, or `recordAppliedFieldEvidence`'s own
-  // "expected a Claim/Evidence/Event, found none" defensive throw) propagated
-  // as an unhandled exception even though the Camp's fields and the
-  // Proposal's status had ALREADY durably committed above: the admin saw a
-  // misleading 500 for an apply that had actually (fully or partially)
-  // succeeded, AND changelog/metrics provenance below never ran, AND it was
-  // never reported as a provenanceError like every other failure mode this
-  // module handles. Both steps are now individually try/caught and reported
-  // via `provenanceErrors` instead — changelog/metrics (`recordProvenance`,
-  // below) still run regardless of whether these succeed.
+  // The evidence was recorded inside the transaction above. What runs here
+  // re-derives `dataConfidence`/`lastVerifiedAt` from the claim ledger (the
+  // only writer of those columns). A failure is reported in
+  // `provenanceErrors`, not thrown: the apply already committed, and the
+  // claims it changed are already withdrawn or re-verified.
   const postCommitProvenanceErrors: ProvenanceError[] = [];
   let verification: AppliedReviewVerification | undefined;
   if (appliedFields.length > 0) {
-    try {
-      await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, appliedFields, reviewTrustBundle!, {
-        kind: 'review',
-        reviewer,
-        reviewedAt: decision.reviewedAt,
-        changes: decision.effectiveChanges,
-        facts,
-      });
-    } catch (err) {
-      console.error('recordAppliedFieldEvidence failed (non-fatal):', err);
-      postCommitProvenanceErrors.push({ step: 'recordAppliedFieldEvidence', message: String(err) });
-    }
-
     try {
       const refreshed = await refreshCampVerificationCache(proposal.campId);
       verification = {
@@ -756,6 +745,7 @@ async function applyBatchAcceptedFieldsForProposal(
     // applyProposalReview relies on (see lockAndCheckProposal's own
     // comment).
     alreadyAppliedFields = await lockAndCheckProposal(client, proposal.id);
+    await lockCampClaims(client, proposal.campId);
     newlyAppliedFields = fields.filter((field) => !alreadyAppliedFields.has(field));
 
     // Validate immutable snapshot identity and construct every canonical
@@ -769,6 +759,7 @@ async function applyBatchAcceptedFieldsForProposal(
         : undefined;
       if (proposalSnapshot) assertExactCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot.citation);
       facts.citations = checkCitations(narrowedChanges, newlyAppliedFields, proposalSnapshot?.citation);
+      facts.countsAsReview = BATCH_ACCEPT_COUNTS_AS_REVIEW;
       reviewTrustBundle = buildCampReviewTrustInput({
         proposalId: proposal.id,
         campId: proposal.campId,
@@ -787,14 +778,24 @@ async function applyBatchAcceptedFieldsForProposal(
     for (const field of newlyAppliedFields) {
       const diff = proposal.proposedChanges[field];
       if (!diff) continue;
-      changeLogs.push(await applyScalarField(client, proposal, actor, reviewedAt, field, diff));
+      changeLogs.push(await applyScalarField(client, proposal, actor, reviewedAt, field, diff, facts));
     }
 
     const unappliedProposalFields = Object.keys(proposal.proposedChanges).filter((field) => !alreadyAppliedFields.has(field));
     const stillUnapplied = unappliedProposalFields.filter((field) => !newlyAppliedFields.includes(field));
     keepPending = stillUnapplied.length > 0;
 
-    await withdrawChangedClaims(client, proposal.campId, newlyAppliedFields, facts, actor, reviewedAt);
+    if (newlyAppliedFields.length > 0) {
+      const at = await nextClaimEventTime(client, proposal.campId);
+      await withdrawChangedClaims(client, proposal.campId, newlyAppliedFields, facts, actor, at);
+      await recordAppliedFieldEvidence({ pool, client, at: new Date(at.getTime() + 1).toISOString() }, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle!, {
+        kind: 'batch-accept',
+        reviewer: actor,
+        reviewedAt,
+        changes: narrowedChanges,
+        facts,
+      });
+    }
     await transitionProposalStatus(client, proposal.id, keepPending, newlyAppliedFields, actor, BATCH_ACCEPT_REVIEWER_NOTES, undefined);
 
     await client.query('COMMIT');
@@ -815,16 +816,9 @@ async function applyBatchAcceptedFieldsForProposal(
   }
 
   try {
-    await recordAppliedFieldEvidence(pool, proposal.campId, proposal.id, newlyAppliedFields, reviewTrustBundle!, {
-      kind: 'batch-accept',
-      reviewer: actor,
-      reviewedAt,
-      changes: narrowedChanges,
-      facts,
-    });
     await refreshCampVerificationCache(proposal.campId);
   } catch (err) {
-    console.error('applyBatchAcceptedClaims: recordAppliedFieldEvidence/refreshCampVerificationCache failed (non-fatal):', err);
+    console.error('applyBatchAcceptedClaims: refreshCampVerificationCache failed (non-fatal):', err);
   }
 
   try {
@@ -948,18 +942,20 @@ interface AppliedFacts {
   previousSessionTimes: Map<string, string>;
   /** Sessions this apply kept (same id) whose time it changed or removed. */
   sessionsWithChangedTime: string[];
+  /** This apply is a review that can verify (not a batch accept, unless the switch says so). */
+  countsAsReview: boolean;
 }
 
 function newAppliedFacts(): AppliedFacts {
-  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [] };
+  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [], countsAsReview: false };
 }
 
 /**
  * In the apply transaction: append a `proposed` event to every existing claim
  * whose value this apply changed — each applied field, the single-value twin
  * an applied list moved, and the time of every kept session whose time
- * changed. Stamped just before `reviewedAt`, so the events written after
- * COMMIT for reviewed values (stamped `reviewedAt`) are the latest.
+ * changed. Stamped `at`; the events this apply then records for reviewed
+ * values are stamped one millisecond later.
  */
 async function withdrawChangedClaims(
   client: PoolClient,
@@ -967,7 +963,7 @@ async function withdrawChangedClaims(
   appliedFields: readonly string[],
   facts: AppliedFacts,
   actor: string,
-  reviewedAt: string,
+  at: Date,
 ): Promise<void> {
   const claimIds = [
     ...appliedFields.map((field) => campCanonicalClaimId(campId, field)),
@@ -980,7 +976,7 @@ async function withdrawChangedClaims(
     actor,
     method: 'review-apply',
     notes: 'The value changed in a review apply; verified again only by the evidence recorded for this approval.',
-    createdAt: new Date(Date.parse(reviewedAt) - 1).toISOString(),
+    createdAt: at.toISOString(),
   });
 }
 
@@ -1087,10 +1083,12 @@ async function lockAndCheckProposal(client: PoolClient, proposalId: string): Pro
  * proposal was read from in full (so a crawl of the same text does not ask
  * again). A proposal made from an incomplete read records no fingerprint.
  */
-function approvedFieldSource(proposal: CampChangeProposal, diff: FieldDiff, reviewedAt: string) {
+function approvedFieldSource(proposal: CampChangeProposal, diff: FieldDiff, reviewedAt: string, reviewed: boolean) {
   // A proposal from an incomplete read never carries one (the adapter does not
   // store it); the second check keeps that true for any other writer.
-  const contentFingerprint = proposal.rawExtraction?.incomplete ? undefined : proposal.rawExtraction?.contentFingerprint;
+  // Only a value a reviewer attested may later stand for "decided on this
+  // page": an unreviewed or batch-accepted value is asked about again.
+  const contentFingerprint = !reviewed || proposal.rawExtraction?.incomplete ? undefined : proposal.rawExtraction?.contentFingerprint;
   return {
     excerpt: diff.excerpt ?? null,
     sourceUrl: diff.sourceUrl ?? proposal.sourceUrl,
@@ -1107,8 +1105,9 @@ async function applyScalarField(
   reviewedAt: string,
   field: string,
   diff: FieldDiff,
+  facts: AppliedFacts,
 ): Promise<ChangeLogEntry> {
-  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt, facts.countsAsReview && facts.citations.get(field)?.reviewed === true);
   await client.query(
     `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
     [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
@@ -1167,7 +1166,7 @@ async function applyEnumArrayField(
   diff: FieldDiff,
   facts: AppliedFacts,
 ): Promise<ChangeLogEntry> {
-  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt, facts.countsAsReview && facts.citations.get(field)?.reviewed === true);
   // Each list has a single-value twin column (`campType`, `category`) that
   // other code still reads. It must stay a member of the list: kept when it
   // still is one, otherwise moved to the list's first member.
@@ -1205,7 +1204,7 @@ async function applyRelationField(
   diff: FieldDiff,
   facts: AppliedFacts,
 ): Promise<{ changeLog: ChangeLogEntry; orphaned?: readonly ExistingScheduleRow[] }> {
-  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt);
+  const fieldSource = approvedFieldSource(proposal, diff, reviewedAt, facts.countsAsReview && facts.citations.get(field)?.reviewed === true);
 
   let orphaned: readonly ExistingScheduleRow[] | undefined;
   if (field === 'schedules') {
@@ -1313,31 +1312,34 @@ async function applyRelationField(
  * `recordApprovedClaim`, which writes `verified` only for a value a reviewer
  * approved against a checked citation, and `proposed` otherwise.
  */
+/** Where and when an apply writes its evidence: inside its transaction, stamped `at`. */
+interface EvidenceWriter {
+  readonly pool: Pool;
+  readonly client: PoolClient;
+  readonly at: string;
+}
+
 async function recordAppliedFieldEvidence(
-  pool: Pool,
+  w: EvidenceWriter,
   campId: string,
   proposalId: string,
   appliedFields: readonly string[],
   reviewTrustBundle: TrustBundle,
   review: ReviewDecisionRecord,
 ): Promise<void> {
-  // One field's failure must not leave the others with no evidence: each is
-  // recorded on its own, and every failure is reported together at the end.
-  const failures: string[] = [];
+  // Inside the apply transaction: any failure rolls the whole apply back,
+  // so no value lands without the record of how it was decided.
   for (const field of appliedFields) {
     try {
-      await recordAppliedField(pool, campId, proposalId, field, appliedFields, reviewTrustBundle, review);
+      await recordAppliedField(w, campId, proposalId, field, appliedFields, reviewTrustBundle, review);
     } catch (err) {
-      failures.push(`${field}: ${err instanceof Error ? err.message : String(err)}`);
+      throw new ReviewApplyEvidenceError(field, err);
     }
-  }
-  if (failures.length > 0) {
-    throw new Error(`recordAppliedFieldEvidence: evidence was not recorded for ${failures.length} of ${appliedFields.length} applied field(s) — ${failures.join('; ')}`);
   }
 }
 
 async function recordAppliedField(
-  pool: Pool,
+  w: EvidenceWriter,
   campId: string,
   proposalId: string,
   field: string,
@@ -1369,7 +1371,7 @@ async function recordAppliedField(
   const diff = review.changes[field];
   const check = review.facts.citations.get(field) ?? { reviewed: false };
   const reviewed = countsAsReview(review) && check.reviewed;
-  await recordApprovedClaim(pool, { draft, evidence, event, proposalId, field, reviewed, review });
+  await recordApprovedClaim(w, { draft, evidence, event, proposalId, field, reviewed, review });
 
   // The single-value twin of an enum list (`campType`, `category`) is what
   // the Verified Camp Claim Set requires. Applying the list keeps the twin a
@@ -1379,7 +1381,7 @@ async function recordAppliedField(
   // itself was approved in this proposal, that decision is the twin's.
   const twin = ENUM_ARRAY_TWIN[field];
   if (twin && !appliedFields.includes(twin.column) && (reviewed || review.facts.twinChanged.get(field))) {
-    await recordApprovedClaim(pool, {
+    await recordApprovedClaim(w, {
       draft: { ...draft, id: campCanonicalClaimId(campId, twin.column), fieldOrBehavior: twin.column },
       evidence,
       event,
@@ -1393,7 +1395,7 @@ async function recordAppliedField(
 
   // Each session the approved list leaves on the camp is its own claim subject.
   if (field === 'schedules' && diff) {
-    await recordSessionClaims(pool, { campId, proposalId, diff, check, evidence, review });
+    await recordSessionClaims(w, { campId, proposalId, diff, check, evidence, review });
   }
 }
 
@@ -1416,7 +1418,7 @@ interface ReviewDecisionRecord {
 const BATCH_ACCEPT_COUNTS_AS_REVIEW = false;
 
 function countsAsReview(review: ReviewDecisionRecord): boolean {
-  return review.kind === 'review' || BATCH_ACCEPT_COUNTS_AS_REVIEW;
+  return review.facts.countsAsReview;
 }
 
 /**
@@ -1440,7 +1442,7 @@ function countsAsReview(review: ReviewDecisionRecord): boolean {
  * failure in between leaves no `verified` event behind.
  */
 async function recordApprovedClaim(
-  pool: Pool,
+  w: EvidenceWriter,
   args: {
     readonly draft: ClaimDefinitionDraft;
     readonly evidence: Evidence;
@@ -1463,13 +1465,14 @@ async function recordApprovedClaim(
 
   if (!args.reviewed) {
     const { verifiedAt: _verifiedAt, ...event } = args.event;
-    await recordEvidence(pool, {
+    await recordEvidenceOnLockedClient(w.pool, w.client, {
       claim: args.draft,
       evidence: sourceEvidence,
       event: {
         ...event,
         id: eventId,
         claimId,
+        createdAt: w.at,
         status: 'proposed',
         evidenceIds: [evidenceId],
         ...(batch ? { method: 'batch-accept' } : {}),
@@ -1502,14 +1505,14 @@ async function recordApprovedClaim(
       ...(args.via ? { recordedThrough: args.via } : {}),
     },
   };
-  await persistClaim(pool, args.draft);
-  await appendEvidence(pool, decisionEvidence);
+  await persistClaimOnLockedClient(w.pool, w.client, args.draft);
+  await appendEvidence(w.client, decisionEvidence);
   // The source citation stays last: the trust display reads an event's last
   // evidence id as the citation to show.
-  await recordEvidence(pool, {
+  await recordEvidenceOnLockedClient(w.pool, w.client, {
     claim: args.draft,
     evidence: sourceEvidence,
-    event: { ...args.event, id: eventId, claimId, status: 'verified', evidenceIds: [decisionEvidence.id, evidenceId], ...(batch ? { method: 'batch-accept' } : {}) },
+    event: { ...args.event, id: eventId, claimId, createdAt: w.at, verifiedAt: w.at, status: 'verified', evidenceIds: [decisionEvidence.id, evidenceId], ...(batch ? { method: 'batch-accept' } : {}) },
   });
 }
 
@@ -1525,11 +1528,11 @@ async function recordApprovedClaim(
  *
  * A time this apply changed was already withdrawn from verified inside the
  * apply transaction (`withdrawChangedClaims`), so nothing here has to undo an
- * earlier claim. Each session is recorded on its own; every failure is
- * reported together at the end.
+ * earlier claim. Recorded inside the apply transaction: a failure rolls the
+ * whole apply back.
  */
 async function recordSessionClaims(
-  pool: Pool,
+  w: EvidenceWriter,
   args: {
     readonly campId: string;
     readonly proposalId: string;
@@ -1540,7 +1543,7 @@ async function recordSessionClaims(
   },
 ): Promise<void> {
   if (!countsAsReview(args.review)) return;
-  const { rows: sessions } = await pool.query<{ id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }>(
+  const { rows: sessions } = await w.client.query<{ id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }>(
     `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "startTime", "endTime"
        FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`,
     [args.campId],
@@ -1552,7 +1555,6 @@ async function recordSessionClaims(
     if (!rowIndexByKey.has(key)) rowIndexByKey.set(key, index);
   }
 
-  const failures: string[] = [];
   for (const session of sessions) {
     const index = rowIndexByKey.get(scheduleNaturalKey(session.label, session.startDate, session.endDate));
     const citation = index === undefined ? undefined : args.check.rows?.[index];
@@ -1561,8 +1563,7 @@ async function recordSessionClaims(
     const attributes: ('dates' | 'time')[] = timeStated ? ['dates', 'time'] : ['dates'];
     for (const attribute of attributes) {
       const claimId = sessionClaimId(session.id, attribute);
-      try {
-        await recordApprovedClaim(pool, {
+      await recordApprovedClaim(w, {
           draft: {
             id: claimId,
             subjectType: SESSION_SUBJECT_TYPE,
@@ -1592,12 +1593,8 @@ async function recordSessionClaims(
           reviewed: true,
           review: args.review,
         });
-      } catch (err) {
-        failures.push(`${session.label} ${attribute}: ${err instanceof Error ? err.message : String(err)}`);
-      }
     }
   }
-  if (failures.length > 0) throw new Error(`session claims not recorded — ${failures.join('; ')}`);
 }
 
 /**

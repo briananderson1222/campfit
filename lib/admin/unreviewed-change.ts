@@ -53,6 +53,47 @@ export async function withdrawVerification(
   return rows.map((row) => row.id);
 }
 
+/**
+ * Serialise every change to one camp's claims: an apply, an edit. Taken at
+ * the start of the transaction that changes values and claims.
+ */
+export async function lockCampClaims(client: PoolClient, campId: string): Promise<void> {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`camp-claims:${campId}`]);
+}
+
+/**
+ * The time to stamp the next event on this camp's claims with: the database
+ * clock, and never earlier than one millisecond after the newest event
+ * already on the camp or its sessions. Surface reads a claim's status from
+ * its newest event, so under `lockCampClaims` a later change always wins,
+ * whatever the application clock says.
+ */
+export async function nextClaimEventTime(client: PoolClient, campId: string): Promise<Date> {
+  const { rows } = await client.query<{ at: Date }>(
+    `SELECT greatest(clock_timestamp(), (
+        SELECT max(e."createdAt") + interval '1 millisecond'
+          FROM "SurfaceVerificationEvent" e
+          JOIN "SurfaceClaimDefinition" d ON d.id = e."claimId"
+         WHERE d."subjectId" = $1
+            OR d."subjectId" IN (SELECT id FROM "CampSchedule" WHERE "campId" = $1)
+      )) AS at`,
+    [campId],
+  );
+  return rows[0]!.at;
+}
+
+/** Withdraw the edited fields' claims inside an edit transaction: lock, stamp, append. */
+export async function withdrawEditedFields(
+  client: PoolClient,
+  campId: string,
+  fields: readonly string[],
+  opts: { actor: string; method: string; notes: string },
+): Promise<void> {
+  await lockCampClaims(client, campId);
+  const at = await nextClaimEventTime(client, campId);
+  await withdrawVerification(client, editedCampClaimIds(campId, fields), { ...opts, createdAt: at.toISOString() });
+}
+
 /** The camp claims a manual edit of these fields changes. */
 export function editedCampClaimIds(campId: string, fields: readonly string[]): string[] {
   return fields.map((field) => campCanonicalClaimId(campId, field));

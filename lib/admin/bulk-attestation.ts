@@ -144,12 +144,16 @@ export async function bulkAttestCamp(
       fieldOrBehavior: field,
     };
 
-    const evidence = buildHumanAttestationEvidence({
+    const built = buildHumanAttestationEvidence({
       subject: { claimId, sourceRef: `admin:${actorEmail}` },
       actor: { id: actorEmail },
       attestedAt,
       contentHash: contentHashFor((camp as Record<string, unknown>)[field]),
     });
+    // Surface keys attestation evidence by claim alone, and evidence rows are
+    // append-only: a second attestation of the same camp (after an edit, say)
+    // needs its own id, or it fails on the duplicate key.
+    const evidence = { ...built, id: `${built.id}.${attestedAt}` };
 
     // See this module's header comment: explicit 'assumed' status, not
     // recordEvidence's 'verified'-for-attestation default.

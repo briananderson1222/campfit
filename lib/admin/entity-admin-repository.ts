@@ -1,5 +1,5 @@
 import { clearApprovedPageFingerprints } from './camp-repository';
-import { editedCampClaimIds, refreshAfterUnreviewedChange, withdrawVerification } from './unreviewed-change';
+import { refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
 import { getPool } from '@/lib/db';
 import type { PoolClient } from 'pg';
 import { buildCampAttestationTrustInput } from './trust-projection';
@@ -48,7 +48,7 @@ async function updateAssistantEntityFields(
       const fields = entries.map(([key]) => key);
       await clearApprovedPageFingerprints(client, id, fields);
       // The edited values were not reviewed: none of them reads as verified.
-      await withdrawVerification(client, editedCampClaimIds(id, fields), {
+      await withdrawEditedFields(client, id, fields, {
         actor: 'admin-assistant', method: 'assistant-edit', notes: 'Edited through the admin assistant; the new value has not been reviewed.',
       });
     }

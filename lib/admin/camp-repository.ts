@@ -10,7 +10,7 @@ import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPric
 import { isValidHttpUrl } from './onboarding-validation';
 import { writeChangeLogs } from './changelog-repository';
 import { RepositoryConnectionError } from './repository-errors';
-import { editedCampClaimIds, refreshAfterUnreviewedChange, withdrawVerification } from './unreviewed-change';
+import { refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
 
 function db() {
   return getPool();
@@ -87,7 +87,7 @@ export async function updateAdminCampFields(
     ]);
     await clearApprovedPageFingerprints(client, campId, fields);
     // The edited values were not reviewed: none of them reads as verified.
-    await withdrawVerification(client, editedCampClaimIds(campId, fields), {
+    await withdrawEditedFields(client, campId, fields, {
       actor, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
     });
     await client.query('COMMIT');
@@ -128,7 +128,7 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
     }
     await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [campId]);
     await clearApprovedPageFingerprints(client, campId, ['ageGroups']);
-    await withdrawVerification(client, editedCampClaimIds(campId, ['ageGroups']), {
+    await withdrawEditedFields(client, campId, ['ageGroups'], {
       actor: changedBy, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
     });
     await client.query('COMMIT');

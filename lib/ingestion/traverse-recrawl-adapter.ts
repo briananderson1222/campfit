@@ -146,6 +146,11 @@ export interface TraverseRecrawlOptions {
    * is skipped and the result is `contentUnchanged`.
    */
   priorContentFingerprint?: string | null;
+  /**
+   * A reviewer asked for this crawl (the recrawl button). Nothing is withheld
+   * as already decided: the reviewer is asking the question again.
+   */
+  askAgain?: boolean;
 }
 
 /**
@@ -495,7 +500,9 @@ export async function runTraverseRecrawlForCamp(
   // later stand for "the page still says this".
   const completeReadFingerprint = fetchResult.incomplete ? undefined : fetchResult.contentFingerprint;
   // A change to a field a reviewer approved from this same page text is not asked again.
-  const decided = withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {}, completeReadFingerprint);
+  const decided = opts.askAgain
+    ? { changes: withheld.changes, decided: [], warnings: [] }
+    : withholdDecidedChanges(withheld.changes, opts.fieldSources ?? {}, completeReadFingerprint);
   const proposedChanges = decided.changes;
   const operatorWarnings = [
     ...(fetchResult.incomplete ? [describeIncompleteness(fetchResult.incomplete)] : []),
