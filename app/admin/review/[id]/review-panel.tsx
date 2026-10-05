@@ -317,7 +317,7 @@ export function ReviewPanel({
                         {[proof.actor, proof.at ? formatCampDate(proof.at) : null, proof.reason].filter(Boolean).join(' · ')}
                       </p>
                       {proof.excerpt && (
-                        <p className={cn('text-xs text-bark-500 italic leading-relaxed', adminTheme.text)}>&quot;{proof.excerpt}&quot;</p>
+                        <p className={cn('text-xs text-bark-500 italic leading-relaxed break-words', adminTheme.text)}>&quot;{proof.excerpt}&quot;</p>
                       )}
                       {!proof.excerpt && (
                         <p className={cn('text-xs text-bark-400 italic', adminTheme.textMuted)}>Admin attestation — no excerpt</p>
