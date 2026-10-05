@@ -631,15 +631,31 @@ export interface RefreshCampVerificationCacheResult {
  * assistant's `mark_camp_verified`, `/attest`, `addFieldAttestation`, and
  * `review-apply.ts`'s `recomputeVerification`.
  */
+/** Test-only seam, inert in production: runs between deriving the status and writing it. */
+export const verificationCacheTestHooks: { beforeWrite?: (campId: string, dataConfidence: DataConfidence) => Promise<void> } = {};
+
 export async function refreshCampVerificationCache(campId: string, options: DeriveVerificationOptions = {}): Promise<RefreshCampVerificationCacheResult> {
   const now = options.now ?? new Date();
-  const rollup = await deriveCampVerification(campId, { now });
-  const dataConfidence = projectTrustStatusToDataConfidence(rollup.status);
-
-  const pool = getPool();
-  await pool.query(`UPDATE "Camp" SET "dataConfidence" = $1, "lastVerifiedAt" = $2 WHERE id = $3`, [dataConfidence, now, campId]);
-
-  return { dataConfidence, lastVerifiedAt: now, rollup };
+  // Derive and write under the per-camp lock (the lock order in
+  // unreviewed-change.ts): no change to the camp's claims can commit in
+  // between, so two refreshes cannot write out of order and leave a cached
+  // status the claims no longer support.
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`camp-claims:${campId}`]);
+    const rollup = await deriveCampVerification(campId, { now });
+    const dataConfidence = projectTrustStatusToDataConfidence(rollup.status);
+    if (verificationCacheTestHooks.beforeWrite) await verificationCacheTestHooks.beforeWrite(campId, dataConfidence);
+    await client.query(`UPDATE "Camp" SET "dataConfidence" = $1, "lastVerifiedAt" = $2 WHERE id = $3`, [dataConfidence, now, campId]);
+    await client.query('COMMIT');
+    return { dataConfidence, lastVerifiedAt: now, rollup };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ---------------------------------------------------------------------------

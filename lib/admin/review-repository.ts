@@ -1,3 +1,4 @@
+import { lockCampClaims } from './unreviewed-change';
 import type { Pool, PoolClient } from 'pg';
 import type { SnapshotStore } from '@kontourai/traverse/fetch';
 
@@ -39,6 +40,11 @@ export async function createProposal(opts: {
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
+    // The camp lock first (the lock order in unreviewed-change.ts): a review
+    // apply holds it while it locks this camp's proposal rows, so taking it
+    // here first means a crawl waits for the apply instead of deadlocking
+    // with it over the Camp and proposal rows.
+    await lockCampClaims(client, opts.campId);
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`camp-proposal:${opts.campId}`]);
     // `createdAt` is stamped here, after the lock, not by the column default
     // (`now()`, the transaction's start, taken before the lock wait). Whoever

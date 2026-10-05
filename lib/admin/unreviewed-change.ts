@@ -66,12 +66,16 @@ export async function lockCampClaims(client: PoolClient, campId: string): Promis
 
 /**
  * LOCK ORDER — every transaction that changes a camp's values or its claims
+ * (review apply, batch accept, admin and assistant edits, Mark Verified, the
+ * attest route, a crawl's `createProposal`, the verification cache refresh)
  * takes its locks in this order, as its first statements, so two of them can
  * wait on each other but never deadlock:
  *
  *   1. `camp-claims:<campId>`            (lockCampClaims)
  *   2. the claim-store subject locks     (acquireSubjectAdvisoryLock): the
- *      camp subject, then each of the camp's sessions in id order
+ *      camp subject, then each of the camp's non-archived sessions in id
+ *      order (an archived session's claims are never saved again: they only
+ *      receive an appended revocation event)
  *   3. rows ("Camp", "CampChangeProposal", "CampSchedule", ...)
  *
  * The subject locks are what the claim store's locked-client writers
@@ -84,7 +88,7 @@ export async function lockCampClaims(client: PoolClient, campId: string): Promis
 export async function lockCampForClaimWrites(client: PoolClient, campId: string): Promise<void> {
   await lockCampClaims(client, campId);
   await acquireSubjectAdvisoryLock(client, campfitVocabulary.subjectType, campId);
-  const { rows } = await client.query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 ORDER BY id`, [campId]);
+  const { rows } = await client.query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`, [campId]);
   for (const { id } of rows) await acquireSubjectAdvisoryLock(client, SESSION_SUBJECT_TYPE, id);
 }
 
@@ -119,6 +123,29 @@ export async function withdrawEditedFields(
   await lockCampForClaimWrites(client, campId);
   const at = await nextClaimEventTime(client, campId);
   await withdrawVerification(client, editedCampClaimIds(campId, fields), { ...opts, createdAt: at.toISOString() });
+}
+
+/** The camp changed after the admin loaded it: attesting now would attest values they never saw. */
+export class CampChangedError extends Error {
+  constructor() {
+    super('The camp changed since you loaded it. Reload the page and check the values again before verifying them.');
+    this.name = 'CampChangedError';
+  }
+}
+
+/**
+ * The camp's version as the admin pages show it: its `updatedAt`, to the
+ * microsecond. Every write of a camp value bumps it (edits and review applies).
+ */
+export async function campVersion(queryable: Queryable, campId: string): Promise<string | null> {
+  const { rows } = await queryable.query<{ version: string }>(`SELECT "updatedAt"::text AS version FROM "Camp" WHERE id = $1`, [campId]);
+  return rows[0]?.version ?? null;
+}
+
+/** Under the camp lock: refuse when the caller saw an older version of the camp than the one about to be attested. */
+export async function assertCampUnchanged(client: PoolClient, campId: string, expectedVersion: string | undefined): Promise<void> {
+  if (expectedVersion === undefined) return;
+  if ((await campVersion(client, campId)) !== expectedVersion) throw new CampChangedError();
 }
 
 /** The camp claims a manual edit of these fields changes. */

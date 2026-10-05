@@ -19,8 +19,9 @@ function db() {
 export async function updateCampAttestationAuditTrail(
   campId: string,
   patch: Record<string, unknown>,
+  queryable: { query: (text: string, values: unknown[]) => Promise<unknown> } = db(),
 ): Promise<void> {
-  await db().query(
+  await queryable.query(
     `UPDATE "Camp"
      SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb,
          "lastVerifiedAt" = now()
@@ -152,6 +153,8 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
 }
 
 export type AdminCampDetail = Omit<Camp, 'organizationName' | 'providerId' | 'fieldSources' | 'registrationCloseDate'> & {
+  /** The camp version the page was rendered from (`campVersion`); sent back by Mark Verified and attest. */
+  versionToken: string;
   organizationName: string | null;
   providerId: string | null;
   fieldSources: Exclude<Camp['fieldSources'], undefined>;
@@ -191,7 +194,7 @@ export async function getAdminCampDetail(campId: string): Promise<AdminCampDetai
     registrationCloseDate: string | Date | null;
   };
   const [campRes, ageRes, schedRes, priceRes] = await Promise.all([
-    db().query<CampDatabaseRow>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]),
+    db().query<CampDatabaseRow>(`SELECT *, "updatedAt"::text AS "versionToken" FROM "Camp" WHERE id = $1`, [campId]),
     db().query<CampAgeGroup>(`SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]),
     db().query<CampSchedule>(`SELECT * FROM "CampSchedule" WHERE "campId" = $1 ORDER BY "startDate" ASC`, [campId]),
     db().query<CampPricing>(`SELECT * FROM "CampPricing" WHERE "campId" = $1 ORDER BY amount ASC`, [campId]),

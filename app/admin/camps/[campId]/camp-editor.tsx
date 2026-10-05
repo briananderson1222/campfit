@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Check, X, Pencil, Loader2, AlertCircle,
@@ -41,6 +42,8 @@ interface Camp {
   fieldSources: Record<string, FieldSource> | null;
   fieldTimeline?: Record<string, FieldTimeline>;
   createdAt: string; updatedAt: string;
+  /** The camp version this page was rendered from; Mark Verified and attest send it back. */
+  versionToken?: string;
   ageGroups: AgeGroup[];
   schedules: { id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }[];
   pricing: { id: string; label: string; amount: number; unit: string }[];
@@ -116,6 +119,7 @@ function ProviderField({ campId, providerId, organizationName, provider }: {
   const [draft, setDraft] = useState(organizationName ?? '');
   const [saving, setSaving] = useState(false);
   const [currentOrgName, setCurrentOrgName] = useState(organizationName);
+  const router = useRouter();
 
   async function save() {
     setSaving(true);
@@ -123,6 +127,8 @@ function ProviderField({ campId, providerId, organizationName, provider }: {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ organizationName: draft || null }),
     });
+    // The camp's version changed; re-read it so Mark Verified sends the new one.
+    router.refresh();
     setSaving(false);
     setCurrentOrgName(draft || null);
     setEditing(false);
@@ -191,6 +197,7 @@ function NeighborhoodField({ campId, value, communitySlug }: { campId: string; v
   const [saving, setSaving] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
   const listId = `nbhd-${campId}`;
+  const router = useRouter();
 
   useEffect(() => {
     fetch(`/api/admin/neighborhoods?community=${communitySlug}`)
@@ -205,6 +212,7 @@ function NeighborhoodField({ campId, value, communitySlug }: { campId: string; v
     }).catch(() => null);
     setSaving(false);
     if (res?.ok) {
+      router.refresh();
       // If the typed value isn't in the list, add it to the community reference
       if (draft && !options.includes(draft)) {
         fetch('/api/admin/neighborhoods', {
@@ -267,6 +275,7 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Omit<AgeGroup, 'id'>[]>([]);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   function startEdit() {
     setDraft(groups.map(g => ({ label: g.label, minAge: g.minAge, maxAge: g.maxAge, minGrade: g.minGrade, maxGrade: g.maxGrade })));
@@ -298,6 +307,7 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
       const saved = await res.json();
       setGroups(saved);
       setEditing(false);
+      router.refresh();
     }
     setSaving(false);
   }
@@ -425,6 +435,7 @@ function EditableField({
   const [draft, setDraft] = useState<unknown>(normalizeEditableValue(field, value, type));
   const [saving, setSaving] = useState(false);
   const [attesting, setAttesting] = useState(false);
+  const router = useRouter();
 
   async function handleAttest() {
     if (!onAttest) return;
@@ -444,6 +455,7 @@ function EditableField({
     if (r?.ok) {
       setCurrent(payloadValue);
       setEditing(false);
+      router.refresh();
     }
   }
 
@@ -621,9 +633,10 @@ function CrawlButton({ campId, websiteUrl }: { campId: string; websiteUrl: strin
 
 // ── Mark Verified button ──────────────────────────────────────────────────────
 
-function MarkVerifiedButton({ campId, initial }: { campId: string; initial: string | null }) {
+function MarkVerifiedButton({ campId, initial, versionToken }: { campId: string; initial: string | null; versionToken?: string }) {
   const [confidence, setConfidence] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
   // Verification Gaps from the mark_verified response (bulkAttestCamp's derived
   // outcome, verification-authority--deliver-plan.md Wave 4/5) — populated only
   // after a real attempt, so we know whether a non-VERIFIED result still has
@@ -635,12 +648,18 @@ function MarkVerifiedButton({ campId, initial }: { campId: string; initial: stri
     setSaving(true);
     const res = await fetch(`/api/admin/camps/${campId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'mark_verified' }),
+      // The version this page shows: the server refuses (409) if the camp
+      // changed since, so nobody verifies values they did not see.
+      body: JSON.stringify({ action: 'mark_verified', expectedVersion: versionToken }),
     });
     if (res.ok) {
       const body: { dataConfidence: string; gaps: string[] } = await res.json();
       setConfidence(body.dataConfidence);
       setGaps(body.gaps);
+      setRefusal(null);
+    } else {
+      const body = await res.json().catch(() => null) as { error?: string } | null;
+      setRefusal(body?.error ?? 'Could not mark the camp verified.');
     }
     setSaving(false);
   }
@@ -663,6 +682,9 @@ function MarkVerifiedButton({ campId, initial }: { campId: string; initial: stri
         {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
         {isVerified ? 'Verified' : 'Mark as Verified'}
       </button>
+      {refusal && (
+        <p role="alert" data-testid="mark-verified-refusal" className="max-w-xs text-right text-xs text-red-600">{refusal}</p>
+      )}
       {!isVerified && gaps !== null && (
         <p className="text-xs text-bark-300">
           {gapCount > 0 ? `${gapCount} gap${gapCount === 1 ? '' : 's'} remain` : 'Not yet verified'}
@@ -779,6 +801,7 @@ function MultiSelectField({ campId, field, label, value, options }: {
 }) {
   const [current, setCurrent] = useState<string[]>(value ?? []);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   async function toggle(opt: string) {
     const next = current.includes(opt)
@@ -791,7 +814,7 @@ function MultiSelectField({ campId, field, label, value, options }: {
       body: JSON.stringify({ [field]: next }),
     }).catch(() => null);
     setSaving(false);
-    if (res?.ok) setCurrent(next);
+    if (res?.ok) { setCurrent(next); router.refresh(); }
   }
 
   return (
@@ -832,7 +855,7 @@ export function CampEditor({
     const res = await fetch(`/api/admin/camps/${camp.id}/attest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: [field] }),
+      body: JSON.stringify({ fields: [field], expectedVersion: camp.versionToken }),
     }).catch(() => null);
     if (res?.ok) {
       const now = new Date().toISOString();
@@ -888,7 +911,7 @@ export function CampEditor({
           <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide">Core Info</h2>
           <div className="flex items-center gap-2">
             <CrawlButton campId={camp.id} websiteUrl={camp.websiteUrl} />
-            <MarkVerifiedButton campId={camp.id} initial={camp.dataConfidence} />
+            <MarkVerifiedButton campId={camp.id} initial={camp.dataConfidence} versionToken={camp.versionToken} />
           </div>
         </div>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">

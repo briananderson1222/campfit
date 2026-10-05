@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import { updateCampAttestationAuditTrail } from '@/lib/admin/camp-repository';
 import { VERIFIED_CAMP_FIELDS } from '@/lib/admin/verification-policy';
 import { recordCampAttestationEvidence } from '@/lib/admin/entity-admin-repository';
+import { CampChangedError } from '@/lib/admin/unreviewed-change';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
 
@@ -22,7 +23,7 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const { fields, notes }: { fields: string[]; notes?: string } = await req.json();
+  const { fields, notes, expectedVersion }: { fields: string[]; notes?: string; expectedVersion?: string } = await req.json();
   if (!Array.isArray(fields) || fields.length === 0) {
     return NextResponse.json({ error: 'fields must be a non-empty array' }, { status: 400 });
   }
@@ -49,18 +50,10 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   // `recordCampAttestationEvidence` (shared with `addFieldAttestation`'s
   // single-field case, `lib/admin/entity-admin-repository.ts`), then
   // refreshes the cached `Camp.dataConfidence`.
-  await recordCampAttestationEvidence({
-    campId: params.campId,
-    fields,
-    actor: auth.access.email,
-    attestedAt: now,
-    notes,
-    mode: 'override',
-  });
-
-  // Build a fieldSources patch: one entry per field, attestedBy + approvedAt, no excerpt/sourceUrl
-  // KEPT (legacy, rollback path, decision 2) — the ClaimStore write above is
-  // additive, never a replacement for this Camp-level audit trail.
+  // A fieldSources patch: one entry per field, attestedBy + approvedAt, no
+  // excerpt/sourceUrl. KEPT (legacy, rollback path, decision 2) — the
+  // ClaimStore write is additive, never a replacement for this Camp-level
+  // audit trail. Written in the same transaction as the attestation.
   const patch: Record<string, { excerpt: null; sourceUrl: string; approvedAt: string; attestedBy: string; notes?: string }> = {};
   for (const field of fields) {
     patch[field] = {
@@ -72,7 +65,21 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     };
   }
 
-  await updateCampAttestationAuditTrail(params.campId, patch);
+  try {
+    await recordCampAttestationEvidence({
+      campId: params.campId,
+      fields,
+      actor: auth.access.email,
+      attestedAt: now,
+      notes,
+      mode: 'override',
+      expectedVersion: typeof expectedVersion === 'string' ? expectedVersion : undefined,
+      legacyWrite: (client) => updateCampAttestationAuditTrail(params.campId, patch, client),
+    });
+  } catch (error) {
+    if (error instanceof CampChangedError) return NextResponse.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
 
   return NextResponse.json({ attested: fields, at: now });
 }

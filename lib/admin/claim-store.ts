@@ -767,6 +767,13 @@ export async function persistClaim(
  * caller's responsibility so a legacy dual-write can be atomic with the
  * canonical ledger write.
  */
+/**
+ * Test-only seams. Nothing in the application sets them, so they are inert in
+ * production. `afterLoad` runs between a locked-client persist's load and its
+ * save, the window a concurrent writer of the same subject must not enter.
+ */
+export const claimStoreTestHooks: { afterLoad?: () => Promise<void> } = {};
+
 export async function persistClaimOnLockedClient(
   pool: Pool,
   client: PoolClient,
@@ -782,6 +789,7 @@ export async function persistClaimOnLockedClient(
   });
 
     const store = await adapter.load();
+    if (claimStoreTestHooks.afterLoad) await claimStoreTestHooks.afterLoad();
     const claimId = draft.id ?? generateClaimId(draft.subjectId, draft.facet, draft.fieldOrBehavior);
     const existing = store.claims.find((claim) => claim.id === claimId);
 

@@ -368,12 +368,16 @@ as verified by events, not by evidence:
   or a batch accept. If any of
   it cannot be written, the whole apply is rolled back and nothing changes.
 - **Order does not depend on the application clock.** Every apply, batch
-  accept, edit and attestation (`bulkAttestCamp`, the attest route) runs in
-  one transaction that takes its locks first, in one order: the per-camp
+  accept, edit, attestation (`bulkAttestCamp`, the attest route), crawl
+  proposal write (`createProposal`) and cache refresh runs in one transaction
+  that takes its locks first, in one order: the per-camp
   `camp-claims` lock, then the claim-store subject locks (camp, then its
   sessions), then rows (`lockCampForClaimWrites` in `unreviewed-change.ts`).
   Events are stamped with the database clock, never earlier than one
   millisecond after the camp's newest event, so a later change always wins.
+- **Attest what was seen.** Mark Verified and the attest route take the camp
+  version the admin page was rendered from (`Camp.updatedAt`, which every
+  value write bumps) and refuse with 409 if the camp changed since.
 
 "On the page" means the excerpt occurs verbatim in the stored page text. It
 does not show that the excerpt supports the value; the review page lists each

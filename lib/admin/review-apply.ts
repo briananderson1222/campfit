@@ -303,6 +303,14 @@ export class ReviewApplyEvidenceError extends Error {
   }
 }
 
+/** The database was busy (deadlock, serialization, lock timeout, connection); nothing was applied and a retry can succeed (HTTP 503). */
+export class ReviewApplyBusyError extends Error {
+  constructor(cause: unknown) {
+    super(`Nothing was applied: the database was busy (${cause instanceof Error ? cause.message : String(cause)}). The proposal is still pending; try again.`);
+    this.name = 'ReviewApplyBusyError';
+  }
+}
+
 export class ReviewApplyConflictError extends Error {
   constructor(message = 'Proposal has already been reviewed.') {
     super(message);
@@ -465,7 +473,9 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
 
     await client.query('COMMIT');
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
+    // A transient database error from anywhere in the apply is retryable.
+    if (!(err instanceof ReviewApplyEvidenceError) && isTransientDatabaseError(err)) throw new ReviewApplyBusyError(err);
     throw err;
   } finally {
     client.release();
@@ -1117,7 +1127,7 @@ async function applyScalarField(
 ): Promise<ChangeLogEntry> {
   const fieldSource = approvedFieldSource(proposal, diff, reviewedAt, facts.countsAsReview && facts.citations.get(field)?.reviewed === true);
   await client.query(
-    `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
+    `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb, "updatedAt" = now() WHERE id = $3`,
     [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
   );
   return {
@@ -1179,12 +1189,14 @@ async function applyEnumArrayField(
   // other code still reads. It must stay a member of the list: kept when it
   // still is one, otherwise moved to the list's first member.
   const twin = ENUM_ARRAY_TWIN[field]!;
-  const before = await client.query<{ twin: string | null }>(`SELECT "${twin.column}"::text AS twin FROM "Camp" WHERE id = $1 FOR UPDATE`, [proposal.campId]);
+  // The camp lock (taken first by the apply) already serialises every writer of this column.
+  const before = await client.query<{ twin: string | null }>(`SELECT "${twin.column}"::text AS twin FROM "Camp" WHERE id = $1`, [proposal.campId]);
   const result = await client.query<{ twin: string | null }>(
     `UPDATE "Camp"
         SET "${field}" = $1::text[],
             "${twin.column}" = CASE WHEN "${twin.column}"::text = ANY($1::text[]) THEN "${twin.column}" ELSE ($1::text[])[1]::"${twin.type}" END,
-            "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb
+            "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb,
+            "updatedAt" = now()
       WHERE id = $3
       RETURNING "${twin.column}"::text AS twin`,
     [diff.new as string[], JSON.stringify({ [field]: fieldSource }), proposal.campId]
@@ -1261,7 +1273,7 @@ async function applyRelationField(
   // `pricing` used to record none, so a later crawl could not tell that a
   // reviewer had approved them.
   await client.query(
-    `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
+    `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb, "updatedAt" = now() WHERE id = $2`,
     [JSON.stringify({ [field]: fieldSource }), proposal.campId],
   );
 

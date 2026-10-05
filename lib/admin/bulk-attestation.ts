@@ -78,7 +78,7 @@ import { getPool } from '@/lib/db';
 import type { Camp, DataConfidence } from '@/lib/types';
 
 import { recordEvidenceOnLockedClient } from './claim-store';
-import { lockCampForClaimWrites, nextClaimEventTime } from './unreviewed-change';
+import { assertCampUnchanged, lockCampForClaimWrites, nextClaimEventTime } from './unreviewed-change';
 import { campCanonicalClaimId } from './trust-projection';
 import { refreshCampVerificationCache } from './verification-authority';
 import { VERIFIED_CAMP_FIELDS, type VerifiedCampField } from './verification-policy';
@@ -122,7 +122,7 @@ export interface BulkAttestCampResult {
 export async function bulkAttestCamp(
   campId: string,
   actorEmail: string,
-  options: { now?: Date } = {},
+  options: { now?: Date; expectedVersion?: string } = {},
 ): Promise<BulkAttestCampResult> {
   const pool = getPool();
   const client = await pool.connect();
@@ -135,6 +135,8 @@ export async function bulkAttestCamp(
     // edit and an attestation are ordered by when they committed. `now` pins
     // the stamp in a test.
     await lockCampForClaimWrites(client, campId);
+    // The admin attests what they saw: refuse if the camp changed since.
+    await assertCampUnchanged(client, campId, options.expectedVersion);
     now = options.now ?? await nextClaimEventTime(client, campId);
     const attestedAt = now.toISOString();
 

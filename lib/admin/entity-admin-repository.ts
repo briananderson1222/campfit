@@ -1,5 +1,5 @@
 import { clearApprovedPageFingerprints } from './camp-repository';
-import { lockCampForClaimWrites, nextClaimEventTime, refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
+import { assertCampUnchanged, lockCampForClaimWrites, nextClaimEventTime, refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
 import { getPool } from '@/lib/db';
 import type { PoolClient } from 'pg';
 import { buildCampAttestationTrustInput } from './trust-projection';
@@ -322,6 +322,8 @@ export async function recordCampAttestationEvidence(args: {
   excerpt?: string;
   legacyWrite?: (client: PoolClient, sourceCitation?: ValidatedSourceCitation) => Promise<unknown>;
   reconcileRefreshFailure?: boolean;
+  /** The camp version (`campVersion`) the admin saw; the attestation is refused if the camp changed since. */
+  expectedVersion?: string;
 }): Promise<unknown> {
   validateCampAttestationEvidenceInput(args);
   if (args.fields.some((field) => !isCanonicalCampAttestationField(field))) {
@@ -361,6 +363,7 @@ export async function recordCampAttestationEvidence(args: {
     // stamp after the camp's newest event, so an attestation and an edit of
     // the same camp are ordered by when they committed.
     await lockCampForClaimWrites(client, args.campId);
+    await assertCampUnchanged(client, args.campId, args.expectedVersion);
     const at = (await nextClaimEventTime(client, args.campId)).toISOString();
     for (const claim of trustBundle.claims) {
       const evidence = trustBundle.evidence.find((item) => item.claimId === claim.id);
