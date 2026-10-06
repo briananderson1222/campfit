@@ -150,8 +150,10 @@ describe('applyBatchAcceptedClaims', () => {
     const claimId = campCanonicalClaimId(campId, 'city');
     const claimRows = await pool.query(`SELECT id FROM "SurfaceClaimDefinition" WHERE id = $1`, [claimId]);
     expect(claimRows.rows).toHaveLength(1);
-    const eventRows = await pool.query<{ status: string }>(`SELECT status FROM "SurfaceVerificationEvent" WHERE "claimId" = $1`, [claimId]);
-    expect(eventRows.rows).toEqual([{ status: 'verified' }]);
+    // A batch accept applies the value under a rule; nobody reviewed it, so
+    // the event is its own kind and does not say verified.
+    const eventRows = await pool.query<{ status: string; method: string }>(`SELECT status, method FROM "SurfaceVerificationEvent" WHERE "claimId" = $1`, [claimId]);
+    expect(eventRows.rows).toEqual([{ status: 'proposed', method: 'batch-accept' }]);
 
     const proposalRow = await queryProposal(pool, proposalId);
     expect(proposalRow?.status).toBe('APPROVED');

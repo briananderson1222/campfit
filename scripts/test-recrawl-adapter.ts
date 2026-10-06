@@ -1119,7 +1119,7 @@ async function testConditionalGet304SkipsExtractionAndRefreshesFreshness() {
   const updated = await recordRecrawlFreshness(fakePool as never, { campId: "camp-304", checkedAt });
   assert.equal(updated, true, "a present camp row reports updated: true");
   assert.equal(queries.length, 1, "exactly one UPDATE is issued");
-  assert.match(queries[0].text, /UPDATE "Camp" SET "lastCrawledAt" = \$1 WHERE id = \$2/, "writes lastCrawledAt for the exact camp id, parameterized");
+  assert.match(queries[0].text, /UPDATE "Camp" SET "lastCrawledAt" = COALESCE\(\$1::timestamptz, now\(\)\) WHERE id = \$2/, "writes lastCrawledAt for the exact camp id, parameterized");
   assert.doesNotMatch(queries[0].text, /lastVerifiedAt|dataConfidence/, "must NEVER touch lastVerifiedAt/dataConfidence — verification authority is untouched (AC1 amendment)");
   assert.deepEqual(queries[0].values, [checkedAt, "camp-304"], "exact checkedAt + campId params");
   const missingPool = { query: async () => ({ rowCount: 0 }) };
@@ -1283,7 +1283,7 @@ async function testCrawlPipelineWiresNotModifiedToFreshnessSeam() {
   );
   assert.match(
     source,
-    /const freshnessUpdated = await recordRecrawlFreshness\(pool, \{ campId: camp\.id, checkedAt: new Date\(\) \}\)/,
+    /const freshnessUpdated = await recordRecrawlFreshness\(pool, \{ campId: camp\.id \}\)/,
     "the notModified branch must record crawl freshness (lastCrawledAt) for the exact camp, and consume the boolean return"
   );
   assert.match(

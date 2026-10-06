@@ -77,9 +77,10 @@ import {
 import { getPool } from '@/lib/db';
 import type { Camp, DataConfidence } from '@/lib/types';
 
-import { recordEvidence } from './claim-store';
+import { recordEvidenceOnLockedClient } from './claim-store';
+import { lockCampForClaimWrites, nextClaimEventTime } from './unreviewed-change';
 import { campCanonicalClaimId } from './trust-projection';
-import { refreshCampVerificationCache } from './verification-authority';
+import { refreshCampVerificationCacheOnLockedClient, type RefreshCampVerificationCacheResult } from './verification-authority';
 import { VERIFIED_CAMP_FIELDS, type VerifiedCampField } from './verification-policy';
 import { campfitVocabulary } from '../trust-vocabulary';
 
@@ -114,8 +115,8 @@ export interface BulkAttestCampResult {
 /**
  * Records one human-attestation `Evidence` row (via `recordEvidence`) for
  * every field in the Verified Camp Claim Set, then derives — never assumes —
- * the resulting `Camp.dataConfidence` via `refreshCampVerificationCache`
- * (the sole writer, AC1). Shared by `POST /api/admin/camps/[campId]`'s
+ * the resulting `Camp.dataConfidence` via `refreshCampVerificationCacheOnLockedClient`
+ * (the sole writer, AC1), in one transaction. Shared by `POST /api/admin/camps/[campId]`'s
  * `mark_verified` action and the assistant tool's `mark_camp_verified` case.
  */
 export async function bulkAttestCamp(
@@ -124,58 +125,73 @@ export async function bulkAttestCamp(
   options: { now?: Date } = {},
 ): Promise<BulkAttestCampResult> {
   const pool = getPool();
-  const now = options.now ?? new Date();
-  const attestedAt = now.toISOString();
+  const client = await pool.connect();
+  let cacheResult: RefreshCampVerificationCacheResult;
+  try {
+    await client.query('BEGIN');
+    // One transaction in the canonical lock order (unreviewed-change.ts):
+    // the values attested are the values under the lock, and the events are
+    // stamped after the camp's newest event by the database clock, so an
+    // edit and an attestation are ordered by when they committed. `now` pins
+    // the stamp in a test.
+    await lockCampForClaimWrites(client, campId);
+    const now = options.now ?? await nextClaimEventTime(client, campId);
+    const attestedAt = now.toISOString();
 
-  const { rows } = await pool.query<Partial<Camp>>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]);
-  const camp = rows[0];
-  if (!camp) {
-    throw new Error(`bulkAttestCamp(${campId}): Camp not found.`);
+    const { rows } = await client.query<Partial<Camp>>(`SELECT * FROM "Camp" WHERE id = $1 FOR UPDATE`, [campId]);
+    const camp = rows[0];
+    if (!camp) {
+      throw new Error(`bulkAttestCamp(${campId}): Camp not found.`);
+    }
+
+    for (const field of VERIFIED_CAMP_FIELDS) {
+      const claimId = campCanonicalClaimId(campId, field);
+      const claim: ClaimDefinitionDraft = {
+        id: claimId,
+        subjectType: campfitVocabulary.subjectType,
+        subjectId: campId,
+        facet: campfitVocabulary.facet,
+        claimType: claimTypeForField(field),
+        fieldOrBehavior: field,
+      };
+
+      const built = buildHumanAttestationEvidence({
+        subject: { claimId, sourceRef: `admin:${actorEmail}` },
+        actor: { id: actorEmail },
+        attestedAt,
+        contentHash: contentHashFor((camp as Record<string, unknown>)[field]),
+      });
+      // Surface keys attestation evidence by claim alone, and evidence rows are
+      // append-only: a second attestation of the same camp (after an edit, say)
+      // needs its own id, or it fails on the duplicate key.
+      const evidence = { ...built, id: `${built.id}.${attestedAt}` };
+
+      // See this module's header comment: explicit 'assumed' status, not
+      // recordEvidence's 'verified'-for-attestation default.
+      const event: VerificationEvent = {
+        id: `event.${evidence.id}.bulk-attestation`,
+        claimId,
+        status: 'assumed',
+        type: 'verification',
+        actor: actorEmail,
+        method: evidence.method,
+        evidenceIds: [evidence.id],
+        createdAt: attestedAt,
+      };
+
+      await recordEvidenceOnLockedClient(pool, client, { claim, evidence, event });
+    }
+    // The derived status is written in this transaction, from the claims it
+    // just wrote, and its rollup also answers the caller (no second derivation).
+    cacheResult = await refreshCampVerificationCacheOnLockedClient(client, campId, options.now ? { now: options.now } : {});
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
   }
 
-  for (const field of VERIFIED_CAMP_FIELDS) {
-    const claimId = campCanonicalClaimId(campId, field);
-    const claim: ClaimDefinitionDraft = {
-      id: claimId,
-      subjectType: campfitVocabulary.subjectType,
-      subjectId: campId,
-      facet: campfitVocabulary.facet,
-      claimType: claimTypeForField(field),
-      fieldOrBehavior: field,
-    };
-
-    const evidence = buildHumanAttestationEvidence({
-      subject: { claimId, sourceRef: `admin:${actorEmail}` },
-      actor: { id: actorEmail },
-      attestedAt,
-      contentHash: contentHashFor((camp as Record<string, unknown>)[field]),
-    });
-
-    // See this module's header comment: explicit 'assumed' status, not
-    // recordEvidence's 'verified'-for-attestation default.
-    const event: VerificationEvent = {
-      id: `event.${evidence.id}.bulk-attestation`,
-      claimId,
-      status: 'assumed',
-      type: 'verification',
-      actor: actorEmail,
-      method: evidence.method,
-      evidenceIds: [evidence.id],
-      createdAt: attestedAt,
-    };
-
-    await recordEvidence(pool, { claim, evidence, event });
-  }
-
-  // LOW fix (review-code.md: redundant double evaluation) — previously this
-  // called `deriveCampVerification` once here (read-only, for the caller's
-  // reply message) AND `refreshCampVerificationCache` immediately after
-  // (which calls `deriveCampVerification` again internally): two full
-  // Camp+Sessions bundle loads/derivations for one `bulkAttestCamp` call.
-  // `refreshCampVerificationCache` now returns the `ClaimGroupRollup` it
-  // already computed while doing the authoritative (persisted) derivation,
-  // so this reuses THAT instead of deriving a second time.
-  const cacheResult = await refreshCampVerificationCache(campId, { now });
   const gapRequirementIds = cacheResult.rollup.requirements
     .filter((requirement) => requirement.status !== 'verified')
     .map((requirement) => requirement.id);

@@ -28,7 +28,7 @@ vi.mock('@/lib/admin/claim-store', () => ({
   recordEvidenceOnLockedClient,
 }));
 vi.mock('@/lib/admin/verification-authority', () => ({
-  refreshCampVerificationCache: vi.fn(async () => undefined),
+  refreshCampVerificationCacheOnLockedClient: vi.fn(async () => undefined),
 }));
 
 import { buildSnapshotSourceRef } from '@kontourai/traverse/fetch';
@@ -41,7 +41,8 @@ describe('exported attestation evidence boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     connect.mockResolvedValue({
-      query: vi.fn(async () => ({ rows: [] })),
+      // The one row the write path reads is the database clock stamp (unreviewed-change.ts).
+      query: vi.fn(async (text: string) => ({ rows: /clock_timestamp/.test(text) ? [{ at: new Date('2026-07-12T00:00:01.000Z') }] : [] })),
       release: vi.fn(),
     });
   });

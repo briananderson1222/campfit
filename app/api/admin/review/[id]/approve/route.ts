@@ -4,7 +4,9 @@ import { getProposalCommunitySlug } from '@/lib/admin/community-access';
 import {
   applyProposalReview,
   ReviewApplyCitationError,
+  ReviewApplyBusyError,
   ReviewApplyConflictError,
+  ReviewApplyEvidenceError,
   ReviewApplyProposalNotFoundError,
   ReviewApplyValueError,
   ReviewCitationMismatchError,
@@ -45,6 +47,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       kept: result.kept,
       appliedFields: result.appliedFields.length,
       ...(result.provenanceErrors.length ? { provenanceErrors: result.provenanceErrors } : {}),
+      ...(result.verification ? { verification: result.verification } : {}),
     });
   } catch (error) {
     if (error instanceof ReviewApplyProposalNotFoundError || error instanceof ReviewApplySessionNotFoundError) {
@@ -66,6 +69,16 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       return NextResponse.json(
         { error: error.message, ...('fields' in error && error.fields.length ? { fields: error.fields } : {}) },
         { status: 422 },
+      );
+    }
+    if (error instanceof ReviewApplyBusyError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+    if (error instanceof ReviewApplyEvidenceError) {
+      console.error('Approve error (nothing applied):', error);
+      return NextResponse.json(
+        { error: error.message, ...(error.field ? { fields: [error.field] } : {}) },
+        { status: error.transient ? 503 : 422 },
       );
     }
     console.error('Approve error:', error);

@@ -47,20 +47,13 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   // interface" decision, verification-authority--deliver-plan.md): records a
   // Claim/Evidence/Event triple per attested field via
   // `recordCampAttestationEvidence` (shared with `addFieldAttestation`'s
-  // single-field case, `lib/admin/entity-admin-repository.ts`), then
-  // refreshes the cached `Camp.dataConfidence`.
-  await recordCampAttestationEvidence({
-    campId: params.campId,
-    fields,
-    actor: auth.access.email,
-    attestedAt: now,
-    notes,
-    mode: 'override',
-  });
-
-  // Build a fieldSources patch: one entry per field, attestedBy + approvedAt, no excerpt/sourceUrl
-  // KEPT (legacy, rollback path, decision 2) — the ClaimStore write above is
-  // additive, never a replacement for this Camp-level audit trail.
+  // single-field case, `lib/admin/entity-admin-repository.ts`) and
+  // refreshes the cached `Camp.dataConfidence`, in one transaction.
+  //
+  // A fieldSources patch: one entry per field, attestedBy + approvedAt, no
+  // excerpt/sourceUrl. KEPT (legacy, rollback path, decision 2) — the
+  // ClaimStore write is additive, never a replacement for this Camp-level
+  // audit trail. Written in the same transaction as the attestation.
   const patch: Record<string, { excerpt: null; sourceUrl: string; approvedAt: string; attestedBy: string; notes?: string }> = {};
   for (const field of fields) {
     patch[field] = {
@@ -72,7 +65,15 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
     };
   }
 
-  await updateCampAttestationAuditTrail(params.campId, patch);
+  await recordCampAttestationEvidence({
+    campId: params.campId,
+    fields,
+    actor: auth.access.email,
+    attestedAt: now,
+    notes,
+    mode: 'override',
+    legacyWrite: (client) => updateCampAttestationAuditTrail(params.campId, patch, client),
+  });
 
   return NextResponse.json({ attested: fields, at: now });
 }

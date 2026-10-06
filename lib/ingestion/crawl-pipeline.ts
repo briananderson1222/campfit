@@ -782,6 +782,7 @@ async function runKnownCampStrategy(
                 // FetchError instead of a crash or a silent empty-shell fetch.
                 requiresRender: (camp as unknown as { requiresRender: boolean }).requiresRender,
                 priorContentFingerprint: skipEligibleFingerprint(camp, options.forceExtract === true),
+                askAgain: options.forceExtract === true,
               });
           const durationMs = Date.now() - startMs;
           const displayModel = withModelOverrideNote(result.model, options.model);
@@ -790,7 +791,7 @@ async function runKnownCampStrategy(
           // replay still finds a DB-current change. Record crawl freshness,
           // then continue into the ordinary proposal sink exactly once.
           if (result.ok && result.unchangedFreshness) {
-            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id, checkedAt: new Date() });
+            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id });
             if (!freshnessUpdated) {
               console.warn(`[crawl] freshness update skipped: camp ${camp.id} no longer exists (deleted between recrawl selection and freshness write)`);
             }
@@ -816,7 +817,7 @@ async function runKnownCampStrategy(
             // createProposal AND matchOrCreateProvider entirely, and record an
             // honest zero-change, zero-spend outcome. `providerCalls`/`tokensUsed`
             // on `result` are already 0/null (extraction never ran).
-            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id, checkedAt: new Date() });
+            const freshnessUpdated = await recordRecrawlFreshness(pool, { campId: camp.id });
             if (!freshnessUpdated) {
               console.warn(
                 `[crawl] freshness update skipped: camp ${camp.id} no longer exists (deleted between recrawl selection and freshness write)`
@@ -890,6 +891,7 @@ async function runKnownCampStrategy(
               incomplete: result.incomplete,
               withheldListFields: result.withheldListFields,
               populatedListFields: result.populatedListFields,
+              notProposedAgain: result.notProposedAgain,
               modelSource: result.modelSource,
               coverage: result.coverage,
             });

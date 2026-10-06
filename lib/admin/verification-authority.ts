@@ -48,9 +48,10 @@
  *    archived Session simply stops contributing to it on the next
  *    evaluation — no separate "recompute derivedFrom" step is needed.
  *
- * `refreshCampVerificationCache(campId)` is the ONLY writer of
- * `Camp.dataConfidence`/`lastVerifiedAt` (AC1) — every writer route (Wave 4)
- * calls it after recording Evidence, never writing the enum directly.
+ * `refreshCampVerificationCacheOnLockedClient(client, campId)` is the ONLY
+ * writer of `Camp.dataConfidence`/`lastVerifiedAt` (AC1) — every writer route
+ * (Wave 4) calls it inside the transaction that records the Evidence, never
+ * writing the enum directly.
  *
  * `recordEvidence`/`projectTrustStatusToDataConfidence` are re-exported here
  * (not reimplemented — they live in `claim-store.ts`/`verification-policy.ts`
@@ -73,7 +74,7 @@
  * `{covered, missing, unattested, pct}` shape from a `ClaimGroupRollup`
  * instead of `fieldSources` JSON.
  */
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import {
   CURRENT_SCHEMA_VERSION,
@@ -376,7 +377,7 @@ interface EvaluationBundle {
  * Camp's own field Claims loaded, since the inherited Claims' `derivedFrom`
  * points at them).
  */
-async function buildEvaluationBundle(pool: Pool, campId: string, scheduleIds: readonly string[], now: Date): Promise<EvaluationBundle> {
+async function buildEvaluationBundle(pool: Pool | PoolClient, campId: string, scheduleIds: readonly string[], now: Date): Promise<EvaluationBundle> {
   const subjectRefs: SubjectRef[] = [
     { subjectType: campfitVocabulary.subjectType, subjectId: campId },
     ...scheduleIds.map((scheduleId) => ({ subjectType: SESSION_SUBJECT_TYPE, subjectId: scheduleId })),
@@ -407,7 +408,7 @@ async function buildEvaluationBundle(pool: Pool, campId: string, scheduleIds: re
   return { claims, evidence, events, policies: mergePolicies(bundle.policies), sessionRollupClaimIds };
 }
 
-async function nonArchivedScheduleIds(pool: Pool, campId: string): Promise<string[]> {
+async function nonArchivedScheduleIds(pool: Pool | PoolClient, campId: string): Promise<string[]> {
   const { rows } = await pool.query<{ id: string }>(
     `SELECT id FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`,
     [campId],
@@ -421,6 +422,14 @@ async function nonArchivedScheduleIds(pool: Pool, campId: string): Promise<strin
 
 export interface DeriveVerificationOptions {
   readonly now?: Date;
+  /**
+   * Read through this client instead of the pool. A caller that holds a
+   * connection (and the camp lock) must pass it: deriving through the pool
+   * would take a second connection while holding the first, and with the
+   * pool's three connections, three such callers wait on each other until
+   * one times out.
+   */
+  readonly client?: PoolClient;
 }
 
 /**
@@ -432,10 +441,11 @@ export interface DeriveVerificationOptions {
  */
 export async function deriveCampVerification(campId: string, options: DeriveVerificationOptions = {}): Promise<ClaimGroupRollup> {
   const now = options.now ?? new Date();
-  const pool = getPool();
+  const pool = options.client ?? getPool();
 
   const scheduleIds = await nonArchivedScheduleIds(pool, campId);
   const built = await buildEvaluationBundle(pool, campId, scheduleIds, now);
+  if (verificationCacheTestHooks.afterLoad) await verificationCacheTestHooks.afterLoad(campId);
   const campRollup = buildCampSessionsVerifiedClaim(campId, built.sessionRollupClaimIds, now);
 
   // NOTE: deliberately NOT run through `validateTrustBundle` — that check
@@ -617,7 +627,7 @@ export interface RefreshCampVerificationCacheResult {
    * redundant double evaluation) so a caller that also needs the full rollup
    * (e.g. `gapRequirementIds`) can read it from HERE instead of calling
    * `deriveCampVerification` a second time. This does not weaken AC1's "sole
-   * writer" invariant — `refreshCampVerificationCache` is still the only
+   * writer" invariant — `refreshCampVerificationCacheOnLockedClient` is still the only
    * function that WRITES `Camp.dataConfidence`/`lastVerifiedAt`; it now also
    * hands back the rollup it already computed along the way.
    */
@@ -625,21 +635,77 @@ export interface RefreshCampVerificationCacheResult {
 }
 
 /**
- * The ONLY writer of `Camp.dataConfidence`/`lastVerifiedAt` (AC1). Called
- * from, and only from, the post-evidence-change points the plan's "Which call
- * sites refresh the cache" table names (Wave 4) — `mark_verified`, the
- * assistant's `mark_camp_verified`, `/attest`, `addFieldAttestation`, and
- * `review-apply.ts`'s `recomputeVerification`.
+ * Test-only seams, inert in production. `afterLoad` runs inside
+ * `deriveCampVerification`, after it has read the claims; `beforeWrite` runs
+ * between deriving the cached status and writing it.
  */
-export async function refreshCampVerificationCache(campId: string, options: DeriveVerificationOptions = {}): Promise<RefreshCampVerificationCacheResult> {
+export const verificationCacheTestHooks: {
+  afterLoad?: (campId: string) => Promise<void>;
+  beforeWrite?: (campId: string, dataConfidence: DataConfidence) => Promise<void>;
+} = {};
+
+/** The cache is written only by a transaction that holds this camp's `camp-claims` lock. */
+export class CampLockNotHeldError extends Error {
+  constructor(campId: string) {
+    super(`The verification cache of camp ${campId} is written only under its camp-claims lock.`);
+    this.name = 'CampLockNotHeldError';
+  }
+}
+
+/**
+ * The ONLY writer of `Camp.dataConfidence`/`lastVerifiedAt` (AC1). It runs
+ * inside the transaction that changed the camp's values or claims (a review
+ * apply, a batch accept, an admin or assistant edit, Mark Verified, the
+ * attest route), on that transaction's client, after its changes and before
+ * its COMMIT. So:
+ *  - the cache and the change it reflects commit together or not at all: a
+ *    derivation that fails rolls the change back, and a VERIFIED cache never
+ *    outlives the change that withdrew it (fail closed);
+ *  - it reads through the same connection, never a second one from the pool;
+ *  - it derives under the camp lock the caller took first (the lock order in
+ *    unreviewed-change.ts), and refuses to run without it, so no other change
+ *    to the camp's claims can commit between the derivation and the write.
+ */
+export async function refreshCampVerificationCacheOnLockedClient(
+  client: PoolClient,
+  campId: string,
+  options: { readonly now?: Date } = {},
+): Promise<RefreshCampVerificationCacheResult> {
+  const { rows } = await client.query<{ held: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_locks
+        WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted AND objsubid = 1
+          AND ((classid::bigint << 32) | objid::bigint) = hashtextextended($1, 0)
+     ) AS held`,
+    [`camp-claims:${campId}`],
+  );
+  if (!rows[0]?.held) throw new CampLockNotHeldError(campId);
   const now = options.now ?? new Date();
-  const rollup = await deriveCampVerification(campId, { now });
+  const rollup = await deriveCampVerification(campId, { now, client });
   const dataConfidence = projectTrustStatusToDataConfidence(rollup.status);
-
-  const pool = getPool();
-  await pool.query(`UPDATE "Camp" SET "dataConfidence" = $1, "lastVerifiedAt" = $2 WHERE id = $3`, [dataConfidence, now, campId]);
-
+  if (verificationCacheTestHooks.beforeWrite) await verificationCacheTestHooks.beforeWrite(campId, dataConfidence);
+  await client.query(`UPDATE "Camp" SET "dataConfidence" = $1, "lastVerifiedAt" = $2 WHERE id = $3`, [dataConfidence, now, campId]);
   return { dataConfidence, lastVerifiedAt: now, rollup };
+}
+
+/**
+ * Re-derive the cache on its own, outside any change (a script or a repair):
+ * one connection, one transaction, under the camp lock.
+ */
+export async function refreshCampVerificationCache(campId: string, options: { readonly now?: Date } = {}): Promise<RefreshCampVerificationCacheResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`camp-claims:${campId}`]);
+    const result = await refreshCampVerificationCacheOnLockedClient(client, campId, options);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ---------------------------------------------------------------------------

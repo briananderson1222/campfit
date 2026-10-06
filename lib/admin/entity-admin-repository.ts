@@ -1,8 +1,10 @@
+import { clearApprovedPageFingerprints } from './camp-repository';
+import { lockCampForClaimWrites, nextClaimEventTime, withdrawEditedFields } from './unreviewed-change';
 import { getPool } from '@/lib/db';
 import type { PoolClient } from 'pg';
 import { buildCampAttestationTrustInput } from './trust-projection';
-import { refreshCampVerificationCache } from './verification-authority';
-import { acquireSubjectAdvisoryLock, recordEvidenceOnLockedClient } from './claim-store';
+import { refreshCampVerificationCacheOnLockedClient } from './verification-authority';
+import { recordEvidenceOnLockedClient } from './claim-store';
 import { VERIFIED_CAMP_FIELDS } from './verification-policy';
 import { buildSnapshotSourceRef, parseAnySnapshotSourceRef } from '@kontourai/traverse/fetch';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
@@ -35,10 +37,30 @@ async function updateAssistantEntityFields(
     throw new Error(`Unsupported ${table.toLowerCase()} update field`);
   }
   const setClauses = entries.map(([key], index) => `"${key}" = $${index + 2}`).join(', ');
-  await getPool().query(
-    `UPDATE "${table}" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
-    [id, ...entries.map(([, value]) => value ?? null)],
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    if (table === 'Camp') await lockCampForClaimWrites(client, id);
+    await client.query(
+      `UPDATE "${table}" SET ${setClauses}, "updatedAt" = now() WHERE id = $1`,
+      [id, ...entries.map(([, value]) => value ?? null)],
+    );
+    if (table === 'Camp') {
+      const fields = entries.map(([key]) => key);
+      await clearApprovedPageFingerprints(client, id, fields);
+      // The edited values were not reviewed: none of them reads as verified.
+      await withdrawEditedFields(client, id, fields, {
+        actor: 'admin-assistant', method: 'assistant-edit', notes: 'Edited through the admin assistant; the new value has not been reviewed.',
+      });
+      await refreshCampVerificationCacheOnLockedClient(client, id);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateAssistantCampFields(campId: string, entries: [string, unknown][]): Promise<void> {
@@ -299,7 +321,6 @@ export async function recordCampAttestationEvidence(args: {
   sourceLocator?: string;
   excerpt?: string;
   legacyWrite?: (client: PoolClient, sourceCitation?: ValidatedSourceCitation) => Promise<unknown>;
-  reconcileRefreshFailure?: boolean;
 }): Promise<unknown> {
   validateCampAttestationEvidenceInput(args);
   if (args.fields.some((field) => !isCanonicalCampAttestationField(field))) {
@@ -335,26 +356,25 @@ export async function recordCampAttestationEvidence(args: {
   let legacyResult: unknown;
   try {
     await client.query('BEGIN');
-    await acquireSubjectAdvisoryLock(client, firstClaim.subjectType, firstClaim.subjectId);
+    // The canonical lock order (unreviewed-change.ts), and a database-clock
+    // stamp after the camp's newest event, so an attestation and an edit of
+    // the same camp are ordered by when they committed.
+    await lockCampForClaimWrites(client, args.campId);
+    const at = (await nextClaimEventTime(client, args.campId)).toISOString();
     for (const claim of trustBundle.claims) {
       const evidence = trustBundle.evidence.find((item) => item.claimId === claim.id);
       if (!evidence) throw new Error(`Missing attestation Evidence for Claim "${claim.id}".`);
       const event = trustBundle.events.find((item) => item.claimId === claim.id);
-      await recordEvidenceOnLockedClient(pool, client, { claim, evidence, event });
+      await recordEvidenceOnLockedClient(pool, client, { claim, evidence, event: event ? { ...event, createdAt: at } : undefined });
     }
     if (args.legacyWrite) legacyResult = await args.legacyWrite(client, sourceCitation);
+    await refreshCampVerificationCacheOnLockedClient(client, args.campId);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
-  }
-  try {
-    await refreshCampVerificationCache(args.campId);
-  } catch (error) {
-    if (!args.reconcileRefreshFailure) throw error;
-    console.error('Attestation committed but verification cache refresh requires reconciliation:', error);
   }
   return legacyResult;
 }
@@ -498,7 +518,6 @@ export async function addFieldAttestation(opts: {
       sourceRef: sourceCitation?.sourceRef,
       sourceLocator: sourceCitation?.sourceLocator,
       excerpt: sourceCitation?.excerpt,
-      reconcileRefreshFailure: true,
       legacyWrite: async (client, validatedCitation) => {
         const { rows } = await client.query(
           `INSERT INTO "FieldAttestation"

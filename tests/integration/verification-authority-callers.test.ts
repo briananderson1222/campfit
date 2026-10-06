@@ -46,7 +46,7 @@
  *   lib/admin/verification-authority.ts:536:export async function refreshCampVerificationCache(...
  *   lib/admin/review-apply.ts:<N>:      await refreshCampVerificationCache(proposal.campId);   [applyProposalReview]
  *   lib/admin/review-apply.ts:<N>:    await refreshCampVerificationCache(proposal.campId);      [applyBatchAcceptedFieldsForProposal]
- *   lib/admin/review-apply.ts:<N>:    await recordEvidence(pool, { claim: draft, ... });          [recordAppliedFieldEvidence]
+ *   lib/admin/review-apply.ts:<N>:    await recordEvidence(pool, { claim: args.draft, ... });     [recordApprovedClaim]
  *   lib/admin/bulk-attestation.ts:<N>:    await recordEvidence(pool, { claim, evidence, event });
  *   lib/admin/bulk-attestation.ts:<N>:  const cacheResult = await refreshCampVerificationCache(campId, { now });
  *   lib/admin/claim-store.ts:890:export async function recordEvidence(...
@@ -72,7 +72,7 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = path.resolve(__dirname, '../..');
 const scanRoots = ['app', 'lib'].map((dir) => path.join(repoRoot, dir));
 
-const TARGET_CALLS = ['recordEvidence(', 'refreshCampVerificationCache('];
+const TARGET_CALLS = ['recordEvidence(', 'recordEvidenceOnLockedClient(', 'refreshCampVerificationCache(', 'refreshCampVerificationCacheOnLockedClient('];
 
 /** The exact set of files allowed to contain a CALL (not the definition) of
  * either target. Any file outside this set containing a call fails the
@@ -82,12 +82,16 @@ const ALLOWED_CALLER_FILES = new Set([
   'lib/admin/review-apply.ts',
   'lib/admin/entity-admin-repository.ts',
   'lib/admin/bulk-attestation.ts',
+  // Re-derives the cache inside a manual edit's transaction (human-initiated).
+  'lib/admin/camp-repository.ts',
+  // The standalone refresh, which runs the in-transaction writer under its own lock.
+  'lib/admin/verification-authority.ts',
 ]);
 
 /** Definition-site lines (not calls) — excluded from the scan so the
  * function DECLARING `recordEvidence`/`refreshCampVerificationCache` is
  * never mistaken for a caller of itself. */
-const DEFINITION_LINE_PATTERNS = [/function\s+recordEvidence\s*\(/, /function\s+refreshCampVerificationCache\s*\(/];
+const DEFINITION_LINE_PATTERNS = [/function\s+recordEvidence\s*\(/, /function\s+recordEvidenceOnLockedClient\s*\(/, /function\s+refreshCampVerificationCache\s*\(/, /function\s+refreshCampVerificationCacheOnLockedClient\s*\(/];
 
 function listSourceFiles(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -181,11 +185,12 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
     );
 
     // applyProposalReview: the interactive single-proposal path.
-    // recordAppliedFieldEvidence / applyBatchAcceptedFieldsForProposal: the
-    // batch path's private helpers (applyBatchAcceptedClaims itself
-    // delegates to applyBatchAcceptedFieldsForProposal per proposal group —
-    // see that function's own header comment).
-    expect(enclosingFunctions).toEqual(new Set(['applyProposalReview', 'recordAppliedFieldEvidence', 'applyBatchAcceptedFieldsForProposal']));
+    // applyBatchAcceptedFieldsForProposal: the batch path's private helper
+    // (applyBatchAcceptedClaims delegates to it per proposal group).
+    // recordApprovedClaim: the one writer of an approved claim's evidence,
+    // reached only through recordAppliedFieldEvidence, which both paths call
+    // inside their apply transaction.
+    expect(enclosingFunctions).toEqual(new Set(['applyProposalReview', 'recordApprovedClaim', 'applyBatchAcceptedFieldsForProposal']));
   });
 
   /**
@@ -200,8 +205,10 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
    * silently joining the caller set.
    */
   it.each([
-    ['lib/admin/entity-admin-repository.ts', ['recordCampAttestationEvidence']],
+    ['lib/admin/entity-admin-repository.ts', ['updateAssistantEntityFields', 'recordCampAttestationEvidence']],
     ['lib/admin/bulk-attestation.ts', ['bulkAttestCamp']],
+    ['lib/admin/camp-repository.ts', ['updateAdminCampFields', 'replaceAdminCampAgeGroups']],
+    ['lib/admin/verification-authority.ts', ['refreshCampVerificationCache']],
   ] as const)('%s\'s call sites resolve to exactly %j', (relativePath, expectedFunctions) => {
     const filePath = path.join(repoRoot, relativePath);
     const fileLines = fs.readFileSync(filePath, 'utf8').split('\n');

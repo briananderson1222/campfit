@@ -10,6 +10,8 @@ import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPric
 import { isValidHttpUrl } from './onboarding-validation';
 import { writeChangeLogs } from './changelog-repository';
 import { RepositoryConnectionError } from './repository-errors';
+import { lockCampForClaimWrites, withdrawEditedFields } from './unreviewed-change';
+import { refreshCampVerificationCacheOnLockedClient } from './verification-authority';
 
 function db() {
   return getPool();
@@ -18,13 +20,37 @@ function db() {
 export async function updateCampAttestationAuditTrail(
   campId: string,
   patch: Record<string, unknown>,
+  queryable: { query: (text: string, values: unknown[]) => Promise<unknown> } = db(),
 ): Promise<void> {
-  await db().query(
+  await queryable.query(
     `UPDATE "Camp"
      SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb,
          "lastVerifiedAt" = now()
      WHERE id = $2`,
     [JSON.stringify(patch), campId],
+  );
+}
+
+/**
+ * Forget which page text these fields were approved from. A crawl withholds a
+ * change to a field approved from the same page text (decided-changes.ts);
+ * once a person edits the field by hand, the stored value is no longer the
+ * approved one, so the page's reading must be proposed again.
+ */
+export async function clearApprovedPageFingerprints(
+  queryable: { query: (text: string, values: unknown[]) => Promise<unknown> },
+  campId: string,
+  fields: readonly string[],
+): Promise<void> {
+  if (fields.length === 0) return;
+  await queryable.query(
+    `UPDATE "Camp" c
+        SET "fieldSources" = (
+          SELECT COALESCE(jsonb_object_agg(e.key,
+                   CASE WHEN e.key = ANY($2::text[]) AND jsonb_typeof(e.value) = 'object' THEN e.value - 'contentFingerprint' ELSE e.value END), '{}'::jsonb)
+            FROM jsonb_each(c."fieldSources") AS e)
+      WHERE c.id = $1 AND c."fieldSources" IS NOT NULL AND jsonb_typeof(c."fieldSources") = 'object'`,
+    [campId, [...fields]],
   );
 }
 
@@ -38,18 +64,43 @@ const ADMIN_CAMP_EDITABLE_FIELDS = new Set([
 export async function updateAdminCampFields(
   campId: string,
   updates: Array<[string, unknown]>,
+  actor = 'admin',
 ): Promise<Record<string, unknown> | null> {
   for (const [field] of updates) {
     if (!ADMIN_CAMP_EDITABLE_FIELDS.has(field)) throw new Error(`Invalid editable camp field: ${field}`);
   }
-  const { rows } = await db().query<Record<string, unknown>>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]);
-  const current = rows[0];
-  if (!current) return null;
-  const setClauses = updates.map(([field], index) => `"${field}" = $${index + 2}`).join(', ');
-  await db().query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = NOW() WHERE id = $1`, [
-    campId,
-    ...updates.map(([, value]) => value ?? null),
-  ]);
+  const fields = updates.map(([field]) => field);
+  const client = await db().connect().catch((error) => {
+    throw new RepositoryConnectionError(error);
+  });
+  let current: Record<string, unknown> | undefined;
+  try {
+    await client.query('BEGIN');
+    await lockCampForClaimWrites(client, campId);
+    const { rows } = await client.query<Record<string, unknown>>(`SELECT * FROM "Camp" WHERE id = $1 FOR UPDATE`, [campId]);
+    current = rows[0];
+    if (!current) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const setClauses = updates.map(([field], index) => `"${field}" = $${index + 2}`).join(', ');
+    await client.query(`UPDATE "Camp" SET ${setClauses}, "updatedAt" = NOW() WHERE id = $1`, [
+      campId,
+      ...updates.map(([, value]) => value ?? null),
+    ]);
+    await clearApprovedPageFingerprints(client, campId, fields);
+    // The edited values were not reviewed: none of them reads as verified.
+    await withdrawEditedFields(client, campId, fields, {
+      actor, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
+    });
+    await refreshCampVerificationCacheOnLockedClient(client, campId);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
   return current;
 }
 
@@ -65,11 +116,14 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
   const client = await db().connect().catch((error) => {
     throw new RepositoryConnectionError(error);
   });
+  let previous: unknown[];
+  let rows: unknown[];
   try {
     await client.query('BEGIN');
-    const previous = await client.query(
+    await lockCampForClaimWrites(client, campId);
+    previous = (await client.query(
       `SELECT label, "minAge", "maxAge", "minGrade", "maxGrade"
-       FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);
+       FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId])).rows;
     await client.query(`DELETE FROM "CampAgeGroup" WHERE "campId" = $1`, [campId]);
     for (const ag of ageGroups) {
       if (!ag.label?.trim()) continue;
@@ -79,21 +133,28 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
         [campId, ag.label.trim(), ag.minAge ?? null, ag.maxAge ?? null, ag.minGrade ?? null, ag.maxGrade ?? null]);
     }
     await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [campId]);
-    await client.query('COMMIT');
-    await writeChangeLogs([{
-      campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous.rows,
-      newValue: ageGroups.filter((row) => row.label?.trim()),
-      changeType: previous.rows.length === 0 ? 'FIELD_POPULATED' : 'UPDATE',
-    }]).catch((error) => console.error('[age-groups PUT] writeChangeLogs failed:', error));
-    const { rows } = await client.query(
+    await clearApprovedPageFingerprints(client, campId, ['ageGroups']);
+    await withdrawEditedFields(client, campId, ['ageGroups'], {
+      actor: changedBy, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
+    });
+    await refreshCampVerificationCacheOnLockedClient(client, campId);
+    const saved = await client.query(
       `SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);
-    return rows;
+    await client.query('COMMIT');
+    rows = saved.rows;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+  // After the connection is back in the pool: the change log takes its own.
+  await writeChangeLogs([{
+    campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous,
+    newValue: ageGroups.filter((row) => row.label?.trim()),
+    changeType: previous.length === 0 ? 'FIELD_POPULATED' : 'UPDATE',
+  }]).catch((error) => console.error('[age-groups PUT] writeChangeLogs failed:', error));
+  return rows;
 }
 
 export type AdminCampDetail = Omit<Camp, 'organizationName' | 'providerId' | 'fieldSources' | 'registrationCloseDate'> & {

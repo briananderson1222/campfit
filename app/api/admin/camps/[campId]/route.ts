@@ -41,7 +41,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ campId: str
   const updates = Object.entries(body).filter(([k]) => EDITABLE_FIELDS.has(k));
   if (updates.length === 0) return NextResponse.json({ error: 'No valid fields' }, { status: 400 });
 
-  const current = await updateAdminCampFields(params.campId, updates);
+  const current = await updateAdminCampFields(params.campId, updates, auth.access.email);
   if (!current) return NextResponse.json({ error: 'Camp not found' }, { status: 404 });
 
   await writeChangeLogs(

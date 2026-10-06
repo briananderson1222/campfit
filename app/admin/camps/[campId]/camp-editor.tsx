@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Check, X, Pencil, Loader2, AlertCircle,
@@ -116,6 +117,7 @@ function ProviderField({ campId, providerId, organizationName, provider }: {
   const [draft, setDraft] = useState(organizationName ?? '');
   const [saving, setSaving] = useState(false);
   const [currentOrgName, setCurrentOrgName] = useState(organizationName);
+  const router = useRouter();
 
   async function save() {
     setSaving(true);
@@ -123,6 +125,8 @@ function ProviderField({ campId, providerId, organizationName, provider }: {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ organizationName: draft || null }),
     });
+    // The edit may change the camp's status; re-read it from the server.
+    router.refresh();
     setSaving(false);
     setCurrentOrgName(draft || null);
     setEditing(false);
@@ -191,6 +195,7 @@ function NeighborhoodField({ campId, value, communitySlug }: { campId: string; v
   const [saving, setSaving] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
   const listId = `nbhd-${campId}`;
+  const router = useRouter();
 
   useEffect(() => {
     fetch(`/api/admin/neighborhoods?community=${communitySlug}`)
@@ -205,6 +210,7 @@ function NeighborhoodField({ campId, value, communitySlug }: { campId: string; v
     }).catch(() => null);
     setSaving(false);
     if (res?.ok) {
+      router.refresh();
       // If the typed value isn't in the list, add it to the community reference
       if (draft && !options.includes(draft)) {
         fetch('/api/admin/neighborhoods', {
@@ -267,6 +273,7 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Omit<AgeGroup, 'id'>[]>([]);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   function startEdit() {
     setDraft(groups.map(g => ({ label: g.label, minAge: g.minAge, maxAge: g.maxAge, minGrade: g.minGrade, maxGrade: g.maxGrade })));
@@ -298,6 +305,7 @@ function AgeGroupsEditor({ campId, initial, isAttested, onAttest }: {
       const saved = await res.json();
       setGroups(saved);
       setEditing(false);
+      router.refresh();
     }
     setSaving(false);
   }
@@ -425,6 +433,7 @@ function EditableField({
   const [draft, setDraft] = useState<unknown>(normalizeEditableValue(field, value, type));
   const [saving, setSaving] = useState(false);
   const [attesting, setAttesting] = useState(false);
+  const router = useRouter();
 
   async function handleAttest() {
     if (!onAttest) return;
@@ -444,6 +453,7 @@ function EditableField({
     if (r?.ok) {
       setCurrent(payloadValue);
       setEditing(false);
+      router.refresh();
     }
   }
 
@@ -621,9 +631,11 @@ function CrawlButton({ campId, websiteUrl }: { campId: string; websiteUrl: strin
 
 // ── Mark Verified button ──────────────────────────────────────────────────────
 
-function MarkVerifiedButton({ campId, initial }: { campId: string; initial: string | null }) {
-  const [confidence, setConfidence] = useState(initial);
+function MarkVerifiedButton({ campId, status }: { campId: string; status: string | null }) {
+  const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   // Verification Gaps from the mark_verified response (bulkAttestCamp's derived
   // outcome, verification-authority--deliver-plan.md Wave 4/5) — populated only
   // after a real attempt, so we know whether a non-VERIFIED result still has
@@ -633,25 +645,33 @@ function MarkVerifiedButton({ campId, initial }: { campId: string; initial: stri
 
   async function markVerified() {
     setSaving(true);
+    setError(null);
     const res = await fetch(`/api/admin/camps/${campId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'mark_verified' }),
-    });
-    if (res.ok) {
+    }).catch(() => null);
+    if (res?.ok) {
       const body: { dataConfidence: string; gaps: string[] } = await res.json();
-      setConfidence(body.dataConfidence);
       setGaps(body.gaps);
+      // The button shows the status the server renders, never a copy kept
+      // here: re-read it, as every edit and attestation on this page does.
+      startRefresh(() => router.refresh());
+    } else {
+      const body = await res?.json().catch(() => null) as { error?: string } | null | undefined;
+      setError(body?.error ?? 'Could not mark the camp verified.');
     }
     setSaving(false);
   }
 
-  const isVerified = confidence === 'VERIFIED';
+  const busy = saving || refreshing;
+  const isVerified = status === 'VERIFIED';
   const gapCount = gaps?.length ?? 0;
   return (
     <div className="flex flex-col items-end gap-0.5">
       <button
         onClick={isVerified ? undefined : markVerified}
-        disabled={saving || isVerified}
+        disabled={busy || isVerified}
+        data-testid="mark-verified"
         className={cn(
           'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors',
           isVerified
@@ -660,10 +680,13 @@ function MarkVerifiedButton({ campId, initial }: { campId: string; initial: stri
         )}
         title={isVerified ? 'All key fields confirmed accurate' : 'Mark this record as fully verified (use when all key fields are confirmed from source)'}
       >
-        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
         {isVerified ? 'Verified' : 'Mark as Verified'}
       </button>
-      {!isVerified && gaps !== null && (
+      {error && (
+        <p role="alert" data-testid="mark-verified-error" className="max-w-xs text-right text-xs text-red-600">{error}</p>
+      )}
+      {!isVerified && !busy && gaps !== null && (
         <p className="text-xs text-bark-300">
           {gapCount > 0 ? `${gapCount} gap${gapCount === 1 ? '' : 's'} remain` : 'Not yet verified'}
         </p>
@@ -779,6 +802,7 @@ function MultiSelectField({ campId, field, label, value, options }: {
 }) {
   const [current, setCurrent] = useState<string[]>(value ?? []);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   async function toggle(opt: string) {
     const next = current.includes(opt)
@@ -791,7 +815,7 @@ function MultiSelectField({ campId, field, label, value, options }: {
       body: JSON.stringify({ [field]: next }),
     }).catch(() => null);
     setSaving(false);
-    if (res?.ok) setCurrent(next);
+    if (res?.ok) { setCurrent(next); router.refresh(); }
   }
 
   return (
@@ -826,13 +850,22 @@ export function CampEditor({
   coverage?: CoverageResult | null;
 }) {
   const [fieldSources, setFieldSources] = useState<Record<string, FieldSource> | null>(camp.fieldSources);
+  const [attestError, setAttestError] = useState<string | null>(null);
   const fieldTimeline = camp.fieldTimeline ?? {};
+  const router = useRouter();
 
   async function attest(field: string) {
+    setAttestError(null);
+    // The attest route records an override and requires its reason.
+    const notes = window.prompt(`Why is the ${field} value correct? (required to attest it)`)?.trim();
+    if (!notes) {
+      setAttestError(`Not attested: ${field} needs a reason.`);
+      return;
+    }
     const res = await fetch(`/api/admin/camps/${camp.id}/attest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: [field] }),
+      body: JSON.stringify({ fields: [field], notes }),
     }).catch(() => null);
     if (res?.ok) {
       const now = new Date().toISOString();
@@ -840,6 +873,11 @@ export function CampEditor({
         ...(prev ?? {}),
         [field]: { excerpt: null, sourceUrl: 'admin:attested', approvedAt: now },
       }));
+      // An attestation can change the camp's status.
+      router.refresh();
+    } else {
+      const body = await res?.json().catch(() => null) as { error?: string } | null | undefined;
+      setAttestError(`Could not attest ${field}: ${body?.error ?? 'the request failed'}.`);
     }
   }
 
@@ -879,6 +917,18 @@ export function CampEditor({
         </div>
       )}
 
+      {attestError && (
+        // Fixed, so it shows next to whichever field's Attest button was clicked.
+        <div role="alert" data-testid="attest-error"
+          className="fixed bottom-20 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg dark:border-red-800/50 dark:bg-red-950 dark:text-red-300">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">{attestError}</span>
+          <button onClick={() => setAttestError(null)} aria-label="Dismiss" className="shrink-0 rounded p-0.5 hover:bg-red-100 dark:hover:bg-red-900/40">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Field coverage meter */}
       <CoverageMeter coverage={coverage} />
 
@@ -888,7 +938,7 @@ export function CampEditor({
           <h2 className="font-display font-bold text-bark-600 dark:text-cream-200 text-sm uppercase tracking-wide">Core Info</h2>
           <div className="flex items-center gap-2">
             <CrawlButton campId={camp.id} websiteUrl={camp.websiteUrl} />
-            <MarkVerifiedButton campId={camp.id} initial={camp.dataConfidence} />
+            <MarkVerifiedButton campId={camp.id} status={camp.dataConfidence} />
           </div>
         </div>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
