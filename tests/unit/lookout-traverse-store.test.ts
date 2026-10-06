@@ -23,6 +23,7 @@ import { fetchSource as forageFetchSource } from "@kontourai/forage/fetch";
 import { toForageFetchOptions } from "@kontourai/traverse/fetch";
 
 import { campToLookoutSource, runLookoutCheck, runLookoutRecrawlForCamp } from "@/lib/ingestion/lookout-check-adapter";
+import { emitCampfitObservation } from "@/lib/ingestion/lookout-observation-store";
 import { createSupabaseSnapshotStore, type SnapshotStorageClient } from "@/lib/ingestion/supabase-snapshot-store";
 import { runTraverseRecrawlForCamp } from "@/lib/ingestion/traverse-recrawl-adapter";
 import type { EgressResolver, EgressResponseOracle } from "@/lib/security/egress-url-policy";
@@ -86,8 +87,11 @@ function served(body: string | Uint8Array, contentType = "text/html; charset=utf
   } as unknown as FetchSourceOptions;
 }
 
-function check(store: SnapshotStore, body: string | Uint8Array, contentType?: string) {
-  const source = campToLookoutSource({ id: "camp-check", websiteUrl: CAMP_URL });
+// A GIF: Forage keeps it as bytes, Traverse resolves its content type to text.
+const GIF = Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x3b]);
+
+function check(store: SnapshotStore, body: string | Uint8Array, contentType?: string, id = "camp-check") {
+  const source = campToLookoutSource({ id, websiteUrl: CAMP_URL });
   return runLookoutCheck(source, { store, fetchSource: forageFetchSource, fetchOptions: toForageFetchOptions(served(body, contentType)) });
 }
 
@@ -122,6 +126,27 @@ describe.each(STORES)("Lookout CHECK through the %s store", (_label, makeStore) 
     const repeat = await check(store, bytes, "text/html; charset=windows-1252");
     expect(repeat.kind).toBe("unchanged-hash");
   });
+
+  it("the drift emitter resolves a binary capture exactly as CHECK stored it", async () => {
+    const store = await makeStore();
+    const checked = await check(store, GIF, "image/gif", "camp-binary");
+    expect(checked.kind, JSON.stringify(checked)).toBe("changed");
+    if (checked.kind !== "changed") return;
+    const source = campToLookoutSource({ id: "camp-binary", websiteUrl: CAMP_URL });
+    // Stored as Lookout's adapter documents: contentType "text" with the bytes on bodyBytes.
+    const [stored] = await store.list(source.id);
+    expect(stored.contentType).toBe("text");
+    expect(stored.bodyBytes).toBeInstanceOf(Uint8Array);
+
+    const root = await tempRoot("binary-emit");
+    const proposals: ExtractionProposal[] = [{ fieldPath: "items[].name", candidateValue: CAMP_NAME, confidence: 0.9, provenance: { excerpt: CAMP_NAME, locator: "chars:0-14" }, extractor: "stub", pathIndices: [0] }];
+    const emitted = await emitCampfitObservation({
+      source, entityKey: "camp-binary", checkedAt: checked.checkedAt, proposals,
+      observation: { sourceId: source.id, snapshotRef: checked.currentSnapshotRef, observedAt: checked.checkedAt, proposals },
+      snapshotStore: store, store: createObservationStore({ root: path.join(root, "observations") }), spoolRoot: path.join(root, "survey"),
+    });
+    expect(emitted.ok, emitted.ok ? "" : `${emitted.error.kind}: ${emitted.error.message}`).toBe(true);
+  });
 });
 
 /** A model stand-in that reads the camp's name and registration status off the prepared page. */
@@ -154,8 +179,8 @@ describe.each(STORES)("Lookout known-camp coordinator over the %s store", (_labe
     const model = countingProvider();
     const campId = "camp-coordinator";
     const current = { id: campId, name: CAMP_NAME, websiteUrl: CAMP_URL } as unknown as Camp;
-    const options = (body: string) => ({ campId, campName: CAMP_NAME, websiteUrl: CAMP_URL, current, provider: model.provider, store, fetchOptions: served(body) });
-    const run = (body: string) => runLookoutRecrawlForCamp(options(body), { observationStore, surveySpoolRoot });
+    const options = (body: string | Uint8Array, contentType?: string) => ({ campId, campName: CAMP_NAME, websiteUrl: CAMP_URL, current, provider: model.provider, store, fetchOptions: served(body, contentType) });
+    const run = (body: string | Uint8Array, contentType?: string) => runLookoutRecrawlForCamp(options(body, contentType), { observationStore, surveySpoolRoot });
     const surveys = async () => (await readdir(surveySpoolRoot).catch(() => [] as string[])).filter((name) => name.endsWith(".json")).length;
     const lookoutId = campToLookoutSource({ id: campId, websiteUrl: CAMP_URL }).id;
     return { store, model, campId, lookoutId, options, run, surveys };
@@ -174,6 +199,17 @@ describe.each(STORES)("Lookout known-camp coordinator over the %s store", (_labe
     expect(repeat.notModified).toBe(true);
     expect(repeat.warnings).toContain("lookout:unchanged-hash");
     expect(h.model.calls()).toBe(1);
+  });
+
+  it("fails closed on a binary page, which Traverse replay cannot prepare, and never reports it unchanged", async () => {
+    const h = await harness();
+    const first = await h.run(GIF, "image/gif");
+    expect(first.ok).toBe(false);
+    expect(first.error).toMatch(/binary/i);
+    const repeat = await h.run(GIF, "image/gif");
+    expect(repeat.ok).toBe(false);
+    expect(repeat.notModified).toBeUndefined();
+    expect(h.model.calls()).toBe(0);
   });
 
   it("a live Traverse recrawl of the same camp does not disturb Lookout's history", async () => {
