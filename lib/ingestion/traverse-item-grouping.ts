@@ -993,6 +993,12 @@ export function assembleItems(
         droppedScheduleLabels.push(label);
         continue;
       }
+      if (endDate !== null && endDate.slice(0, 10) < startDate.slice(0, 10)) {
+        // A session never ends before it starts, wherever its year came from.
+        operatorWarnings.push(`session "${label}" dropped: its end date (${endDate}) is before its start date (${startDate})`);
+        droppedScheduleLabels.push(label);
+        continue;
+      }
       datedRows.push({ row, dateParts, startDate, endDate, label, ...(yearCitation ? { yearCitation } : {}) });
     }
     const timed = assignSessionTimes(datedRows, undatedTimes, options.preparedText);

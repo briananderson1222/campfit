@@ -579,3 +579,84 @@ describe('fix round 5: the broad reading is the years a date line states', () =>
     });
   }
 });
+
+describe('fix round 6: the whole citation states exactly one year', () => {
+  const TWO_LINE: [string, string][] = [
+    ['2026–2027 School Year', 'Week 1: June 14 - 18'],
+    ['Ages 6-12 (2026 & 2027 programs)', 'June 14 - 18'],
+    ['June 14 - 18', 'Was 2025, now 2026'],
+    ['Summer 2026-27 Session 1', 'June 14 - 18'],
+    ['June 14 - 18', '(2026-27)'],
+  ];
+  for (const [a, b] of TWO_LINE) {
+    const cited = `${a}\n\n${b}`;
+    it(`${JSON.stringify(cited)} is refused for every pairing`, async () => {
+      const years = [...new Set([...cited.matchAll(/20\d{2}/g)].map((m) => m[0]))];
+      if (/2026-27/.test(cited)) years.push('2027');
+      const pairings: [string, string][] = [];
+      for (const s of years) for (const e of years) pairings.push([`${s}-06-14`, `${e}-06-18`], [`${s}-12-28`, `${e}-01-03`]);
+      for (const [start, end] of pairings) {
+        const { item, preparedText } = await extract([a, b], session(start, end, cited));
+        expect(preparedText).toContain(cited);
+        expect(item.schedules, `${start}/${end}`).toEqual([]);
+      }
+    });
+  }
+});
+
+describe('fix round 6: the bound exception', () => {
+  const REFUSED: [string, string, string][] = [
+    // I1: the binding is by month, day and year, not by year only.
+    ['June 14, 2026 - June 18, 2027', '2026-01-05', '2027-12-31'],
+    // I2: no other year on the line.
+    ['June 14, 2026 - June 18, 2027 (or 2028)', '2026-06-14', '2027-06-18'],
+    // A day sits right next to its month name, which is a whole word.
+    ['Week 2 June 2026 - July 3, 2027', '2026-06-02', '2027-07-03'],
+    ['Session 3 December 2026 - January 3, 2027', '2026-12-03', '2027-01-03'],
+    ['Mayfield 5, 2026 - Junction 3, 2027', '2026-05-05', '2027-06-03'],
+    // A third date on the line.
+    ['June 7 - June 14, 2026 - June 18, 2027', '2026-06-14', '2027-06-18'],
+  ];
+  for (const [line, start, end] of REFUSED) {
+    it(`${JSON.stringify(line)} as ${start}/${end} is refused`, async () => {
+      const { item } = await extract(['## Sessions', line], session(start, end, line));
+      expect(item.schedules).toEqual([]);
+    });
+  }
+
+  it('control: a day-first line and a heading-free cross-year line still bind', async () => {
+    for (const [line, start, end] of [['Winter week: 28 December 2026 - 3 January 2027', '2026-12-28', '2027-01-03'], ['June 14, 2026 till June 18, 2027', '2026-06-14', '2027-06-18']] as const) {
+      const { item } = await extract(['## Sessions', line], session(start, end, line));
+      expect(item.schedules.map((s) => [s.startDate, s.endDate]), line).toEqual([[start, end]]);
+    }
+  });
+});
+
+describe('fix round 6: a session never ends before it starts', () => {
+  it('a reversed same-year pair from the session\'s own line is refused', async () => {
+    const line = 'Winter week: December 28 - January 3, 2026';
+    const { item } = await extract([line], session('2026-12-28', '2026-01-03', line));
+    expect(item.schedules).toEqual([]);
+    expect(item.operatorWarnings.join(' ')).toContain('is before its start date');
+  });
+});
+
+describe('fix round 6: broad reading coverage', () => {
+  const TWO_YEARS = [
+    'Week 1: June 14 - 18, 2026-٢٧',
+    'Week 1: June 14 - 18, 2026-२७',
+    'Week 1: June 14 - 18, 2026-𝟐𝟕',
+    'Week 1: June 14 - 18, 2026-²⁷',
+    'June 14, 2026 - June 18, 27',
+    'Week 1: June 14 - 18, 2026 -- // ~~ 27',
+    'Week 1: June 14 - 18, 2026FY27',
+    'Week 1: June 14 - 18, 2026 FY-27',
+    'Week 1: June 14 - 18, 2026 10 am - 27',
+  ];
+  for (const line of TWO_YEARS) {
+    it(`${JSON.stringify(line)} is refused as 2026`, async () => {
+      const { item } = await extract([line], session('2026-06-14', '2026-06-18', line));
+      expect(item.schedules).toEqual([]);
+    });
+  }
+});

@@ -446,14 +446,20 @@ drops the page's header, navigation and footer, so text there is not seen.
 Years are read two ways. The broad reading takes every number that could be
 a year: a four-digit 1900-2099 (also in a phone number, a street number, a
 URL path or a room number, or glued to a table cell's time "20279:00");
-every two-digit number chained after such a year by up to three
-non-alphanumeric characters (any dash, "/", ",", ";", "|", "~", "+", "·",
-an apostrophe) or by "to", "through", "thru", "and", "or", "&" ("2026-27",
-"2026 '27", "2026/27/28", "2027 - 12 spots"), except a valid time (H:MM with
-H 0-23 and MM 00-59, or H am/pm with H 1-12: "2027 - 10:00 AM", "2027 -
-9am") and a date written year first ("2027-06-14"); a numeric date's
-two-digit year ("6/14/26"); an abbreviated year ("Summer '26"); and a fiscal
-year ("FY27"). Full-width digits are read as digits. It is the single source
+every two-digit number chained after such a year on the same line by any
+run of non-alphanumeric characters (any dash, "/", ",", ";", "|", "~",
+"+", "·", an apostrophe) or by "to", "through", "thru", "till", "until",
+"and", "or", "&" ("2026-27", "2026 '27", "2026/27/28", "2027 - 12 spots"),
+except a valid time (H:MM with H 0-23 and MM 00-59, or H am/pm with H 1-12:
+"2027 - 10:00 AM", "2027 - 9am"), which is skipped and the chain read on
+("2026 10 am - 27"), and a date written year first ("2027-06-14"); a
+numeric date's two-digit year ("6/14/26"); a two-digit year after a month,
+day and comma when the text also states a four-digit year ("June 18, 27");
+an abbreviated year ("Summer '26"); and a fiscal year ("FY27", "FY-27",
+"2026FY27"). Every Unicode decimal digit (full-width, Arabic-Indic,
+Devanagari, mathematical, superscript) is read as its digit. Not read
+(known gaps): years in words, Roman numerals, joining words beyond the list
+("vs", "und", "y"), double-encoded HTML entities. It is the single source
 of truth for the years a date line, a heading's section or a page states,
 and is used wherever another year makes a rule refuse, so reading too much
 there only refuses. Accepted, fail-closed recall cost: a count or code after
@@ -474,20 +480,27 @@ the clear reading does not.
   the year excerpt under the rules below, or the date is refused. A citation
   that is not stretched keeps today's rule, including a year on the
   session's own label line or year cell ("Summer 2027 Session 1 / June 14 -
-  18"). A date line states year Y only when the broad reading
-  (below) finds exactly that one year on it. A line on which it finds more
-  than one year states none of them, with one exception: a session stated in
-  full across a year boundary. That needs exactly two dates on the line,
-  each followed by its own four-digit year (a month name and day, a day and
-  month name, or a numeric m/d), joined only by a range joiner ("-", "~",
-  "to", "through", "thru", "until"), the second not before the first, and no
-  other year on the line. Then the proposed start date must be the first
-  date and the end date the second, month, day and year
-  ("December 28, 2026 - January 3, 2027" as 2026-12-28 to 2027-01-03 only).
-  "Class of 3, 2027" and "Grades 1-5, 2027" are not dates; "June 14, 2026
-  and June 14, 2027" and "June 14 2026 (rescheduled from June 7 2025)" are
-  refused. Review apply applies the same rule to a row with no year citation
-  whose citation is stretched or has a line stating more than one year.
+  18"). The whole citation, every line of it, must state exactly
+  one year by the broad reading (below), and it must be the date's: a
+  citation stating more than one year anywhere ("2026–2027 School Year /
+  Week 1: June 14 - 18", "June 14 - 18 / (2026-27)") states none of them.
+  One exception: a date line stating one session in full across a year
+  boundary, when no other line of the citation states a year. That needs
+  exactly two dates on the line (and no third date mention), each followed
+  by its own four-digit year, with the day right next to a whole-word month
+  name (month and day, or day and month) or as a numeric m/d; joined only by
+  a range joiner ("-", "~", "to", "through", "thru", "until", "till"); the
+  second not before the first; and no other year on the line. Then the
+  proposed start date must be the first date and the end date the second,
+  month, day and year ("December 28, 2026 - January 3, 2027" as 2026-12-28
+  to 2027-01-03 only). "Class of 3, 2027", "Grades 1-5, 2027", "Week 2 June
+  2026" and "Mayfield 5" are not dates; "June 14, 2026 and June 14, 2027"
+  and "June 14 2026 (rescheduled from June 7 2025)" are refused. A session
+  whose end date is before its start date is refused at extraction and at
+  review apply, wherever its year came from. Review apply applies the same
+  year rule to a row with no year citation whose citation is stretched or
+  has a line stating more than one year; a row with a year citation counts
+  only when none of its dates' date lines states a year.
 - The date's own lines (the lines of a stretched citation that state a
   date; every line of any other citation) state no year in the broad
   reading. A date whose own line states its year keeps today's rule.

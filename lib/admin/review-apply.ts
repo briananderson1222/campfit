@@ -53,7 +53,7 @@ import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import { textStatesTime } from '@/lib/ingestion/session-time';
-import { excerptStatesOnlyYearOf, isStretchedCitation, statesSeveralYearsOnALine, yearOnADateLine } from '@/lib/ingestion/session-year';
+import { excerptStatesOnlyYearOf, isStretchedCitation, statesADate, statesSeveralYearsOnALine, yearOnADateLine, yearsStatedIn } from '@/lib/ingestion/session-year';
 import { keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
@@ -133,7 +133,14 @@ function assertApplicableValues(changes: ProposedChanges, fields: readonly strin
     const diff = changes[field];
     if (!diff) continue;
     const invalid = invalidEnumMembers(field, diff.new);
-    if (invalid.length > 0) {
+    const reversed = field === 'schedules' && Array.isArray(diff.new)
+      ? (diff.new as { label?: unknown; startDate?: unknown; endDate?: unknown }[]).filter((row) =>
+        typeof row?.startDate === 'string' && typeof row?.endDate === 'string' && row.endDate !== '' && row.endDate.slice(0, 10) < row.startDate.slice(0, 10))
+      : [];
+    if (reversed.length > 0) {
+      failing.push(field);
+      problems.push(`"${field}" has a session that ends before it starts (${reversed.map((row) => `${String(row.startDate)} – ${String(row.endDate)}`).join(', ')})`);
+    } else if (invalid.length > 0) {
       failing.push(field);
       problems.push(`"${field}" has value(s) that are not allowed: ${invalid.map((value) => `"${value}"`).join(', ')}`);
     } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field) && Array.isArray(diff.new) && diff.new.length === 0) {
@@ -956,7 +963,11 @@ function checkCitations(changes: ProposedChanges, fields: readonly string[], cit
       // A row with no year citation whose dates' citation was stretched up to
       // a heading (a proposal written before the session-year rules) counts
       // only when one of its date lines states the year (session-year.ts).
-      const ownYearStated = field !== 'schedules' || year !== undefined || stretchedCitationStatesYear(excerpt, (diff.new as unknown[])[index]);
+      // With a year citation, the dates' own lines must state no year at
+      // all (the year came from elsewhere); without one, a stretched or
+      // multi-year citation must state the row's years itself.
+      const ownYearStated = field !== 'schedules'
+        || (year !== undefined ? datesLinesStateNoYear(excerpt) : stretchedCitationStatesYear(excerpt, (diff.new as unknown[])[index]));
       return resolved.state === 'verified' && ownYearStated && (year === undefined || year.checked)
         ? { checked: true, excerpt, locator: resolved.locator, ...extra }
         : { checked: false, excerpt, ...extra };
@@ -991,6 +1002,11 @@ function checkSessionTimeCitation(
   return checked
     ? { checked, excerpt: excerpts.join(' / '), locator: first?.state === 'verified' ? first.locator : undefined }
     : { checked: false, excerpt: excerpts.join(' / ') };
+}
+
+/** For a session row with a year citation: none of its dates' citation's date lines states a year. */
+function datesLinesStateNoYear(excerpt: string): boolean {
+  return excerpt.split('\n').filter((line) => statesADate(line)).every((line) => yearsStatedIn(line).size === 0);
 }
 
 /**

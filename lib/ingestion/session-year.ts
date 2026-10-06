@@ -57,7 +57,11 @@ export function statesADate(text: string): boolean {
  *    year first ("2027-06-14");
  *  - a numeric date's two-digit year ("6/14/26"), an abbreviated year ("Summer
  *    '26") and a fiscal year ("FY27", "FY'27").
- * Full-width digits are read as digits.
+ * Any Unicode decimal digit (full-width, Arabic-Indic, Devanagari,
+ * mathematical, and superscripts after NFKC) is read as its ASCII digit.
+ * A two-digit year after a month and day and a comma ("June 18, 27") is read
+ * when the text also states a four-digit year. A valid time inside a chain
+ * is skipped and the chain read on ("2026 10 am - 27").
  *
  * The CLEAR reading takes only a standalone four-digit year: at the start of
  * the text or after a space, "(", a quote or a Markdown marker, or as the year
@@ -69,10 +73,13 @@ export function statesADate(text: string): boolean {
  * (`clearYearsIn`); otherwise it is not a year excerpt.
  */
 const FOUR_DIGIT_YEAR_RE = /(?<![\d$£€])((?:19|20)\d{2})(?=\d{1,2}:\d{2}|(?!\d))/g;
-const CHAINED_TWO_DIGITS_RE = /^(?:[^\p{L}\p{N}]{1,3}|\s*(?:to|through|thru|and|or|&)\s+)['’‘]?(\d{2})(?!\d)/iu;
+const CHAINED_TWO_DIGITS_RE = /^(?:[^\p{L}\p{N}\n]+|\s*(?:to|through|thru|till|until|and|or|&)\s+)['’‘]?(\d{2})(?!\d)/iu;
 const NUMERIC_DATE_SHORT_YEAR_RE = /(?<![\d/])\d{1,2}\/\d{1,2}\/(\d{2})(?![\d/])/g;
 const ABBREVIATED_YEAR_RE = /(?<![A-Za-z\d])['’‘](\d{2})(?![\d'’])/g;
-const FISCAL_YEAR_RE = /\bFY\s*['’‘]?(\d{2})(?!\d)/gi;
+const FISCAL_YEAR_RE = /(?<![A-Za-z])FY[\s'’‘\-‐‑‒–—―−]*(\d{2})(?!\d)/gi;
+const MONTH_WORD = String.raw`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\.?`;
+/** A two-digit year after a month, a day and a comma ("June 18, 27"). */
+const MONTH_DAY_SHORT_YEAR_RE = new RegExp(String.raw`\b${MONTH_WORD}\s+\d{1,2}(?:st|nd|rd|th)?,\s*['’‘]?(\d{2})(?!\d)`, "gi");
 
 const CLEAR_YEAR_RE = /(?<=^|[\s("'“‘[*_])((?:19|20)\d{2})(?:\s*[-–—]\s*((?:19|20)?\d{2}))?(?=$|[\s.,;:!?)"”’\]*_])/g;
 const NUMERIC_DATE_YEAR_RE = /(?<![\d/])\d{1,2}\/\d{1,2}\/((?:19|20)\d{2})(?![\d/])/g;
@@ -87,9 +94,20 @@ function addYear(years: Set<number>, first: number, second: string | undefined):
   years.add(second.length === 4 ? Number(second) : first - (first % 100) + Number(second));
 }
 
-/** Full-width digits as ASCII digits. */
+/**
+ * Every Unicode decimal digit as its ASCII digit (after NFKC, which folds
+ * full-width and superscript digits). A decimal digit's value is its position
+ * in its run of consecutive decimal digits, modulo ten (Unicode encodes each
+ * script's 0-9 as one run; the mathematical digits as five runs in a row).
+ */
 function normalizeDigits(text: string): string {
-  return text.replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xff10));
+  return text.normalize("NFKC").replace(/\p{Nd}/gu, (digit) => {
+    const code = digit.codePointAt(0)!;
+    if (code >= 0x30 && code <= 0x39) return digit;
+    let position = 0;
+    while (/\p{Nd}/u.test(String.fromCodePoint(code - position - 1))) position++;
+    return String(position % 10);
+  });
 }
 
 /** Whether `hour` followed by `after` is a valid time: H:MM (H 0-23, MM 00-59) or H am/pm (H 1-12). */
@@ -110,7 +128,11 @@ export function yearsStatedIn(raw: string): Set<number> {
     for (let chained = CHAINED_TWO_DIGITS_RE.exec(rest); chained; chained = CHAINED_TWO_DIGITS_RE.exec(rest)) {
       const after = rest.slice(chained[0].length);
       const value = Number(chained[1]);
-      if (isValidTime(value, after)) break;
+      if (isValidTime(value, after)) {
+        // A time is not a year; read on after it ("2026 10 am - 27").
+        rest = after.replace(/^(?::[0-5]\d|\s*[ap]\.?\s?m\b\.?)/i, "");
+        continue;
+      }
       // A date written year first ("2027-06-14", "2027/06/14"): month, then day.
       const separator = chained[0].slice(0, chained[0].length - 2);
       const day = /^([-/.])(\d{1,2})(?!\d)/.exec(after);
@@ -122,23 +144,31 @@ export function yearsStatedIn(raw: string): Set<number> {
   for (const match of text.matchAll(NUMERIC_DATE_SHORT_YEAR_RE)) years.add(2000 + Number(match[1]));
   for (const match of text.matchAll(ABBREVIATED_YEAR_RE)) years.add(2000 + Number(match[1]));
   for (const match of text.matchAll(FISCAL_YEAR_RE)) years.add(2000 + Number(match[1]));
+  if (years.size > 0) for (const match of text.matchAll(MONTH_DAY_SHORT_YEAR_RE)) years.add(2000 + Number(match[2]));
   return years;
 }
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const MONTH_NAME = String.raw`(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?`;
+
 /**
  * A date with its own four-digit year: "June 14, 2026", "June 14th 2026",
- * "14 June 2026", "6/14/2026". A day needs a month name or a numeric
- * month/day: "Class of 3, 2027" and "Grades 1-5, 2027" are not dates.
+ * "14 June 2026", "6/14/2026". A day needs a month name (a whole word:
+ * "Mayfield 5" is not May) or a numeric month/day, and sits right next to
+ * it: "Class of 3, 2027", "Grades 1-5, 2027" and "Week 2 June 2026" are not
+ * dates.
  */
 const FULL_DATE_RE = new RegExp(
-  String.raw`\b${MONTH_NAME}\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{2})(?!\d)` +
-    String.raw`|(?<!\d)(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?${MONTH_NAME},?\s+((?:19|20)\d{2})(?!\d)` +
+  String.raw`\b${MONTH_WORD}\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{2})(?!\d)` +
+    String.raw`|(?<!\d)(?<!\p{L}\s+)(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?${MONTH_WORD},?\s+((?:19|20)\d{2})(?!\d)` +
     String.raw`|(?<![\d/])(\d{1,2})\/(\d{1,2})\/((?:19|20)\d{2})(?![\d/])`,
+  "giu",
+);
+/** Every date mention on a line, with or without a year: a line stating a third date is not one session's two. */
+const ANY_DATE_RE = new RegExp(
+  String.raw`\b${MONTH_WORD}\s+\d{1,2}(?!\d)|(?<!\d)\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?${MONTH_WORD}|(?<![\d/])\d{1,2}\/\d{1,2}(?![\d])`,
   "gi",
 );
-/** What may stand between the two dates of one session: a range joiner, nothing else. */
+/** What may stand between the two dates of one session: a range joiner ("-", "~", "to", "through", "thru", "until", "till"), nothing else. */
 const RANGE_JOINER_RE = /^\s*(?:[-‐‑‒–—―−~]|to|through|thru|until|till)\s*$/i;
 
 function isoDate(year: number, month: number, day: number): string | null {
@@ -162,10 +192,10 @@ export function sessionStatedInFull(line: string): { start: string; end: string 
     let year = 0;
     if (g[1] !== undefined) {
       year = Number(g[3]);
-      iso = isoDate(year, MONTHS.indexOf(g[1].toLowerCase()) + 1, Number(g[2]));
+      iso = isoDate(year, MONTHS.indexOf(g[1].slice(0, 3).toLowerCase()) + 1, Number(g[2]));
     } else if (g[5] !== undefined) {
       year = Number(g[6]);
-      iso = isoDate(year, MONTHS.indexOf(g[5].toLowerCase()) + 1, Number(g[4]));
+      iso = isoDate(year, MONTHS.indexOf(g[5].slice(0, 3).toLowerCase()) + 1, Number(g[4]));
     } else {
       year = Number(g[9]);
       iso = isoDate(year, Number(g[7]), Number(g[8]));
@@ -174,6 +204,7 @@ export function sessionStatedInFull(line: string): { start: string; end: string 
     dates.push({ iso, from: match.index!, to: match.index! + match[0].length, year });
   }
   if (dates.length !== 2) return null;
+  if ([...line.matchAll(ANY_DATE_RE)].length !== 2) return null;
   const [first, second] = dates as [typeof dates[0], typeof dates[0]];
   if (!RANGE_JOINER_RE.test(line.slice(first.to, second.from))) return null;
   if (second.iso < first.iso) return null;
@@ -370,12 +401,14 @@ export function isStretchedCitation(excerpt: string): boolean {
 
 /**
  * The year-in-quote rule for a session date (`value`, `YYYY-MM-DD`, the
- * session's start or end). A date line states year Y only when the broad
- * reading (`yearsStatedIn`, valid times excepted) finds exactly {Y} on it. A
- * line on which it finds more than one year states none of them, with one
- * exception: a session stated in full across a year boundary
- * (`sessionStatedInFull`), and then only for its own start date as the start
- * and its own end date as the end. Otherwise a citation that is not stretched
+ * session's start or end). The whole citation, every line of it, must state
+ * exactly {Y} by the broad reading (`yearsStatedIn`, valid times excepted):
+ * a citation stating more than one year anywhere ("2026–2027 School Year /
+ * Week 1: June 14 - 18") states none of them. One exception: a date line
+ * stating a session in full across a year boundary (`sessionStatedInFull`),
+ * only for its own start date as the start and its own end date as the end,
+ * and only when no other line of the citation states a year. Otherwise a
+ * citation that is not stretched
  * keeps today's rule (it states the year), and a stretched citation ("## 2027
  * Camp Dates / Week 1: June 28 – July 2 / Week 2: ...") must state the year on
  * one of its date lines: the heading is not the date's own text, and its year
@@ -385,21 +418,18 @@ export function yearOnADateLine(excerpt: string, value: string, role: "start" | 
   const year = Number(value.slice(0, 4));
   const lines = excerpt.split("\n").filter((line) => line.trim());
   const dateLines = lines.filter((line) => statesADate(line));
-  let bound = false;
-  for (const line of dateLines.length > 0 ? dateLines : lines) {
-    const years = yearsStatedIn(line);
-    if (years.size <= 1) {
-      if (years.size === 1 && !years.has(year)) return false;
-      continue;
-    }
+  // The one way a citation stating more than one year counts: a date line
+  // stating one session in full across a year boundary, this date being its
+  // start or end as given, and no other line of the citation stating a year.
+  for (const line of dateLines) {
+    if (yearsStatedIn(line).size <= 1) continue;
     const session = sessionStatedInFull(line);
-    if (session && session[role] === value.slice(0, 10)) {
-      bound = true;
-      continue;
-    }
-    return false;
+    return session !== null && session[role] === value.slice(0, 10)
+      && lines.every((other) => other === line || yearsStatedIn(other).size === 0);
   }
-  if (bound) return true;
+  // Otherwise the whole citation, every line of it, states exactly this year.
+  const stated = new Set(lines.flatMap((line) => [...yearsStatedIn(line)]));
+  if (stated.size !== 1 || !stated.has(year)) return false;
   if (!isStretchedCitation(excerpt)) return excerpt.includes(String(year));
   return dateLines.some((line) => {
     const years = yearsStatedIn(line);

@@ -28,6 +28,7 @@ const REVIEWER = 'reviewer@campfit.test';
 const URL = 'https://larkspur.example.test/summer';
 const HEADING = '## 2027 Camp Dates';
 const WEEK_ONE = 'Week 1: June 14 - June 18';
+const WEEK_SIX = 'Week 6: July 19 - 23 (2026-27)';
 
 /** The stored page. Every excerpt below is one of its lines, verbatim and unique. */
 const PAGE = [
@@ -38,6 +39,7 @@ const PAGE = [
   'Camp runs 9:00 AM - 3:30 PM every day.',
   'Dates for 2026 and 2027 are below.',
   'Winter week: December 28, 2026 - January 3, 2027',
+  WEEK_SIX,
 ].join('\n');
 
 const ROW = { label: 'Week 1', startDate: '2027-06-14', endDate: '2027-06-18', startTime: null, endTime: null, earlyDropOff: null, latePickup: null };
@@ -159,7 +161,7 @@ describe('a session whose year comes from another excerpt', () => {
 
   it('fix round 5: a multi-year line with no year citation binds each date to its own year at apply', async () => {
     const winter = 'Winter week: December 28, 2026 - January 3, 2027';
-    const wrong = { ...ROW, label: 'Winter week', startDate: '2027-12-28', endDate: '2027-01-03' };
+    const wrong = { ...ROW, label: 'Winter week', startDate: '2027-12-28', endDate: '2028-01-03' };
     const campId = await seedCamp();
     await approveAll({ schedules: { old: [], new: [wrong], confidence: 0.9, excerpt: winter, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: winter }] } }, campId);
     expect(await datesClaimOf(campId)).not.toBe('verified');
@@ -171,6 +173,23 @@ describe('a session whose year comes from another excerpt', () => {
     const campId = await seedCamp();
     await approveAll({ schedules: { old: [], new: [right], confidence: 0.9, excerpt: winter, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: winter }] } }, campId);
     expect(await datesClaimOf(campId)).toBe('verified');
+  });
+
+  it('fix round 6: a session that ends before it starts is refused at apply, and nothing is written', async () => {
+    const winter = 'Winter week: December 28, 2026 - January 3, 2027';
+    const reversed = { ...ROW, label: 'Winter week', startDate: '2026-12-28', endDate: '2026-01-03' };
+    const campId = await seedCamp();
+    await expect(approveAll({ schedules: { old: [], new: [reversed], confidence: 0.9, excerpt: winter, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: winter }] } }, campId))
+      .rejects.toThrow(/ends before it starts/);
+    const { rows } = await getTestPool().query(`SELECT id FROM "CampSchedule" WHERE "campId" = $1`, [campId]);
+    expect(rows).toEqual([]);
+  });
+
+  it('fix round 6: a row with a year citation whose own date line states two years is not attested', async () => {
+    const campId = await seedCamp();
+    const row = { ...ROW, label: 'Week 6', startDate: '2027-07-19', endDate: '2027-07-23' };
+    await approveAll({ schedules: { old: [], new: [row], confidence: 0.9, excerpt: WEEK_SIX, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: WEEK_SIX, year: { excerpt: HEADING } }] } }, campId);
+    expect(await datesClaimOf(campId)).not.toBe('verified');
   });
 });
 
