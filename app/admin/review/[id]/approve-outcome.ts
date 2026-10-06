@@ -5,11 +5,19 @@
  * comes back in `provenanceErrors`. The page then stays and says so instead
  * of moving on as if everything landed.
  */
-export function approveOutcome(body: { provenanceErrors?: { step: string; message: string }[] } | null | undefined): { stay: boolean; message: string | null } {
-  const errors = body?.provenanceErrors ?? [];
-  if (errors.length === 0) return { stay: false, message: null };
+export function approveOutcome(body: { provenanceErrors?: { step: string; message: string }[] } | null | undefined): {
+  stay: boolean;
+  message: string | null;
+  /** Sessions whose stored time was deliberately kept (not a failure): one sentence each, naming the session. */
+  kept: string[];
+} {
+  const all = body?.provenanceErrors ?? [];
+  const kept = all.filter((entry) => entry.step === 'sessionTimeKept').map((entry) => entry.message);
+  const errors = all.filter((entry) => entry.step !== 'sessionTimeKept');
+  if (errors.length === 0) return { stay: kept.length > 0, message: null, kept };
   return {
     stay: true,
-    message: `Applied, but a follow-up step failed (${errors.map((error) => error.step).join(', ')}): ${errors[0]!.message.slice(0, 300)}. The camp's verification status or history may be out of date until the next change.`,
+    message: `Applied, but a follow-up step failed (${errors.map((error) => error.step).join(', ')}): ${errors.map((error) => error.message.slice(0, 300)).join(' / ')}. The camp's verification status or history may be out of date until the next change.`,
+    kept,
   };
 }

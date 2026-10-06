@@ -564,6 +564,42 @@ describe('a cited time that would replace a value the reviewer was not shown', (
   });
 });
 
+describe('the newest event decides what a session\'s time is', () => {
+  it('J3b: a crawl-cited time, then a steward\'s "no fixed daily time": a later cited time is kept out', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME), campId);
+    const [session] = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-no-fixed-time', scheduleId: session!.id, reason: 'Varies by day.' }, STEWARD);
+    const pending = listDiff([weekOne(null)], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }]);
+    const result = await approveAll({ schedules: pending }, campId);
+    expect(result.provenanceErrors.map((e) => e.step)).toEqual(['sessionTimeKept']);
+    expect((await sessionOf(campId))[0]).toMatchObject({ startTime: null, endTime: null });
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ method: 'no-fixed-time' });
+  });
+
+  it('J3a: "no fixed daily time", then a steward time: a proposal that shows that time applies its cited time', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-no-fixed-time', scheduleId: session!.id, reason: 'Varies by day.' }, STEWARD);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '8:00 AM', endTime: '2:00 PM' }, STEWARD);
+    const pending = listDiff([weekOne({ startTime: '8:00 AM', endTime: '2:00 PM' })], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }]);
+    const result = await approveAll({ schedules: pending }, campId);
+    expect(result.provenanceErrors.map((e) => e.step)).not.toContain('sessionTimeKept');
+    expect((await sessionOf(campId))[0]).toMatchObject({ startTime: '9:00 AM', endTime: '3:30 PM' });
+  });
+
+  it('two stored sessions told apart only by their times: a cited time that is neither\'s, unshown, is refused', async () => {
+    const campId = await seedCamp();
+    const pm = { ...weekOne({ startTime: '1:00 PM', endTime: '4:00 PM' }) };
+    await approveAll(fullChanges(listDiff([], [weekOne({ startTime: '9:00 AM', endTime: '12:00 PM' }), pm], [{ excerpt: WEEK_ONE, times: [{ excerpt: 'morning 9:00 AM - 12:00 PM' }] }, { excerpt: WEEK_ONE, times: [{ excerpt: 'afternoon 1:00 PM - 4:00 PM' }] }])), campId);
+    expect(await sessionOf(campId)).toHaveLength(2);
+    const pending = listDiff([], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }]);
+    await expect(approveAll({ schedules: pending }, campId)).rejects.toThrow('more than one stored session');
+    expect((await sessionOf(campId)).map((s) => s.startTime).sort()).toEqual(['1:00 PM', '9:00 AM']);
+  });
+});
+
 describe('an "intentionally empty" attestation', () => {
   const claimOf = (campId: string, field: string) => `camp.${campId}.field.${field}`;
   async function insertEvent(campId: string, field: string, method: string, secondsFromNow: number) {

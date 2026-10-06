@@ -1065,7 +1065,22 @@ function timeNotShown(diff: FieldDiff, row: IncomingScheduleSnapshot, stored: re
     const same = list.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
     return same.length === 1 ? same[0]! : null;
   };
-  const current = only(stored);
+  const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+  const twins = stored.filter((candidate) => scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
+  if (twins.length > 1) {
+    // Sessions told apart only by their times (morning and afternoon): a
+    // cited time that is one of theirs changes nothing, and the proposal's
+    // `old` list showing exactly these sessions means the reviewer saw what
+    // it replaces. Otherwise which stored value it would replace is unseen.
+    if (twins.some((twin) => sessionTimeKey(twin) === sessionTimeKey(row))) return false;
+    const shownTwins = old.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key).map(sessionTimeKey).sort();
+    if (JSON.stringify(shownTwins) === JSON.stringify(twins.map(sessionTimeKey).sort())) return false;
+    throw new ReviewApplyValueError(
+      `Nothing was applied: "${row.label}" on these dates is more than one stored session, and the page's ${row.startTime}–${row.endTime} is neither's time, so which one it would replace is not settled. Keep the current sessions, or correct them in the camp editor.`,
+      ['schedules'],
+    );
+  }
+  const current = twins[0];
   if (!current) return false;
   if (current.noFixedTime) {
     kept.push(`Session "${row.label}": a steward recorded that it has no fixed daily time, so the page's ${row.startTime}–${row.endTime} was not applied. If the page is right, a steward enters that time for the session.`);

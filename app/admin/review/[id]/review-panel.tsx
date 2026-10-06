@@ -109,6 +109,7 @@ export function ReviewPanel({
   const [campEditFields, setCampEditFields] = useState<Record<string, boolean>>({});
   const [savingCampField, setSavingCampField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [keptSessions, setKeptSessions] = useState<string[]>([]);
   const [persistedSurveyEvents, setPersistedSurveyEvents] = useState<readonly ReviewSessionEvent[]>(surveyReviewEvents);
   const surveyEventPersistence = useMemo(() => (
     surveyReviewSessionId
@@ -180,6 +181,7 @@ export function ReviewPanel({
       const outcome = approveOutcome(await res.json().catch(() => null));
       if (outcome.stay) {
         setErrorMessage(outcome.message);
+        setKeptSessions(outcome.kept);
         setLoading(null);
         router.refresh();
         return;
@@ -414,6 +416,14 @@ export function ReviewPanel({
       </div>
       {recrawlMsg && (
         <p className="text-xs text-pine-600 bg-pine-50 border border-pine-200/60 rounded-lg px-3 py-2">{recrawlMsg}</p>
+      )}
+      {keptSessions.length > 0 && (
+        <div data-testid="kept-session-times" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="font-semibold">Applied. These session times were kept on purpose, not replaced:</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {keptSessions.map((sentence) => <li key={sentence}>{sentence}</li>)}
+          </ul>
+        </div>
       )}
       {errorMessage && (
         <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

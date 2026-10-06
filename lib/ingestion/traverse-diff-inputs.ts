@@ -15,6 +15,8 @@ export interface RowCitation {
    * time; `excerpt` above then cites its dates.
    */
   times?: { excerpt: string; locator?: string }[];
+  /** Sessions only: the time is the page's one daily time, applied to every session; the page line it was read from. */
+  timePageWide?: string;
 }
 
 function rowCitation(excerpt: string, locator: string): RowCitation {
@@ -26,6 +28,7 @@ export function scheduleRowCitation(row: AssembledItem["schedules"][number]): Ro
   return {
     ...rowCitation(row.label, row.locator),
     ...(row.timeCitations.length > 0 ? { times: row.timeCitations.map((time) => rowCitation(time.excerpt, time.locator)) } : {}),
+    ...(row.timePageWideLine ? { timePageWide: row.timePageWideLine } : {}),
   };
 }
 

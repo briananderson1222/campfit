@@ -202,6 +202,8 @@ export interface AssembledItem {
     startTime: string | null;
     endTime: string | null;
     timeCitations: { excerpt: string; locator: string }[];
+    /** Present when the time is the page's one daily time applied to every session: the page line it was read from. */
+    timePageWideLine?: string;
     label: string;
     locator: string;
     confidence?: number;
@@ -629,26 +631,28 @@ function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
  * (session-time.ts), and the rest of the text's LINE states no other time
  * ("Half-day 9am-12pm / full-day 9am-3pm" cited as "9am-3pm" is refused).
  *
- * Whose time it is, by the line it is on (a list item, a table row, a card's
- * line; blank lines are not lines):
+ * Whose time it is, by the line it is on (a list item, a table row; blank
+ * lines are not lines):
  *  - the line of exactly one session's dates: that session's;
- *  - the line directly above or below exactly one session's date line (a
- *    card): that session's; next to two sessions' lines (a header-less
- *    table) it is refused, since either could own it, and so is one of a
- *    block of time lines ("Half day 9-12" / "Full day 9-3");
- *  - a line of its own that states a date or names a session is refused;
- *  - otherwise it is the camp's daily time, for every session without a time
- *    of its own, only when its line states no date and names no session, AND
- *    the whole page outside the session date lines states exactly one time
- *    range, this one. A second range anywhere (another card's time, a time
- *    that was refused, one the model did not extract) means no daily time.
+ *  - any other line is never one session's: a card's time on a line of its
+ *    own, above or below its dates, is refused, because position does not
+ *    say which card it belongs to (the steward-entry guidance covers it);
+ *  - the camp's daily time, for every session without one, only when its
+ *    line is before the first or after the last session line and not right
+ *    next to it (there it may be one card's own time), states no date and
+ *    names no session,
+ *    neither it nor its heading
+ *    reads as office or contact hours, and the whole page outside the
+ *    session date lines states exactly one time range, this one. Such a time
+ *    carries its line (`pageWideLine`) so the review page shows it as a
+ *    page-wide time applied to every session.
  * When in doubt, the time is left out; nothing is filled in from a usual day.
  */
 function assignSessionTimes(
   rows: readonly { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; label: string }[],
   undatedTimes: readonly Map<string, FieldProposal>[],
   preparedText: string | undefined,
-): { times: ({ start: FieldProposal; end: FieldProposal } | null)[]; notes: string[] } {
+): { times: ({ start: FieldProposal; end: FieldProposal; pageWideLine?: string } | null)[]; notes: string[] } {
   type Pair = { start: FieldProposal; end: FieldProposal };
   const notes: string[] = [];
   const pairs: Pair[] = [];
@@ -713,13 +717,8 @@ function assignSessionTimes(
     for (const range of readTimes(preparedText.slice(line.start, line.end)).ranges) outside.set(`${range.start}|${range.end}`, index);
   });
 
-  /** A non-session line that states a time range. */
-  const rangeLine = (index: number) => index >= 0 && index < lines.length && !sessionLineSet.has(index)
-    && readTimes(preparedText.slice(lines[index]!.start, lines[index]!.end)).ranges.length > 0;
-
   const own = new Map<number, Pair>();
-  const conflicted = new Set<number>();
-  let general: Pair | null = null;
+  let general: (Pair & { pageWideLine: string }) | null = null;
   for (const pair of pairs) {
     const span = spanOf(pair.start.locator);
     const covered = linesOf(pair.start.locator);
@@ -736,47 +735,50 @@ function assignSessionTimes(
     }
     const lineText = preparedText.slice(line.start, line.end);
     const onLine = sessionsOnLine(index);
-    if (onLine.length === 0 && (statesADate(lineText) || SESSION_NAME_RE.test(lineText))) {
-      // A line of its own that names a date or a session ("Week 1 hours:
-      // 9-12") is about that session, which its position does not tell.
-      notes.push(`"${pair.start.excerpt}": the cited time is not in any one session's own text`);
+    if (onLine.length === 1) {
+      // On the session's own date line: that session's time.
+      own.set(onLine[0]!, pair);
       continue;
     }
-    const neighbours = onLine.length > 0 ? onLine : [...new Set([...sessionsOnLine(index - 1), ...sessionsOnLine(index + 1)])];
-    if (onLine.length === 0 && neighbours.length > 0 && (rangeLine(index - 1) || rangeLine(index + 1))) {
-      // One of a block of time lines ("Half day 9-12" / "Full day 9-3")
-      // next to a session: the block is not one session's time.
-      notes.push(`"${pair.start.excerpt}": it is one of several time lines together; which session it belongs to is not settled`);
+    if (onLine.length > 1) {
+      notes.push(`"${pair.start.excerpt}": its line carries several sessions' dates; which one it belongs to is not settled`);
       continue;
     }
-    if (neighbours.length === 1) {
-      const session = neighbours[0]!;
-      const existing = own.get(session);
-      if (existing && (existing.start.candidateValue !== pair.start.candidateValue || existing.end.candidateValue !== pair.end.candidateValue)) {
-        conflicted.add(session);
-      } else {
-        own.set(session, pair);
-      }
+    // Not on any session's line. Position near a session (a card's own time
+    // line) does not say whose it is, so it is never one session's.
+    if (statesADate(lineText) || SESSION_NAME_RE.test(lineText)) {
+      notes.push(`"${pair.start.excerpt}": the cited time is not on any one session's own line`);
       continue;
     }
-    if (neighbours.length > 1) {
-      notes.push(`"${pair.start.excerpt}": it sits between two sessions' lines; which one it belongs to is not settled`);
+    const sessionIndices = [...sessionLineSet];
+    if (index >= Math.min(...sessionIndices) - 1 && index <= Math.max(...sessionIndices) + 1) {
+      // Between session lines, or right next to the first or last one, it
+      // may be one card's own time. Refused, never attributed.
+      notes.push(`"${pair.start.excerpt}": it sits among or right next to the session lines; whether it is one session's time or every session's is not settled`);
+      continue;
+    }
+    const heading = lines.slice(0, index).reverse().find((candidate) => preparedText.slice(candidate.start, candidate.end).trimStart().startsWith("#"));
+    const headingText = heading ? preparedText.slice(heading.start, heading.end) : "";
+    if (NOT_CAMP_DAY_RE.test(lineText) || NOT_CAMP_DAY_RE.test(headingText)) {
+      notes.push(`"${pair.start.excerpt}": it reads as office or contact hours, not the camp day`);
       continue;
     }
     const key = `${pair.start.candidateValue}|${pair.end.candidateValue}`;
     if (outside.size !== 1 || !outside.has(key)) {
       notes.push(`"${pair.start.excerpt}": the page states ${outside.size} different time ranges outside the session lines; none is applied to every session`);
     } else {
-      general ??= pair;
+      general ??= { ...pair, pageWideLine: lineText.trim() };
     }
   }
-  for (const session of conflicted) {
-    own.delete(session);
-    notes.push(`"${rows[session]!.label}": the page states different times for this session`);
-  }
-  const times = rows.map((_row, index) => (conflicted.has(index) ? null : own.get(index) ?? general));
+  const times = rows.map((_row, index) => own.get(index) ?? general);
   return { times, notes };
 }
+
+/**
+ * Words that mark a time as the office's, not the camp day's. A page-wide
+ * time on such a line, or under such a heading, is not applied.
+ */
+const NOT_CAMP_DAY_RE = /\b(office|phone|call us|contact|business hours|hours of operation|front desk|reception|customer service)\b/i;
 
 const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i;
 const NUMERIC_DATE_RE = /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/;
@@ -946,6 +948,7 @@ export function assembleItems(
         startTime: time ? (time.start.candidateValue as string) : null,
         endTime: time ? (time.end.candidateValue as string) : null,
         timeCitations: time ? distinctCitations([time.start, time.end]) : [],
+        ...(time?.pageWideLine ? { timePageWideLine: time.pageWideLine } : {}),
         label: dated.label,
         locator: rowLocator(dated.dateParts),
         ...withConfidence(rowConfidence(dated.row)),

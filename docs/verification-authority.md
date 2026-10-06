@@ -445,16 +445,22 @@ defaulted or guessed:
   refused);
 - whose time it is follows from the prepared page text
   (`lib/ingestion/prepared-text.ts`), never from how the model cut its
-  citation; without that text no time is attached. By the line it is on
-  (blank lines are not lines): the line of one session's dates, or the line
-  directly above or below exactly one session's date line (a card), makes it
-  that session's; next to two sessions' lines (a header-less table), one of
-  a block of time lines, or a line of its own that states a date or names a
-  session, it is refused;
-- any other time is the camp's daily time, for every session without its
-  own, only when the WHOLE page outside the session date lines states exactly
-  one time range, this one (a second range anywhere, extracted or not, means
-  none).
+  citation; without that text no time is attached. A time is a session's
+  only when it is on that session's own date line. A time on a line of its
+  own is never one session's, wherever it sits (a card's time above or below
+  its dates is refused: position does not say whose it is);
+- such a line is the camp's daily time, for every session without its own,
+  only when it is before the first or after the last session line and not
+  right next to it, states no date, names no session, does not read as office
+  or contact hours (on the line or under its heading), and the WHOLE page
+  outside the session date lines states exactly one time range, this one.
+  The proposal marks it (`rowCitations[i].timePageWide`, the page line), and
+  the review page shows "Page-wide time applied to every session" with that
+  line, so a reviewer can reject it.
+
+Layouts that therefore get no crawled session time: cards and header-less
+tables that put each session's time on a line of its own. The
+missing-requirements guidance asks a steward for those.
 
 A session listed twice (a summary line and a card) is one session; a time
 one copy states is its time. Two different stated times on the same dates
@@ -471,10 +477,12 @@ when the row cites where its time was read; any other time in a row (one
 unstated and the stored time stays. A cited time that would replace a stored
 value the proposal did not show (a steward's time entered or changed after
 the page was read, a proposal with no `old` row for the session, or a
-steward's "no fixed daily time") is not applied for that session: the stored
+steward's "no fixed daily time", decided by the time claim's newest event) is not applied for that session: the stored
 value stays, the rest of the apply goes through, and the apply result says
 so (`provenanceErrors`, step `sessionTimeKept`), which the review page
-shows. So is a cited time the proposal showed
+shows as a deliberate keep, naming each session. Sessions that share a label
+and dates and are told apart only by their times refuse the apply when the
+cited time is neither stored session's and the proposal did not show them. So is a cited time the proposal showed
 as unchanged (its `old` row had the same time): it was not a change the
 reviewer approved, and a time changed since (by a steward) stays. Known limit:
 sessions that share a label and dates and are told apart only by their times

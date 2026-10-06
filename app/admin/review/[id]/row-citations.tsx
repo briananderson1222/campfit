@@ -26,7 +26,7 @@ export function RowCitations({ proposedChanges }: { proposedChanges: ProposedCha
                 <span className="break-words">{rowSummary(row)}</span>
                 <span className="grid gap-0.5">
                   <q className="break-words text-xs text-bark-500">{diff.rowCitations?.[index]?.excerpt?.trim() || 'no citation'}</q>
-                  <TimeCitation row={row} times={diff.rowCitations?.[index]?.times} />
+                  <TimeCitation row={row} times={diff.rowCitations?.[index]?.times} pageWide={diff.rowCitations?.[index]?.timePageWide} />
                 </span>
               </li>
             ))}
@@ -42,11 +42,21 @@ export function RowCitations({ proposedChanges }: { proposedChanges: ProposedCha
  * kept from the stored session because the page does not state one (an
  * approval does not attest a kept time).
  */
-function TimeCitation({ row, times }: { row: unknown; times: readonly { excerpt: string }[] | undefined }) {
+function TimeCitation({ row, times, pageWide }: { row: unknown; times: readonly { excerpt: string }[] | undefined; pageWide?: string }) {
   const value = (typeof row === 'object' && row !== null ? row : {}) as Record<string, unknown>;
   if (!value.startTime || !value.endTime) return null;
   if (!times || times.length === 0) {
     return <span data-testid="row-time-kept" className="text-xs text-bark-400">time kept from the stored session; the page does not state it</span>;
+  }
+  if (pageWide) {
+    // Not this session's own text: one daily time the page states once,
+    // applied to every session. The reviewer judges whether it is the camp
+    // day (and not, say, office hours).
+    return (
+      <span data-testid="row-time-page-wide" className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-900">
+        <strong>Page-wide time applied to every session.</strong> Check it is the camp day: <q className="break-words">{pageWide}</q>
+      </span>
+    );
   }
   return (
     <span data-testid="row-time-citation" className="text-xs text-bark-500">

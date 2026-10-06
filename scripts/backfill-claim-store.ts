@@ -97,7 +97,7 @@ async function main() {
       log(`  - ${downgrade.campId} ("${downgrade.campName}"): ${downgrade.currentDataConfidence} -> ${downgrade.derivedDataConfidence}`);
     }
     if (impact.downgrades.length > 0) {
-      log('To refresh exactly these camps\' cached status: npx tsx scripts/repair-downgraded-camps.ts --apply');
+      log(`To refresh exactly these camps' cached status: npx tsx scripts/repair-downgraded-camps.ts${allowProduction ? ' --allow-production' : ''} --apply`);
     }
   }
 
