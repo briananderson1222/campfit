@@ -637,6 +637,9 @@ function MarkVerifiedButton({ campId, initial, versionToken }: { campId: string;
   const [confidence, setConfidence] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  // After a save elsewhere on the page the server re-renders with the
+  // camp's new status (an edit takes a verified field out of verified).
+  useEffect(() => { setConfidence(initial); }, [initial]);
   // Verification Gaps from the mark_verified response (bulkAttestCamp's derived
   // outcome, verification-authority--deliver-plan.md Wave 4/5) — populated only
   // after a real attempt, so we know whether a non-VERIFIED result still has
