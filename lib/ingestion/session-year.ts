@@ -85,9 +85,16 @@ export function yearsStatedIn(text: string): Set<number> {
   return years;
 }
 
-/** Whether a text states a short year range ("2026-27", "2026–2027"): two years at once. */
+/**
+ * A year range token: "2026-27", "2026/27", "2026–2027". The second part must
+ * end the token: a year followed by a dash and a time ("2027 - 10:00 AM"), a
+ * count ("2027 - 12 spots left") or a code ("2027-01:") is not a range.
+ */
+const YEAR_RANGE_RE = /(?<![\d$£€])(?:19|20)\d{2}\s*(?:[-–—/]\s*\d{2}|[-–—]\s*(?:19|20)\d{2})(?![\d:/.-]|\s*[-–—/]\s*\d|\s*(?:[ap]\.?m\b|spots?|campers?|kids|children|students|seats?|places|openings|slots?|spaces?|participants|people|weeks?|days?|nights?|hours?|hrs?|minutes?|mins?)\b)/i;
+
+/** Whether a text states a year range ("2026-27", "2026–2027"): two years at once. */
 export function statesAYearRange(text: string): boolean {
-  return [...text.matchAll(BROAD_YEAR_RE)].some((match) => match[2] !== undefined) || /(?<!\d)(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}(?!\d)/.test(text);
+  return YEAR_RANGE_RE.test(text);
 }
 
 /**

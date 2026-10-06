@@ -242,7 +242,7 @@ describe('the review page', () => {
   });
 });
 
-describe('a number that is not a year (fix round 1)', () => {
+describe('fix round 1: a number that is not a year', () => {
   // Each line states 2027 as a phone number, a street number, an amount, a
   // URL path or a room label. None may become the year excerpt, by either
   // rule, and none passes the review-apply check.
@@ -296,7 +296,7 @@ describe('a number that is not a year (fix round 1)', () => {
   });
 });
 
-describe('a year on the session\'s own label line (fix round 2)', () => {
+describe('fix round 1: a year on the session\'s own label line', () => {
   it('"Summer 2027 Session 1" above its dates keeps today\'s behaviour, with another year on the page', async () => {
     const cited = 'Summer 2027 Session 1\n\nJune 14 - 18';
     const { item, preparedText } = await extract(['Summer 2027 Session 1', 'June 14 - 18', 'Founded in 2009.'], session('2027-06-14', '2027-06-18', cited));
@@ -327,7 +327,7 @@ describe('a year on the session\'s own label line (fix round 2)', () => {
   });
 });
 
-describe('guards (fix round 4)', () => {
+describe('fix round 1: guards', () => {
   it('rule 2 does not take a line that also states a date ("Registration opens Jan 5, 2027") as the year excerpt', async () => {
     const { item } = await extract(['Summer 2027 at the meadow.', 'Registration opens Jan 5, 2027.', '## Sessions', W1], session('2027-06-14', '2027-06-18', W1));
     expect(item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['Summer 2027 at the meadow.']);
@@ -339,7 +339,7 @@ describe('guards (fix round 4)', () => {
   });
 });
 
-describe('two-digit years (fix round, low)', () => {
+describe('fix round 1: two-digit and glued years', () => {
   it('"6/14/26" on the session\'s own line is a year there: no year is taken from a heading', async () => {
     const line = 'Week 1: 6/14/26 - 6/18/26';
     const { item } = await extract(['## 2027 Camp Dates', line], session('2027-06-14', '2027-06-18', line));
@@ -355,6 +355,38 @@ describe('two-digit years (fix round, low)', () => {
   it('a year glued to a table cell\'s time ("20269:00 AM") counts as another year on the page', async () => {
     const { item, preparedText } = await extract(['Summer 2027 at the meadow.', '## Sessions', W1, '20269:00 AM - 3:00 PM'], session('2027-06-14', '2027-06-18', W1));
     expect(preparedText).toContain('20269:00 AM');
+    expect(item.schedules).toEqual([]);
+  });
+});
+
+describe('fix round 2: a year followed by a dash and a number on a date line', () => {
+  // A year, a dash and a time or a count is not a two-year range.
+  const ACCEPTED = [
+    'Week 1: June 14 - 18, 2027 - 10:00 AM to 2:00 PM',
+    'Week 1: June 14 - 18, 2027 - 12 spots left',
+    'Week 1: June 14 - 18, 2027 – 30 campers',
+    'Session 2027-01: June 14-18, 2027',
+  ];
+  for (const line of ACCEPTED) {
+    it(`"${line}" keeps today's behaviour`, async () => {
+      const { item } = await extract([line], session('2027-06-14', '2027-06-18', line));
+      expect(item.schedules.map((s) => [s.startDate, s.yearCitation])).toEqual([['2027-06-14', undefined]]);
+    });
+  }
+
+  for (const line of ['Week 1: June 14 - 18 (2026-27)', 'Week 1: June 14 - 18, 2027-2028', 'Week 1: June 14 - 18, 2026/27']) {
+    it(`"${line}" states two years and is refused for either`, async () => {
+      for (const year of ['2026', '2027']) {
+        const { item } = await extract([line], session(`${year}-06-14`, `${year}-06-18`, line));
+        expect(item.schedules, year).toEqual([]);
+      }
+    });
+  }
+
+  it('a governing heading with a number that may be a year refuses, even when a line above clearly states the page\'s only year', async () => {
+    // Without the refusal the heading would read as stating no year, and the
+    // only-year rule would take "Summer 2027 at the meadow." instead.
+    const { item } = await extract(['Summer 2027 at the meadow.', '## Lakeside Camp, 2027 Pine Street', W1], session('2027-06-14', '2027-06-18', W1));
     expect(item.schedules).toEqual([]);
   });
 });
