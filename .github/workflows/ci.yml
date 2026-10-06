@@ -48,6 +48,14 @@ jobs:
       - name: Traverse sources-strategy crawl frontier proof (campfit#133)
         run: npm run test:traverse-crawl
 
+      # Offline Lookout CHECK/drift proofs (no network, no database).
+      - name: Lookout CHECK, drift-gate, event and discovery proofs
+        run: |
+          npm run test:l4-provider-drift
+          npm run test:l4-lookout-check
+          npm run test:l4-lookout-events
+          npm run test:l4-lookout-discovery
+
       - name: Survey value-descriptor mapping proof (campfit#45)
         run: npm run verify:survey-value-descriptor
 

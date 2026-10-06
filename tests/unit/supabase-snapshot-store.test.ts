@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildSnapshotSourceRef, fetchSource, snapshotHashBasis, type Snapshot } from "@kontourai/traverse/fetch";
 import { buildSnapshotSourceRef as buildForageSnapshotRef, parseSnapshotSourceRef as parseForageSnapshotRef } from "@kontourai/forage/fetch";
 
-import { withExactSnapshotLookup } from "@/lib/ingestion/lookout-snapshot-lookup";
+import { fromTraverseSnapshotStore } from "@kontourai/lookout";
 import { isSnapshotIntact } from "@/lib/ingestion/snapshot-integrity";
 
 import {
@@ -197,12 +197,15 @@ describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () =>
   // base64 and must give them back as a Uint8Array, or the capture could not be
   // hashed and referenced again after a read.
   const bytes = Uint8Array.from([0x43, 0x61, 0x66, 0xe9]); // "Café" in windows-1252
+  // A Forage capture as Lookout's CHECK stores it: headers, no contentType.
+  // It reaches the store through Lookout's fromTraverseSnapshotStore, which
+  // adds the contentType Traverse 5 requires.
   const capture = {
     sourceId: "https://charset.example/camps",
     url: "https://charset.example/camps",
     fetchedAt: "2026-09-28T10:00:00.000Z",
     status: 200,
-    contentType: "html",
+    headers: { "content-type": "text/html; charset=windows-1252", etag: '"v1"' },
     body: "Café",
     bytes,
     declaredCharset: "windows-1252",
@@ -211,41 +214,49 @@ describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () =>
 
   it("reads back a byte-exact capture whose Forage reference still resolves", async () => {
     const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
+    const exact = fromTraverseSnapshotStore(store);
     const reference = buildForageSnapshotRef(capture as never);
-    await store.put(capture);
+    await exact.put(capture as never);
 
-    const [readBack] = await store.list(capture.sourceId);
+    // Stored as a Traverse record: contentType added, bytes and headers kept.
+    const [stored] = await store.list(capture.sourceId);
+    expect(stored.contentType).toBe("html");
+    expect((stored as unknown as { headers: unknown }).headers).toEqual((capture as unknown as { headers: unknown }).headers);
+    const [readBack] = await exact.list(capture.sourceId);
     expect((readBack as unknown as { bytes: unknown }).bytes).toBeInstanceOf(Uint8Array);
     expect(buildForageSnapshotRef(readBack as never)).toBe(reference);
 
     const lookup = parseForageSnapshotRef(reference)!;
-    const found = await withExactSnapshotLookup(store).findExact(lookup);
+    const found = await exact.findExact(lookup);
     expect(found.kind).toBe("found");
   });
 
   it("exact lookup refuses a hash prefix and a mismatched envelope digest", async () => {
     const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
-    await store.put(capture);
-    const exact = withExactSnapshotLookup(store);
+    const exact = fromTraverseSnapshotStore(store);
+    await exact.put(capture as never);
     const lookup = parseForageSnapshotRef(buildForageSnapshotRef(capture as never))!;
 
     expect((await exact.findExact({ ...lookup, bodyHash: lookup.bodyHash.slice(0, 16).padEnd(64, "0") })).kind).toBe("missing");
     expect((await exact.findExact({ ...lookup, snapshotDigest: "0".repeat(64) })).kind).toBe("mismatch");
-    expect((await exact.findExact({ ...lookup, url: "https://charset.example/other" })).kind).toBe("mismatch");
+    // Lookout's adapter matches the URL as part of the identity, so another
+    // URL finds nothing; Lookout refuses a missing reference as it does a
+    // mismatched one.
+    expect((await exact.findExact({ ...lookup, url: "https://charset.example/other" })).kind).toBe("missing");
   });
 
   it('exact lookup never returns a same-hash capture from a different fetch', async () => {
     const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
     const later = { ...capture, fetchedAt: '2026-09-29T10:00:00.000Z' } as unknown as Snapshot;
     const laterLookup = parseForageSnapshotRef(buildForageSnapshotRef(later as never))!;
-    const exact = withExactSnapshotLookup(store);
+    const exact = fromTraverseSnapshotStore(store);
 
     // Only the earlier fetch is stored: the later reference must not resolve to it.
-    await store.put(capture);
+    await exact.put(capture as never);
     expect((await exact.findExact({ ...laterLookup, snapshotDigest: undefined })).kind).toBe('missing');
 
     // Both fetches stored: each reference resolves to its own capture.
-    await store.put(later);
+    await exact.put(later as never);
     const found = await exact.findExact(laterLookup);
     expect(found.kind).toBe('found');
     expect(found.kind === 'found' && found.snapshot.fetchedAt).toBe('2026-09-29T10:00:00.000Z');

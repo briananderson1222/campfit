@@ -1,7 +1,7 @@
-import { createCheckRunner, type CheckResult, type ExtractableLookoutSource, type LookoutSource, type RenderPolicy, type ObservationStore, type ProposalSetObservation } from "@kontourai/lookout";
+import { createCheckRunner, fromTraverseSnapshotStore, type CheckResult, type ExtractableLookoutSource, type LookoutSource, type RenderPolicy, type ObservationStore, type ProposalSetObservation } from "@kontourai/lookout";
 import type { FetchSource, CreateCheckRunnerOptions } from "@kontourai/lookout";
 import type { ExtractionProposal } from "@kontourai/traverse";
-import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
+import { toForageFetchOptions, isSameSnapshotRef, parseAnySnapshotSourceRef, type SnapshotStore as TraverseSnapshotStore } from "@kontourai/traverse/fetch";
 import { fetchSource as forageFetchSource } from "@kontourai/forage/fetch";
 import { createGuardedFetch, type EgressResponseOracle } from "@kontourai/forage/egress";
 import type { Camp } from "@/lib/types";
@@ -13,7 +13,14 @@ import { createGuardedTraverseFetchOptions, type EgressResolver } from "@/lib/se
 export { LOOKOUT_CADENCE_HINT, campToLookoutSource, listingToLookoutSource } from "./lookout-sources";
 import { campToLookoutSource } from "./lookout-sources";
 
-export interface RunLookoutCheckOptions extends Omit<CreateCheckRunnerOptions, "fetchSource"> {
+export interface RunLookoutCheckOptions extends Omit<CreateCheckRunnerOptions, "fetchSource" | "store"> {
+  /**
+   * CampFit's Traverse snapshot store. Lookout reads and writes Forage
+   * captures, which a Traverse 5 store refuses (no `contentType`), so it is
+   * always wrapped with Lookout's `fromTraverseSnapshotStore` here, the one
+   * place every CHECK passes through.
+   */
+  store: TraverseSnapshotStore;
   fetchSource: FetchSource;
   userAgent?: string;
   /** Deterministic threat-fixture seam; production uses the canonical resolver. */
@@ -72,11 +79,29 @@ export async function runLookoutCheck(source: LookoutSource, options: RunLookout
   const fetchOptions = resolver || egressResponseOracle
     ? { ...plainFetchOptions, fetch: createGuardedFetch({ ...(resolver ? { resolver } : {}), ...(egressResponseOracle ? { responseOracle: egressResponseOracle } : {}) }) }
     : options.fetchOptions;
-  return createCheckRunner({ ...options, fetchOptions, fetchSource }).check(source);
+  return createCheckRunner({ ...options, store: fromTraverseSnapshotStore(options.store), fetchOptions, fetchSource }).check(source);
 }
 
 export function isLookoutUnchanged(result: CheckResult): boolean {
   return result.kind === "unchanged-304" || result.kind === "unchanged-hash";
+}
+
+/**
+ * Whether an unchanged CHECK's capture is the content the latest committed
+ * observation was made from: same source, URL and body hash. CHECK reports
+ * `unchanged` against the latest stored capture, which is not always the one
+ * an observation was committed for: a replay or emission that failed after a
+ * `changed` CHECK leaves that capture stored and the observation behind it.
+ * Skipping on such a result would never extract the change. Body hash, not
+ * the full reference, because a repeat with new validators is stored as a
+ * new capture of the same content. A reference that does not parse is not a
+ * match.
+ */
+export function isObservedContent(observedSnapshotRef: string, checkedSnapshotRef: string): boolean {
+  const observed = parseAnySnapshotSourceRef(observedSnapshotRef);
+  const checked = parseAnySnapshotSourceRef(checkedSnapshotRef);
+  return observed !== null && observed !== undefined && checked !== null && checked !== undefined &&
+    observed.sourceId === checked.sourceId && observed.url === checked.url && observed.bodyHash === checked.bodyHash;
 }
 
 /**
@@ -113,16 +138,25 @@ export async function runLookoutRecrawlForCamp(
   if (checked.kind === "error") {
     return failed(options, `lookout-check:${checked.origin}:${checked.error.kind}: ${checked.error.message}`);
   }
+  // The capture this run classified; the replay below must read exactly it.
+  let currentSnapshotRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
+  const replayOptions = { ...options, requiresRender: false, mode: "replay" as const, fetchOptions: undefined, replaySourceId: source.id };
+  let unchangedSinceObservation = false;
   if (checked.kind === "unchanged-304" || checked.kind === "unchanged-hash") {
-    const snapshotRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
+    const snapshotRef = currentSnapshotRef;
     const persisted = observationStore ? await observationStore.loadLatest(source.id) : null;
     let baselineResult: TraverseRecrawlResult | null = null;
     if (persisted && !persisted.ok) return failed(options, `lookout-baseline:${persisted.error.kind}: ${persisted.error.message}`);
+    // Unchanged against the latest capture, but not the content the latest
+    // observation was made from: extract and emit it as a change instead of
+    // skipping (see isObservedContent).
+    unchangedSinceObservation = Boolean(persisted?.value) && !isObservedContent(persisted!.value!.snapshotRef, snapshotRef);
     if (!persisted || persisted.value === null) {
-      // CHECK can be unchanged on first enablement because Traverse already has
-      // a production snapshot corpus. Replay that exact classified snapshot to
-      // seed Lookout's observation baseline without reviewer-visible events.
-      const baseline = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
+      // CHECK can be unchanged with no observation when Lookout's captures
+      // outlive its observation store (durable snapshot storage, local
+      // observations). Replay that exact classified snapshot to seed Lookout's
+      // observation baseline without reviewer-visible events.
+      const baseline = await replayCamp(replayOptions);
       baselineResult = baseline;
       if (!baseline.ok) return failed(options, `lookout-baseline:${baseline.error}`);
       if (!isSameSnapshotRef(baseline.snapshot.ref ?? '', snapshotRef)) return failed(options, `lookout-baseline:snapshot-mismatch: classified ${snapshotRef}, replayed ${baseline.snapshot.ref ?? "none"}`);
@@ -152,13 +186,15 @@ export async function runLookoutRecrawlForCamp(
         warnings: [...checked.warnings, ...baselineResult.warnings, `lookout:${checked.kind}`],
       };
     }
-    return { ...failed(options, ""), ok: true, notModified: true, error: null, snapshot: { ref: snapshotRef, bodyHash: null }, warnings: [...checked.warnings, `lookout:${checked.kind}`] };
+    if (!unchangedSinceObservation) {
+      return { ...failed(options, ""), ok: true, notModified: true, error: null, snapshot: { ref: snapshotRef, bodyHash: null }, warnings: [...checked.warnings, `lookout:${checked.kind}`] };
+    }
   }
   // The plain extraction classifies shell content only; it cannot render on
   // its own. A shell warning triggers one separately Lookout-classified render.
-  let replayed = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
-  if (!isSameSnapshotRef(replayed.snapshot.ref ?? '', checked.currentSnapshotRef)) {
-    return failed(options, `lookout-check:snapshot-mismatch: classified ${checked.currentSnapshotRef}, replayed ${replayed.snapshot.ref ?? "none"}`);
+  let replayed = await replayCamp(replayOptions);
+  if (!isSameSnapshotRef(replayed.snapshot.ref ?? '', currentSnapshotRef)) {
+    return failed(options, `lookout-check:snapshot-mismatch: classified ${currentSnapshotRef}, replayed ${replayed.snapshot.ref ?? "none"}`);
   }
   const shellWarning = replayed.warnings.some((warning) => warning.startsWith("js-shell-suspected:"));
   if (policy === "on-shell-warning" && shellWarning && options.fetchOptions?.renderImpl) {
@@ -173,9 +209,10 @@ export async function runLookoutRecrawlForCamp(
         ? `lookout-check:${checked.origin}:${checked.error.kind}: ${checked.error.message}`
         : `lookout-check:render-retry-${checked.kind}`);
     }
-    replayed = await replayCamp({ ...options, requiresRender: false, mode: "replay", fetchOptions: undefined });
-    if (!isSameSnapshotRef(replayed.snapshot.ref ?? '', checked.currentSnapshotRef)) {
-      return failed(options, `lookout-check:snapshot-mismatch: classified ${checked.currentSnapshotRef}, replayed ${replayed.snapshot.ref ?? "none"}`);
+    currentSnapshotRef = checked.currentSnapshotRef;
+    replayed = await replayCamp(replayOptions);
+    if (!isSameSnapshotRef(replayed.snapshot.ref ?? '', currentSnapshotRef)) {
+      return failed(options, `lookout-check:snapshot-mismatch: classified ${currentSnapshotRef}, replayed ${replayed.snapshot.ref ?? "none"}`);
     }
   }
   if (!replayed.ok) return replayed;
@@ -185,7 +222,7 @@ export async function runLookoutRecrawlForCamp(
   const proposals = selection.proposals;
   const observation: ProposalSetObservation = {
     sourceId: source.id,
-    snapshotRef: checked.currentSnapshotRef,
+    snapshotRef: currentSnapshotRef,
     observedAt: checked.checkedAt,
     proposals,
     // Lookout never reports a proposal missing from an incomplete run as
@@ -194,6 +231,7 @@ export async function runLookoutRecrawlForCamp(
   };
   const emission = await emitCampfitObservation({
     source, observation, checkedAt: checked.checkedAt, proposals,
+    resultKind: checked.kind === "changed" ? "changed" : "unchanged-hash",
     entityKey: options.campId, store: observationStore, snapshotStore: options.store,
     spoolRoot: deps.surveySpoolRoot, now: deps.clock, faults: deps.emissionFaults,
   });

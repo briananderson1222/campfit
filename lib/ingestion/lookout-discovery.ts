@@ -4,7 +4,7 @@ import type { FetchSourceOptions, SnapshotStore } from "@kontourai/traverse/fetc
 import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { createDriftEmitter, diffProposalSets, extractionProposalIdentity } from "@kontourai/lookout";
+import { createDriftEmitter, diffProposalSets, extractionProposalIdentity, fromTraverseSnapshotStore } from "@kontourai/lookout";
 import type { ExtractableLookoutSource, StoredProposalObservation } from "@kontourai/lookout";
 import { toForageFetchOptions, isSameSnapshotRef } from "@kontourai/traverse/fetch";
 import { authorDriftSurveyInput } from "./lookout-survey-authoring";
@@ -16,13 +16,12 @@ import {
   type DiscoveryObservation,
 } from "./llm-discovery";
 import { discoverCampsFromUrl } from "./llm-discovery";
-import { runLookoutCheck } from "./lookout-check-adapter";
-import { withExactSnapshotLookup } from "./lookout-snapshot-lookup";
+import { isObservedContent, runLookoutCheck } from "./lookout-check-adapter";
 import { createCampfitObservationStore, persistSurveyInput } from "./lookout-observation-store";
 import { assignGlobalItemIndices } from "./traverse-item-grouping";
 
 export { DISCOVERY_SOURCE_PREFIX, discoverySourceId, listingToLookoutSource } from "./lookout-sources";
-import { discoverySourceId, listingToLookoutSource } from "./lookout-sources";
+import { discoverySourceId, listingToLookoutSource, lookoutSourceId } from "./lookout-sources";
 
 function eventProposal(evidence: NewEntityAppearedEvent["current"][number]): ExtractionProposal {
   return {
@@ -45,7 +44,7 @@ export function discoveryEventToStub(
   sourceUrl: string,
 ): DiscoveredCampStub | null {
   if (event.kind !== "new-entity-appeared" || event.current.length === 0) return null;
-  const sourceId = discoverySourceId(sourceUrl);
+  const sourceId = lookoutSourceId(discoverySourceId(sourceUrl));
   if (event.current.some((item) => item.sourceId !== sourceId)) return null;
   const snapshotRefs = new Set(event.current.map((item) => item.snapshotRef));
   if (snapshotRefs.size !== 1) return null;
@@ -248,14 +247,22 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   if (unchangedEnablement) {
     const latestObservation = await observationStore.loadLatest(source.id);
     if (!latestObservation.ok) throw new Error(`lookout-listing:observation-${latestObservation.error.kind}: ${latestObservation.error.message}`);
-    if (latestObservation.value) return { ...recovered, unchanged: true, baseline: false };
+    // Skip only when the unchanged capture is the content the latest
+    // observation was made from; otherwise replay and emit it (see
+    // isObservedContent).
+    const classifiedRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
+    if (latestObservation.value && isObservedContent(latestObservation.value.snapshotRef, classifiedRef)) {
+      return { ...recovered, unchanged: true, baseline: false };
+    }
   }
 
-  // On first enablement an existing Traverse snapshot may classify unchanged.
-  // Replay that exact classified snapshot to seed Lookout's listing baseline;
-  // native first-observation semantics guarantee zero events/inserts/survey.
+  // Replay exactly the classified snapshot. An unchanged CHECK reaches here
+  // with no observation (first enablement, or Lookout's captures outliving its
+  // observation store), which seeds the listing baseline with zero
+  // events/inserts/survey, or with an observation of other content, which
+  // emits the difference.
   let snapshotRef = checked.kind === "unchanged-304" ? checked.snapshotRef : checked.currentSnapshotRef;
-  let discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay" });
+  let discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay", replaySourceId: source.id });
   if (discovery.error || !discovery.proposals) throw new Error(discovery.error ?? "Lookout listing replay returned no proposals");
   if (!isSameSnapshotRef(discovery.sourceRef ?? '', snapshotRef)) {
     throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
@@ -272,7 +279,7 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
     });
     if (checked.kind !== "changed") throw new Error(`lookout-listing:render-retry-${checked.kind}`);
     snapshotRef = checked.currentSnapshotRef;
-    discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay" });
+    discovery = await discoverCampsFromUrl(url, { provider: options.provider, store: options.store, mode: "replay", replaySourceId: source.id });
     if (discovery.error || !discovery.proposals) throw new Error(discovery.error ?? "Lookout listing rendered replay returned no proposals");
     if (!isSameSnapshotRef(discovery.sourceRef ?? '', snapshotRef)) throw new Error(`lookout-listing:snapshot-mismatch: classified ${snapshotRef}, replayed ${discovery.sourceRef ?? "none"}`);
   }
@@ -287,7 +294,7 @@ export async function runLookoutListingDiscovery(url: string, options: RunLookou
   const recordedAt = new Date().toISOString();
   const emitter = createDriftEmitter<ProposalEntity>({
     now: () => recordedAt,
-    snapshotStore: withExactSnapshotLookup(options.store),
+    snapshotStore: fromTraverseSnapshotStore(options.store),
     store: {
       loadLatest: async (sourceId) => {
         const loaded = await observationStore.loadLatest(sourceId);

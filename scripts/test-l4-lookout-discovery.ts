@@ -18,7 +18,9 @@ import { filterNewDiscoveries } from "../lib/ingestion/llm-discovery";
 import { createDiscoveryPlaceholderRepository } from "../lib/ingestion/lookout-discovery-repository";
 
 const url = "https://fixture.example/programs";
-const sourceId = discoverySourceId(url);
+// Lookout's listing lineage is namespaced away from the discovery id
+// Traverse's live discovery fetch writes (lookout-sources.ts).
+const sourceId = listingToLookoutSource(url).id;
 const priorRef = `traverse-snapshot:${encodeURIComponent(sourceId)}?url=${encodeURIComponent(url)}&sha256=${"a".repeat(64)}&fetchedAt=2026-07-10T00%3A00%3A00.000Z`;
 const currentRef = `traverse-snapshot:${encodeURIComponent(sourceId)}?url=${encodeURIComponent(url)}&sha256=${"b".repeat(64)}&fetchedAt=2026-07-11T00%3A00%3A00.000Z`;
 
@@ -56,7 +58,8 @@ assert.equal(diff.value.events.length, 1, "2-to-3 observation must emit exactly 
 assert.equal(diff.value.events[0]?.kind, "new-entity-appeared");
 
 const source = listingToLookoutSource(url);
-assert.equal(source.id, `campfit-discovery:${url}`, "listing ID must preserve the exact legacy lineage");
+assert.equal(source.id, `lookout:${discoverySourceId(url)}`, "listing ID is the discovery id under Lookout's own namespace");
+assert.notEqual(source.id, discoverySourceId(url), "Lookout never shares a source id with Traverse's live discovery fetch");
 assert.deepEqual((source.targetSchema ?? []).map((field) => field.path), ["items[].name", "items[].detailUrl", "items[].snippet"]);
 
 // E7 has its own listing-source fixture even though it intentionally shares
@@ -179,7 +182,7 @@ assert.ok(commitFailure.calls.includes("ROLLBACK"));
 const coordinatorRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-listing-coordinator-"));
 try {
   const listingUrl = "https://coordinator.test/programs";
-  const listingId = discoverySourceId(listingUrl);
+  const listingId = listingToLookoutSource(listingUrl).id;
   const store = createInMemorySnapshotStore();
   let body = "Alder Hiking Beacon Art";
   let providerNames = ["Alder Hiking", "Beacon Art"];
@@ -188,12 +191,20 @@ try {
   // itself an invalid snapshot. Round identity comes from the body changing,
   // exactly as it does in production.
   const snap = (fetchedAt: string): Snapshot => ({ sourceId: listingId, url: listingUrl, fetchedAt, status: 200, contentType: "html", body, bodyHash: createHash("sha256").update(body).digest("hex") });
+  // The fetch returns a Forage capture (no contentType), as Forage does.
+  const forage = (record: Snapshot) => {
+    const { contentType: _contentType, ...capture } = record;
+    void _contentType;
+    return { ...capture, headers: { "content-type": "text/html" } };
+  };
   let currentSnapshot = snap("2026-07-10T00:00:00.000Z");
   await store.put(currentSnapshot);
+  let providerFails = false;
   const provider: ExtractionProvider = {
     name: "listing-fixture",
     async extract({ content }) {
       void content;
+      if (providerFails) throw new Error("injected listing provider failure");
       return { proposals: providerNames.map((name, index) => ({ fieldPath: `items[${index}].name`, candidateValue: name, confidence: 0.96, provenance: { excerpt: name, locator: `chars:${index * 13}-${index * 13 + name.length}` }, extractor: "fixture" })), raw: { response: "{}", model: "listing-fixture" } };
     },
   };
@@ -216,20 +227,35 @@ try {
     },
   };
   const common = { provider, store, repository: coordinatorRepository, observationStore: observationStore as never, surveyRoot: path.join(coordinatorRoot, "survey"), pendingRoot: path.join(coordinatorRoot, "pending") };
-  const baseline = await runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: currentSnapshot }) });
+  const baseline = await runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: forage(currentSnapshot) }) });
   assert.equal(baseline.baseline, true); assert.equal(baseline.inserted, 0); assert.equal(baseline.unchanged, true);
   assert.deepEqual(await readdir(path.join(coordinatorRoot, "survey")).catch(() => []), []);
   body = "Alder Hiking Beacon Art Cedar Science";
   providerNames = ["Alder Hiking", "Beacon Art", "Cedar Science"];
   currentSnapshot = snap("2026-07-11T00:00:00.000Z");
   failObservation = true;
-  await assert.rejects(runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: currentSnapshot }) }), /[Ee]mission failed/);
+  await assert.rejects(runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: forage(currentSnapshot) }) }), /[Ee]mission failed/);
   assert.equal(camps.has("Cedar Science"), true, "DB effect survives observation failure");
-  const recoveredRun = await runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: currentSnapshot }) });
+  const recoveredRun = await runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: forage(currentSnapshot) }) });
   assert.equal(recoveredRun.unchanged, true); assert.equal(camps.size, 3);
   assert.equal((await readdir(path.join(coordinatorRoot, "survey"))).filter((name) => name.endsWith(".json")).length, 1);
   const latestObservation = await delegate.loadLatest(listingId);
   assert.ok(latestObservation.ok && latestObservation.value?.snapshotRef.includes("da8cf57d0d3d15d2824d85d480343289082d0173b91b4ba43c4b8685b5fedfea"));
+
+  // A changed CHECK stores its capture before the replay runs. When the
+  // replay fails, the next CHECK of the same page classifies unchanged against
+  // that capture, but no observation was made of it: it must be extracted and
+  // its new entry inserted, not skipped.
+  body = "Alder Hiking Beacon Art Cedar Science Dove Studio";
+  providerNames = ["Alder Hiking", "Beacon Art", "Cedar Science", "Dove Studio"];
+  currentSnapshot = snap("2026-07-12T00:00:00.000Z");
+  providerFails = true;
+  await assert.rejects(runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: forage(currentSnapshot) }) }));
+  providerFails = false;
+  assert.equal(camps.has("Dove Studio"), false);
+  const afterFailedReplay = await runLookoutListingDiscovery(listingUrl, { ...common, fetchSource: async () => ({ snapshot: forage(currentSnapshot) }) });
+  assert.equal(afterFailedReplay.inserted, 1, "the change a failed replay left unobserved is extracted on the next unchanged CHECK");
+  assert.equal(camps.has("Dove Studio"), true);
 } finally { await rm(coordinatorRoot, { recursive: true, force: true }); }
 
 console.log("PASS L4 discovery: stable listing ID; DB-first durable ordering; observation catch-up; idempotent PLACEHOLDER");

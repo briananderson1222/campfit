@@ -47,13 +47,23 @@ export interface DiscoveryOptions {
   maxProviderCalls?: number;
   maxTotalTokens?: number;
   egressProfile?: EgressPolicyProfile;
+  /**
+   * Replay the capture stored under this source id instead of the listing's
+   * discovery id. Lookout's listing discovery replays the capture its CHECK
+   * stored under its own source id. Replay only: a live fetch always writes
+   * under the discovery id, and a live call that names one is refused.
+   */
+  replaySourceId?: string;
 }
 
 export async function discoverCampsFromUrl(url: string, options: DiscoveryOptions): Promise<DiscoveryResult> {
   const model = options.provider.name;
+  if (options.replaySourceId !== undefined && options.mode !== "replay") {
+    return { isListingPage: false, stubs: [], model, error: "replaySourceId is replay-only: a live fetch writes under the discovery id" };
+  }
   try {
     const result = await fetchAndExtractWithRevalidation(
-      { id: `campfit-discovery:${url}`, url, contentType: "html", userAgent: CAMPFIT_FETCH_USER_AGENT },
+      { id: options.replaySourceId ?? `campfit-discovery:${url}`, url, contentType: "html", userAgent: CAMPFIT_FETCH_USER_AGENT },
       {
         targetSchema: DISCOVERY_TARGET_SCHEMA,
         fieldHints: DISCOVERY_FIELD_HINTS,

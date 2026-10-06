@@ -25,8 +25,8 @@ importers:
         specifier: ^1.0.1
         version: 1.0.1(playwright@1.60.0)
       '@kontourai/lookout':
-        specifier: 0.8.7
-        version: 0.8.7(@anthropic-ai/sdk@0.102.0(zod@4.4.3))(@kontourai/relay@0.7.0(@ai-sdk/provider@4.0.3)(@anthropic-ai/sdk@0.102.0(zod@4.4.3)))(playwright@1.60.0)(typescript@6.0.3)
+        specifier: 0.8.8
+        version: 0.8.8(@anthropic-ai/sdk@0.102.0(zod@4.4.3))(@kontourai/relay@0.7.0(@ai-sdk/provider@4.0.3)(@anthropic-ai/sdk@0.102.0(zod@4.4.3)))(playwright@1.60.0)(typescript@6.0.3)
       '@kontourai/relay':
         specifier: ^0.7.0
         version: 0.7.0(@ai-sdk/provider@4.0.3)(@anthropic-ai/sdk@0.102.0(zod@4.4.3))
@@ -677,8 +677,8 @@ packages:
       playwright:
         optional: true
 
-  '@kontourai/lookout@0.8.7':
-    resolution: {integrity: sha512-+iSVZgobs1Tq1gZfSN2e85oywn0SGuvBsmlWT4S0Ii6t9OwpAwCBTSBhU1dHkBlY9kDKtBztuQg8x4qtuv1QrQ==}
+  '@kontourai/lookout@0.8.8':
+    resolution: {integrity: sha512-X62Rngw+i19WflbqS+pIGRczRp7ayes+Pac4yTXR9xrfC9GWzhrpI62wRpFaM6rccQZv1L07Kwr+EIUfTlldow==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -3774,7 +3774,7 @@ snapshots:
     optionalDependencies:
       playwright: 1.60.0
 
-  '@kontourai/lookout@0.8.7(@anthropic-ai/sdk@0.102.0(zod@4.4.3))(@kontourai/relay@0.7.0(@ai-sdk/provider@4.0.3)(@anthropic-ai/sdk@0.102.0(zod@4.4.3)))(playwright@1.60.0)(typescript@6.0.3)':
+  '@kontourai/lookout@0.8.8(@anthropic-ai/sdk@0.102.0(zod@4.4.3))(@kontourai/relay@0.7.0(@ai-sdk/provider@4.0.3)(@anthropic-ai/sdk@0.102.0(zod@4.4.3)))(playwright@1.60.0)(typescript@6.0.3)':
     dependencies:
       '@kontourai/datum': 0.8.0(playwright@1.60.0)
       '@kontourai/forage': 1.0.1(playwright@1.60.0)

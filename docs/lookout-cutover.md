@@ -4,16 +4,23 @@ Camp rows in PostgreSQL remain the canonical reviewed state. Lookout sources are
 
 ## Source identity
 
-- Known camps retain the historical raw `Camp.id` snapshot source ID.
-- Listing pages retain `campfit-discovery:${url}`.
+Lookout keeps its captures in CampFit's snapshot store, wrapped with Lookout's `fromTraverseSnapshotStore` (Lookout 0.8.8), under source IDs that no Traverse fetch writes:
 
-Changing either ID starts a new validator, snapshot, and observation lineage and is therefore prohibited.
+- Known camps: `lookout:${Camp.id}`. The legacy Traverse recrawl writes under the raw `Camp.id`.
+- Listing pages: `lookout:campfit-discovery:${url}`. Traverse's live discovery writes under `campfit-discovery:${url}`.
+- Drift-gated provider sources: `lookout:${key}`. The sources-strategy extraction writes under `key`.
+
+Lookout compares each fetch with the latest capture under its source ID. Under a shared ID a Traverse capture becomes that prior: a capture Traverse hashed over decoded text makes every later CHECK `changed`, a Traverse capture carries no validators so no `304` is ever answered, and a Traverse capture of new content between two CHECKs would let the second report unchanged against content no observation was made of. The Lookout coordinators replay their own capture by passing the Lookout source ID as a replay-only `replaySourceId`; a live Traverse fetch that names one is refused.
+
+These IDs started a new Lookout lineage (they replaced the raw `Camp.id` and `campfit-discovery:${url}` IDs Lookout used before). Captures and observations recorded under the old IDs stay in place and still read; review, apply and attestation resolve snapshot references by the source ID inside the reference. The first CHECK of each source under the new ID records a new baseline. A pending Survey delivery staged under an old ID is not reconciled under the new one. Changing these IDs again starts another lineage.
+
+An unchanged CHECK (`304` or hash) skips extraction only when its capture has the source, URL and body hash of the latest committed observation. Otherwise (a replay or emission failed after a changed CHECK stored its capture, or the store holds a capture no observation was made of) the coordinator replays it and emits the difference.
 
 ## Routing and rollback
 
 `LOOKOUT_RECRAWL=1` selects the Lookout CHECK path. Every other value selects the existing Traverse recrawl adapter. The value is captured when the crawl module initializes; changing the environment of a running process does not change its strategy. Until the owner accepts the complete parity corpus, the default remains off. Rollback is to start a new process with `LOOKOUT_RECRAWL=0`.
 
-Lookout CHECK classifies every effective fetch. `unchanged-304` and `unchanged-hash` skip extraction and update only `lastCrawledAt`. They never update `lastVerifiedAt`. Rendered attempts do not receive HTTP validators.
+Lookout CHECK classifies every effective fetch. `unchanged-304` and `unchanged-hash` of the observed content skip extraction and update only `lastCrawledAt`. They never update `lastVerifiedAt`. Rendered attempts do not receive HTTP validators.
 
 ## Events, DB-current review semantics, and baseline
 
