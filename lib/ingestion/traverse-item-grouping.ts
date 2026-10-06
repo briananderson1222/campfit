@@ -69,6 +69,7 @@
 import type { ExtractionProposal } from "@kontourai/traverse";
 import type { PricingUnit } from "@/lib/types";
 import { canonicalTime, readTimes, textStatesOnlyRange, textStatesTime } from "./session-time";
+import { sessionYearFromPage, statesADate, type YearCitation } from "./session-year";
 import {
   CAMP_TARGET_SCHEMA,
   ENUM_ARRAY_SCHEMA_PATHS,
@@ -103,6 +104,9 @@ function twentyFourHourAnswer(value: unknown): string | null {
 /** The per-session time leaves, relative to one item. */
 const SESSION_TIME_PATHS = new Set(["schedules[].startTime", "schedules[].endTime"]);
 
+/** Why a date whose cited text does not state its year is refused. */
+const YEAR_NOT_IN_QUOTE = "its year is not stated in the cited text";
+
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/;
 
 /** A real calendar date written `YYYY-MM-DD` (optionally followed by a time). "June 1" is not one: it has no year. */
@@ -123,7 +127,9 @@ function isIsoCalendarDate(value: unknown): boolean {
  * where such a value is refused: it is never part of a proposed change, and it
  * is reported (see `AssembledItem.refusedValues`).
  *
- * A date must also have its year in the excerpt it cites.
+ * A date must also have its year in the excerpt it cites. A session date
+ * refused only for that may still take its year from another excerpt on the
+ * page (session-year.ts, applied in `assembleItems`).
  *
  * An enum is matched ignoring case and surrounding space and returned in its
  * declared spelling ("Instagram" is `instagram`); nothing looser than that.
@@ -160,7 +166,7 @@ function screenValue(relPath: string, value: unknown, excerpt: string): { ok: tr
       // must carry the year, or the date is a guess.
       return excerpt.includes((value as string).slice(0, 4))
         ? { ok: true, value }
-        : { ok: false, why: "its year is not stated in the cited text" };
+        : { ok: false, why: YEAR_NOT_IN_QUOTE };
     case "number":
       return typeof value === "number" && Number.isFinite(value) ? { ok: true, value } : { ok: false, why: "not a number" };
     case "boolean":
@@ -215,6 +221,12 @@ export interface AssembledItem {
     timeCitations: { excerpt: string; locator: string }[];
     /** Present when the time is the page's one daily time applied to every session: the page line it was read from. */
     timePageWideLine?: string;
+    /**
+     * Present when the dates' own text states no year and the year was taken
+     * from another excerpt on the page (session-year.ts): that excerpt, verbatim,
+     * and its `chars:` locator. The reviewer sees it beside the session.
+     */
+    yearCitation?: YearCitation;
     label: string;
     locator: string;
     confidence?: number;
@@ -796,17 +808,10 @@ function assignSessionTimes(
  */
 const NOT_CAMP_DAY_RE = /\b(office|phone|call us|contact|business hours|hours of operation|front desk|reception|customer service)\b/i;
 
-const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i;
-const NUMERIC_DATE_RE = /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/;
 /** "Week 2", "Session 1", "Wk 3", "Term B": text that names one session. */
 // A separator is required ("sessions", "weeks" do not name one), and a
 // number followed by a time ("week 9 am") is a time, not a session number.
 const SESSION_NAME_RE = /\b(week|wk|session|term|block)\s+(?:#\s*)?(?:\d+(?![\d:]|\s*[ap]\.?\s?m\b)|[a-z](?![\w.])|(?:one|two|three|four|five|six|seven|eight|nine|ten)\b)/i;
-
-/** Whether a text states a calendar date ("June 14", "June 14th", "14 June", "6/14", "2027-06-14"). */
-function statesADate(text: string): boolean {
-  return MONTH_DAY_RE.test(text) || NUMERIC_DATE_RE.test(text);
-}
 
 /** Whether two `chars:<start>-<end>` locators overlap. False when either cannot be parsed. */
 function spansOverlap(a: string, b: string): boolean {
@@ -903,7 +908,6 @@ export function assembleItems(
     const pricingResult = assembleNestedRows(pricingEntries, NESTED_ARRAY_FIELDS["pricing[]"]);
     warnings.push(...ageGroupResult.warnings, ...scheduleResult.warnings, ...pricingResult.warnings);
     refuse("ageGroups", refusedIn(ageGroupResult.rows));
-    refuse("schedules", refusedIn(scheduleResult.rows), false);
     refuse("pricing", refusedIn(pricingResult.rows), false);
 
     // A provider may report the same band, session or tier more than once
@@ -931,10 +935,40 @@ export function assembleItems(
     // A session's time never decides whether the session is proposed: it is
     // attached by `assignSessionTimes` only when the page states it, and is
     // otherwise left out (null), which leaves the time requirement open.
-    const datedRows: { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; startDate: string; endDate: string | null; label: string }[] = [];
+    const datedRows: { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; startDate: string; endDate: string | null; label: string; yearCitation?: YearCitation }[] = [];
     const droppedScheduleLabels: string[] = [];
     const undatedTimes: Map<string, FieldProposal>[] = [];
-    for (const row of scheduleResult.rows) {
+    const yearNotes: string[] = [];
+    const yearResolvedRows = scheduleResult.rows.map((original) => {
+      // A session date refused only because its cited text states no year may
+      // take its year from another excerpt on the page (session-year.ts).
+      const start = original.get("startDate");
+      const end = original.get("endDate");
+      const parts = [start, end].filter((fp): fp is FieldProposal => fp !== undefined);
+      if (!parts.some((fp) => fp.refused === YEAR_NOT_IN_QUOTE)) return { row: original };
+      if (parts.some((fp) => fp.refused !== undefined && fp.refused !== YEAR_NOT_IN_QUOTE)) return { row: original };
+      const found = sessionYearFromPage(parts.map((fp) => ({ value: String(fp.candidateValue), locator: fp.locator })), options.preparedText);
+      if (!found.ok) {
+        yearNotes.push(`"${rowExcerpt(original)}": ${found.why}`);
+        return { row: original };
+      }
+      const row = new Map(original);
+      for (const subField of ["startDate", "endDate"]) {
+        const fp = row.get(subField);
+        if (fp?.refused === YEAR_NOT_IN_QUOTE) {
+          const { refused: _refused, ...kept } = fp;
+          row.set(subField, kept);
+        }
+      }
+      return { row, yearCitation: found.citation };
+    });
+    refuse("schedules", refusedIn(yearResolvedRows.map(({ row }) => row)), false);
+    if (yearNotes.length > 0) {
+      operatorWarnings.push(
+        `${yearNotes.length} session date${yearNotes.length === 1 ? "" : "s"} not given a year from another excerpt on the page (e.g. ${yearNotes.slice(0, 3).join("; ")}) — a year the page does not settle for that session is not filled in`
+      );
+    }
+    for (const { row, yearCitation } of yearResolvedRows) {
       if (row.size === 0) continue;
       const dateParts = new Map([...row].filter(([subField]) => subField === "startDate" || subField === "endDate"));
       if (dateParts.size === 0) {
@@ -948,7 +982,7 @@ export function assembleItems(
         droppedScheduleLabels.push(label);
         continue;
       }
-      datedRows.push({ row, dateParts, startDate, endDate, label });
+      datedRows.push({ row, dateParts, startDate, endDate, label, ...(yearCitation ? { yearCitation } : {}) });
     }
     const timed = assignSessionTimes(datedRows, undatedTimes, options.preparedText);
     if (timed.notes.length > 0) {
@@ -965,6 +999,7 @@ export function assembleItems(
         endTime: time ? (time.end.candidateValue as string) : null,
         timeCitations: time ? distinctCitations([time.start, time.end]) : [],
         ...(time?.pageWideLine ? { timePageWideLine: time.pageWideLine } : {}),
+        ...(dated.yearCitation ? { yearCitation: dated.yearCitation } : {}),
         label: dated.label,
         locator: rowLocator(dated.dateParts),
         ...withConfidence(rowConfidence(dated.row)),

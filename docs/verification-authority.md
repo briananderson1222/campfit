@@ -427,6 +427,54 @@ an edit from another tab in between is attested too. Stale-view protection
 needs a camp version that changes only when a value does; it is tracked as a
 follow-up.
 
+## Session dates and their year
+
+A session date is kept when the text it cites states its year (the
+year-in-quote rule, `lib/ingestion/traverse-item-grouping.ts`). Owner
+decision: a date whose own line states no year ("Week 1: June 28 – July 2"
+under a "2027 Camp Dates" heading) may take its year from a second excerpt
+on the same page, which must be on the stored snapshot and is shown to the
+reviewer next to the session. Nothing is guessed: if no excerpt settles the
+year, the date is refused as before, and with it the whole session list.
+
+The year excerpt is derived from the prepared page text
+(`lib/ingestion/session-year.ts`), never from how the model cut its
+citation, and only by these rules. A "heading" is a Markdown heading line
+(`#`) of the prepared text; a bold line is not one.
+
+- The date's own line (every line its cited text covers) states no year.
+  A line that states a year keeps today's rule: its cited text must state
+  the date's year.
+- The session is within one year: start and end in the same year, end not
+  before start. A range across a year boundary ("December 28 - January 3")
+  is never given one year; both years must be on its own line.
+- **Governing heading.** The nearest heading above the session's line, with
+  no other heading between them, states exactly one year (a "2026-27"
+  heading states two), the text under it up to the next heading states no
+  other year, and the date is in that year. Years elsewhere on the page do
+  not matter, so a page with a "2026 Sessions" list and a "2027 Sessions"
+  list gives each session its own heading's year.
+- **Only year on the page.** Otherwise (the governing heading states no
+  year, or there is none) the whole prepared page states exactly one year,
+  the date is in it, and the excerpt is the nearest line above the session
+  that states it and states no date. Any second year anywhere on the page
+  (a "Last year (2026)" note, a "Founded in 2019" line, a footer) refuses.
+
+The proposal stores the excerpt with the session's own citation
+(`rowCitations[i].year`: the verbatim text and its `chars:` locator). Review
+apply checks it like the other citations: the excerpt is on the stored page
+(at its locator) and states exactly one year, the row's start and end
+year. Only then is the session's `dates` claim attested; a failing year
+citation leaves the row unattested, like a failing time citation. The review
+page shows "Year from:" with the excerpt beside the session, apart from the
+dates' own text.
+
+Known limits: a year excerpt can be a heading of a different program on the
+page that happens to be the nearest; the reviewer sees it beside each
+session. A row that cites no year excerpt is checked as before (its date
+excerpt on the page); the apply does not re-check that its own text states
+its year.
+
 ## Session times and steward entry
 
 **Extraction.** The crawl schema asks for each session's start and end time
