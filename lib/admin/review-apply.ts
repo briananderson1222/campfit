@@ -194,7 +194,14 @@ export interface ProvenanceError {
      * module's transaction; a failure recording the claim-level revocation
      * afterwards must not undo that, or block changelog/metrics provenance.
      */
-    | 'revokeArchivedSessionClaims';
+    | 'revokeArchivedSessionClaims'
+    /**
+     * A session's time was kept rather than replaced: the proposal's cited
+     * time would have overwritten a value the reviewer was not shown (a
+     * steward's time entered after the page was read, or a steward's "no
+     * fixed daily time"). The rest of the apply went through.
+     */
+    | 'sessionTimeKept';
   readonly message: string;
 }
 
@@ -540,6 +547,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // duplicate-retry discriminator below, which only applies to THOSE two
   // steps.
   const provenanceErrors = [
+    ...facts.sessionTimesKept.map((message): ProvenanceError => ({ step: 'sessionTimeKept', message })),
     ...postCommitProvenanceErrors,
     ...(keepPending && derivedApprovedCount > 0 && appliedFields.length === 0
       ? []
@@ -982,10 +990,12 @@ interface AppliedFacts {
   countsAsReview: boolean;
   /** The session rows this apply wrote (`sessionRowsToApply`), index-aligned with the proposal's rows and their citations. */
   appliedSchedules?: IncomingScheduleSnapshot[];
+  /** One sentence per session whose stored time was kept instead of a cited time the reviewer was not shown. */
+  sessionTimesKept: string[];
 }
 
 function newAppliedFacts(): AppliedFacts {
-  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [], countsAsReview: false };
+  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [], countsAsReview: false, sessionTimesKept: [] };
 }
 
 /**
@@ -1027,42 +1037,46 @@ async function withdrawChangedClaims(
  * (`keepUnstatedSessionTimes`, read here under the camp lock). A crawl never
  * removes or rewinds a time it does not state.
  */
-type StoredSessionTime = Pick<IncomingScheduleSnapshot, 'label' | 'startDate' | 'endDate' | 'startTime' | 'endTime'>;
+type StoredSessionTime = Pick<IncomingScheduleSnapshot, 'label' | 'startDate' | 'endDate' | 'startTime' | 'endTime'> & { readonly noFixedTime?: boolean };
 
-function sessionRowsToApply(diff: FieldDiff, stored: readonly StoredSessionTime[]): IncomingScheduleSnapshot[] {
+function sessionRowsToApply(diff: FieldDiff, stored: readonly StoredSessionTime[], kept: string[]): IncomingScheduleSnapshot[] {
   const rows = (Array.isArray(diff.new) ? diff.new as IncomingScheduleSnapshot[] : []).map((row, index) =>
-    (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 && !timeShownUnchanged(diff, row) ? row : { ...row, startTime: null, endTime: null });
-  refuseTimeChangedSinceProposal(diff, rows, stored);
+    (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 && !timeShownUnchanged(diff, row) && !timeNotShown(diff, row, stored, kept)
+      ? row
+      : { ...row, startTime: null, endTime: null });
   return keepUnstatedSessionTimes(stored, rows) as IncomingScheduleSnapshot[];
 }
 
 /**
- * A cited time would replace a stored time the reviewer was not shown: the
- * stored session's time differs from what the proposal's `old` list had for
- * it (a steward entered or changed it after the proposal was built, or the
- * proposal carries no `old` row for it). The apply is refused with a message
- * to recrawl, so the page's time is reviewed against the current one; it is
- * never overwritten unseen.
+ * Whether a cited time would replace a stored value the reviewer was not
+ * shown: the stored session's time differs from what the proposal's `old`
+ * list had for it (a steward entered or changed it after the page was read,
+ * or the proposal has no `old` row for it), or a steward recorded that the
+ * session has no fixed daily time (which no `old` row can show). That time is
+ * then kept, only for that session, and `kept` says so; the rest of the apply
+ * goes through, and a later crawl proposes the page's time against the
+ * stored one.
  */
-function refuseTimeChangedSinceProposal(diff: FieldDiff, rows: readonly IncomingScheduleSnapshot[], stored: readonly StoredSessionTime[]): void {
+function timeNotShown(diff: FieldDiff, row: IncomingScheduleSnapshot, stored: readonly StoredSessionTime[], kept: string[]): boolean {
+  if (row.startTime === null || row.endTime === null) return false;
   const old = Array.isArray(diff.old) ? diff.old as StoredSessionTime[] : [];
-  const only = (list: readonly StoredSessionTime[], row: StoredSessionTime) => {
+  const only = (list: readonly StoredSessionTime[]) => {
     const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
     const same = list.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
     return same.length === 1 ? same[0]! : null;
   };
-  for (const row of rows) {
-    if (row.startTime === null || row.endTime === null) continue;
-    const current = only(stored, row);
-    if (!current || !current.startTime?.trim() || !current.endTime?.trim()) continue;
-    if (sessionTimeKey(current) === sessionTimeKey(row)) continue;
-    const shown = only(old, row);
-    if (shown && sessionTimeKey(shown) === sessionTimeKey(current)) continue;
-    throw new ReviewApplyValueError(
-      `Nothing was applied: session "${row.label}" now has the time ${current.startTime}–${current.endTime}, which this proposal did not show (it was entered or changed after the page was read). Recrawl the camp to review the page's time against it, or keep the current sessions.`,
-      ['schedules'],
-    );
+  const current = only(stored);
+  if (!current) return false;
+  if (current.noFixedTime) {
+    kept.push(`Session "${row.label}": a steward recorded that it has no fixed daily time, so the page's ${row.startTime}–${row.endTime} was not applied. If the page is right, a steward enters that time for the session.`);
+    return true;
   }
+  if (!current.startTime?.trim() || !current.endTime?.trim()) return false;
+  if (sessionTimeKey(current) === sessionTimeKey(row)) return false;
+  const shown = only(old);
+  if (shown && sessionTimeKey(shown) === sessionTimeKey(current)) return false;
+  kept.push(`Session "${row.label}": kept ${current.startTime}–${current.endTime}, which this proposal did not show (it was entered or changed after the page was read); the page's ${row.startTime}–${row.endTime} was not applied. The next crawl proposes it against the current time.`);
+  return true;
 }
 
 /**
@@ -1316,7 +1330,17 @@ async function applyRelationField(
       [proposal.campId],
     );
     for (const row of before.rows) facts.previousSessionTimes.set(row.id, sessionTimeKey(row));
-    facts.appliedSchedules = sessionRowsToApply(diff, before.rows);
+    // A steward's "no fixed daily time" is a stored value too, though the row has no time.
+    const { rows: noFixedTime } = await client.query<{ id: string }>(
+      `SELECT s.id FROM "CampSchedule" s
+        WHERE s."campId" = $1 AND s."archivedAt" IS NULL
+          AND (SELECT e.method FROM "SurfaceVerificationEvent" e
+                WHERE e."claimId" = 'session.' || s.id || '.time'
+                ORDER BY e."createdAt" DESC, e.id DESC LIMIT 1) = 'no-fixed-time'`,
+      [proposal.campId],
+    );
+    const stored = before.rows.map((row) => ({ ...row, noFixedTime: noFixedTime.some((n) => n.id === row.id) }));
+    facts.appliedSchedules = sessionRowsToApply(diff, stored, facts.sessionTimesKept);
     const reconciliation = await applyScheduleReconciliation(client, proposal.campId, facts.appliedSchedules);
     orphaned = reconciliation.orphaned;
     if (reconciliation.matchedIds.length > 0) {

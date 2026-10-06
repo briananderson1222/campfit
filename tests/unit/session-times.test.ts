@@ -23,6 +23,8 @@ import { createReplayProvider } from '../fixtures/real-crawl/replay';
 const DATES_W1 = 'Week 1: June 14 - June 18, 2027';
 const DATES_W2 = 'Week 2: June 21 - June 25, 2027';
 const DAILY = 'Camp runs 9:00 AM - 3:30 PM every day.';
+/** A line between the sessions and a daily-time line, so the daily line is not next to a session's line. */
+const GAP = 'Ask the office about early drop-off.';
 
 function page(lines: readonly string[]): string {
   return `<html><body><main><h1>Larkspur Meadow Day Camp</h1>${lines.map((line) => `<p>${line}</p>`).join('')}</main></body></html>`;
@@ -88,7 +90,7 @@ describe('a crawled session time', () => {
   it('is extracted with its own citation; one daily time stated once applies to every session', async () => {
     // The model gives the daily time on each session; Traverse keeps one copy
     // of a repeated proposal (same field, value and text).
-    const { result, item } = await extract([DATES_W1, DATES_W2, DAILY], [
+    const { result, item } = await extract([DATES_W1, DATES_W2, GAP, DAILY], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', DAILY),
       answer('items[].schedules[].endTime', '3:30 PM', DAILY),
@@ -127,7 +129,7 @@ describe('a crawled session time', () => {
   });
 
   it('is refused with only one end stated', async () => {
-    const { item } = await extract([DATES_W1, DATES_W2, DAILY], [
+    const { item } = await extract([DATES_W1, DATES_W2, GAP, DAILY], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', DAILY),
     ]);
@@ -164,7 +166,7 @@ describe('a crawled session time', () => {
       answer('items[].schedules[].endTime', '3:00 PM', full),
     ]);
     expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
-    expect(item.operatorWarnings.join('\n')).toContain('2 separate daily times');
+    expect(item.operatorWarnings.join('\n')).toContain('one of several time lines together');
   });
 });
 
@@ -205,7 +207,7 @@ describe('a time placed by where its text is', () => {
     'Hours for all weeks: 9:00 AM - 3:30 PM.',
     'Each week 9 am - 3:30 pm.',
   ])('a daily time stated for every session ("%s") applies to each', async (daily) => {
-    const { item } = await extract([DATES_W1, DATES_W2, daily], [
+    const { item } = await extract([DATES_W1, DATES_W2, GAP, daily], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', daily),
       answer('items[].schedules[].endTime', '3:30 PM', daily),
@@ -300,7 +302,7 @@ describe('a time is not guessed', () => {
   });
 
   it('without the page text, no daily time is applied to every session', async () => {
-    const { result } = await extract([DATES_W1, DATES_W2, DAILY], [
+    const { result } = await extract([DATES_W1, DATES_W2, GAP, DAILY], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', DAILY),
       answer('items[].schedules[].endTime', '3:30 PM', DAILY),
@@ -323,6 +325,94 @@ describe('a time is not guessed', () => {
       answer('items[].schedules[].endTime', '4:00 PM', 'Fri 1:00 PM - 4:00 PM'),
     ]);
     expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+    expect(item.operatorWarnings.join('\n')).toContain('its line states other times too');
+  });
+});
+
+describe('a time belongs to a session only when the page text settles it', () => {
+  async function fromHtml(body: string, proposals: readonly unknown[]) {
+    const { provider } = createReplayProvider(proposals);
+    const result = await runTraverseExtraction({ content: `<html><body><main><h1>Larkspur Meadow Day Camp</h1>${body}</main></body></html>`, sourceRef: 'https://larkspur.example.test/summer', provider });
+    return assembleItems(result.proposals as ExtractionProposal[], { preparedText: preparedTextOf(result) })[0]!;
+  }
+  const NAME = answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp');
+  const D1 = 'June 14 - June 18, 2027'; const D2 = 'June 21 - June 25, 2027';
+  const dates = [
+    answer('items[].schedules[].startDate', '2027-06-14', D1), answer('items[].schedules[].endDate', '2027-06-18', D1),
+    answer('items[].schedules[].startDate', '2027-06-21', D2), answer('items[].schedules[].endDate', '2027-06-25', D2),
+  ];
+  const time = (start: string, end: string, text: string) => [answer('items[].schedules[].startTime', start, text), answer('items[].schedules[].endTime', end, text)];
+  const shape = (item: Awaited<ReturnType<typeof fromHtml>>) => item.schedules.map((s) => [s.startDate, s.startTime, s.endTime]);
+
+  it('H1: two cards with their own times: each card keeps its own; neither is copied to the other', async () => {
+    const item = await fromHtml(`<h2>Week 1</h2><p>${D1}</p><p>9:00 AM - 12:00 PM</p><h2>Week 2</h2><p>${D2}</p><p>1:00 PM - 4:00 PM</p>`,
+      [NAME, ...dates, ...time('9:00 AM', '12:00 PM', '9:00 AM - 12:00 PM'), ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', '1:00 PM', '4:00 PM']]);
+  });
+
+  it('H1: a card with its time above its dates gives it to that card only', async () => {
+    const item = await fromHtml(`<h2>Week 1</h2><p>9:00 AM - 12:00 PM</p><p>${D1}</p><h2>Week 2</h2><p>${D2}</p>`,
+      [NAME, ...dates, ...time('9:00 AM', '12:00 PM', '9:00 AM - 12:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', null, null]]);
+  });
+
+  it('H1: only the last card\'s time extracted: it stays on the last card', async () => {
+    const item = await fromHtml(`<h2>Week 1</h2><p>${D1}</p><p>9:00 AM - 12:00 PM</p><h2>Week 2</h2><p>${D2}</p><p>1:00 PM - 4:00 PM</p>`,
+      [NAME, ...dates, ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', '1:00 PM', '4:00 PM']]);
+  });
+
+  it('H1: a header-less table (each cell its own line): a time between two sessions\' lines is refused', async () => {
+    const item = await fromHtml(`<table><tr><td>${D1}</td><td>9:00 AM - 12:00 PM</td></tr><tr><td>${D2}</td><td>1:00 PM - 4:00 PM</td></tr></table>`,
+      [NAME, ...dates, ...time('9:00 AM', '12:00 PM', '9:00 AM - 12:00 PM'), ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', '1:00 PM', '4:00 PM']]);
+  });
+
+  it('H1: a daily time is not applied when the page states another range anywhere outside the session lines (even one not extracted)', async () => {
+    const item = await fromHtml(`<p>Camp runs 9:00 AM - 3:00 PM.</p><p>Extended care 3:00 PM - 5:30 PM is extra.</p><h2>Sessions</h2><p>${D1}</p><h3>Next</h3><p>${D2}</p>`,
+      [NAME, ...dates, ...time('9:00 AM', '3:00 PM', 'Camp runs 9:00 AM - 3:00 PM.')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+  });
+
+  it('H1: a daily time stated once, away from the session lines, still applies to every session', async () => {
+    const item = await fromHtml(`<p>Camp runs 9:00 AM - 3:00 PM.</p><h2>Sessions</h2><p>${D1}</p><h3>Next</h3><p>${D2}</p>`,
+      [NAME, ...dates, ...time('9:00 AM', '3:00 PM', 'Camp runs 9:00 AM - 3:00 PM.')]);
+    expect(shape(item)).toEqual([['2027-06-14', '9:00 AM', '3:00 PM'], ['2027-06-21', '9:00 AM', '3:00 PM']]);
+  });
+
+  it('H2: a narrow citation of one of two ranges on a line ("half-day 9am-12pm / full-day 9am-3pm") is refused', async () => {
+    const line = 'Half-day 9am-12pm / full-day 9am-3pm';
+    const item = await fromHtml(`<p>${line}</p><h2>Sessions</h2><p>${D1}</p><h3>Next</h3><p>${D2}</p>`, [NAME, ...dates, ...time('9:00 AM', '3:00 PM', '9am-3pm')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+  });
+
+  it('H2: "Morning camp 9-12; afternoon camp 1-4" cited as "1:00 PM - 4:00 PM" is refused', async () => {
+    const line = 'Morning camp 9:00 AM - 12:00 PM; afternoon camp 1:00 PM - 4:00 PM';
+    const item = await fromHtml(`<p>${line}</p><h2>Sessions</h2><p>${D1}</p><h3>Next</h3><p>${D2}</p>`, [NAME, ...dates, ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+  });
+
+  it('H2: a session\'s own line offering half-day or full-day, narrowly cited, is refused', async () => {
+    const w1 = `Week 1: ${D1}, half-day 9am-12pm or full-day 9am-3pm`;
+    const item = await fromHtml(`<p>${w1}</p><h3>Next</h3><p>${D2}</p>`, [
+      NAME,
+      answer('items[].schedules[].startDate', '2027-06-14', `Week 1: ${D1}`), answer('items[].schedules[].endDate', '2027-06-18', `Week 1: ${D1}`),
+      answer('items[].schedules[].startDate', '2027-06-21', D2), answer('items[].schedules[].endDate', '2027-06-25', D2),
+      ...time('9:00 AM', '3:00 PM', 'full-day 9am-3pm'),
+    ]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+  });
+
+  it('F4: a time line that states other dates ("Summer hours ..., July 5 - August 20, 2027") is not applied to June sessions', async () => {
+    const line = 'Summer hours 9am-3pm, July 5 - August 20, 2027';
+    const item = await fromHtml(`<p>${line}</p><h2>Sessions</h2><p>${D1}</p><h3>Next</h3><p>${D2}</p>`, [NAME, ...dates, ...time('9:00 AM', '3:00 PM', line)]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+  });
+
+  it('I4: two different times next to one session leave it without a time', async () => {
+    const item = await fromHtml(`<h2>Week 1</h2><p>9:00 AM - 12:00 PM</p><p>${D1}</p><p>1:00 PM - 4:00 PM</p><h2>Week 2</h2><p>${D2}</p>`,
+      [NAME, ...dates, ...time('9:00 AM', '12:00 PM', '9:00 AM - 12:00 PM'), ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
     expect(item.operatorWarnings.join('\n')).toContain('states different times for this session');
   });
 });

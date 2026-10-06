@@ -30,7 +30,6 @@ import { loadMissingRequirements } from '@/lib/admin/missing-requirements';
 import { parseStewardEntry as parseEntry, recordStewardEntry, StewardEntryNotFoundError, StewardEntryValidationError } from '@/lib/admin/steward-entry';
 import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 import { deriveCampAndSessionVerification, deriveCampVerification, deriveSessionVerification } from '@/lib/admin/verification-authority';
-import { ReviewApplyValueError } from '@/lib/admin/review-apply';
 import { createHash } from 'node:crypto';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
@@ -522,17 +521,86 @@ describe('a session with no fixed daily time', () => {
   });
 });
 
-describe('a pending proposal and a time a steward entered after it was built', () => {
-  it('is refused rather than overwriting the steward\'s time the reviewer never saw', async () => {
+describe('a cited time that would replace a value the reviewer was not shown', () => {
+  const week2 = { ...weekOne(null), label: 'Week 2', startDate: '2027-06-21', endDate: '2027-06-25' };
+  const cited = (old: unknown[] | null) => ({
+    ...listDiff([], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' }), week2], [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }, { excerpt: 'Week 2: June 21 - June 25, 2027' }]),
+    old,
+  });
+
+  it('keeps a steward\'s time entered after the proposal was built, says so, and still applies the rest of the list', async () => {
     const campId = await seedCamp();
     await approveAll(fullChanges(NO_TIME), campId);
     const [session] = await sessionOf(campId);
-    // Built while the session had no time: old shows none, new cites 9:00-3:30.
-    const pending = listDiff([weekOne(null)], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }]);
+    const pending = cited([weekOne(null)]);
     await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '8:00 AM', endTime: '2:00 PM' }, STEWARD);
-    await expect(approveAll({ schedules: pending }, campId)).rejects.toBeInstanceOf(ReviewApplyValueError);
-    expect((await sessionOf(campId))[0]).toMatchObject({ startTime: '8:00 AM', endTime: '2:00 PM' });
+    const result = await approveAll({ schedules: pending }, campId);
+    expect(result.provenanceErrors).toEqual([expect.objectContaining({ step: 'sessionTimeKept', message: expect.stringContaining('kept 8:00 AM–2:00 PM') })]);
+    const sessions = await sessionOf(campId);
+    expect(sessions).toHaveLength(2);
+    expect(sessions.find((s) => s.id === session!.id)).toMatchObject({ startTime: '8:00 AM', endTime: '2:00 PM' });
     expect((await timeClaim(session!.id))!.event).toMatchObject({ method: 'steward-entry' });
+  });
+
+  it('F3: keeps a steward\'s time when the proposal has no old row for the session at all', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '8:00 AM', endTime: '2:00 PM' }, STEWARD);
+    const result = await approveAll({ schedules: cited(null) }, campId);
+    expect(result.provenanceErrors.map((e) => e.step)).toEqual(['sessionTimeKept']);
+    expect((await sessionOf(campId)).find((s) => s.id === session!.id)).toMatchObject({ startTime: '8:00 AM', endTime: '2:00 PM' });
+  });
+
+  it('M2: keeps a steward\'s "no fixed daily time"', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-no-fixed-time', scheduleId: session!.id, reason: 'Overnight camp.' }, STEWARD);
+    const result = await approveAll({ schedules: cited([weekOne(null)]) }, campId);
+    expect(result.provenanceErrors).toEqual([expect.objectContaining({ step: 'sessionTimeKept', message: expect.stringContaining('no fixed daily time') })]);
+    expect((await sessionOf(campId)).find((s) => s.id === session!.id)).toMatchObject({ startTime: null, endTime: null });
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ status: 'assumed', method: 'no-fixed-time' });
+  });
+});
+
+describe('an "intentionally empty" attestation', () => {
+  const claimOf = (campId: string, field: string) => `camp.${campId}.field.${field}`;
+  async function insertEvent(campId: string, field: string, method: string, secondsFromNow: number) {
+    const pool = getTestPool();
+    const claimId = claimOf(campId, field);
+    const id = `${method}.${randomUUID()}`;
+    await pool.query(`INSERT INTO "SurfaceEvidence" (id, "claimId", "evidenceType", method, "sourceRef", "excerptOrSummary", "observedAt", "collectedBy") VALUES ($1, $2, 'human_attestation', 'attestation', 'test', 'test', now(), 'test')`, [`ev.${id}`, claimId]);
+    await pool.query(`INSERT INTO "SurfaceVerificationEvent" (id, "claimId", status, type, actor, method, "evidenceIds", "createdAt") VALUES ($1, $2, 'assumed', 'verification', 'test', $3, ARRAY[$4], now() + make_interval(secs => $5))`, [`evt.${id}`, claimId, method, `ev.${id}`, secondsFromNow]);
+  }
+  const pricingStatus = async (campId: string) => (await deriveCampVerification(campId)).requirements.find((r) => r.id === 'pricing')!.status;
+
+  it('C2: does not count once the list has rows (inserted directly, as a seed or import would)', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME, ['pricing']), campId);
+    await recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'pricing', reason: 'Free program.' }, STEWARD);
+    expect(await pricingStatus(campId)).toBe('verified');
+    await getTestPool().query(`INSERT INTO "CampPricing" (id, "campId", label, amount, unit) VALUES (gen_random_uuid()::text, $1, 'Tuition', 395, 'PER_WEEK')`, [campId]);
+    expect(await pricingStatus(campId)).not.toBe('verified');
+  });
+
+  it('F6: only the NEWEST event decides: an older "intentionally empty" under a newer other attestation does not count', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME, ['pricing']), campId);
+    await recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'pricing', reason: 'Free program.' }, STEWARD);
+    expect(await pricingStatus(campId)).toBe('verified');
+    await insertEvent(campId, 'pricing', 'attestation', 60);
+    expect(await pricingStatus(campId)).not.toBe('verified');
+    await insertEvent(campId, 'pricing', 'intentionally-empty', 120);
+    expect(await pricingStatus(campId)).toBe('verified');
+  });
+
+  it('is refused while a pending crawl proposal lists entries for that list', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME, ['pricing']), campId);
+    await seedProposal(campId, { pricing: listDiff([], [{ label: 'Tuition', amount: 395, unit: 'PER_WEEK', durationWeeks: null, ageQualifier: null, discountNotes: null }], [{ excerpt: 'Tuition: $395 per week' }]) });
+    await expect(recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'pricing', reason: 'Free program.' }, STEWARD))
+      .rejects.toThrow('A pending crawl proposal lists pricing');
   });
 });
 

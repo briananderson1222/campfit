@@ -442,12 +442,14 @@ async function withoutUnattestedEmptyLists(
   const counts = rows[0] ?? { ageGroups: 0, pricing: 0, schedules: 0 };
   const dropped = new Set<string>();
   for (const field of ['ageGroups', 'pricing', 'schedules'] as const) {
-    if (counts[field] > 0) continue;
     const claimId = campCanonicalClaimId(campId, field);
     const newest = bundle.events
       .filter((event) => event.claimId === claimId)
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-    if (newest?.method !== INTENTIONALLY_EMPTY_METHOD) dropped.add(claimId);
+    const attestedEmpty = newest?.method === INTENTIONALLY_EMPTY_METHOD;
+    // Empty: only an "intentionally empty" attestation counts. Not empty: that
+    // attestation describes a list that no longer exists, so it does not.
+    if (counts[field] === 0 ? !attestedEmpty : attestedEmpty) dropped.add(claimId);
   }
   if (dropped.size === 0) return bundle;
   return {

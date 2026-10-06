@@ -247,6 +247,19 @@ export async function recordStewardEntry(
           : `SELECT count(*)::int AS n FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`;
       const { rows } = await client.query<{ n: number }>(counted, [campId]);
       if (rows[0]!.n > 0) throw new StewardEntryValidationError(`The camp's ${entry.field} list is not empty, so it cannot be attested as intentionally empty.`);
+      // A pending crawl proposal that lists entries for this list says the
+      // page has some: review it first rather than attest the list empty.
+      const pending = await client.query<{ id: string }>(
+        `SELECT id FROM "CampChangeProposal"
+          WHERE "campId" = $1 AND status = 'PENDING'
+            AND jsonb_typeof("proposedChanges"->$2->'new') = 'array' AND jsonb_array_length("proposedChanges"->$2->'new') > 0
+            AND NOT ($2 = ANY(COALESCE("appliedFields", '{}')))
+          LIMIT 1`,
+        [campId, entry.field],
+      );
+      if (pending.rows[0]) {
+        throw new StewardEntryValidationError(`A pending crawl proposal lists ${entry.field} for this camp (proposal ${pending.rows[0].id}). Review it first; record the list as intentionally empty only if the page is wrong.`);
+      }
       const claimId = campCanonicalClaimId(campId, entry.field);
       claim = {
         id: claimId,

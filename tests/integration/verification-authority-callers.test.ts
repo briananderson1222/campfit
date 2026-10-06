@@ -88,6 +88,8 @@ const ALLOWED_CALLER_FILES = new Set([
   'lib/admin/verification-authority.ts',
   // A steward's entry of a missing value, recorded as their attestation in its transaction.
   'lib/admin/steward-entry.ts',
+  // The post-deploy repair: the standalone refresh of exactly the camps whose cache disagrees with their claims.
+  'lib/admin/verification-repair.ts',
 ]);
 
 /** Definition-site lines (not calls) — excluded from the scan so the
@@ -212,6 +214,7 @@ describe('recordEvidence/refreshCampVerificationCache caller-set tripwire (R4/AC
     ['lib/admin/camp-repository.ts', ['updateAdminCampFields', 'replaceAdminCampAgeGroups']],
     ['lib/admin/verification-authority.ts', ['refreshCampVerificationCache']],
     ['lib/admin/steward-entry.ts', ['recordStewardEntry']],
+    ['lib/admin/verification-repair.ts', ['repairDowngradedCamps']],
   ] as const)('%s\'s call sites resolve to exactly %j', (relativePath, expectedFunctions) => {
     const filePath = path.join(repoRoot, relativePath);
     const fileLines = fs.readFileSync(filePath, 'utf8').split('\n');

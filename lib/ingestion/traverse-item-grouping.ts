@@ -68,7 +68,7 @@
 
 import type { ExtractionProposal } from "@kontourai/traverse";
 import type { PricingUnit } from "@/lib/types";
-import { canonicalTime, textStatesOnlyRange, textStatesTime } from "./session-time";
+import { canonicalTime, readTimes, textStatesOnlyRange, textStatesTime } from "./session-time";
 import {
   CAMP_TARGET_SCHEMA,
   ENUM_ARRAY_SCHEMA_PATHS,
@@ -620,27 +620,29 @@ function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
 /**
  * Attach a stated start and end time to each dated session row, or none.
  *
- * A pair is a time only when its start and end are cited from the SAME text,
- * and that text states exactly one time range, this one, with its end after
- * its start (session-time.ts). "Drop-off 8, camp 9-3, pickup 5" does not
- * state 8-5; "half day 9-12 / full day 9-3" does not say which; a start from
- * the morning camp's line and an end from the afternoon's is not a range the
- * page states.
+ * A session gets a time only from text that unambiguously belongs to it, and
+ * that is decided from the prepared page text, never from how narrowly the
+ * model cut its citation. Without the prepared text no time is attached.
  *
- * Traverse drops a repeated proposal (same field, value and cited span), and
- * without item indices a time can arrive on the wrong session's row. So a
- * time is placed by where its cited text is, never by the row it arrived on.
- * With the prepared page text, "where" is the LINE (a list item, a table
- * row): a time on the same line as exactly one session's dates is that
- * session's time; on the lines of several sessions it is refused. A time on
- * no session's line is the camp's daily time only when
- *  - its line states no date and names no session ("Week 2"),
- *  - it sits outside the run of session lines (before the first or after the
- *    last), not between them, where it may belong to the session above it,
- *  - and it is the page's only such time text (one cited span).
- * It then applies to each session without a time of its own. Without the
- * page text only the cited spans are compared, and no daily time is applied.
- * When unsure, the time is left out; nothing is filled in from a usual day.
+ * A pair is a time only when its start and end are cited from the SAME text,
+ * that text states exactly one range, this one, with its end after its start
+ * (session-time.ts), and the rest of the text's LINE states no other time
+ * ("Half-day 9am-12pm / full-day 9am-3pm" cited as "9am-3pm" is refused).
+ *
+ * Whose time it is, by the line it is on (a list item, a table row, a card's
+ * line; blank lines are not lines):
+ *  - the line of exactly one session's dates: that session's;
+ *  - the line directly above or below exactly one session's date line (a
+ *    card): that session's; next to two sessions' lines (a header-less
+ *    table) it is refused, since either could own it, and so is one of a
+ *    block of time lines ("Half day 9-12" / "Full day 9-3");
+ *  - a line of its own that states a date or names a session is refused;
+ *  - otherwise it is the camp's daily time, for every session without a time
+ *    of its own, only when its line states no date and names no session, AND
+ *    the whole page outside the session date lines states exactly one time
+ *    range, this one. A second range anywhere (another card's time, a time
+ *    that was refused, one the model did not extract) means no daily time.
+ * When in doubt, the time is left out; nothing is filled in from a usual day.
  */
 function assignSessionTimes(
   rows: readonly { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; label: string }[],
@@ -649,82 +651,130 @@ function assignSessionTimes(
 ): { times: ({ start: FieldProposal; end: FieldProposal } | null)[]; notes: string[] } {
   type Pair = { start: FieldProposal; end: FieldProposal };
   const notes: string[] = [];
-  const pairOf = (row: Map<string, FieldProposal>, label: string): Pair | null => {
+  const pairs: Pair[] = [];
+  const consider = (row: Map<string, FieldProposal>, label: string) => {
     const start = row.get("startTime");
     const end = row.get("endTime");
-    if (!start && !end) return null;
+    if (!start && !end) return;
     if (!start || !end || start.refused || end.refused) {
       notes.push(`"${label}": ${start?.refused ?? end?.refused ?? `no ${start ? "end" : "start"} time was extracted`}`);
-      return null;
+      return;
     }
     if (start.excerpt !== end.excerpt || start.locator !== end.locator) {
       notes.push(`"${label}": the start and end time are cited from different text ("${start.excerpt}", "${end.excerpt}")`);
-      return null;
+      return;
     }
     if (!textStatesOnlyRange(start.candidateValue, end.candidateValue, start.excerpt)) {
       notes.push(`"${start.excerpt}": does not state ${start.candidateValue}–${end.candidateValue} as its one time range`);
-      return null;
+      return;
     }
-    return { start, end };
+    pairs.push({ start, end });
   };
-  const stated = [
-    ...rows.map(({ row, label }) => pairOf(row, label)),
-    ...undatedTimes.map((row) => pairOf(row, rowExcerpt(row))),
-  ].filter((pair): pair is Pair => pair !== null);
+  rows.forEach(({ row, label }) => consider(row, label));
+  undatedTimes.forEach((row) => consider(row, rowExcerpt(row)));
+  const none = rows.map(() => null);
+  if (pairs.length === 0) return { times: none, notes };
+  if (preparedText === undefined) {
+    notes.push(`${pairs.length} session time(s) not placed: the page text they were read from is not available`);
+    return { times: none, notes };
+  }
 
-  /** The span a locator's text sits in: its whole line(s) with the page text, else the cited span. */
-  const contextOf = (locator: string): [number, number] | null => {
+  // The page's non-blank lines, in order.
+  const lines: { start: number; end: number }[] = [];
+  for (let at = 0; at <= preparedText.length;) {
+    const next = preparedText.indexOf("\n", at);
+    const end = next < 0 ? preparedText.length : next;
+    if (preparedText.slice(at, end).trim()) lines.push({ start: at, end });
+    if (next < 0) break;
+    at = next + 1;
+  }
+  const lineOf = (offset: number) => lines.findIndex((line) => offset >= line.start && offset <= line.end);
+  const spanOf = (locator: string): [number, number] | null => {
     const m = /^chars:(\d+)-(\d+)$/.exec(locator);
-    if (!m) return null;
-    const [from, to] = [Number(m[1]), Number(m[2])];
-    if (preparedText === undefined) return [from, to];
-    const lineStart = preparedText.lastIndexOf("\n", Math.max(0, from - 1)) + 1;
-    const nextBreak = preparedText.indexOf("\n", Math.max(from, to - 1));
-    return [from === 0 ? 0 : lineStart, nextBreak < 0 ? preparedText.length : nextBreak];
+    return m ? [Number(m[1]), Number(m[2])] : null;
   };
-  const overlap = (a: [number, number] | null, b: [number, number] | null) => a !== null && b !== null && a[0] < b[1] && b[0] < a[1];
-  const sessionContexts = rows.map(({ dateParts }) => [...dateParts.values()].map((fp) => contextOf(fp.locator)).filter((c): c is [number, number] => c !== null));
-  const allSessionContexts = sessionContexts.flat();
-  const firstSessionStart = Math.min(...allSessionContexts.map((c) => c[0]));
-  const lastSessionEnd = Math.max(...allSessionContexts.map((c) => c[1]));
+  /** Line indices a cited span covers. */
+  const linesOf = (locator: string): number[] => {
+    const span = spanOf(locator);
+    if (!span) return [];
+    const from = lineOf(span[0]);
+    const to = lineOf(Math.max(span[0], span[1] - 1));
+    if (from < 0 || to < 0) return [];
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  };
+  const sessionLines = rows.map(({ dateParts }) => new Set([...dateParts.values()].flatMap((fp) => linesOf(fp.locator))));
+  const sessionLineSet = new Set(sessionLines.flatMap((set) => [...set]));
+  const sessionsOnLine = (index: number) => sessionLines.flatMap((set, session) => (set.has(index) ? [session] : []));
+
+  // Every range the page states outside the session date lines.
+  const outside = new Map<string, number>();
+  lines.forEach((line, index) => {
+    if (sessionLineSet.has(index)) return;
+    for (const range of readTimes(preparedText.slice(line.start, line.end)).ranges) outside.set(`${range.start}|${range.end}`, index);
+  });
+
+  /** A non-session line that states a time range. */
+  const rangeLine = (index: number) => index >= 0 && index < lines.length && !sessionLineSet.has(index)
+    && readTimes(preparedText.slice(lines[index]!.start, lines[index]!.end)).ranges.length > 0;
 
   const own = new Map<number, Pair>();
   const conflicted = new Set<number>();
-  const general = new Map<string, Pair>();
-  for (const pair of stated) {
-    const context = contextOf(pair.start.locator);
-    const covering = sessionContexts.flatMap((contexts, index) => (contexts.some((c) => overlap(context, c)) ? [index] : []));
-    if (covering.length === 1) {
-      const index = covering[0]!;
-      const existing = own.get(index);
+  let general: Pair | null = null;
+  for (const pair of pairs) {
+    const span = spanOf(pair.start.locator);
+    const covered = linesOf(pair.start.locator);
+    if (!span || covered.length !== 1) {
+      notes.push(`"${pair.start.excerpt}": its place on the page could not be read`);
+      continue;
+    }
+    const index = covered[0]!;
+    const line = lines[index]!;
+    const rest = preparedText.slice(line.start, span[0]) + " " + preparedText.slice(span[1], line.end);
+    if (readTimes(rest).times.size > 0) {
+      notes.push(`"${pair.start.excerpt}": its line states other times too, so which one this session has is not settled`);
+      continue;
+    }
+    const lineText = preparedText.slice(line.start, line.end);
+    const onLine = sessionsOnLine(index);
+    if (onLine.length === 0 && (statesADate(lineText) || SESSION_NAME_RE.test(lineText))) {
+      // A line of its own that names a date or a session ("Week 1 hours:
+      // 9-12") is about that session, which its position does not tell.
+      notes.push(`"${pair.start.excerpt}": the cited time is not in any one session's own text`);
+      continue;
+    }
+    const neighbours = onLine.length > 0 ? onLine : [...new Set([...sessionsOnLine(index - 1), ...sessionsOnLine(index + 1)])];
+    if (onLine.length === 0 && neighbours.length > 0 && (rangeLine(index - 1) || rangeLine(index + 1))) {
+      // One of a block of time lines ("Half day 9-12" / "Full day 9-3")
+      // next to a session: the block is not one session's time.
+      notes.push(`"${pair.start.excerpt}": it is one of several time lines together; which session it belongs to is not settled`);
+      continue;
+    }
+    if (neighbours.length === 1) {
+      const session = neighbours[0]!;
+      const existing = own.get(session);
       if (existing && (existing.start.candidateValue !== pair.start.candidateValue || existing.end.candidateValue !== pair.end.candidateValue)) {
-        conflicted.add(index);
+        conflicted.add(session);
       } else {
-        own.set(index, pair);
+        own.set(session, pair);
       }
       continue;
     }
-    if (covering.length > 1) {
-      notes.push(`"${pair.start.excerpt}": the cited text gives the times of several sessions at once; which is which is not settled by it`);
+    if (neighbours.length > 1) {
+      notes.push(`"${pair.start.excerpt}": it sits between two sessions' lines; which one it belongs to is not settled`);
       continue;
     }
-    const lineText = context && preparedText !== undefined ? preparedText.slice(context[0], context[1]) : null;
-    const outsideSessions = context !== null && (context[1] <= firstSessionStart || context[0] >= lastSessionEnd);
-    if (lineText !== null && outsideSessions && !statesADate(lineText) && !SESSION_NAME_RE.test(lineText)) {
-      if (!general.has(pair.start.locator)) general.set(pair.start.locator, pair);
+    const key = `${pair.start.candidateValue}|${pair.end.candidateValue}`;
+    if (outside.size !== 1 || !outside.has(key)) {
+      notes.push(`"${pair.start.excerpt}": the page states ${outside.size} different time ranges outside the session lines; none is applied to every session`);
     } else {
-      notes.push(`"${pair.start.excerpt}": the cited time is not in any one session's own text`);
+      general ??= pair;
     }
   }
-  for (const index of conflicted) {
-    own.delete(index);
-    notes.push(`"${rows[index]!.label}": the page states different times for this session`);
+  for (const session of conflicted) {
+    own.delete(session);
+    notes.push(`"${rows[session]!.label}": the page states different times for this session`);
   }
-  if (general.size > 1) {
-    notes.push(`the page states ${general.size} separate daily times (${[...general.values()].map((pair) => `${pair.start.candidateValue}–${pair.end.candidateValue}`).join(", ")}); none is applied to every session`);
-  }
-  const everySession = general.size === 1 ? [...general.values()][0]! : null;
-  const times = rows.map((_row, index) => (conflicted.has(index) ? null : own.get(index) ?? everySession));
+  const times = rows.map((_row, index) => (conflicted.has(index) ? null : own.get(index) ?? general));
   return { times, notes };
 }
 

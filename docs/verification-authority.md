@@ -437,18 +437,24 @@ and `9:00–15:00` reads only as 3 PM, so both are refused. That is the
 time-of-day analogue of the year-in-quote rule for dates. A time is never
 defaulted or guessed:
 
-- the start and end must be cited from the same text, and that text must
-  state exactly one time range, this one, with its end after its start
-  (`09:00 - 03:00` is refused, not read as 9 AM to 3 AM; "drop-off 8, camp
-  9-3, pickup 5" does not state 8-5);
-- a time is placed by the LINE of the page it is on (a list item, a table
-  row), using the prepared page text (`lib/ingestion/prepared-text.ts`): on
-  one session's date line it is that session's; on several sessions' lines
-  it is refused;
-- a time on no session's line applies to every session only when its line
-  states no date and names no session, it sits before or after the run of
-  session lines (not between them), and it is the page's only such time
-  text. Without the prepared text no time is applied to every session.
+- the start and end must be cited from the same text, that text must state
+  exactly one time range, this one, with its end after its start (`09:00 -
+  03:00` is refused, not read as 9 AM to 3 AM), and the rest of the text's
+  line on the page must state no other time (a narrow citation of
+  "full-day 9am-3pm" out of "half-day 9am-12pm / full-day 9am-3pm" is
+  refused);
+- whose time it is follows from the prepared page text
+  (`lib/ingestion/prepared-text.ts`), never from how the model cut its
+  citation; without that text no time is attached. By the line it is on
+  (blank lines are not lines): the line of one session's dates, or the line
+  directly above or below exactly one session's date line (a card), makes it
+  that session's; next to two sessions' lines (a header-less table), one of
+  a block of time lines, or a line of its own that states a date or names a
+  session, it is refused;
+- any other time is the camp's daily time, for every session without its
+  own, only when the WHOLE page outside the session date lines states exactly
+  one time range, this one (a second range anywhere, extracted or not, means
+  none).
 
 A session listed twice (a summary line and a card) is one session; a time
 one copy states is its time. Two different stated times on the same dates
@@ -463,8 +469,12 @@ for every proposal shape (`sessionRowsToApply`): a row's time is written only
 when the row cites where its time was read; any other time in a row (one
 `computeDiff` kept, possibly since changed by a steward) is treated as
 unstated and the stored time stays. A cited time that would replace a stored
-time the proposal did not show (a steward entered or changed it after the
-page was read) refuses the apply with a message to recrawl. So is a cited time the proposal showed
+value the proposal did not show (a steward's time entered or changed after
+the page was read, a proposal with no `old` row for the session, or a
+steward's "no fixed daily time") is not applied for that session: the stored
+value stays, the rest of the apply goes through, and the apply result says
+so (`provenanceErrors`, step `sessionTimeKept`), which the review page
+shows. So is a cited time the proposal showed
 as unchanged (its `old` row had the same time): it was not a change the
 reviewer approved, and a time changed since (by a steward) stays. Known limit:
 sessions that share a label and dates and are told apart only by their times
@@ -488,8 +498,10 @@ This changed earlier behaviour: Mark Verified attested `hash(null)` for the
 two lists whatever they held, and a camp with no sessions verified its
 sessions trivially. A camp cached VERIFIED that way keeps the cached value
 until its next re-derivation (any write to the camp; nothing re-derives
-existing camps on deploy). `npx tsx scripts/backfill-claim-store.ts --report
---dry-run` lists them.
+existing camps on deploy). After deploy, an operator runs `npx tsx
+scripts/repair-downgraded-camps.ts` (lists them, writes nothing) and then
+`--apply`, which re-derives the cache of the listed camps only; every other
+camp is untouched, so no still-VERIFIED camp is re-dated.
 
 **Steward entry** (`lib/admin/steward-entry.ts`, `POST
 /api/admin/camps/[campId]/steward-entry`). A steward can enter a session's

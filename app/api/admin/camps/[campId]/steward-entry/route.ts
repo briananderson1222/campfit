@@ -1,13 +1,14 @@
 /**
  * POST /api/admin/camps/[campId]/steward-entry
  *
- * A steward enters a value the camp is missing (a session's start and end
- * time, or a single-value camp requirement). The entry is stored and recorded
- * as that steward's attestation of it, in one transaction
- * (lib/admin/steward-entry.ts).
+ * A steward enters a value the camp is missing, or records with a reason
+ * that it has none on purpose. Each is recorded as that steward's attestation,
+ * in one transaction (lib/admin/steward-entry.ts).
  *
  * Body: { kind: 'session-time', scheduleId, startTime, endTime }
+ *     | { kind: 'session-no-fixed-time', scheduleId, reason }
  *     | { kind: 'camp-field', field, value }
+ *     | { kind: 'intentionally-empty', field: 'ageGroups' | 'pricing' | 'schedules', reason }
  * Returns the derived dataConfidence and the requirements still missing.
  */
 import { NextResponse } from 'next/server';
