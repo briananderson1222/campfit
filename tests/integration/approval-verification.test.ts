@@ -889,6 +889,8 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
         expect((await refreshCampVerificationCacheOnLockedClient(client, campId)).dataConfidence).toBe('PLACEHOLDER');
         await client.query('COMMIT');
       } finally {
+        // A failed assertion above leaves the transaction open; never return it to the pool open.
+        await client.query('ROLLBACK').catch(() => undefined);
         client.release();
       }
     });
