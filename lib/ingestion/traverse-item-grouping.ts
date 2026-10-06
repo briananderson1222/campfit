@@ -68,6 +68,7 @@
 
 import type { ExtractionProposal } from "@kontourai/traverse";
 import type { PricingUnit } from "@/lib/types";
+import { canonicalTime, textStatesTime } from "./session-time";
 import {
   CAMP_TARGET_SCHEMA,
   ENUM_ARRAY_SCHEMA_PATHS,
@@ -81,7 +82,7 @@ import {
 /** One nested array field family this module reconstructs full rows for. */
 const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
   "ageGroups[]": ["minAge", "maxAge"],
-  "schedules[]": ["startDate", "endDate"],
+  "schedules[]": ["startDate", "endDate", "startTime", "endTime"],
   "pricing[]": ["amount", "unit"],
   "socialLinks[]": ["platform", "url"],
 };
@@ -90,6 +91,9 @@ const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
 const SCHEMA_BY_REL_PATH = new Map(
   CAMP_TARGET_SCHEMA.map((field) => [field.path.slice(ITEMS_ARRAY_PREFIX.length), field] as const),
 );
+
+/** The per-session time leaves, relative to one item. */
+const SESSION_TIME_PATHS = new Set(["schedules[].startTime", "schedules[].endTime"]);
 
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/;
 
@@ -119,6 +123,16 @@ function isIsoCalendarDate(value: unknown): boolean {
 function screenValue(relPath: string, value: unknown, excerpt: string): { ok: true; value: unknown } | { ok: false; why: string } {
   const field = SCHEMA_BY_REL_PATH.get(relPath);
   if (!field) return { ok: true, value };
+  if (SESSION_TIME_PATHS.has(relPath)) {
+    // A session time is a clock time with its half of the day, and the text
+    // it cites must state that time (session-time.ts); the time-of-day
+    // analogue of the year-in-quote rule for dates below.
+    const canonical = canonicalTime(value);
+    if (canonical === null) return { ok: false, why: "not a clock time with its am/pm" };
+    return textStatesTime(canonical, excerpt)
+      ? { ok: true, value: canonical }
+      : { ok: false, why: "the time is not stated in the cited text" };
+  }
   switch (field.type) {
     case "enum": {
       const allowed = field.enumValues ?? [];
@@ -175,8 +189,23 @@ export interface AssembledItem {
   scalars: Partial<Record<ItemFieldPath, FieldProposal>>;
   /** each entry is one age band, fully reconstructed from its own excerpt(s). `locator` is where `label` sits in the prepared text. */
   ageGroups: { minAge: number | null; maxAge: number | null; label: string; locator: string; confidence?: number }[];
-  /** each entry is one session, fully reconstructed from its own excerpt(s). */
-  schedules: { startDate: string | null; endDate: string | null; label: string; locator: string; confidence?: number }[];
+  /**
+   * each entry is one session, fully reconstructed from its own excerpt(s).
+   * `label`/`locator` cite its dates. `startTime`/`endTime` are set only when
+   * the page states both (each in the text it cites, see `screenValue`), and
+   * `timeCitations` then holds that text: one entry per distinct excerpt.
+   * A time the page does not state is null, never a default.
+   */
+  schedules: {
+    startDate: string | null;
+    endDate: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    timeCitations: { excerpt: string; locator: string }[];
+    label: string;
+    locator: string;
+    confidence?: number;
+  }[];
   /**
    * each entry is one price tier, fully reconstructed from its own excerpt(s).
    * A tier missing its amount or unit is never defaulted (a missing amount is
@@ -445,6 +474,16 @@ function assembleEnumArrayEntries(
   return { rows: [...byValue.values()], refused: ordered.filter((fp) => fp.refused), warnings };
 }
 
+/** One citation per distinct excerpt, in order. */
+function distinctCitations(parts: readonly FieldProposal[]): { excerpt: string; locator: string }[] {
+  const seen = new Map<string, { excerpt: string; locator: string }>();
+  for (const part of parts) {
+    const key = `${part.excerpt}\u0000${part.locator}`;
+    if (!seen.has(key)) seen.set(key, { excerpt: part.excerpt, locator: part.locator });
+  }
+  return [...seen.values()];
+}
+
 function rowExcerpt(row: Map<string, FieldProposal>): string {
   return [...row.values()][0]?.excerpt ?? "";
 }
@@ -538,6 +577,89 @@ function withConfidence(confidence: number | undefined): { confidence?: number }
 
 function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
   return meanReportedConfidence([...row.values()].map((value) => value.confidence));
+}
+
+/**
+ * Attach a stated start and end time to each dated session row, or none.
+ *
+ * Traverse drops a repeated proposal (same field, value and cited span), so a
+ * page that states one daily time for every session ("Camp runs 9am-3pm")
+ * arrives as ONE start/end time, paired positionally with the first session.
+ * And without item indices a time can land on the wrong session's row. So a
+ * row's time is decided by what its cited text is:
+ *  - text that also states a date is about one session: it is kept only on
+ *    the row whose own date citation it overlaps (the same line or card);
+ *  - text that states no date is about every session ("every day", "camp
+ *    hours"): when the page states exactly one such time, it applies to each
+ *    session without a time of its own; when it states several (half day,
+ *    full day), none is assigned — which one a session has is not stated.
+ * A row whose start or end time was refused (`screenValue`), or that has only
+ * one of the two, gets no time from its own proposals. Nothing is filled in
+ * from a usual camp day.
+ */
+function assignSessionTimes(
+  rows: readonly { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; label: string }[],
+  undatedTimes: readonly Map<string, FieldProposal>[],
+): { times: ({ start: FieldProposal; end: FieldProposal } | null)[]; notes: string[] } {
+  const notes: string[] = [];
+  const pairOf = (row: Map<string, FieldProposal>, label: string): { start: FieldProposal; end: FieldProposal } | null => {
+    const start = row.get("startTime");
+    const end = row.get("endTime");
+    if (!start && !end) return null;
+    if (start && end && !start.refused && !end.refused) return { start, end };
+    notes.push(`"${label}": ${start?.refused ?? end?.refused ?? `no ${start ? "end" : "start"} time was extracted`}`);
+    return null;
+  };
+  const isGeneral = (pair: { start: FieldProposal; end: FieldProposal }) => !statesADate(pair.start.excerpt) && !statesADate(pair.end.excerpt);
+
+  const stated = [
+    ...rows.map(({ row, label }) => pairOf(row, label)),
+    ...undatedTimes.map((row) => pairOf(row, rowExcerpt(row))),
+  ].filter((pair): pair is { start: FieldProposal; end: FieldProposal } => pair !== null);
+
+  const general = new Map<string, { start: FieldProposal; end: FieldProposal }>();
+  for (const pair of stated.filter(isGeneral)) {
+    const key = `${pair.start.candidateValue}|${pair.end.candidateValue}`;
+    if (!general.has(key)) general.set(key, pair);
+  }
+  if (general.size > 1) {
+    notes.push(`the page states ${general.size} different daily times (${[...general.values()].map((pair) => `${pair.start.candidateValue}–${pair.end.candidateValue}`).join(", ")}) without saying which session has which`);
+  }
+  const everySession = general.size === 1 ? [...general.values()][0]! : null;
+
+  // A time stated with a session's dates belongs to the session whose own
+  // date citation it overlaps, whichever row it arrived on.
+  const specific = stated.filter((pair) => !isGeneral(pair));
+  const used = new Set<{ start: FieldProposal; end: FieldProposal }>();
+  const times = rows.map(({ dateParts }) => {
+    const dateLocators = [...dateParts.values()].map((fp) => fp.locator);
+    const own = specific.find((pair) => [pair.start, pair.end].every((fp) => dateLocators.some((locator) => spansOverlap(fp.locator, locator))));
+    if (own) {
+      used.add(own);
+      return own;
+    }
+    return everySession;
+  });
+  for (const pair of specific) {
+    if (!used.has(pair)) notes.push(`"${pair.start.excerpt}": the cited time is not in any one session's own text`);
+  }
+  return { times, notes };
+}
+
+const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b/i;
+const NUMERIC_DATE_RE = /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/;
+
+/** Whether a text states a calendar date ("June 14", "6/14", "2027-06-14"). */
+function statesADate(text: string): boolean {
+  return MONTH_DAY_RE.test(text) || NUMERIC_DATE_RE.test(text);
+}
+
+/** Whether two `chars:<start>-<end>` locators overlap. False when either cannot be parsed. */
+function spansOverlap(a: string, b: string): boolean {
+  const pa = /^chars:(\d+)-(\d+)$/.exec(a);
+  const pb = /^chars:(\d+)-(\d+)$/.exec(b);
+  if (!pa || !pb) return false;
+  return Number(pa[1]) < Number(pb[2]) && Number(pb[1]) < Number(pa[2]);
 }
 
 /**
@@ -641,20 +763,51 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     // end date, is dropped, and then the whole change is withheld: approving a
     // session list reconciles the camp's sessions against it, so a partial
     // list would archive the sessions that could not be extracted.
-    const completeSchedules: AssembledItem["schedules"] = [];
+    //
+    // A session's time never decides whether the session is proposed: it is
+    // attached by `assignSessionTimes` only when the page states it, and is
+    // otherwise left out (null), which leaves the time requirement open.
+    const datedRows: { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; startDate: string; endDate: string | null; label: string }[] = [];
     const droppedScheduleLabels: string[] = [];
+    const undatedTimes: Map<string, FieldProposal>[] = [];
     for (const row of scheduleResult.rows) {
       if (row.size === 0) continue;
-      const label = rowExcerpt(row);
+      const dateParts = new Map([...row].filter(([subField]) => subField === "startDate" || subField === "endDate"));
+      if (dateParts.size === 0) {
+        undatedTimes.push(row);
+        continue;
+      }
+      const label = rowExcerpt(dateParts);
       const startDate = acceptedValue<string>(row.get("startDate"));
       const endDate = acceptedValue<string>(row.get("endDate"));
       if (startDate === null || row.get("endDate")?.refused) {
         droppedScheduleLabels.push(label);
         continue;
       }
-      completeSchedules.push({ startDate, endDate, label, locator: rowLocator(row), ...withConfidence(rowConfidence(row)) });
+      datedRows.push({ row, dateParts, startDate, endDate, label });
     }
-    const scheduleRows = dedupeRows(completeSchedules, (row) => JSON.stringify([row.startDate, row.endDate]));
+    const timed = assignSessionTimes(datedRows, undatedTimes);
+    if (timed.notes.length > 0) {
+      operatorWarnings.push(
+        `${timed.notes.length} session time${timed.notes.length === 1 ? "" : "s"} not proposed (e.g. ${timed.notes.slice(0, 3).join("; ")}) — a time the page does not state for that session is left out, and the session is proposed without it`
+      );
+    }
+    const completeSchedules: AssembledItem["schedules"] = datedRows.map((dated, index) => {
+      const time = timed.times[index];
+      return {
+        startDate: dated.startDate,
+        endDate: dated.endDate,
+        startTime: time ? (time.start.candidateValue as string) : null,
+        endTime: time ? (time.end.candidateValue as string) : null,
+        timeCitations: time ? distinctCitations([time.start, time.end]) : [],
+        label: dated.label,
+        locator: rowLocator(dated.dateParts),
+        ...withConfidence(rowConfidence(dated.row)),
+      };
+    });
+    // Sessions on the same dates at different times (morning and afternoon)
+    // are two sessions; the same dates and times are one.
+    const scheduleRows = dedupeRows(completeSchedules, (row) => JSON.stringify([row.startDate, row.endDate, row.startTime, row.endTime]));
     const droppedSchedules = droppedScheduleLabels.length;
     if (droppedSchedules > 0) {
       // One note for the family, not one per row: a listing page can carry dozens.

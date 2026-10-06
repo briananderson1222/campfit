@@ -52,6 +52,7 @@ import { CAMP_ENUM_ARRAY_FIELDS, CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from
 import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
+import { textStatesTime } from '@/lib/ingestion/session-time';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
@@ -875,6 +876,14 @@ interface RowCitationCheck {
   readonly excerpt?: string;
   /** The `chars:` locator the excerpt resolved to. Set only when `checked`. */
   readonly locator?: string;
+  /**
+   * Sessions only, present when the row cites where its time was read: every
+   * time excerpt is on the stored page AND states the row's start and end
+   * time (session-time.ts). A time with no citation of its own (a stored
+   * time the crawl kept, see diff-engine.ts) has no `time` check and is not
+   * attested by this approval.
+   */
+  readonly time?: { readonly checked: boolean; readonly excerpt?: string; readonly locator?: string };
 }
 
 /** Whether an applied field's cited excerpts are on the stored page, and for a list, row by row. */
@@ -918,15 +927,44 @@ function checkCitations(changes: ProposedChanges, fields: readonly string[], cit
       checks.set(field, { reviewed: false });
       continue;
     }
-    const rows = citations.map((row): RowCitationCheck => {
+    const rows = citations.map((row, index): RowCitationCheck => {
+      const time = field === 'schedules' ? checkSessionTimeCitation((diff.new as unknown[])[index], row?.times, citation.text) : undefined;
       const excerpt = typeof row?.excerpt === 'string' ? row.excerpt : '';
-      if (!excerpt.trim()) return { checked: false };
+      if (!excerpt.trim()) return { checked: false, ...(time ? { time } : {}) };
       const resolved = resolveReviewExcerpt(excerpt, citation.text, row.locator);
-      return resolved.state === 'verified' ? { checked: true, excerpt, locator: resolved.locator } : { checked: false, excerpt };
+      return resolved.state === 'verified'
+        ? { checked: true, excerpt, locator: resolved.locator, ...(time ? { time } : {}) }
+        : { checked: false, excerpt, ...(time ? { time } : {}) };
     });
-    checks.set(field, { reviewed: rows.every((row) => row.checked), rows });
+    // A cited time is part of what the row asserts: a list whose cited time
+    // fails the check is not reviewed as a whole.
+    checks.set(field, { reviewed: rows.every((row) => row.checked && (row.time === undefined || row.time.checked)), rows });
   }
   return checks;
+}
+
+/**
+ * Check a proposed session row's time citation: every excerpt is on the stored
+ * page and, together, they state the row's start and end time. Undefined when
+ * the row cites no time.
+ */
+function checkSessionTimeCitation(
+  value: unknown,
+  times: readonly { excerpt?: unknown; locator?: string }[] | undefined,
+  pageText: string,
+): RowCitationCheck['time'] | undefined {
+  if (!Array.isArray(times) || times.length === 0) return undefined;
+  const excerpts = times.map((time) => (typeof time?.excerpt === 'string' ? time.excerpt : ''));
+  const resolved = times.map((time, i) => (excerpts[i]!.trim() ? resolveReviewExcerpt(excerpts[i]!, pageText, time.locator) : null));
+  const row = (value ?? {}) as { startTime?: unknown; endTime?: unknown };
+  const cited = excerpts.join('\n');
+  const checked = resolved.every((r) => r?.state === 'verified')
+    && textStatesTime(row.startTime, cited)
+    && textStatesTime(row.endTime, cited);
+  const first = resolved[0];
+  return checked
+    ? { checked, excerpt: excerpts.join(' / '), locator: first?.state === 'verified' ? first.locator : undefined }
+    : { checked: false, excerpt: excerpts.join(' / ') };
 }
 
 /** What the apply transaction learned that the evidence written after it needs. */
@@ -1559,12 +1597,19 @@ async function recordSessionClaims(
     const index = rowIndexByKey.get(keyOf(session));
     const citation = index === undefined ? undefined : args.check.rows?.[index];
     if (!citation?.checked) continue;
+    // The time is attested only from its own citation, checked on the page
+    // and stating this time; a time the crawl did not state (kept from the
+    // stored session) is left to whoever attested it before.
     const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
+    const row = proposed[index!]!;
+    const timeChecked = timeStated && citation.time?.checked === true
+      && session.startTime === row.startTime && session.endTime === row.endTime;
     // A session created by this apply was not locked up front (its id did not exist yet).
     await acquireSubjectAdvisoryLock(w.client, SESSION_SUBJECT_TYPE, session.id);
-    const attributes: ('dates' | 'time')[] = timeStated ? ['dates', 'time'] : ['dates'];
+    const attributes: ('dates' | 'time')[] = timeChecked ? ['dates', 'time'] : ['dates'];
     for (const attribute of attributes) {
       const claimId = sessionClaimId(session.id, attribute);
+      const cited = attribute === 'time' ? citation.time! : citation;
       await recordApprovedClaim(w, {
           draft: {
             id: claimId,
@@ -1576,8 +1621,8 @@ async function recordSessionClaims(
             impactLevel: 'medium',
             metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
           },
-          // This row's own citation, not the list's first row's.
-          evidence: { ...args.evidence, sourceLocator: citation.locator, excerptOrSummary: citation.excerpt ?? args.evidence.excerptOrSummary },
+          // This row's own citation (for the time, the text that states it), not the list's first row's.
+          evidence: { ...args.evidence, sourceLocator: cited.locator, excerptOrSummary: cited.excerpt ?? args.evidence.excerptOrSummary },
           event: {
             id: claimId,
             claimId,

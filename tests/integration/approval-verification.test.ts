@@ -55,9 +55,19 @@ function diff(old: unknown, next: unknown, excerpt: string): FieldDiff {
   return { old, new: next, confidence: 0.9, excerpt, sourceUrl: URL, mode: 'update' };
 }
 
-/** A list change whose every row cites its own line of the page. */
+/**
+ * A list change whose every row cites its own line of the page. A session row
+ * that states a time cites that same line for it (each session line states
+ * its dates and its time), as a crawl records it (`RowCitation.times`).
+ */
 function listDiff(old: unknown, rows: unknown[], excerpts: string[]): FieldDiff {
-  return { ...diff(old, rows, excerpts[0]!), rowCitations: excerpts.map((excerpt) => ({ excerpt })) };
+  return {
+    ...diff(old, rows, excerpts[0]!),
+    rowCitations: excerpts.map((excerpt, i) => {
+      const row = rows[i] as { startTime?: unknown; endTime?: unknown } | undefined;
+      return row?.startTime && row?.endTime ? { excerpt, times: [{ excerpt }] } : { excerpt };
+    }),
+  };
 }
 
 function session(times: boolean) {

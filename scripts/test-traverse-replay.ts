@@ -112,7 +112,7 @@ function testItemToProposedChangesExactSerialization() {
       },
     },
     ageGroups: [{ label: "Ages 6-12", locator: "chars:40-49", minAge: 6, maxAge: 12, confidence: 0.8 }],
-    schedules: [{ label: "June 3-7", locator: "chars:50-58", startDate: "2026-06-03", endDate: "2026-06-07", confidence: 0.82 }],
+    schedules: [{ label: "June 3-7", locator: "chars:50-58", startDate: "2026-06-03", endDate: "2026-06-07", startTime: null, endTime: null, timeCitations: [], confidence: 0.82 }],
     pricing: [{ label: "$425 per week", locator: "chars:60-73", amount: 425, unit: "PER_WEEK", confidence: 0.84 }],
     campTypes: [],
     categories: [],

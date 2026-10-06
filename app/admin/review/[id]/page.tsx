@@ -13,6 +13,8 @@ import { ReviewDetailHeading } from './review-detail-heading';
 import { reportedOverallConfidence } from '@/lib/admin/proposal-extraction-status';
 import { ExtractionNotices } from './extraction-notices';
 import { RowCitations } from './row-citations';
+import { loadMissingRequirements } from '@/lib/admin/missing-requirements';
+import { MissingRequirementsPanel } from '@/components/admin/missing-requirements-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +65,10 @@ export default async function ReviewDetailPage(
   });
   const trustDisplays = await loadCampTrustDisplays(proposal.campId);
   const overallConfidence = reportedOverallConfidence(proposal);
+  const missingRequirements = await loadMissingRequirements(proposal.campId).catch((err) => {
+    console.error('[admin/review] loadMissingRequirements failed:', err);
+    return null;
+  });
 
   return (
     <div>
@@ -99,6 +105,9 @@ export default async function ReviewDetailPage(
       </div>
       <ExtractionNotices rawExtraction={proposal.rawExtraction} />
       <RowCitations proposedChanges={proposal.proposedChanges} />
+      <div className="mb-4">
+        <MissingRequirementsPanel guidance={missingRequirements} />
+      </div>
       <div className="mb-4 flex items-center justify-end gap-2">
         {queue.previousId && (
           <Link href={buildDetailHref(queue.previousId, searchParams)} className="btn-secondary gap-1.5 text-sm">

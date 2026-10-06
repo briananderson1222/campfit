@@ -37,7 +37,7 @@ import type {
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, ITEM_FIELD_PATHS } from "./traverse-schema";
 import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
-import { plainLabel } from "./traverse-diff-inputs";
+import { plainLabel, scheduleRowCitation } from "./traverse-diff-inputs";
 import { describeIncompleteness, extractionIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
 import { compareValue } from "./lookout-diff-adapter";
@@ -158,15 +158,15 @@ export function itemToProposedChanges(
         label: plainLabel(s.label),
         startDate: s.startDate,
         endDate: s.endDate,
-        startTime: null,
-        endTime: null,
+        startTime: s.startTime,
+        endTime: s.endTime,
         earlyDropOff: null,
         latePickup: null,
       })),
       ...reportedConfidence(meanReportedConfidence(item.schedules.map((s) => s.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.schedules[0].locator }),
-      rowCitations: item.schedules.map((row) => ({ excerpt: row.label, ...(row.locator ? { locator: row.locator } : {}) })),
+      rowCitations: item.schedules.map(scheduleRowCitation),
     };
   }
 

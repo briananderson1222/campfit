@@ -9,6 +9,8 @@ import { getCampFieldTimeline } from '@/lib/admin/field-metadata';
 import { coverageFromRollup, deriveCampVerification } from '@/lib/admin/verification-authority';
 import { getAdminCampDetail, getAdminCampPendingProposals } from '@/lib/admin/camp-repository';
 import { getAdminCampSiteHints } from '@/lib/admin/site-hint-repository';
+import { loadMissingRequirements } from '@/lib/admin/missing-requirements';
+import { MissingRequirementsPanel } from '@/components/admin/missing-requirements-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +35,12 @@ export default async function AdminCampDetailPage(props: { params: Promise<{ cam
       .then(rollup => coverageFromRollup(rollup, camp))
       .catch(err => { console.error('[admin/camps] deriveCampVerification failed:', err); return null; }),
   ]);
+  // After the parallel reads above, not among them: it derives the camp and
+  // each session, and holds no connection between reads.
+  const missingRequirements = await loadMissingRequirements(params.campId).catch((err) => {
+    console.error('[admin/camps] loadMissingRequirements failed:', err);
+    return null;
+  });
   const fieldTimeline = await getCampFieldTimeline(params.campId).catch((err) => {
     console.error('[admin/camps] getCampFieldTimeline failed:', err);
     return {};
@@ -65,6 +73,10 @@ export default async function AdminCampDetailPage(props: { params: Promise<{ cam
         >
           <ExternalLink className="w-3.5 h-3.5" /> Public page
         </Link>
+      </div>
+
+      <div className="mb-5">
+        <MissingRequirementsPanel guidance={missingRequirements} />
       </div>
 
       <CampEditor

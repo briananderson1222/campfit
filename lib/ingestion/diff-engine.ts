@@ -3,9 +3,11 @@ import type { CampInput } from './adapter';
 import type { ProposedChanges, FieldDiff } from '@/lib/admin/types';
 import {
   projectProvenance,
+  projectScheduleDomain,
   relationDomainIdentity,
   normalizeScalar,
 } from './diff-policy';
+import { plainLabel } from './plain-label';
 import { compareRelation, compareValue } from './lookout-diff-adapter';
 
 // A change to a field a reviewer approved within this window is still
@@ -52,6 +54,37 @@ const SCALAR_FIELDS = [
 const ARRAY_FIELDS = ['ageGroups', 'schedules', 'pricing'] as const;
 
 const ENUM_ARRAY_FIELDS = ['campTypes', 'categories'] as const;
+
+/**
+ * A page that does not state a session's time is not evidence the time was
+ * removed, and approving a session list writes every row's time. So a crawled
+ * session with no time that is the same session as a stored one (same plain
+ * label and dates, and the only stored session with them) keeps the stored
+ * time, as the socialLinks merge below keeps unlinked profiles. A crawled
+ * time that differs from the stored one is a change, proposed for review like
+ * any other. The kept time carries no citation, so an approval does not
+ * attest it again: whoever attested it before (a reviewer, a steward) still
+ * stands, because the value did not change.
+ */
+export function keepUnstatedSessionTimes(currentItems: readonly unknown[], extractedRows: readonly unknown[]): unknown[] {
+  const keyOf = (row: unknown): string => {
+    const domain = projectScheduleDomain(row);
+    return `${plainLabel(domain.label ?? '').toLowerCase()}|${domain.startDate ?? ''}|${domain.endDate ?? ''}`;
+  };
+  const stored = new Map<string, Record<string, unknown>[]>();
+  for (const row of currentItems) {
+    if (!isPlainObject(row)) continue;
+    const key = keyOf(row);
+    stored.set(key, [...(stored.get(key) ?? []), row]);
+  }
+  return extractedRows.map((row) => {
+    if (!isPlainObject(row) || row.startTime != null || row.endTime != null) return row;
+    const matches = stored.get(keyOf(row)) ?? [];
+    const only = matches.length === 1 ? matches[0]! : null;
+    if (!only || typeof only.startTime !== 'string' || typeof only.endTime !== 'string' || !only.startTime.trim() || !only.endTime.trim()) return row;
+    return { ...row, startTime: only.startTime, endTime: only.endTime };
+  });
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -128,11 +161,12 @@ export function computeDiff(
   for (const field of ARRAY_FIELDS) {
     const conf = knownConfidence(confidence, field);
 
-    const extractedArr = (extracted as Record<string, unknown>)[field];
-    if (!Array.isArray(extractedArr) || extractedArr.length === 0) continue;
+    const extractedValue = (extracted as Record<string, unknown>)[field];
+    if (!Array.isArray(extractedValue) || extractedValue.length === 0) continue;
 
     const currentArr = (current as unknown as Record<string, unknown>)[field];
     const currentItems = Array.isArray(currentArr) ? currentArr : [];
+    const extractedArr = field === 'schedules' ? keepUnstatedSessionTimes(currentItems, extractedValue) : extractedValue;
     const identity = relationDomainIdentity(field);
 
     // One Lookout multiset call supplies equality and additive/replace facts.

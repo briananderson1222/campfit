@@ -403,12 +403,13 @@ What counts as reviewed for a list (`ageGroups`, `pricing`, `schedules`,
   the two must agree or the apply is refused.
 - `schedules` is recorded per kept session whose own row's excerpt is on the
   page: a `dates` claim, and a `time` claim when the row states a start and an
-  end time. Exact duplicate rows are one session; sessions that share a label
-  and dates (a morning and an afternoon session) are told apart by their
-  times, so among those a time change replaces the session. A session with
-  no stated time has no `time` claim, so `sessions-verified` stays open; the
-  crawl schema has no session time field, so a list approved from a crawl
-  carries no times today.
+  end time AND cites where its time was read (`rowCitations[i].times`), that
+  text is on the page and states both times (`lib/ingestion/session-time.ts`).
+  A time with no citation of its own is not attested by the approval. Exact
+  duplicate rows are one session; sessions that share a label and dates (a
+  morning and an afternoon session) are told apart by their times, so among
+  those a time change replaces the session. A session with no attested time
+  has no `time` claim, so `sessions-verified` stays open.
 
 A batch accept is recorded as its own kind (`batch-accept` on the evidence and
 the event), and the trust display shows it as "Accepted in batch". Like a review, it verifies a field only when the field's cited
@@ -425,6 +426,41 @@ camp holds when they run, not necessarily the values the admin's page showed:
 an edit from another tab in between is attested too. Stale-view protection
 needs a camp version that changes only when a value does; it is tracked as a
 follow-up.
+
+## Session times and steward entry
+
+**Extraction.** The crawl schema asks for each session's start and end time
+(`items[].schedules[].startTime`/`endTime`). A time is kept only when its
+cited text states it with its half of the day (`9am`, `3:30 PM`, `9-3pm`,
+`15:00`); `8:30-3:00` states no half of the day and is refused, the time-of-day
+analogue of the year-in-quote rule for dates. A time is never defaulted: a
+session whose time is not stated is proposed without one. Text that states a
+date belongs to that session (matched by overlapping citation spans); text
+that states no date ("Camp runs 9am-3pm every day") applies to every session,
+but only when the page states exactly one such time.
+
+**A crawl never removes a stored time it does not state.** In `computeDiff`, a
+crawled session with no time that is the same session as a stored one (same
+plain label and dates, and the only stored session with them) keeps the
+stored time (`keepUnstatedSessionTimes`). A crawled time that differs is
+proposed for review.
+
+**Missing requirements.** For a camp that is not VERIFIED, the admin camp page
+and the review page list every requirement the derivation reports as not
+verified (`lib/admin/missing-requirements.ts`), each session's missing
+attributes under it, with the camp's website and phone.
+
+**Steward entry** (`lib/admin/steward-entry.ts`, `POST
+/api/admin/camps/[campId]/steward-entry`). A steward can enter a session's
+start and end time, or a missing single-value camp requirement (description,
+camp type, category, registration status, city, website). The entry is stored
+and recorded as that steward's attestation: `human_attestation` evidence
+(`method: 'attestation'`, `metadata.reviewKind: 'steward-entry'`) and an
+`assumed` event with method `steward-entry`, counted like an admin
+attestation (`countAdminAttestedRequirements`). One transaction, in the lock
+order above, stamped by `nextClaimEventTime`, the cache re-derived on the same
+client before commit. It clears the field's approved-page fingerprint, so a
+later crawl that reads a different value proposes it.
 
 ## Accepted gaps
 

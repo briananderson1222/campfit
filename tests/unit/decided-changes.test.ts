@@ -96,8 +96,8 @@ describe('after an approve, the review page', () => {
     } }));
     expect(html).toContain('data-testid="row-citations"');
     expect(html.match(/data-testid="row-citation"/g)).toHaveLength(2);
-    expect(html).toContain('Session One · 2027-06-07 – 2027-06-11</span><q class="break-words text-xs text-bark-500">Session One: June 7 - June 11, 2027</q>');
-    expect(html).toContain('Session Two · 2027-06-14 – 2027-06-18</span><q class="break-words text-xs text-bark-500">no citation</q>');
+    expect(html).toContain('Session One · 2027-06-07 – 2027-06-11</span><span class="grid gap-0.5"><q class="break-words text-xs text-bark-500">Session One: June 7 - June 11, 2027</q></span>');
+    expect(html).toContain('Session Two · 2027-06-14 – 2027-06-18</span><span class="grid gap-0.5"><q class="break-words text-xs text-bark-500">no citation</q></span>');
     expect(renderToStaticMarkup(createElement(RowCitations, { proposedChanges: { city: { old: 'A', new: 'B' } } }))).toBe('');
   });
 });

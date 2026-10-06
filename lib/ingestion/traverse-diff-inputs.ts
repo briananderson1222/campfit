@@ -9,10 +9,29 @@ export { plainLabel };
 export interface RowCitation {
   excerpt: string;
   locator?: string;
+  /**
+   * Sessions only: where the row's start and end time were read, one entry
+   * per distinct excerpt. Present exactly when the crawl stated the row's
+   * time; `excerpt` above then cites its dates.
+   */
+  times?: { excerpt: string; locator?: string }[];
 }
 
 function rowCitation(excerpt: string, locator: string): RowCitation {
   return { excerpt, ...(locator ? { locator } : {}) };
+}
+
+/** One proposed session row: its dates' citation, plus its time's when the page stated one. */
+export function scheduleRowCitation(row: AssembledItem["schedules"][number]): RowCitation {
+  return {
+    ...rowCitation(row.label, row.locator),
+    ...(row.timeCitations.length > 0 ? { times: row.timeCitations.map((time) => rowCitation(time.excerpt, time.locator)) } : {}),
+  };
+}
+
+/** One proposed session row's value. A time the page did not state stays null. */
+export function scheduleRowValue(row: AssembledItem["schedules"][number]) {
+  return { label: plainLabel(row.label), startDate: row.startDate ?? "", endDate: row.endDate ?? "", startTime: row.startTime, endTime: row.endTime, earlyDropOff: null, latePickup: null };
 }
 
 /** An unreported confidence leaves the field out, which computeDiff reads as unknown. */
@@ -51,9 +70,9 @@ export function assembledItemToDiffInputs(item: AssembledItem): {
     if (item.ageGroups[0]?.label && item.ageGroups[0].locator) locators.ageGroups = item.ageGroups[0].locator;
   }
   if (item.schedules.length > 0) {
-    extracted.schedules = item.schedules.map((v) => ({ label: plainLabel(v.label), startDate: v.startDate ?? "", endDate: v.endDate ?? "", startTime: null, endTime: null, earlyDropOff: null, latePickup: null }));
+    extracted.schedules = item.schedules.map(scheduleRowValue);
     setConfidence(confidence, "schedules", meanReportedConfidence(item.schedules.map((v) => v.confidence)));
-    rowCitations.schedules = item.schedules.map((v) => rowCitation(v.label, v.locator));
+    rowCitations.schedules = item.schedules.map(scheduleRowCitation);
     if (item.schedules[0]?.label) excerpts.schedules = item.schedules[0].label;
     if (item.schedules[0]?.label && item.schedules[0].locator) locators.schedules = item.schedules[0].locator;
   }

@@ -90,7 +90,12 @@ export interface FieldDiff {
    * proposals written before it was recorded; such a list has no per-row
    * citation to check.
    */
-  rowCitations?: { excerpt: string; locator?: string }[];
+  rowCitations?: {
+    excerpt: string;
+    locator?: string;
+    /** Sessions only: where the row's start and end time were read. Present only when the crawl stated the time. */
+    times?: { excerpt: string; locator?: string }[];
+  }[];
   mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions
 }
 
