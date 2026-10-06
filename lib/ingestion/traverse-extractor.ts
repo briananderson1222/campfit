@@ -28,6 +28,7 @@
  * are actually appliable.
  */
 
+import { preparedTextOf, rememberPreparedText } from "./prepared-text";
 import { extract } from "@kontourai/traverse";
 import type {
   ExtractionProvider,
@@ -37,7 +38,7 @@ import type {
 import type { FieldDiff, ProposedChanges } from "@/lib/admin/types";
 import { CAMP_TARGET_SCHEMA, CAMP_FIELD_HINTS, ITEM_FIELD_PATHS } from "./traverse-schema";
 import { assembleItems, meanReportedConfidence, type AssembledItem } from "./traverse-item-grouping";
-import { plainLabel } from "./traverse-diff-inputs";
+import { plainLabel, scheduleRowCitation } from "./traverse-diff-inputs";
 import { describeIncompleteness, extractionIncompleteness, withholdListChangesFromIncompleteRun, type ExtractionIncompleteness } from "./extraction-completeness";
 import { normalizeScalar, projectProvenance } from "./diff-policy";
 import { compareValue } from "./lookout-diff-adapter";
@@ -73,7 +74,7 @@ export async function runTraverseExtraction(
   const fieldHints = opts.extraFieldHints && Object.keys(opts.extraFieldHints).length > 0
     ? { ...CAMP_FIELD_HINTS, ...opts.extraFieldHints }
     : CAMP_FIELD_HINTS;
-  return extract({
+  const result = await extract({
     content: opts.content,
     contentType: opts.contentType ?? "html",
     sourceRef: opts.sourceRef,
@@ -82,6 +83,8 @@ export async function runTraverseExtraction(
     provider: opts.provider,
     maxContentChars: opts.maxContentChars,
   });
+  rememberPreparedText(result, opts.content, opts.contentType ?? "html");
+  return result;
 }
 
 /** Present only when reported: an unreported confidence is absent, never 0. */
@@ -158,15 +161,15 @@ export function itemToProposedChanges(
         label: plainLabel(s.label),
         startDate: s.startDate,
         endDate: s.endDate,
-        startTime: null,
-        endTime: null,
+        startTime: s.startTime,
+        endTime: s.endTime,
         earlyDropOff: null,
         latePickup: null,
       })),
       ...reportedConfidence(meanReportedConfidence(item.schedules.map((s) => s.confidence))),
       mode: "add_items",
       ...projectProvenance({ excerpt: item.schedules[0].label, sourceUrl, includeEmptyExcerpt: true, locator: item.schedules[0].locator }),
-      rowCitations: item.schedules.map((row) => ({ excerpt: row.label, ...(row.locator ? { locator: row.locator } : {}) })),
+      rowCitations: item.schedules.map(scheduleRowCitation),
     };
   }
 
@@ -246,7 +249,7 @@ export function buildTraverseItemProposalRecords(
   } = {}
 ): TraverseItemProposalRecord[] {
   const sourceUrl = opts.sourceUrl ?? "";
-  const items = assembleItems(result.proposals);
+  const items = assembleItems(result.proposals, { preparedText: preparedTextOf(result) });
   const incomplete = extractionIncompleteness(result);
 
   // An item that collapsed several programs has no name of its own, and this

@@ -82,10 +82,30 @@ describe('plainLabel', () => {
 
 describe('after an approve, the review page', () => {
   it('moves on when everything was recorded, and stays to show what was not', () => {
-    expect(approveOutcome({})).toEqual({ stay: false, message: null });
+    expect(approveOutcome({})).toEqual({ stay: false, message: null, kept: [] });
     const outcome = approveOutcome({ provenanceErrors: [{ step: 'writeChangeLogs', message: 'change log write blocked' }] });
     expect(outcome.stay).toBe(true);
     expect(outcome.message).toBe("Applied, but a follow-up step failed (writeChangeLogs): change log write blocked. The camp's verification status or history may be out of date until the next change.");
+  });
+
+  it('shows kept session times as a deliberate keep, each session named, apart from real failures', () => {
+    const kept = approveOutcome({ provenanceErrors: [
+      { step: 'sessionTimeKept', message: 'Session "Week 1": kept 8:00 AM–2:00 PM.' },
+      { step: 'sessionTimeKept', message: 'Session "Week 2": a steward recorded that it has no fixed daily time.' },
+    ] });
+    expect(kept).toEqual({ stay: true, message: null, kept: ['Session "Week 1": kept 8:00 AM–2:00 PM.', 'Session "Week 2": a steward recorded that it has no fixed daily time.'] });
+    const two = approveOutcome({ provenanceErrors: [
+      { step: 'writeChangeLogs', message: 'change log blocked' },
+      { step: 'sessionTimeKept', message: 'Session "Week 1": kept.' },
+      { step: 'recordReviewDecision', message: 'metrics blocked' },
+    ] });
+    expect(two.message).toContain('change log blocked');
+    expect(two.message).toContain('metrics blocked');
+    expect(two.kept).toEqual(['Session "Week 1": kept.']);
+    const both = approveOutcome({ provenanceErrors: [{ step: 'sessionTimeKept', message: 'Session "Week 1": kept.' }, { step: 'writeChangeLogs', message: 'blocked' }] });
+    expect(both.message).toContain('(writeChangeLogs)');
+    expect(both.message).not.toContain('sessionTimeKept');
+    expect(both.kept).toEqual(['Session "Week 1": kept.']);
   });
 
   it('shows each proposed row next to the text it cites', () => {
@@ -96,8 +116,18 @@ describe('after an approve, the review page', () => {
     } }));
     expect(html).toContain('data-testid="row-citations"');
     expect(html.match(/data-testid="row-citation"/g)).toHaveLength(2);
-    expect(html).toContain('Session One · 2027-06-07 – 2027-06-11</span><q class="break-words text-xs text-bark-500">Session One: June 7 - June 11, 2027</q>');
-    expect(html).toContain('Session Two · 2027-06-14 – 2027-06-18</span><q class="break-words text-xs text-bark-500">no citation</q>');
+    expect(html).toContain('Session One · 2027-06-07 – 2027-06-11</span><span class="grid gap-0.5"><q class="break-words text-xs text-bark-500">Session One: June 7 - June 11, 2027</q></span>');
+    expect(html).toContain('Session Two · 2027-06-14 – 2027-06-18</span><span class="grid gap-0.5"><q class="break-words text-xs text-bark-500">no citation</q></span>');
     expect(renderToStaticMarkup(createElement(RowCitations, { proposedChanges: { city: { old: 'A', new: 'B' } } }))).toBe('');
+  });
+
+  it('marks a page-wide time as applied to every session and shows its whole line', () => {
+    const row = { label: 'Week 1', startDate: '2027-06-14', endDate: '2027-06-18', startTime: '9:00 AM', endTime: '5:00 PM' };
+    const html = renderToStaticMarkup(createElement(RowCitations, { proposedChanges: {
+      schedules: { old: [], new: [row], rowCitations: [{ excerpt: 'Week 1: June 14 - June 18, 2027', times: [{ excerpt: '9am-5pm' }], timePageWide: 'Office hours 9am-5pm' }] },
+    } }));
+    expect(html).toContain('data-testid="row-time-page-wide"');
+    expect(html).toContain('Page-wide time applied to every session.');
+    expect(html).toContain('Office hours 9am-5pm');
   });
 });

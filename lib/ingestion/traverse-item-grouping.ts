@@ -68,6 +68,7 @@
 
 import type { ExtractionProposal } from "@kontourai/traverse";
 import type { PricingUnit } from "@/lib/types";
+import { canonicalTime, readTimes, textStatesOnlyRange, textStatesTime } from "./session-time";
 import {
   CAMP_TARGET_SCHEMA,
   ENUM_ARRAY_SCHEMA_PATHS,
@@ -81,7 +82,7 @@ import {
 /** One nested array field family this module reconstructs full rows for. */
 const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
   "ageGroups[]": ["minAge", "maxAge"],
-  "schedules[]": ["startDate", "endDate"],
+  "schedules[]": ["startDate", "endDate", "startTime", "endTime"],
   "pricing[]": ["amount", "unit"],
   "socialLinks[]": ["platform", "url"],
 };
@@ -90,6 +91,17 @@ const NESTED_ARRAY_FIELDS: Record<string, string[]> = {
 const SCHEMA_BY_REL_PATH = new Map(
   CAMP_TARGET_SCHEMA.map((field) => [field.path.slice(ITEMS_ARRAY_PREFIX.length), field] as const),
 );
+
+/** "HH:MM" on a 24-hour clock, in the stored spelling, or null. */
+function twentyFourHourAnswer(value: unknown): string | null {
+  const m = typeof value === "string" ? /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim()) : null;
+  if (!m) return null;
+  const hour = Number(m[1]);
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${m[2]} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+/** The per-session time leaves, relative to one item. */
+const SESSION_TIME_PATHS = new Set(["schedules[].startTime", "schedules[].endTime"]);
 
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/;
 
@@ -119,6 +131,19 @@ function isIsoCalendarDate(value: unknown): boolean {
 function screenValue(relPath: string, value: unknown, excerpt: string): { ok: true; value: unknown } | { ok: false; why: string } {
   const field = SCHEMA_BY_REL_PATH.get(relPath);
   if (!field) return { ok: true, value };
+  if (SESSION_TIME_PATHS.has(relPath)) {
+    // A session time is a clock time with its half of the day, and the text
+    // it cites must state that time (session-time.ts); the time-of-day
+    // analogue of the year-in-quote rule for dates below.
+    // A model answering in 24-hour form ("12:00", "16:00") is read as that
+    // clock time; it still counts only when the cited text states it with
+    // its am/pm (below), so this reads the answer, it does not guess.
+    const canonical = canonicalTime(value) ?? twentyFourHourAnswer(value);
+    if (canonical === null) return { ok: false, why: "not a clock time with its am/pm" };
+    return textStatesTime(canonical, excerpt)
+      ? { ok: true, value: canonical }
+      : { ok: false, why: "the time is not stated in the cited text" };
+  }
   switch (field.type) {
     case "enum": {
       const allowed = field.enumValues ?? [];
@@ -175,8 +200,25 @@ export interface AssembledItem {
   scalars: Partial<Record<ItemFieldPath, FieldProposal>>;
   /** each entry is one age band, fully reconstructed from its own excerpt(s). `locator` is where `label` sits in the prepared text. */
   ageGroups: { minAge: number | null; maxAge: number | null; label: string; locator: string; confidence?: number }[];
-  /** each entry is one session, fully reconstructed from its own excerpt(s). */
-  schedules: { startDate: string | null; endDate: string | null; label: string; locator: string; confidence?: number }[];
+  /**
+   * each entry is one session, fully reconstructed from its own excerpt(s).
+   * `label`/`locator` cite its dates. `startTime`/`endTime` are set only when
+   * the page states both (each in the text it cites, see `screenValue`), and
+   * `timeCitations` then holds that text: one entry per distinct excerpt.
+   * A time the page does not state is null, never a default.
+   */
+  schedules: {
+    startDate: string | null;
+    endDate: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    timeCitations: { excerpt: string; locator: string }[];
+    /** Present when the time is the page's one daily time applied to every session: the page line it was read from. */
+    timePageWideLine?: string;
+    label: string;
+    locator: string;
+    confidence?: number;
+  }[];
   /**
    * each entry is one price tier, fully reconstructed from its own excerpt(s).
    * A tier missing its amount or unit is never defaulted (a missing amount is
@@ -445,6 +487,16 @@ function assembleEnumArrayEntries(
   return { rows: [...byValue.values()], refused: ordered.filter((fp) => fp.refused), warnings };
 }
 
+/** One citation per distinct excerpt, in order. */
+function distinctCitations(parts: readonly FieldProposal[]): { excerpt: string; locator: string }[] {
+  const seen = new Map<string, { excerpt: string; locator: string }>();
+  for (const part of parts) {
+    const key = `${part.excerpt}\u0000${part.locator}`;
+    if (!seen.has(key)) seen.set(key, { excerpt: part.excerpt, locator: part.locator });
+  }
+  return [...seen.values()];
+}
+
 function rowExcerpt(row: Map<string, FieldProposal>): string {
   return [...row.values()][0]?.excerpt ?? "";
 }
@@ -503,6 +555,44 @@ function dedupeRows<T extends { label: string }>(
   return { rows: kept, dropped, droppedLabels };
 }
 
+/**
+ * One session listed more than once (a summary line and a card) is one
+ * session: rows on the same dates are merged. A time stated by one copy is
+ * the session's time. Rows on the same dates with DIFFERENT stated times are
+ * different sessions (a morning and an afternoon session), one each; a copy
+ * with no time is then not assigned to either.
+ */
+function mergeSessionCopies(rows: readonly AssembledItem["schedules"][number][]): {
+  rows: AssembledItem["schedules"][number][];
+  dropped: number;
+  droppedLabels: { kept: string; dropped: string }[];
+} {
+  const groups = new Map<string, AssembledItem["schedules"][number][]>();
+  for (const row of rows) {
+    const key = JSON.stringify([row.startDate, row.endDate]);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const kept: AssembledItem["schedules"][number][] = [];
+  const droppedLabels: { kept: string; dropped: string }[] = [];
+  let dropped = 0;
+  for (const copies of groups.values()) {
+    const timed = new Map<string, AssembledItem["schedules"][number]>();
+    for (const row of copies) {
+      if (row.startTime !== null && row.endTime !== null && !timed.has(`${row.startTime}|${row.endTime}`)) timed.set(`${row.startTime}|${row.endTime}`, row);
+    }
+    const keep = timed.size > 0 ? [...timed.values()] : [copies[0]!];
+    kept.push(...keep);
+    for (const row of copies) {
+      if (keep.includes(row)) continue;
+      dropped++;
+      if (row.label !== keep[0]!.label) droppedLabels.push({ kept: keep[0]!.label, dropped: row.label });
+    }
+  }
+  // Keep the page's order.
+  kept.sort((a, b) => rows.indexOf(a) - rows.indexOf(b));
+  return { rows: kept, dropped, droppedLabels };
+}
+
 function parsePricingUnit(fp: FieldProposal | undefined): PricingUnit | null {
   const value = fp && !fp.refused ? fp.candidateValue : undefined;
   return typeof value === "string" && (PRICING_UNIT_VALUES as readonly string[]).includes(value)
@@ -541,10 +631,206 @@ function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
 }
 
 /**
+ * Attach a stated start and end time to each dated session row, or none.
+ *
+ * A session gets a time only from text that unambiguously belongs to it, and
+ * that is decided from the prepared page text, never from how narrowly the
+ * model cut its citation. Without the prepared text no time is attached.
+ *
+ * A pair is a time only when its start and end are cited from the SAME text,
+ * that text states exactly one range, this one, with its end after its start
+ * (session-time.ts), and the rest of the text's LINE states no other time
+ * ("Half-day 9am-12pm / full-day 9am-3pm" cited as "9am-3pm" is refused).
+ *
+ * Whose time it is, by the line it is on (a list item, a table row; blank
+ * lines are not lines):
+ *  - the line of exactly one session's dates: that session's;
+ *  - any other line is never one session's: a card's time on a line of its
+ *    own, above or below its dates, is refused, because position does not
+ *    say which card it belongs to (the steward-entry guidance covers it);
+ *  - the camp's daily time, for every session without one, only when its
+ *    line is before the first session line and not right above it (after or
+ *    among the session lines it may be the last card's own time), states no
+ *    date and names no session,
+ *    neither it nor its heading
+ *    reads as office or contact hours, and the whole page outside the
+ *    session date lines states exactly one time range, this one. Such a time
+ *    carries its line (`pageWideLine`) so the review page shows it as a
+ *    page-wide time applied to every session.
+ * When in doubt, the time is left out; nothing is filled in from a usual day.
+ */
+function assignSessionTimes(
+  rows: readonly { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; label: string }[],
+  undatedTimes: readonly Map<string, FieldProposal>[],
+  preparedText: string | undefined,
+): { times: ({ start: FieldProposal; end: FieldProposal; pageWideLine?: string } | null)[]; notes: string[] } {
+  type Pair = { start: FieldProposal; end: FieldProposal };
+  const notes: string[] = [];
+  const pairs: Pair[] = [];
+  const consider = (row: Map<string, FieldProposal>, label: string) => {
+    const start = row.get("startTime");
+    const end = row.get("endTime");
+    if (!start && !end) return;
+    if (!start || !end || start.refused || end.refused) {
+      notes.push(`"${label}": ${start?.refused ?? end?.refused ?? `no ${start ? "end" : "start"} time was extracted`}`);
+      return;
+    }
+    if (start.excerpt !== end.excerpt || start.locator !== end.locator) {
+      notes.push(`"${label}": the start and end time are cited from different text ("${start.excerpt}", "${end.excerpt}")`);
+      return;
+    }
+    if (!textStatesOnlyRange(start.candidateValue, end.candidateValue, start.excerpt)) {
+      notes.push(`"${start.excerpt}": does not state ${start.candidateValue}–${end.candidateValue} as its one time range`);
+      return;
+    }
+    pairs.push({ start, end });
+  };
+  rows.forEach(({ row, label }) => consider(row, label));
+  undatedTimes.forEach((row) => consider(row, rowExcerpt(row)));
+  const none = rows.map(() => null);
+  if (pairs.length === 0) return { times: none, notes };
+  if (preparedText === undefined) {
+    notes.push(`${pairs.length} session time(s) not placed: the page text they were read from is not available`);
+    return { times: none, notes };
+  }
+
+  // The page's non-blank lines, in order.
+  const lines: { start: number; end: number }[] = [];
+  for (let at = 0; at <= preparedText.length;) {
+    const next = preparedText.indexOf("\n", at);
+    const end = next < 0 ? preparedText.length : next;
+    if (preparedText.slice(at, end).trim()) lines.push({ start: at, end });
+    if (next < 0) break;
+    at = next + 1;
+  }
+  const lineOf = (offset: number) => lines.findIndex((line) => offset >= line.start && offset <= line.end);
+  const spanOf = (locator: string): [number, number] | null => {
+    const m = /^chars:(\d+)-(\d+)$/.exec(locator);
+    return m ? [Number(m[1]), Number(m[2])] : null;
+  };
+  /** Line indices a cited span covers. */
+  const linesOf = (locator: string): number[] => {
+    const span = spanOf(locator);
+    if (!span) return [];
+    const from = lineOf(span[0]);
+    const to = lineOf(Math.max(span[0], span[1] - 1));
+    if (from < 0 || to < 0) return [];
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  };
+  const sessionLines = rows.map(({ dateParts }) => new Set([...dateParts.values()].flatMap((fp) => linesOf(fp.locator))));
+  const sessionLineSet = new Set(sessionLines.flatMap((set) => [...set]));
+  const sessionsOnLine = (index: number) => sessionLines.flatMap((set, session) => (set.has(index) ? [session] : []));
+
+  // Every range the page states outside the session date lines.
+  const outside = new Map<string, number>();
+  lines.forEach((line, index) => {
+    if (sessionLineSet.has(index)) return;
+    for (const range of readTimes(preparedText.slice(line.start, line.end)).ranges) outside.set(`${range.start}|${range.end}`, index);
+  });
+
+  const own = new Map<number, Pair>();
+  let general: (Pair & { pageWideLine: string }) | null = null;
+  for (const pair of pairs) {
+    const span = spanOf(pair.start.locator);
+    const covered = linesOf(pair.start.locator);
+    if (!span || covered.length !== 1) {
+      notes.push(`"${pair.start.excerpt}": its place on the page could not be read`);
+      continue;
+    }
+    const index = covered[0]!;
+    const line = lines[index]!;
+    const rest = preparedText.slice(line.start, span[0]) + " " + preparedText.slice(span[1], line.end);
+    if (readTimes(rest).times.size > 0) {
+      notes.push(`"${pair.start.excerpt}": its line states other times too, so which one this session has is not settled`);
+      continue;
+    }
+    const lineText = preparedText.slice(line.start, line.end);
+    const onLine = sessionsOnLine(index);
+    if (onLine.length === 1) {
+      // On the session's own date line: that session's time.
+      own.set(onLine[0]!, pair);
+      continue;
+    }
+    if (onLine.length > 1) {
+      notes.push(`"${pair.start.excerpt}": its line carries several sessions' dates; which one it belongs to is not settled`);
+      continue;
+    }
+    // Not on any session's line. Position near a session (a card's own time
+    // line) does not say whose it is, so it is never one session's.
+    if (statesADate(lineText) || SESSION_NAME_RE.test(lineText)) {
+      notes.push(`"${pair.start.excerpt}": the cited time is not on any one session's own line`);
+      continue;
+    }
+    const sessionIndices = [...sessionLineSet];
+    if (sessionIndices.length === 0) {
+      notes.push(`"${pair.start.excerpt}": no session's dates could be placed on the page, so a page-wide time cannot be told from a session's`);
+      continue;
+    }
+    if (index >= Math.min(...sessionIndices) - 1) {
+      // Only text BEFORE the session list (and not right above it) can be the
+      // camp's daily time. After or among the session lines it may be the
+      // last card's own time. Refused, never attributed.
+      notes.push(`"${pair.start.excerpt}": it is not above the session list; whether it is one session's time or every session's is not settled`);
+      continue;
+    }
+    const heading = lines.slice(0, index).reverse().find((candidate) => preparedText.slice(candidate.start, candidate.end).trimStart().startsWith("#"));
+    const headingText = heading ? preparedText.slice(heading.start, heading.end) : "";
+    if (NOT_CAMP_DAY_RE.test(lineText) || NOT_CAMP_DAY_RE.test(headingText)) {
+      notes.push(`"${pair.start.excerpt}": it reads as office or contact hours, not the camp day`);
+      continue;
+    }
+    const key = `${pair.start.candidateValue}|${pair.end.candidateValue}`;
+    if (outside.size !== 1 || !outside.has(key)) {
+      notes.push(`"${pair.start.excerpt}": the page states ${outside.size} different time ranges outside the session lines; none is applied to every session`);
+    } else {
+      general ??= { ...pair, pageWideLine: lineText.trim() };
+    }
+  }
+  const times = rows.map((_row, index) => own.get(index) ?? general);
+  return { times, notes };
+}
+
+/**
+ * Words that mark a time as the office's, not the camp day's. A page-wide
+ * time on such a line, or under such a heading, is not applied.
+ */
+const NOT_CAMP_DAY_RE = /\b(office|phone|call us|contact|business hours|hours of operation|front desk|reception|customer service)\b/i;
+
+const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i;
+const NUMERIC_DATE_RE = /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/;
+/** "Week 2", "Session 1", "Wk 3", "Term B": text that names one session. */
+// A separator is required ("sessions", "weeks" do not name one), and a
+// number followed by a time ("week 9 am") is a time, not a session number.
+const SESSION_NAME_RE = /\b(week|wk|session|term|block)\s+(?:#\s*)?(?:\d+(?![\d:]|\s*[ap]\.?\s?m\b)|[a-z](?![\w.])|(?:one|two|three|four|five|six|seven|eight|nine|ten)\b)/i;
+
+/** Whether a text states a calendar date ("June 14", "June 14th", "14 June", "6/14", "2027-06-14"). */
+function statesADate(text: string): boolean {
+  return MONTH_DAY_RE.test(text) || NUMERIC_DATE_RE.test(text);
+}
+
+/** Whether two `chars:<start>-<end>` locators overlap. False when either cannot be parsed. */
+function spansOverlap(a: string, b: string): boolean {
+  const pa = /^chars:(\d+)-(\d+)$/.exec(a);
+  const pb = /^chars:(\d+)-(\d+)$/.exec(b);
+  if (!pa || !pb) return false;
+  return Number(pa[1]) < Number(pb[2]) && Number(pb[1]) < Number(pa[2]);
+}
+
+/**
  * Group a full traverse extraction's proposals into one {@link AssembledItem}
  * per source item, ordered by item index.
  */
-export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] {
+export function assembleItems(
+  proposals: ExtractionProposal[],
+  options: {
+    /**
+     * The prepared text the proposals' `chars:` locators point into. Session
+     * times are placed by the line they are on; without it only the cited
+     * spans are compared and no daily time is applied to every session.
+     */
+    preparedText?: string;
+  } = {},
+): AssembledItem[] {
   const { groups: byItem, chunkBoundaryIndices } = groupByItemIndex(proposals);
   const items: AssembledItem[] = [];
 
@@ -641,20 +927,50 @@ export function assembleItems(proposals: ExtractionProposal[]): AssembledItem[] 
     // end date, is dropped, and then the whole change is withheld: approving a
     // session list reconciles the camp's sessions against it, so a partial
     // list would archive the sessions that could not be extracted.
-    const completeSchedules: AssembledItem["schedules"] = [];
+    //
+    // A session's time never decides whether the session is proposed: it is
+    // attached by `assignSessionTimes` only when the page states it, and is
+    // otherwise left out (null), which leaves the time requirement open.
+    const datedRows: { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; startDate: string; endDate: string | null; label: string }[] = [];
     const droppedScheduleLabels: string[] = [];
+    const undatedTimes: Map<string, FieldProposal>[] = [];
     for (const row of scheduleResult.rows) {
       if (row.size === 0) continue;
-      const label = rowExcerpt(row);
+      const dateParts = new Map([...row].filter(([subField]) => subField === "startDate" || subField === "endDate"));
+      if (dateParts.size === 0) {
+        undatedTimes.push(row);
+        continue;
+      }
+      const label = rowExcerpt(dateParts);
       const startDate = acceptedValue<string>(row.get("startDate"));
       const endDate = acceptedValue<string>(row.get("endDate"));
       if (startDate === null || row.get("endDate")?.refused) {
         droppedScheduleLabels.push(label);
         continue;
       }
-      completeSchedules.push({ startDate, endDate, label, locator: rowLocator(row), ...withConfidence(rowConfidence(row)) });
+      datedRows.push({ row, dateParts, startDate, endDate, label });
     }
-    const scheduleRows = dedupeRows(completeSchedules, (row) => JSON.stringify([row.startDate, row.endDate]));
+    const timed = assignSessionTimes(datedRows, undatedTimes, options.preparedText);
+    if (timed.notes.length > 0) {
+      operatorWarnings.push(
+        `${timed.notes.length} session time${timed.notes.length === 1 ? "" : "s"} not proposed (e.g. ${timed.notes.slice(0, 3).join("; ")}) — a time the page does not state for that session is left out, and the session is proposed without it`
+      );
+    }
+    const completeSchedules: AssembledItem["schedules"] = datedRows.map((dated, index) => {
+      const time = timed.times[index];
+      return {
+        startDate: dated.startDate,
+        endDate: dated.endDate,
+        startTime: time ? (time.start.candidateValue as string) : null,
+        endTime: time ? (time.end.candidateValue as string) : null,
+        timeCitations: time ? distinctCitations([time.start, time.end]) : [],
+        ...(time?.pageWideLine ? { timePageWideLine: time.pageWideLine } : {}),
+        label: dated.label,
+        locator: rowLocator(dated.dateParts),
+        ...withConfidence(rowConfidence(dated.row)),
+      };
+    });
+    const scheduleRows = mergeSessionCopies(completeSchedules);
     const droppedSchedules = droppedScheduleLabels.length;
     if (droppedSchedules > 0) {
       // One note for the family, not one per row: a listing page can carry dozens.

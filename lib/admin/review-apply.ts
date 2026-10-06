@@ -52,6 +52,8 @@ import { CAMP_ENUM_ARRAY_FIELDS, CAMP_SCALAR_FIELDS, CAMP_RELATION_TABLES } from
 import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
+import { textStatesTime } from '@/lib/ingestion/session-time';
+import { keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
@@ -67,7 +69,7 @@ import type { DataConfidence } from '@/lib/types';
 import { buildCampReviewTrustInput, campCanonicalClaimId, type ReviewCitationSource } from './trust-projection';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from './survey-review-apply';
 import { getSurveyReviewEvents } from './survey-review-events';
-import { applyScheduleReconciliation, distinctSessions, sessionMatchKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
+import { applyScheduleReconciliation, distinctSessions, scheduleNaturalKey, sessionMatchKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
@@ -192,7 +194,14 @@ export interface ProvenanceError {
      * module's transaction; a failure recording the claim-level revocation
      * afterwards must not undo that, or block changelog/metrics provenance.
      */
-    | 'revokeArchivedSessionClaims';
+    | 'revokeArchivedSessionClaims'
+    /**
+     * A session's time was kept rather than replaced: the proposal's cited
+     * time would have overwritten a value the reviewer was not shown (a
+     * steward's time entered after the page was read, or a steward's "no
+     * fixed daily time"). The rest of the apply went through.
+     */
+    | 'sessionTimeKept';
   readonly message: string;
 }
 
@@ -538,6 +547,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // duplicate-retry discriminator below, which only applies to THOSE two
   // steps.
   const provenanceErrors = [
+    ...facts.sessionTimesKept.map((message): ProvenanceError => ({ step: 'sessionTimeKept', message })),
     ...postCommitProvenanceErrors,
     ...(keepPending && derivedApprovedCount > 0 && appliedFields.length === 0
       ? []
@@ -875,6 +885,14 @@ interface RowCitationCheck {
   readonly excerpt?: string;
   /** The `chars:` locator the excerpt resolved to. Set only when `checked`. */
   readonly locator?: string;
+  /**
+   * Sessions only, present when the row cites where its time was read: every
+   * time excerpt is on the stored page AND states the row's start and end
+   * time (session-time.ts). A time with no citation of its own (a stored
+   * time the crawl kept, see diff-engine.ts) has no `time` check and is not
+   * attested by this approval.
+   */
+  readonly time?: { readonly checked: boolean; readonly excerpt?: string; readonly locator?: string };
 }
 
 /** Whether an applied field's cited excerpts are on the stored page, and for a list, row by row. */
@@ -918,15 +936,45 @@ function checkCitations(changes: ProposedChanges, fields: readonly string[], cit
       checks.set(field, { reviewed: false });
       continue;
     }
-    const rows = citations.map((row): RowCitationCheck => {
+    const rows = citations.map((row, index): RowCitationCheck => {
+      const time = field === 'schedules' ? checkSessionTimeCitation((diff.new as unknown[])[index], row?.times, citation.text) : undefined;
       const excerpt = typeof row?.excerpt === 'string' ? row.excerpt : '';
-      if (!excerpt.trim()) return { checked: false };
+      if (!excerpt.trim()) return { checked: false, ...(time ? { time } : {}) };
       const resolved = resolveReviewExcerpt(excerpt, citation.text, row.locator);
-      return resolved.state === 'verified' ? { checked: true, excerpt, locator: resolved.locator } : { checked: false, excerpt };
+      return resolved.state === 'verified'
+        ? { checked: true, excerpt, locator: resolved.locator, ...(time ? { time } : {}) }
+        : { checked: false, excerpt, ...(time ? { time } : {}) };
     });
-    checks.set(field, { reviewed: rows.every((row) => row.checked), rows });
+    // A cited time is part of what the row asserts: a list whose cited time
+    // fails the check is not reviewed as a whole.
+    checks.set(field, { reviewed: rows.every((row) => row.checked && (row.time === undefined || row.time.checked)), rows });
   }
   return checks;
+}
+
+/**
+ * Check a proposed session row's time citation: every excerpt is on the stored
+ * page and, together, they state the row's start and end time. Undefined when
+ * the row cites no time.
+ */
+function checkSessionTimeCitation(
+  value: unknown,
+  times: readonly { excerpt?: unknown; locator?: string }[] | undefined,
+  pageText: string,
+): RowCitationCheck['time'] | undefined {
+  if (!Array.isArray(times) || times.length === 0) return undefined;
+  const excerpts = times.map((time) => (typeof time?.excerpt === 'string' ? time.excerpt : ''));
+  const resolved = times.map((time, i) => (excerpts[i]!.trim() ? resolveReviewExcerpt(excerpts[i]!, pageText, time.locator) : null));
+  const row = (value ?? {}) as { startTime?: unknown; endTime?: unknown };
+  // Each time must be stated within one excerpt: joined, the end of one and
+  // the start of the next could read as a range.
+  const checked = resolved.every((r) => r?.state === 'verified')
+    && excerpts.some((excerpt) => textStatesTime(row.startTime, excerpt))
+    && excerpts.some((excerpt) => textStatesTime(row.endTime, excerpt));
+  const first = resolved[0];
+  return checked
+    ? { checked, excerpt: excerpts.join(' / '), locator: first?.state === 'verified' ? first.locator : undefined }
+    : { checked: false, excerpt: excerpts.join(' / ') };
 }
 
 /** What the apply transaction learned that the evidence written after it needs. */
@@ -940,10 +988,14 @@ interface AppliedFacts {
   sessionsWithChangedTime: string[];
   /** This apply is a review that can verify (not a batch accept, unless the switch says so). */
   countsAsReview: boolean;
+  /** The session rows this apply wrote (`sessionRowsToApply`), index-aligned with the proposal's rows and their citations. */
+  appliedSchedules?: IncomingScheduleSnapshot[];
+  /** One sentence per session whose stored time was kept instead of a cited time the reviewer was not shown. */
+  sessionTimesKept: string[];
 }
 
 function newAppliedFacts(): AppliedFacts {
-  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [], countsAsReview: false };
+  return { citations: new Map(), twinChanged: new Map(), previousSessionTimes: new Map(), sessionsWithChangedTime: [], countsAsReview: false, sessionTimesKept: [] };
 }
 
 /**
@@ -974,6 +1026,86 @@ async function withdrawChangedClaims(
     notes: 'The value changed in a review apply; verified again only by the evidence recorded for this approval.',
     createdAt: at.toISOString(),
   });
+}
+
+/**
+ * The session rows an approved list writes. A time is applied only from the
+ * crawl's own citation of it (`rowCitations[i].times`): a row's time without
+ * one is not the page's statement (a time `computeDiff` kept from the stored
+ * session, possibly since changed by a steward, or no time at all), so it is
+ * treated as unstated, and an unstated time keeps the stored session's time
+ * (`keepUnstatedSessionTimes`, read here under the camp lock). A crawl never
+ * removes or rewinds a time it does not state.
+ */
+type StoredSessionTime = Pick<IncomingScheduleSnapshot, 'label' | 'startDate' | 'endDate' | 'startTime' | 'endTime'> & { readonly noFixedTime?: boolean };
+
+function sessionRowsToApply(diff: FieldDiff, stored: readonly StoredSessionTime[], kept: string[]): IncomingScheduleSnapshot[] {
+  const rows = (Array.isArray(diff.new) ? diff.new as IncomingScheduleSnapshot[] : []).map((row, index) =>
+    (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 && !timeShownUnchanged(diff, row) && !timeNotShown(diff, row, stored, kept)
+      ? row
+      : { ...row, startTime: null, endTime: null });
+  return keepUnstatedSessionTimes(stored, rows) as IncomingScheduleSnapshot[];
+}
+
+/**
+ * Whether a cited time would replace a stored value the reviewer was not
+ * shown: the stored session's time differs from what the proposal's `old`
+ * list had for it (a steward entered or changed it after the page was read,
+ * or the proposal has no `old` row for it), or a steward recorded that the
+ * session has no fixed daily time (which no `old` row can show). That time is
+ * then kept, only for that session, and `kept` says so; the rest of the apply
+ * goes through, and a later crawl proposes the page's time against the
+ * stored one.
+ */
+function timeNotShown(diff: FieldDiff, row: IncomingScheduleSnapshot, stored: readonly StoredSessionTime[], kept: string[]): boolean {
+  if (row.startTime === null || row.endTime === null) return false;
+  const old = Array.isArray(diff.old) ? diff.old as StoredSessionTime[] : [];
+  const only = (list: readonly StoredSessionTime[]) => {
+    const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+    const same = list.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
+    return same.length === 1 ? same[0]! : null;
+  };
+  const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+  const twins = stored.filter((candidate) => scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
+  if (twins.length > 1) {
+    // Sessions told apart only by their times (morning and afternoon): a
+    // cited time that is one of theirs changes nothing, and the proposal's
+    // `old` list showing exactly these sessions means the reviewer saw what
+    // it replaces. Otherwise which stored value it would replace is unseen.
+    if (twins.some((twin) => sessionTimeKey(twin) === sessionTimeKey(row))) return false;
+    const shownTwins = old.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key).map(sessionTimeKey).sort();
+    if (JSON.stringify(shownTwins) === JSON.stringify(twins.map(sessionTimeKey).sort())) return false;
+    throw new ReviewApplyValueError(
+      `Nothing was applied: "${row.label}" on these dates is more than one stored session, and the page's ${row.startTime}–${row.endTime} is neither's time, so which one it would replace is not settled. Keep the current sessions, or correct them in the camp editor.`,
+      ['schedules'],
+    );
+  }
+  const current = twins[0];
+  if (!current) return false;
+  if (current.noFixedTime) {
+    kept.push(`Session "${row.label}": a steward recorded that it has no fixed daily time, so the page's ${row.startTime}–${row.endTime} was not applied. If the page is right, a steward enters that time for the session.`);
+    return true;
+  }
+  if (!current.startTime?.trim() || !current.endTime?.trim()) return false;
+  if (sessionTimeKey(current) === sessionTimeKey(row)) return false;
+  const shown = only(old);
+  if (shown && sessionTimeKey(shown) === sessionTimeKey(current)) return false;
+  kept.push(`Session "${row.label}": kept ${current.startTime}–${current.endTime}, which this proposal did not show (it was entered or changed after the page was read); the page's ${row.startTime}–${row.endTime} was not applied. The next crawl proposes it against the current time.`);
+  return true;
+}
+
+/**
+ * Whether the reviewer was shown this row's time as unchanged: the
+ * proposal's `old` list has the same session (same plain label and dates,
+ * the only one) with the same time. Such a time is not a change the reviewer
+ * approved, so it does not overwrite a time changed since (by a steward);
+ * it is treated as unstated, which keeps the stored time.
+ */
+function timeShownUnchanged(diff: FieldDiff, row: IncomingScheduleSnapshot): boolean {
+  const old = Array.isArray(diff.old) ? diff.old as IncomingScheduleSnapshot[] : [];
+  const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+  const same = old.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
+  return same.length === 1 && sessionTimeKey(same[0]!) === sessionTimeKey(row);
 }
 
 function sessionTimeKey(row: { startTime?: string | null; endTime?: string | null }): string {
@@ -1207,12 +1339,24 @@ async function applyRelationField(
   if (field === 'schedules') {
     // A matched session keeps its id; whether its time changed decides if an
     // earlier time claim still describes it.
-    const before = await client.query<{ id: string; startTime: string | null; endTime: string | null }>(
-      `SELECT id, "startTime", "endTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`,
+    const before = await client.query<{ id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }>(
+      `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "startTime", "endTime"
+         FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`,
       [proposal.campId],
     );
     for (const row of before.rows) facts.previousSessionTimes.set(row.id, sessionTimeKey(row));
-    const reconciliation = await applyScheduleReconciliation(client, proposal.campId, diff.new as IncomingScheduleSnapshot[]);
+    // A steward's "no fixed daily time" is a stored value too, though the row has no time.
+    const { rows: noFixedTime } = await client.query<{ id: string }>(
+      `SELECT s.id FROM "CampSchedule" s
+        WHERE s."campId" = $1 AND s."archivedAt" IS NULL
+          AND (SELECT e.method FROM "SurfaceVerificationEvent" e
+                WHERE e."claimId" = 'session.' || s.id || '.time'
+                ORDER BY e."createdAt" DESC, e.id DESC LIMIT 1) = 'no-fixed-time'`,
+      [proposal.campId],
+    );
+    const stored = before.rows.map((row) => ({ ...row, noFixedTime: noFixedTime.some((n) => n.id === row.id) }));
+    facts.appliedSchedules = sessionRowsToApply(diff, stored, facts.sessionTimesKept);
+    const reconciliation = await applyScheduleReconciliation(client, proposal.campId, facts.appliedSchedules);
     orphaned = reconciliation.orphaned;
     if (reconciliation.matchedIds.length > 0) {
       const after = await client.query<{ id: string; startTime: string | null; endTime: string | null }>(
@@ -1392,7 +1536,7 @@ async function recordAppliedField(
 
   // Each session the approved list leaves on the camp is its own claim subject.
   if (field === 'schedules' && diff) {
-    await recordSessionClaims(w, { campId, proposalId, diff, check, evidence, review });
+    await recordSessionClaims(w, { campId, proposalId, diff, check, evidence, review, applied: review.facts.appliedSchedules });
   }
 }
 
@@ -1536,6 +1680,7 @@ async function recordSessionClaims(
     readonly check: CitationCheck;
     readonly evidence: Evidence;
     readonly review: ReviewDecisionRecord;
+    readonly applied: readonly IncomingScheduleSnapshot[] | undefined;
   },
 ): Promise<void> {
   if (!countsAsReview(args.review)) return;
@@ -1544,7 +1689,8 @@ async function recordSessionClaims(
        FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`,
     [args.campId],
   );
-  const proposed = Array.isArray(args.diff.new) ? (args.diff.new as IncomingScheduleSnapshot[]) : [];
+  // The rows the apply wrote (cited times, stored times kept), index-aligned with the citations.
+  const proposed = args.applied ?? [];
   // The same keys the apply matched on (session-identity.ts): exact
   // duplicates are one session; sessions that share a label and dates are
   // told apart by their times.
@@ -1559,12 +1705,24 @@ async function recordSessionClaims(
     const index = rowIndexByKey.get(keyOf(session));
     const citation = index === undefined ? undefined : args.check.rows?.[index];
     if (!citation?.checked) continue;
+    // The time is attested only from its own citation, checked on the page
+    // and stating this time; a time the crawl did not state (kept from the
+    // stored session) is left to whoever attested it before.
     const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
+    // The time the citation was checked against is the proposal's own row;
+    // the stored time must still be that one (a kept or newer time is not
+    // what the cited text states).
+    const row = proposed[index!]!;
+    const proposedRow = (Array.isArray(args.diff.new) ? args.diff.new as IncomingScheduleSnapshot[] : [])[index!];
+    const timeChecked = timeStated && citation.time?.checked === true
+      && session.startTime === row.startTime && session.endTime === row.endTime
+      && session.startTime === proposedRow?.startTime && session.endTime === proposedRow?.endTime;
     // A session created by this apply was not locked up front (its id did not exist yet).
     await acquireSubjectAdvisoryLock(w.client, SESSION_SUBJECT_TYPE, session.id);
-    const attributes: ('dates' | 'time')[] = timeStated ? ['dates', 'time'] : ['dates'];
+    const attributes: ('dates' | 'time')[] = timeChecked ? ['dates', 'time'] : ['dates'];
     for (const attribute of attributes) {
       const claimId = sessionClaimId(session.id, attribute);
+      const cited = attribute === 'time' ? citation.time! : citation;
       await recordApprovedClaim(w, {
           draft: {
             id: claimId,
@@ -1576,8 +1734,8 @@ async function recordSessionClaims(
             impactLevel: 'medium',
             metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
           },
-          // This row's own citation, not the list's first row's.
-          evidence: { ...args.evidence, sourceLocator: citation.locator, excerptOrSummary: citation.excerpt ?? args.evidence.excerptOrSummary },
+          // This row's own citation (for the time, the text that states it), not the list's first row's.
+          evidence: { ...args.evidence, sourceLocator: cited.locator, excerptOrSummary: cited.excerpt ?? args.evidence.excerptOrSummary },
           event: {
             id: claimId,
             claimId,

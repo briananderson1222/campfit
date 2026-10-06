@@ -403,12 +403,13 @@ What counts as reviewed for a list (`ageGroups`, `pricing`, `schedules`,
   the two must agree or the apply is refused.
 - `schedules` is recorded per kept session whose own row's excerpt is on the
   page: a `dates` claim, and a `time` claim when the row states a start and an
-  end time. Exact duplicate rows are one session; sessions that share a label
-  and dates (a morning and an afternoon session) are told apart by their
-  times, so among those a time change replaces the session. A session with
-  no stated time has no `time` claim, so `sessions-verified` stays open; the
-  crawl schema has no session time field, so a list approved from a crawl
-  carries no times today.
+  end time AND cites where its time was read (`rowCitations[i].times`), that
+  text is on the page and states both times (`lib/ingestion/session-time.ts`).
+  A time with no citation of its own is not attested by the approval. Exact
+  duplicate rows are one session; sessions that share a label and dates (a
+  morning and an afternoon session) are told apart by their times, so among
+  those a time change replaces the session. A session with no attested time
+  has no `time` claim, so `sessions-verified` stays open.
 
 A batch accept is recorded as its own kind (`batch-accept` on the evidence and
 the event), and the trust display shows it as "Accepted in batch". Like a review, it verifies a field only when the field's cited
@@ -425,6 +426,115 @@ camp holds when they run, not necessarily the values the admin's page showed:
 an edit from another tab in between is attested too. Stale-view protection
 needs a camp version that changes only when a value does; it is tracked as a
 follow-up.
+
+## Session times and steward entry
+
+**Extraction.** The crawl schema asks for each session's start and end time
+(`items[].schedules[].startTime`/`endTime`). A time is kept only when its
+cited text states it with its half of the day (`9am`, `3:30 PM`, `9-3pm`,
+`noon`, a 24-hour `15:00` or `09:30`); `8:30-3:00` states no half of the day
+and `9:00–15:00` reads only as 3 PM, so both are refused. A model's 24-hour
+answer (`12:00`, `16:00`) is read as that clock time, and counts only when
+the cited text states it with its am/pm. That is the
+time-of-day analogue of the year-in-quote rule for dates. A time is never
+defaulted or guessed:
+
+- the start and end must be cited from the same text, that text must state
+  exactly one time range, this one, with its end after its start (`09:00 -
+  03:00` is refused, not read as 9 AM to 3 AM), and the rest of the text's
+  line on the page must state no other time (a narrow citation of
+  "full-day 9am-3pm" out of "half-day 9am-12pm / full-day 9am-3pm" is
+  refused);
+- whose time it is follows from the prepared page text
+  (`lib/ingestion/prepared-text.ts`), never from how the model cut its
+  citation; without that text no time is attached. A time is a session's
+  only when it is on that session's own date line. A time on a line of its
+  own is never one session's, wherever it sits (a card's time above or below
+  its dates is refused: position does not say whose it is);
+- such a line is the camp's daily time, for every session without its own,
+  only when it is above the first session line and not right above it (after
+  or among the session lines it may be the last card's own time), states no date, names no session, does not read as office
+  or contact hours (on the line or under its heading), and the WHOLE page
+  outside the session date lines states exactly one time range, this one.
+  The proposal marks it (`rowCitations[i].timePageWide`, the page line), and
+  the review page shows "Page-wide time applied to every session" with that
+  line, so a reviewer can reject it.
+
+Layouts that therefore get no crawled session time: cards and header-less
+tables that put each session's time on a line of its own. The
+missing-requirements guidance asks a steward for those.
+
+A session listed twice (a summary line and a card) is one session; a time
+one copy states is its time. Two different stated times on the same dates
+are two sessions (morning and afternoon).
+
+**A crawl never removes a stored time it does not state.** In `computeDiff`, a
+crawled session with no time that is the same session as a stored one (same
+plain label and dates, and the only stored session with them) keeps the
+stored time (`keepUnstatedSessionTimes`). A crawled time that differs is
+proposed for review. Review apply enforces the same rule under the camp lock
+for every proposal shape (`sessionRowsToApply`): a row's time is written only
+when the row cites where its time was read; any other time in a row (one
+`computeDiff` kept, possibly since changed by a steward) is treated as
+unstated and the stored time stays. So is a cited time the proposal showed
+as unchanged (its `old` row had the same time): it was not a change the
+reviewer approved, and a time changed since (by a steward) stays.
+
+A cited time that would replace a stored value the proposal did not show (a
+steward's time entered or changed after the page was read, a proposal with
+no `old` row for the session, or a steward's "no fixed daily time", decided
+by the time claim's newest event) is not applied for that session: the
+stored value stays, the rest of the apply goes through, and the apply result
+says so (`provenanceErrors`, step `sessionTimeKept`), which the review page
+shows as a deliberate keep, naming each session.
+
+Sessions that share a label and dates and are told apart only by their
+times (morning and afternoon) are matched by time. Known limits: a cited
+time that is neither stored session's, when the proposal did not show them,
+refuses the apply; and a crawl that lists them without times does not keep
+their stored times, so the approval replaces them.
+
+**Missing requirements.** For a camp that is not VERIFIED, the admin camp page
+and the review page list every requirement the derivation reports as not
+verified (`lib/admin/missing-requirements.ts`), each session's missing
+attributes under it, with the camp's website and phone.
+
+**Empty required lists.** An empty age-group list, price list or session
+list is a Verification Gap (the policies: "an empty list is acceptable only
+when explicitly attested as intentionally empty", "an unknown price is an
+explicit Verification Gap"). While a list is empty, its claim counts only
+when its newest event is a steward's "intentionally empty" attestation
+(`withoutUnattestedEmptyLists`); a camp with no sessions derives its
+`sessions-verified` requirement from that attestation of its session list.
+Mark Verified attests a list from its rows and never attests an empty one.
+This changed earlier behaviour: Mark Verified attested `hash(null)` for the
+two lists whatever they held, and a camp with no sessions verified its
+sessions trivially. A camp cached VERIFIED that way keeps the cached value
+until its next re-derivation (any write to the camp; nothing re-derives
+existing camps on deploy). After deploy, an operator runs `npx tsx
+scripts/repair-downgraded-camps.ts` (lists them, writes nothing) and then
+`--apply`, which re-derives the cache of the listed camps only; every other
+camp is untouched, so no still-VERIFIED camp is re-dated.
+
+**Steward entry** (`lib/admin/steward-entry.ts`, `POST
+/api/admin/camps/[campId]/steward-entry`). A steward can enter a session's
+start and end time, or a missing single-value camp requirement (description,
+registration status, city, website). Camp type and category are not entered
+there: each is the twin of a list review apply keeps it a member of. The entry is stored
+and recorded as that steward's attestation: `human_attestation` evidence
+(`method: 'attestation'`, `metadata.reviewKind: 'steward-entry'`) and an
+`assumed` event with method `steward-entry`, counted like an admin
+attestation (`countAdminAttestedRequirements`). One transaction, in the lock
+order above, stamped by `nextClaimEventTime`, the cache re-derived on the same
+client before commit. It clears the field's approved-page fingerprint, so a
+later crawl that reads a different value proposes it.
+
+Two more kinds, each with a required reason and its own event method:
+"intentionally empty" for an empty age-group, price or session list
+(`intentionally-empty`, refused when the list has rows), and "no fixed daily
+time" for a session (`no-fixed-time`, an overnight or residential session;
+the policy accepts an explicit non-applicability attestation). A time whose
+end is not after its start is refused as an entry.
 
 ## Accepted gaps
 
@@ -444,10 +554,10 @@ follow-up.
   into one larger caller-managed transaction would need a bigger refactor
   than this module's scope; accepted, recorded above under ClaimStore
   materialization.
-- **A zero-Session Camp trivially verifies `sessions-verified`.** With no
-  non-archived Sessions, the Camp's rollup Claim has an empty `derivedFrom`
-  list and resolves to `verified` by default — documented behavior, not an
-  oversight, and covered by an explicit test case.
+- **A zero-Session Camp no longer trivially verifies `sessions-verified`.**
+  With no non-archived Sessions, the Camp's rollup Claim derives from the
+  camp's `schedules` claim, which counts only as an explicit "intentionally
+  empty" attestation (see Empty required lists).
 - **`Camp.updatedAt` is not bumped by `mark_verified`/bulk attestation.**
   Only `dataConfidence`/`lastVerifiedAt` are written by
   `refreshCampVerificationCache`; any UI or downstream consumer that treats

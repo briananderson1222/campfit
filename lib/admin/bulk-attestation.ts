@@ -106,7 +106,7 @@ function contentHashFor(value: unknown): string {
 export interface BulkAttestCampResult {
   readonly campId: string;
   readonly dataConfidence: DataConfidence;
-  /** Always `VERIFIED_CAMP_FIELDS.length` — every required Camp Attribute gets one Evidence row per call. */
+  /** Required Camp Attributes attested by this call: every one except an empty list (age groups, pricing), which stays a gap. */
   readonly attestedFieldCount: number;
   /** Verified Camp Claim Set requirement ids whose status is NOT `'verified'` after this attestation — empty when the Camp is fully VERIFIED. */
   readonly gapRequirementIds: string[];
@@ -127,6 +127,7 @@ export async function bulkAttestCamp(
   const pool = getPool();
   const client = await pool.connect();
   let cacheResult: RefreshCampVerificationCacheResult;
+  let attestedFieldCount = 0;
   try {
     await client.query('BEGIN');
     // One transaction in the canonical lock order (unreviewed-change.ts):
@@ -144,7 +145,18 @@ export async function bulkAttestCamp(
       throw new Error(`bulkAttestCamp(${campId}): Camp not found.`);
     }
 
+    // The list requirements are not Camp columns: attest their rows, and
+    // never attest an empty list. An empty required list stays a gap until a
+    // steward attests it as intentionally empty (steward-entry.ts).
+    const listRows: Partial<Record<VerifiedCampField, unknown[]>> = {
+      ageGroups: (await client.query(`SELECT label, "minAge", "maxAge", "minGrade", "maxGrade" FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY label, "minAge", "maxAge", id`, [campId])).rows,
+      pricing: (await client.query(`SELECT label, amount::float AS amount, unit, "durationWeeks", "ageQualifier", "discountNotes" FROM "CampPricing" WHERE "campId" = $1 ORDER BY label, amount, id`, [campId])).rows,
+    };
+    let attested = 0;
     for (const field of VERIFIED_CAMP_FIELDS) {
+      const rowsOfList = listRows[field];
+      if (rowsOfList !== undefined && rowsOfList.length === 0) continue;
+      attested++;
       const claimId = campCanonicalClaimId(campId, field);
       const claim: ClaimDefinitionDraft = {
         id: claimId,
@@ -159,7 +171,7 @@ export async function bulkAttestCamp(
         subject: { claimId, sourceRef: `admin:${actorEmail}` },
         actor: { id: actorEmail },
         attestedAt,
-        contentHash: contentHashFor((camp as Record<string, unknown>)[field]),
+        contentHash: contentHashFor(rowsOfList ?? (camp as Record<string, unknown>)[field]),
       });
       // Surface keys attestation evidence by claim alone, and evidence rows are
       // append-only: a second attestation of the same camp (after an edit, say)
@@ -183,6 +195,7 @@ export async function bulkAttestCamp(
     }
     // The derived status is written in this transaction, from the claims it
     // just wrote, and its rollup also answers the caller (no second derivation).
+    attestedFieldCount = attested;
     cacheResult = await refreshCampVerificationCacheOnLockedClient(client, campId, options.now ? { now: options.now } : {});
     await client.query('COMMIT');
   } catch (error) {
@@ -199,7 +212,7 @@ export async function bulkAttestCamp(
   return {
     campId,
     dataConfidence: cacheResult.dataConfidence,
-    attestedFieldCount: VERIFIED_CAMP_FIELDS.length,
+    attestedFieldCount,
     gapRequirementIds,
   };
 }

@@ -183,6 +183,16 @@ export const CAMP_TARGET_SCHEMA: TargetFieldSchema[] = [
     description: "The SAME session's end date as the paired schedules[].startDate at this index — from the same excerpt, not a different session or the whole-summer season span.",
   },
   {
+    path: "items[].schedules[].startTime",
+    type: "string",
+    description: "The SAME session's (at this schedules[] index) daily start time, as written on the page with its am/pm (e.g. \"9:00 AM\"). Only when the page states it; leave unset otherwise — never assume a usual camp day.",
+  },
+  {
+    path: "items[].schedules[].endTime",
+    type: "string",
+    description: "The SAME session's daily end time, as written on the page with its am/pm (e.g. \"3:00 PM\"). Only when the page states it; leave unset otherwise.",
+  },
+  {
     path: "items[].ageGroups[].minAge",
     type: "number",
     description: "One age band's minimum age (in years) for THIS camp. A camp with multiple age bands (e.g. separate camps for 5-6 and 7-9) gets multiple ageGroups[] entries — do not compose a single min..max spanning unrelated bands.",
@@ -228,6 +238,8 @@ export const CAMP_TARGET_SCHEMA: TargetFieldSchema[] = [
 export const CAMP_FIELD_HINTS: Record<string, string> = {
   "items[].schedules[].startDate": "Sessions are often written as a range like 'June 9-13, 2026' — the start is the first date. A whole-summer span like 'June 8 to August 7' describing many sessions is NOT one session — only propose it as a schedule if the page genuinely offers a single continuous multi-week session, not a season overview.",
   "items[].schedules[].endDate": "For a range like 'June 9-13, 2026' the end date is 'June 13, 2026' — pair it with the SAME session's startDate.",
+  "items[].schedules[].startTime": "Quote the one text that states this session's start and end time together, with its am/pm (e.g. 'Camp runs 9am-3pm'); cite that same text for startTime and endTime. When the page states one daily time for every session, give it on each session, citing that same text. Early drop-off and late pickup are not the session's start or end. A time the page does not state is left unset.",
+  "items[].schedules[].endTime": "Pair it with the SAME session's startTime, from the text that states it. Leave unset if the page does not state an end time.",
   "items[].ageGroups[].minAge": "Ground each age band in its own excerpt (e.g. 'Ages 7-9') — do not pair a minAge from one excerpt with a maxAge from a different age band's excerpt.",
   "items[].pricing[].amount": "Report the numeric dollar amount only, without the '$' sign or any unit suffix (the unit goes in pricing[].unit).",
   "items[].pricing[].unit": "Pair each unit with the SAME price entry's amount, from the same excerpt (e.g. '$450 per session' -> PER_SESSION). Do not assume PER_WEEK.",

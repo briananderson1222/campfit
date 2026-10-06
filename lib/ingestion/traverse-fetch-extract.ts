@@ -1,4 +1,5 @@
 import { extract } from "@kontourai/traverse";
+import { rememberPreparedText } from "./prepared-text";
 import {
   buildSnapshotSourceRef,
   fetchAndExtract,
@@ -101,5 +102,7 @@ export async function fetchAndExtractWithRevalidation(
       preparationVersion: opts.preparationVersion,
     },
   });
+  // Kept beside the result so session times can be placed by their line (prepared-text.ts).
+  rememberPreparedText(extraction, snapshot.bodyBytes ?? snapshot.body, snapshot.contentType);
   return { fetch: fetchResult, extraction, sourceRef, ...(contentFingerprint === undefined ? {} : { contentFingerprint }) };
 }
