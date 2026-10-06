@@ -92,6 +92,14 @@ const SCHEMA_BY_REL_PATH = new Map(
   CAMP_TARGET_SCHEMA.map((field) => [field.path.slice(ITEMS_ARRAY_PREFIX.length), field] as const),
 );
 
+/** "HH:MM" on a 24-hour clock, in the stored spelling, or null. */
+function twentyFourHourAnswer(value: unknown): string | null {
+  const m = typeof value === "string" ? /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim()) : null;
+  if (!m) return null;
+  const hour = Number(m[1]);
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${m[2]} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
 /** The per-session time leaves, relative to one item. */
 const SESSION_TIME_PATHS = new Set(["schedules[].startTime", "schedules[].endTime"]);
 
@@ -127,7 +135,10 @@ function screenValue(relPath: string, value: unknown, excerpt: string): { ok: tr
     // A session time is a clock time with its half of the day, and the text
     // it cites must state that time (session-time.ts); the time-of-day
     // analogue of the year-in-quote rule for dates below.
-    const canonical = canonicalTime(value);
+    // A model answering in 24-hour form ("12:00", "16:00") is read as that
+    // clock time; it still counts only when the cited text states it with
+    // its am/pm (below), so this reads the answer, it does not guess.
+    const canonical = canonicalTime(value) ?? twentyFourHourAnswer(value);
     if (canonical === null) return { ok: false, why: "not a clock time with its am/pm" };
     return textStatesTime(canonical, excerpt)
       ? { ok: true, value: canonical }

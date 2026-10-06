@@ -369,6 +369,26 @@ describe('a time belongs to a session only when the page text settles it', () =>
     expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
   });
 
+  it('a 24-hour model answer counts when the cited text states that time with am/pm, and not otherwise', async () => {
+    const w1 = `Week 1: ${D1}, 9:00 AM - 12:00 PM`;
+    const w2 = `Week 2: ${D2}, 13:00 - 16:00`;
+    const item = await fromHtml(`<ul><li>${w1}</li><li>${w2}</li></ul>`, [
+      NAME,
+      answer('items[].schedules[].startDate', '2027-06-14', w1), answer('items[].schedules[].endDate', '2027-06-18', w1),
+      ...time('09:00', '12:00', w1),
+      answer('items[].schedules[].startDate', '2027-06-21', w2), answer('items[].schedules[].endDate', '2027-06-25', w2),
+      ...time('13:00', '16:00', w2),
+    ]);
+    // Week 2's text states 24-hour times only; 16:00 reads as 4 PM but 13:00 - 16:00 is a stated range, so both count.
+    expect(shape(item)).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', '1:00 PM', '4:00 PM']]);
+    const unstated = await fromHtml(`<ul><li>Week 1: ${D1}, 9 - 12</li></ul>`, [
+      NAME,
+      answer('items[].schedules[].startDate', '2027-06-14', `Week 1: ${D1}, 9 - 12`), answer('items[].schedules[].endDate', '2027-06-18', `Week 1: ${D1}, 9 - 12`),
+      ...time('09:00', '12:00', `Week 1: ${D1}, 9 - 12`),
+    ]);
+    expect(shape(unstated)).toEqual([['2027-06-14', null, null]]);
+  });
+
   it('a time on the session\'s own date line is that session\'s only', async () => {
     const w1 = `Week 1: ${D1}, 9:00 AM - 12:00 PM`;
     const item = await fromHtml(`<p>${w1}</p><h3>Next</h3><p>${D2}</p>`, [

@@ -433,7 +433,9 @@ follow-up.
 (`items[].schedules[].startTime`/`endTime`). A time is kept only when its
 cited text states it with its half of the day (`9am`, `3:30 PM`, `9-3pm`,
 `noon`, a 24-hour `15:00` or `09:30`); `8:30-3:00` states no half of the day
-and `9:00–15:00` reads only as 3 PM, so both are refused. That is the
+and `9:00–15:00` reads only as 3 PM, so both are refused. A model's 24-hour
+answer (`12:00`, `16:00`) is read as that clock time, and counts only when
+the cited text states it with its am/pm. That is the
 time-of-day analogue of the year-in-quote rule for dates. A time is never
 defaulted or guessed:
 
