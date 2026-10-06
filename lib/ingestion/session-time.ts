@@ -17,7 +17,9 @@
  *    other half (`9-3pm` is 9 AM). The text states the range; this only reads
  *    it.
  * A time with nothing saying which half of the day it is in (`8:30-3:00`) is
- * not stated: a crawled time it would support is refused, never guessed.
+ * not stated: a crawled time it would support is refused, never guessed. So
+ * is a 24-hour time without a leading zero below 13 (`9:00–15:00` states
+ * only 3 PM; the 9 is not read as 9 AM).
  */
 
 const MERIDIEM = String.raw`(a\.?\s?m\.?|p\.?\s?m\.?)`;
@@ -83,13 +85,24 @@ export function canonicalTime(value: unknown): string | null {
   return total === null ? null : fromMinutes(total);
 }
 
-/** Every time `text` states, in the stored spelling. See the module header for what counts as stated. */
-export function timesStatedIn(text: string): Set<string> {
-  const found = new Set<string>();
-  for (const match of text.matchAll(NOON_MIDNIGHT)) {
-    found.add(match[1]!.toLowerCase() === 'midnight' ? '12:00 AM' : '12:00 PM');
-  }
-  for (const match of text.matchAll(TIME_OR_RANGE)) {
+/** A start and end time a text states as one range ("9am-3pm"), in the stored spelling. */
+export interface StatedRange {
+  readonly start: string;
+  readonly end: string;
+}
+
+/**
+ * Every time `text` states, and every range it states, in the stored
+ * spelling. See the module header for what counts as stated. A range counts
+ * only when its end is after its start: "09:00 - 03:00" reads as 9 AM to
+ * 3 AM, which no day camp means, so it is not a range (and a crawled time
+ * pair it would support is refused). `noon`/`midnight` count as range ends.
+ */
+export function readTimes(text: string): { times: Set<string>; ranges: StatedRange[] } {
+  const times = new Set<string>();
+  const ranges: StatedRange[] = [];
+  const spelled = text.replace(NOON_MIDNIGHT, (word) => (word.toLowerCase() === 'midnight' ? '12:00 am' : '12:00 pm'));
+  for (const match of spelled.matchAll(TIME_OR_RANGE)) {
     const [, h1, m1, mer1, h2, m2, mer2] = match;
     const firstHalf = halfOf(mer1);
     const secondHalf = halfOf(mer2);
@@ -98,7 +111,7 @@ export function timesStatedIn(text: string): Set<string> {
       second = secondHalf
         ? twelveHourMinutes(Number(h2), m2 === undefined ? 0 : Number(m2), secondHalf)
         : twentyFourHourMinutes(h2, m2);
-      if (second !== null) found.add(fromMinutes(second));
+      if (second !== null) times.add(fromMinutes(second));
     }
     const minute1 = m1 === undefined ? 0 : Number(m1);
     let first: number | null = null;
@@ -112,9 +125,36 @@ export function timesStatedIn(text: string): Set<string> {
     } else {
       first = twentyFourHourMinutes(h1!, m1);
     }
-    if (first !== null) found.add(fromMinutes(first));
+    if (first !== null) times.add(fromMinutes(first));
+    if (first !== null && second !== null && second > first) {
+      const range = { start: fromMinutes(first), end: fromMinutes(second) };
+      if (!ranges.some((r) => r.start === range.start && r.end === range.end)) ranges.push(range);
+    }
   }
-  return found;
+  return { times, ranges };
+}
+
+/** Every time `text` states, in the stored spelling. */
+export function timesStatedIn(text: string): Set<string> {
+  return readTimes(text).times;
+}
+
+/**
+ * Whether `text` states exactly one range, and it is `start`–`end`. A text
+ * with two ranges ("half day 9-12, full day 9-3") does not say which one a
+ * session has.
+ */
+export function textStatesOnlyRange(start: unknown, end: unknown, text: string): boolean {
+  const s = canonicalTime(start);
+  const e = canonicalTime(end);
+  const { ranges } = readTimes(text);
+  return s !== null && e !== null && ranges.length === 1 && ranges[0]!.start === s && ranges[0]!.end === e;
+}
+
+/** Minutes after midnight of a time in the stored spelling (`9:00 AM`). */
+export function minutesOfCanonical(time: string): number {
+  const [, h, m, half] = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(time)!;
+  return (Number(h) % 12 + (half === 'PM' ? 12 : 0)) * 60 + Number(m);
 }
 
 /** Whether `text` states the time `value` (compared in the stored spelling). */

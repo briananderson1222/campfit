@@ -28,6 +28,7 @@
  * are actually appliable.
  */
 
+import { preparedTextOf, rememberPreparedText } from "./prepared-text";
 import { extract } from "@kontourai/traverse";
 import type {
   ExtractionProvider,
@@ -73,7 +74,7 @@ export async function runTraverseExtraction(
   const fieldHints = opts.extraFieldHints && Object.keys(opts.extraFieldHints).length > 0
     ? { ...CAMP_FIELD_HINTS, ...opts.extraFieldHints }
     : CAMP_FIELD_HINTS;
-  return extract({
+  const result = await extract({
     content: opts.content,
     contentType: opts.contentType ?? "html",
     sourceRef: opts.sourceRef,
@@ -82,6 +83,8 @@ export async function runTraverseExtraction(
     provider: opts.provider,
     maxContentChars: opts.maxContentChars,
   });
+  rememberPreparedText(result, opts.content, opts.contentType ?? "html");
+  return result;
 }
 
 /** Present only when reported: an unreported confidence is absent, never 0. */
@@ -246,7 +249,7 @@ export function buildTraverseItemProposalRecords(
   } = {}
 ): TraverseItemProposalRecord[] {
   const sourceUrl = opts.sourceUrl ?? "";
-  const items = assembleItems(result.proposals);
+  const items = assembleItems(result.proposals, { preparedText: preparedTextOf(result) });
   const incomplete = extractionIncompleteness(result);
 
   // An item that collapsed several programs has no name of its own, and this

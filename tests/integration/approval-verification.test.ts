@@ -30,6 +30,7 @@ import { getCampProposalHistoryBatch } from '@/lib/admin/review-repository';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import type { FieldDiff, ProposedChanges } from '@/lib/admin/types';
+import { recordStewardEntry } from '@/lib/admin/steward-entry';
 import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 
 const REVIEWER = 'reviewer@campfit.test';
@@ -92,13 +93,22 @@ function fullChanges(opts: { sessionTimes: boolean }): ProposedChanges {
   };
 }
 
+/**
+ * A camp Mark Verified can verify: it lists an age group and a price (an
+ * empty required list is a gap Mark Verified does not attest), and its empty
+ * session list is attested as intentionally empty by a steward.
+ */
 async function seedCamp(): Promise<string> {
   const { rows } = await getTestPool().query<{ id: string }>(
     `INSERT INTO "Camp" (slug, name, "campType", category, description, city, "websiteUrl")
      VALUES ($1, 'Aspen Grove', 'SLEEPAWAY', 'SPORTS', '', '', '') RETURNING id`,
     [`aspen-grove-${randomUUID()}`],
   );
-  return rows[0]!.id;
+  const campId = rows[0]!.id;
+  await getTestPool().query(`INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge") VALUES (gen_random_uuid()::text, $1, 'Ages 6 - 10', 6, 10)`, [campId]);
+  await getTestPool().query(`INSERT INTO "CampPricing" (id, "campId", label, amount, unit) VALUES (gen_random_uuid()::text, $1, 'Tuition', 450, 'PER_WEEK')`, [campId]);
+  await recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'schedules', reason: 'fixture: sessions are listed later' }, 'steward@campfit.test');
+  return campId;
 }
 
 /** A pending proposal. With `snapshot`, its excerpts cite a snapshot that is really in the store. */
@@ -322,7 +332,8 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     const { rows } = await getTestPool().query<{ claimId: string; n: number }>(
       `SELECT "claimId", count(*)::int AS n FROM "SurfaceEvidence" WHERE "evidenceType" = 'human_attestation' GROUP BY 1 ORDER BY 1`,
     );
-    expect(rows.map((row) => row.claimId.split('.field.')[1])).toEqual(['categories', 'category', 'description']);
+    // `schedules` is the fixture's intentionally-empty session list (seedCamp).
+    expect(rows.map((row) => row.claimId.split('.field.')[1])).toEqual(['categories', 'category', 'description', 'schedules']);
   });
 
   it('refuses a single value that its own list does not hold, before writing anything', async () => {
@@ -742,7 +753,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       }
       expect([...finished].sort()).toEqual(['apply', 'writer']);
       const { rows } = await pool.query(`SELECT id FROM "SurfaceClaimDefinition" WHERE "subjectId" = $1 ORDER BY id`, [campId]);
-      expect(rows.map((row) => row.id)).toEqual([`camp.${campId}.field.city`, `camp.${campId}.field.description`]);
+      expect(rows.map((row) => row.id)).toEqual([`camp.${campId}.field.city`, `camp.${campId}.field.description`, `camp.${campId}.field.schedules`]);
   });
   });
   describe('one lock order across crawls, reviews, edits and attestations', () => {
@@ -795,7 +806,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       const attesting = recordCampAttestationEvidence({ campId, fields: ['description', 'websiteUrl'], actor: REVIEWER, attestedAt: new Date().toISOString(), notes: 'n/a on purpose', mode: 'override' });
       await Promise.all([applying, attesting]);
       const { rows } = await pool().query<{ id: string }>(`SELECT id FROM "SurfaceClaimDefinition" WHERE "subjectId" = $1 ORDER BY id`, [campId]);
-      expect(rows.map((row) => row.id.split('.').pop())).toEqual(['city', 'description', 'websiteUrl']);
+      expect(rows.map((row) => row.id.split('.').pop())).toEqual(['city', 'description', 'schedules', 'websiteUrl']);
     });
 
     it('a session-claim writer waits for an apply on the camp (session subject locks)', async () => {

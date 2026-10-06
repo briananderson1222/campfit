@@ -17,8 +17,8 @@ import type { ClaimGroupRollup } from '@kontourai/surface';
 import { getPool } from '@/lib/db';
 import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
 
-import { STEWARD_CAMP_FIELDS, STEWARD_FIELD_OPTIONS, type StewardCampField } from './steward-entry';
-import { deriveCampVerification, deriveSessionVerification, projectTrustStatusToDataConfidence } from './verification-authority';
+import { STEWARD_CAMP_FIELDS, STEWARD_FIELD_OPTIONS, type IntentionallyEmptyField, type StewardCampField } from './steward-entry';
+import { deriveCampAndSessionVerification, projectTrustStatusToDataConfidence } from './verification-authority';
 import type { DataConfidence } from '@/lib/types';
 
 /** A camp-level requirement that is not verified. */
@@ -34,6 +34,12 @@ export interface MissingCampRequirement {
     readonly options?: readonly { value: string; label: string }[];
     readonly current: string | null;
   };
+  /**
+   * Present when the required list is empty: the steward can record, with a
+   * reason, that the camp really has none. That explicit attestation is the
+   * only way an empty list satisfies its requirement.
+   */
+  readonly intentionallyEmpty?: { readonly field: IntentionallyEmptyField };
 }
 
 /** One current session with at least one requirement not verified. */
@@ -45,7 +51,7 @@ export interface MissingSessionRequirements {
   readonly startTime: string | null;
   readonly endTime: string | null;
   readonly missing: readonly { readonly attribute: string; readonly title: string; readonly detail: string }[];
-  /** True when the session's time is missing: the panel offers a time entry. */
+  /** True when the session's time is missing: the panel offers a time entry, or "no fixed daily time" with a reason. */
   readonly timeEntry: boolean;
 }
 
@@ -120,11 +126,12 @@ function shortValue(field: string, value: unknown): string {
 function campDetail(requirementId: string, status: string, value: unknown): string {
   const stale = status === 'stale';
   if (requirementId === 'pricing' && isEmpty(value)) {
-    // The camp editor has no price editor: say what the steward can do.
-    return 'No prices listed yet. Find them on the camp\'s website or call. Prices come in through a crawl a reviewer approves; Mark Verified attests the camp as it stands.';
+    // The camp editor has no price editor. Mark Verified does not attest an
+    // empty list, so it is not offered here.
+    return 'No prices listed. Find them on the camp\'s website or call; prices come in through a crawl a reviewer approves. If the camp really charges nothing, record that here with how you know.';
   }
   if (LIST_FIELDS.has(requirementId)) {
-    if (isEmpty(value)) return 'None listed yet. Find them on the camp\'s website or call, then add them in the camp editor and attest them.';
+    if (isEmpty(value)) return 'None listed. Find them on the camp\'s website or call, then add them in the camp editor. If the camp really has none, record that here with how you know.';
     return stale
       ? 'Checked, but too long ago. Check the list against the camp\'s website again, then attest it in the camp editor.'
       : 'Listed, but nobody has checked the list against the source yet. Approve it in review, or check it and attest it in the camp editor.';
@@ -146,7 +153,7 @@ function sessionDetail(attribute: string, session: SessionForGuidance, campMissi
   if (attribute === 'time') {
     return session.startTime && session.endTime
       ? `${session.startTime}–${session.endTime} has not been checked against the source. Check it, then enter it here.`
-      : 'The crawled page does not state when this session starts and ends. Check the website or call, then enter it here.';
+      : 'The crawled page does not state when this session starts and ends. Check the website or call, then enter it here, or record that it has no fixed daily time (an overnight or residential session).';
   }
   if (attribute === 'dates') return 'The dates have not been checked against the source. Approve the session list in review.';
   const from = INHERITED_FROM[attribute];
@@ -198,6 +205,14 @@ export function describeMissingRequirements(input: {
     const title = CAMP_REQUIREMENT_TITLES[requirement.id] ?? requirement.title ?? requirement.id;
     if (requirement.id === 'sessions-verified') {
       const count = sessions.length;
+      if (input.sessions.length === 0) {
+        return {
+          requirementId: requirement.id,
+          title,
+          detail: 'No sessions listed. Find them on the camp\'s website or call; sessions come in through a crawl a reviewer approves. If the camp really runs no sessions, record that here with how you know.',
+          intentionallyEmpty: { field: 'schedules' },
+        } satisfies MissingCampRequirement;
+      }
       return {
         requirementId: requirement.id,
         title,
@@ -213,6 +228,7 @@ export function describeMissingRequirements(input: {
       requirementId: requirement.id,
       title,
       detail: campDetail(requirement.id, requirement.status, value),
+      ...(LIST_FIELDS.has(requirement.id) && isEmpty(value) ? { intentionallyEmpty: { field: requirement.id as IntentionallyEmptyField } } : {}),
       ...(field
         ? {
             entry: {
@@ -255,11 +271,14 @@ export async function loadMissingRequirements(campId: string): Promise<MissingRe
       [campId],
     ),
   ]);
-  const campRollup = await deriveCampVerification(campId);
-  const sessions = [];
-  for (const session of sessionRows.rows) {
-    sessions.push({ session, rollup: await deriveSessionVerification(session.id) });
-  }
+  // One bundle and one derivation for the camp and all its sessions.
+  const derived = await deriveCampAndSessionVerification(campId);
+  const campRollup = derived.camp;
+  const sessions = sessionRows.rows.flatMap((session) => {
+    const rollup = derived.sessions.get(session.id);
+    // A session archived between the two reads is no longer the camp's.
+    return rollup ? [{ session, rollup }] : [];
+  });
   return describeMissingRequirements({
     campId,
     campRollup,

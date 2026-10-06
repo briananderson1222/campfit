@@ -67,6 +67,7 @@
  *    rendered) — never more than one render per source per run.
  */
 
+import { preparedTextOf, rememberPreparedText } from "./prepared-text";
 import { describeIncompleteness, extractionIncompleteness, type ExtractionIncompleteness } from "./extraction-completeness";
 import { fetchAndExtract, crawlSource } from "@kontourai/traverse/fetch";
 import type {
@@ -561,6 +562,11 @@ async function runFetchAndExtractAttempt(
         deps.priorContentFingerprint === undefined ? undefined : { priorFingerprint: deps.priorContentFingerprint },
       )
     : await fetchAndExtract(config, opts);
+  // Session times are placed by their line (prepared-text.ts); both paths keep the text.
+  const snapshot = far.fetch?.snapshot;
+  if (far.extraction && snapshot && !preparedTextOf(far.extraction)) {
+    rememberPreparedText(far.extraction, snapshot.bodyBytes ?? snapshot.body, snapshot.contentType);
+  }
   return { far, latencyMs: now() - startedAt };
 }
 
@@ -667,7 +673,7 @@ async function runCoreFetchAndExtract(
       // trips the heuristic. Log the suspicion and move on with the first
       // attempt's (unrendered) results — never issue a retry we already
       // know cannot succeed.
-      const firstAttemptItemCount = assembleItems(far.extraction.proposals).length;
+      const firstAttemptItemCount = assembleItems(far.extraction.proposals, { preparedText: preparedTextOf(far.extraction) }).length;
       log(
         `[traverse-pipeline] ${src.key}: js-shell-suspected but no renderImpl is configured in this ` +
           `execution context — skipping the render retry (would fail invalid-config)`
@@ -681,7 +687,7 @@ async function runCoreFetchAndExtract(
         firstAttemptWarnings: firstWarnings,
       };
     } else if (pureShellSuspected) {
-      const firstAttemptItemCount = assembleItems(far.extraction.proposals).length;
+      const firstAttemptItemCount = assembleItems(far.extraction.proposals, { preparedText: preparedTextOf(far.extraction) }).length;
       log(`[traverse-pipeline] ${src.key}: js-shell-suspected — auto-retrying with a render`);
 
       const retryAttempt = await runFetchAndExtractAttempt(
@@ -714,7 +720,7 @@ async function runCoreFetchAndExtract(
         );
       } else {
         const retryAttemptItemCount = retryAttempt.far.extraction
-          ? assembleItems(retryAttempt.far.extraction.proposals).length
+          ? assembleItems(retryAttempt.far.extraction.proposals, { preparedText: preparedTextOf(retryAttempt.far.extraction) }).length
           : 0;
         core.shellEscalation = {
           shellDetected: true,
@@ -946,6 +952,7 @@ async function runTraverseCrawlPipelineForSource(
       ...(page.sourceRef ? { preparedArtifact: { sourceSnapshotRef: page.sourceRef } } : {}),
     });
 
+    rememberPreparedText(extraction, snapshot.body, snapshot.contentType);
     result.providerCalls += extraction.providerCalls;
     result.tokensUsed = (result.tokensUsed ?? 0) + (extraction.totalTokensUsed ?? 0);
     if (!result.model && extraction.raw?.model) result.model = extraction.raw.model;
@@ -962,7 +969,7 @@ async function runTraverseCrawlPipelineForSource(
       result.warnings.push(`[crawl ${page.url}] ${describeIncompleteness(pageIncomplete)}`);
     }
 
-    const items = assembleItems(extraction.proposals);
+    const items = assembleItems(extraction.proposals, { preparedText: preparedTextOf(extraction) });
     result.warnings.push(...unroutedMultiProgramWarnings(items).map((w) => `[crawl ${page.url}] ${w}`));
     if (items.length === 0) continue;
 
@@ -1043,7 +1050,7 @@ export async function runTraversePipelineForSource(
     return result;
   }
 
-  const assembled = assembleItems(far.extraction.proposals);
+  const assembled = assembleItems(far.extraction.proposals, { preparedText: preparedTextOf(far.extraction) });
   result.warnings.push(...unroutedMultiProgramWarnings(assembled));
   const itemNames = assembled.map((item) => itemDisplayName(item));
   const currentByItemName = deps.currentByItemNames
@@ -1116,7 +1123,7 @@ export async function runTraverseFetchAndAssemble(
   if (!far.extraction) {
     return { ...core, items: [] };
   }
-  return { ...core, items: assembleItems(far.extraction.proposals) };
+  return { ...core, items: assembleItems(far.extraction.proposals, { preparedText: preparedTextOf(far.extraction) }) };
 }
 
 /**

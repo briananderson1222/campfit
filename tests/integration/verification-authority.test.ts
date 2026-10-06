@@ -59,6 +59,7 @@ import {
 } from "@/lib/admin/claim-store";
 import { backfillClaimStore, buildDowngradeImpactReport } from "@/lib/admin/claim-store-backfill";
 import { bulkAttestCamp } from "@/lib/admin/bulk-attestation";
+import { recordStewardEntry } from "@/lib/admin/steward-entry";
 import { campCanonicalClaimId } from "@/lib/admin/trust-projection";
 import {
   buildInheritedSessionClaims,
@@ -94,7 +95,17 @@ async function insertCamp(
       overrides.description ?? "",
     ],
   );
-  return result.rows[0]!.id;
+  const campId = result.rows[0]!.id;
+  // Required lists that are not empty: an empty one is a gap only an
+  // explicit "intentionally empty" attestation closes.
+  await pool.query(`INSERT INTO "CampAgeGroup" (id, "campId", label, "minAge", "maxAge") VALUES (gen_random_uuid()::text, $1, 'Ages 6 - 10', 6, 10)`, [campId]);
+  await pool.query(`INSERT INTO "CampPricing" (id, "campId", label, amount, unit) VALUES (gen_random_uuid()::text, $1, 'Tuition', 450, 'PER_WEEK')`, [campId]);
+  return campId;
+}
+
+/** A session-less camp's empty session list, attested as intentionally empty by a steward. */
+async function attestNoSessions(campId: string): Promise<void> {
+  await recordStewardEntry(campId, { kind: "intentionally-empty", field: "schedules", reason: "fixture: the camp runs no sessions" }, "steward@campfit.test");
 }
 
 interface CampScheduleSeed {
@@ -700,6 +711,7 @@ describe("AC3 backfill", () => {
     for (const field of VERIFIED_CAMP_FIELDS) {
       await verifyCampField(pool, genuinelyVerifiedCampId, field, now);
     }
+    await attestNoSessions(genuinelyVerifiedCampId);
     await testPool.query(`UPDATE "Camp" SET "dataConfidence" = 'VERIFIED' WHERE id = $1`, [genuinelyVerifiedCampId]);
 
     // A third, non-VERIFIED Camp — the report only ever evaluates
@@ -760,10 +772,10 @@ describe("AC3 backfill", () => {
       const requirement = rollup.requirements.find((candidate) => candidate.id === field)!;
       expect(requirement.status).toBe("proposed");
     }
-    // No Sessions -> sessions-verified is trivially verified (documented
-    // default), but it cannot lift the other 8 under an all-required rollup.
+    // No Sessions and no "intentionally empty" attestation of the session
+    // list -> sessions-verified is a gap too (it used to be trivially verified).
     const sessionsRequirement = rollup.requirements.find((requirement) => requirement.id === "sessions-verified")!;
-    expect(sessionsRequirement.status).toBe("verified");
+    expect(sessionsRequirement.status).toBe("proposed");
     expect(rollup.status).toBe("proposed");
 
     const cacheResult = await refreshCampVerificationCache(campId);
@@ -792,6 +804,7 @@ describe("AC4 writers-recordEvidence", () => {
   it("mark_verified route's shared bulkAttestCamp helper records human-attestation Evidence + an Event for every required Camp Attribute, and derives VERIFIED for a fully-attested, zero-Session Camp", async () => {
     const testPool = getTestPool();
     const campId = await insertCamp(testPool, { name: "AC4 mark_verified bulk-attestation Camp" });
+    await attestNoSessions(campId);
 
     const result = await bulkAttestCamp(campId, "reviewer@campfit.test");
 
@@ -958,6 +971,7 @@ describe("AC4 writers-recordEvidence", () => {
   it("/attest route's reconciled path (recordCampAttestationEvidence, lib/admin/entity-admin-repository.ts) creates a Claim + Evidence + Event row per attested field and drives refreshCampVerificationCache to VERIFIED for a fully-attested, session-less Camp", async () => {
     const testPool = getTestPool();
     const campId = await insertCamp(testPool, { name: "AC4 /attest reconciliation Camp" });
+    await attestNoSessions(campId);
     const attestedAt = new Date().toISOString();
 
     // Exercises the exact function `app/api/admin/camps/[campId]/attest/
@@ -1441,6 +1455,7 @@ describe("verification-authority.ts (Wave 3 core)", () => {
     const testPool = getTestPool();
     const pool = getProductionPool();
     const campId = await insertCamp(testPool, { name: "Wave3 fully-verified Camp" });
+    await attestNoSessions(campId);
     const now = new Date().toISOString();
 
     for (const field of VERIFIED_CAMP_FIELDS) {

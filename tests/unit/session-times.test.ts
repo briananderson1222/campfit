@@ -15,6 +15,7 @@ import { CAMP_TARGET_SCHEMA } from '@/lib/ingestion/traverse-schema';
 import { runTraverseExtraction } from '@/lib/ingestion/traverse-extractor';
 import { assembleItems } from '@/lib/ingestion/traverse-item-grouping';
 import { assembledItemToDiffInputs } from '@/lib/ingestion/traverse-diff-inputs';
+import { preparedTextOf } from '@/lib/ingestion/prepared-text';
 import { computeDiff, keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import type { Camp } from '@/lib/types';
 import { createReplayProvider } from '../fixtures/real-crawl/replay';
@@ -43,7 +44,7 @@ async function extract(lines: readonly string[], proposals: readonly unknown[]) 
   const { provider } = createReplayProvider(proposals);
   const result = await runTraverseExtraction({ content: page(lines), sourceRef: 'https://larkspur.example.test/summer', provider });
   expect(result.error).toBeUndefined();
-  const items = assembleItems(result.proposals as ExtractionProposal[]);
+  const items = assembleItems(result.proposals as ExtractionProposal[], { preparedText: preparedTextOf(result) });
   expect(items).toHaveLength(1);
   return { result, item: items[0]! };
 }
@@ -163,7 +164,7 @@ describe('a crawled session time', () => {
       answer('items[].schedules[].endTime', '3:00 PM', full),
     ]);
     expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
-    expect(item.operatorWarnings.join('\n')).toContain('2 different daily times');
+    expect(item.operatorWarnings.join('\n')).toContain('2 separate daily times');
   });
 });
 
@@ -182,7 +183,7 @@ describe('a time placed by where its text is', () => {
       answer('items[].schedules[].endTime', '4:00 PM', line),
     ]);
     expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
-    expect(item.operatorWarnings.join('\n')).toContain('several sessions at once');
+    expect(item.operatorWarnings.join('\n')).toContain('as its one time range');
   });
 
   it('stated with one session\'s ordinal dates stays on that session', async () => {
@@ -220,6 +221,136 @@ describe('a time placed by where its text is', () => {
       answer('items[].schedules[].endTime', '12:00 PM', hours),
     ]);
     expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+  });
+});
+
+describe('a time is not guessed', () => {
+  async function extractHtml(html: string, proposals: readonly unknown[]) {
+    const { provider } = createReplayProvider(proposals);
+    const result = await runTraverseExtraction({ content: html, sourceRef: 'https://larkspur.example.test/summer', provider });
+    return assembleItems(result.proposals as ExtractionProposal[], { preparedText: preparedTextOf(result) })[0]!;
+  }
+  const NAME = answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp');
+
+  it('a table row that states a time gives it to its own session only; a "TBD" row gets none', async () => {
+    const r1d = 'June 14 - June 18, 2027'; const r1t = '9:00 AM - 12:00 PM'; const r2d = 'June 21 - June 25, 2027';
+    const html = `<html><body><h1>Larkspur Meadow Day Camp</h1><table><tr><th>Dates</th><th>Hours</th></tr><tr><td>${r1d}</td><td>${r1t}</td></tr><tr><td>${r2d}</td><td>TBD</td></tr></table></body></html>`;
+    const item = await extractHtml(html, [
+      NAME,
+      answer('items[].schedules[].startDate', '2027-06-14', r1d), answer('items[].schedules[].endDate', '2027-06-18', r1d),
+      answer('items[].schedules[].startTime', '9:00 AM', r1t), answer('items[].schedules[].endTime', '12:00 PM', r1t),
+      answer('items[].schedules[].startDate', '2027-06-21', r2d), answer('items[].schedules[].endDate', '2027-06-25', r2d),
+    ]);
+    expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', null, null]]);
+  });
+
+  it('a narrow citation from one session\'s own line stays on that session', async () => {
+    const w1 = 'Week 1: June 14 - June 18, 2027 (early start 7:30am-12:30pm)';
+    const { item } = await extract([w1, DATES_W2], [
+      answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp'),
+      answer('items[].schedules[].startDate', '2027-06-14', 'Week 1: June 14 - June 18, 2027'),
+      answer('items[].schedules[].endDate', '2027-06-18', 'Week 1: June 14 - June 18, 2027'),
+      answer('items[].schedules[].startTime', '7:30 AM', '7:30am-12:30pm'),
+      answer('items[].schedules[].endTime', '12:30 PM', '7:30am-12:30pm'),
+      answer('items[].schedules[].startDate', '2027-06-21', DATES_W2),
+      answer('items[].schedules[].endDate', '2027-06-25', DATES_W2),
+    ]);
+    expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', '7:30 AM', '12:30 PM'], ['2027-06-21', null, null]]);
+  });
+
+  it('a start from one line and an end from another is not a range the page states', async () => {
+    const am = 'Morning camp 9:00 AM - 12:00 PM'; const pm = 'Afternoon camp 1:00 PM - 4:00 PM';
+    const { item } = await extract([DATES_W1, DATES_W2, am, pm], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '9:00 AM', am),
+      answer('items[].schedules[].endTime', '4:00 PM', pm),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+    expect(item.operatorWarnings.join('\n')).toContain('cited from different text');
+  });
+
+  it('a start and end from one text that states a different range (drop-off to pickup) are refused', async () => {
+    const day = 'Drop-off 8:00 AM, camp 9:00 AM - 3:00 PM, pickup by 5:00 PM.';
+    const { item } = await extract([DATES_W1, DATES_W2, day], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '8:00 AM', day),
+      answer('items[].schedules[].endTime', '5:00 PM', day),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+  });
+
+  it('a range whose end is not after its start ("09:00 - 03:00") is refused, not read as 9 AM to 3 AM', async () => {
+    const daily = 'Camp hours 09:00 - 03:00 daily';
+    const { item } = await extract([DATES_W1, DATES_W2, daily], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '09:00', daily),
+      answer('items[].schedules[].endTime', '03:00', daily),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+  });
+
+  it('a daily time between session lines is not applied to every session', async () => {
+    const hours = 'Hours: 9:00 AM - 12:00 PM';
+    const { item } = await extract([DATES_W1, hours, DATES_W2], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '9:00 AM', hours),
+      answer('items[].schedules[].endTime', '12:00 PM', hours),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+  });
+
+  it('without the page text, no daily time is applied to every session', async () => {
+    const { result } = await extract([DATES_W1, DATES_W2, DAILY], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '9:00 AM', DAILY),
+      answer('items[].schedules[].endTime', '3:30 PM', DAILY),
+    ]);
+    const item = assembleItems(result.proposals as ExtractionProposal[])[0]!;
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+  });
+
+  it('two different times cited on one session\'s line leave that session without a time', async () => {
+    const w1 = 'Week 1: June 14 - June 18, 2027. Mon 9:00 AM - 12:00 PM; Fri 1:00 PM - 4:00 PM';
+    const { item } = await extract([w1, DATES_W2], [
+      answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp'),
+      answer('items[].schedules[].startDate', '2027-06-14', 'Week 1: June 14 - June 18, 2027'),
+      answer('items[].schedules[].endDate', '2027-06-18', 'Week 1: June 14 - June 18, 2027'),
+      answer('items[].schedules[].startTime', '9:00 AM', 'Mon 9:00 AM - 12:00 PM'),
+      answer('items[].schedules[].endTime', '12:00 PM', 'Mon 9:00 AM - 12:00 PM'),
+      answer('items[].schedules[].startDate', '2027-06-21', DATES_W2),
+      answer('items[].schedules[].endDate', '2027-06-25', DATES_W2),
+      answer('items[].schedules[].startTime', '1:00 PM', 'Fri 1:00 PM - 4:00 PM'),
+      answer('items[].schedules[].endTime', '4:00 PM', 'Fri 1:00 PM - 4:00 PM'),
+    ]);
+    expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+    expect(item.operatorWarnings.join('\n')).toContain('states different times for this session');
+  });
+});
+
+describe('one session listed twice', () => {
+  it('a summary line and a card with the time are one session with that time', async () => {
+    const summary = 'At a glance: June 14 - June 18, 2027';
+    const card = 'Week 1: June 14 - June 18, 2027, 9:00 AM - 3:00 PM';
+    const { item } = await extract([summary, card], [
+      answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp'),
+      answer('items[].schedules[].startDate', '2027-06-14', summary), answer('items[].schedules[].endDate', '2027-06-18', summary),
+      answer('items[].schedules[].startDate', '2027-06-14', card), answer('items[].schedules[].endDate', '2027-06-18', card),
+      answer('items[].schedules[].startTime', '9:00 AM', card), answer('items[].schedules[].endTime', '3:00 PM', card),
+    ]);
+    expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', '9:00 AM', '3:00 PM']]);
+  });
+
+  it('a morning and an afternoon session on the same dates stay two sessions', async () => {
+    const am = 'Morning: June 14 - June 18, 2027, 9:00 AM - 12:00 PM';
+    const pm = 'Afternoon: June 14 - June 18, 2027, 1:00 PM - 4:00 PM';
+    const { item } = await extract([am, pm], [
+      answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp'),
+      answer('items[].schedules[].startDate', '2027-06-14', am), answer('items[].schedules[].endDate', '2027-06-18', am),
+      answer('items[].schedules[].startTime', '9:00 AM', am), answer('items[].schedules[].endTime', '12:00 PM', am),
+      answer('items[].schedules[].startDate', '2027-06-14', pm), answer('items[].schedules[].endDate', '2027-06-18', pm),
+      answer('items[].schedules[].startTime', '1:00 PM', pm), answer('items[].schedules[].endTime', '4:00 PM', pm),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([['9:00 AM', '12:00 PM'], ['1:00 PM', '4:00 PM']]);
   });
 });
 

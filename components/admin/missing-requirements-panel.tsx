@@ -15,8 +15,10 @@ import { AlertCircle, ExternalLink, Loader2, Phone } from 'lucide-react';
 import type { MissingCampRequirement, MissingRequirementsGuidance, MissingSessionRequirements } from '@/lib/admin/missing-requirements';
 import { displayExternalUrl, safeExternalHref } from '@/lib/admin/safe-url';
 
-function telHref(phone: string): string | undefined {
-  const digits = phone.replace(/[^\d+]/g, '');
+/** A `tel:` link for the number itself; an extension ("ext. 12", "x12") is not dialled. */
+export function telHref(phone: string): string | undefined {
+  const number = phone.split(/\s*(?:ext\.?|extension|x|#)\s*\d+\s*$/i)[0] ?? phone;
+  const digits = number.replace(/[^\d+]/g, '');
   return digits.replace(/\D/g, '').length >= 7 ? `tel:${digits}` : undefined;
 }
 
@@ -86,6 +88,60 @@ function CampFieldEntry({ campId, item }: { campId: string; item: MissingCampReq
     </form>
   );
 }
+
+/**
+ * Record, with a reason, that something has no value on purpose: an empty
+ * required list ("the camp is free") or a session with no fixed daily time
+ * (overnight). The reason is required and kept with the attestation.
+ */
+function ReasonedAttestation({ campId, body, label, prompt, testId }: {
+  campId: string; body: Record<string, string>; label: string; prompt: string; testId: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const failure = await postEntry(campId, { ...body, reason });
+    setBusy(false);
+    if (failure) setError(failure);
+    else router.refresh();
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} data-testid={`${testId}-open`}
+        className="mt-2 text-xs font-medium text-pine-700 underline underline-offset-2 hover:text-pine-800 dark:text-pine-300">
+        {label}…
+      </button>
+    );
+  }
+  return (
+    <form onSubmit={submit} className="mt-2 space-y-1.5" data-testid={testId}>
+      <label className="block text-xs text-bark-500 dark:text-cream-300">
+        {prompt}
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required
+          className="mt-1 w-full min-w-0 rounded-lg border border-cream-300 bg-white px-2.5 py-1.5 text-sm text-bark-700 dark:border-bark-500 dark:bg-bark-800 dark:text-cream-100" />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <SaveButton busy={busy} label={label} />
+        <button type="button" onClick={() => setOpen(false)} className="text-xs text-bark-400 hover:text-bark-600">Cancel</button>
+      </div>
+      {error && <p role="alert" className="text-xs text-red-700 dark:text-red-300">{error}</p>}
+    </form>
+  );
+}
+
+const EMPTY_LABELS: Record<string, string> = {
+  ageGroups: 'Record that the camp has no age limits',
+  pricing: 'Record that the camp charges nothing',
+  schedules: 'Record that the camp runs no sessions',
+};
 
 function SessionTimeEntry({ campId, session }: { campId: string; session: MissingSessionRequirements }) {
   const router = useRouter();
@@ -183,6 +239,13 @@ export function MissingRequirementsPanel({ guidance }: { guidance: MissingRequir
                 <p className="font-semibold text-bark-700 dark:text-cream-100">{item.title}</p>
                 <p className="mt-0.5 text-xs text-bark-500 dark:text-cream-300">{item.detail}</p>
                 {item.entry && <CampFieldEntry campId={guidance.campId} item={item} />}
+                {item.intentionallyEmpty && (
+                  <ReasonedAttestation campId={guidance.campId}
+                    body={{ kind: 'intentionally-empty', field: item.intentionallyEmpty.field }}
+                    label={EMPTY_LABELS[item.intentionallyEmpty.field] ?? 'Record that this is intentionally empty'}
+                    prompt="How do you know? (required, kept with the record)"
+                    testId={`intentionally-empty-${item.intentionallyEmpty.field}`} />
+                )}
                 {item.requirementId === 'sessions-verified' && guidance.sessions.length > 0 && (
                   <ul className="mt-2 space-y-2">
                     {guidance.sessions.map((session) => (
@@ -200,6 +263,13 @@ export function MissingRequirementsPanel({ guidance }: { guidance: MissingRequir
                           ))}
                         </ul>
                         {session.timeEntry && <SessionTimeEntry campId={guidance.campId} session={session} />}
+                        {session.timeEntry && (
+                          <ReasonedAttestation campId={guidance.campId}
+                            body={{ kind: 'session-no-fixed-time', scheduleId: session.scheduleId }}
+                            label="Record that this session has no fixed daily time"
+                            prompt="Why does it have no fixed daily time? (for example: overnight camp; required)"
+                            testId={`no-fixed-time-${session.scheduleId}`} />
+                        )}
                       </li>
                     ))}
                   </ul>

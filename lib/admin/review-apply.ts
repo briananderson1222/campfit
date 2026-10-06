@@ -1027,10 +1027,42 @@ async function withdrawChangedClaims(
  * (`keepUnstatedSessionTimes`, read here under the camp lock). A crawl never
  * removes or rewinds a time it does not state.
  */
-function sessionRowsToApply(diff: FieldDiff, stored: readonly unknown[]): IncomingScheduleSnapshot[] {
+type StoredSessionTime = Pick<IncomingScheduleSnapshot, 'label' | 'startDate' | 'endDate' | 'startTime' | 'endTime'>;
+
+function sessionRowsToApply(diff: FieldDiff, stored: readonly StoredSessionTime[]): IncomingScheduleSnapshot[] {
   const rows = (Array.isArray(diff.new) ? diff.new as IncomingScheduleSnapshot[] : []).map((row, index) =>
     (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 && !timeShownUnchanged(diff, row) ? row : { ...row, startTime: null, endTime: null });
+  refuseTimeChangedSinceProposal(diff, rows, stored);
   return keepUnstatedSessionTimes(stored, rows) as IncomingScheduleSnapshot[];
+}
+
+/**
+ * A cited time would replace a stored time the reviewer was not shown: the
+ * stored session's time differs from what the proposal's `old` list had for
+ * it (a steward entered or changed it after the proposal was built, or the
+ * proposal carries no `old` row for it). The apply is refused with a message
+ * to recrawl, so the page's time is reviewed against the current one; it is
+ * never overwritten unseen.
+ */
+function refuseTimeChangedSinceProposal(diff: FieldDiff, rows: readonly IncomingScheduleSnapshot[], stored: readonly StoredSessionTime[]): void {
+  const old = Array.isArray(diff.old) ? diff.old as StoredSessionTime[] : [];
+  const only = (list: readonly StoredSessionTime[], row: StoredSessionTime) => {
+    const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+    const same = list.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
+    return same.length === 1 ? same[0]! : null;
+  };
+  for (const row of rows) {
+    if (row.startTime === null || row.endTime === null) continue;
+    const current = only(stored, row);
+    if (!current || !current.startTime?.trim() || !current.endTime?.trim()) continue;
+    if (sessionTimeKey(current) === sessionTimeKey(row)) continue;
+    const shown = only(old, row);
+    if (shown && sessionTimeKey(shown) === sessionTimeKey(current)) continue;
+    throw new ReviewApplyValueError(
+      `Nothing was applied: session "${row.label}" now has the time ${current.startTime}–${current.endTime}, which this proposal did not show (it was entered or changed after the page was read). Recrawl the camp to review the page's time against it, or keep the current sessions.`,
+      ['schedules'],
+    );
+  }
 }
 
 /**

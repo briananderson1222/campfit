@@ -27,7 +27,11 @@ import { applyProposalReview } from '@/lib/admin/review-apply';
 import { getProposal } from '@/lib/admin/review-repository';
 import { verificationCacheTestHooks } from '@/lib/admin/verification-authority';
 import { loadMissingRequirements } from '@/lib/admin/missing-requirements';
-import { recordStewardEntry, StewardEntryNotFoundError } from '@/lib/admin/steward-entry';
+import { parseStewardEntry as parseEntry, recordStewardEntry, StewardEntryNotFoundError, StewardEntryValidationError } from '@/lib/admin/steward-entry';
+import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
+import { deriveCampAndSessionVerification, deriveCampVerification, deriveSessionVerification } from '@/lib/admin/verification-authority';
+import { ReviewApplyValueError } from '@/lib/admin/review-apply';
+import { createHash } from 'node:crypto';
 import { getOrCreateSurveyReviewSessionForProposal } from '@/lib/admin/survey-review-sessions';
 import { replaceSurveyReviewEvents } from '@/lib/admin/survey-review-events';
 import type { FieldDiff, ProposedChanges } from '@/lib/admin/types';
@@ -197,8 +201,10 @@ describe('the missing-requirements guidance', () => {
     // Nothing reviewed yet: every requirement is missing.
     const before = (await loadMissingRequirements(campId))!;
     expect(before.dataConfidence).toBe('PLACEHOLDER');
+    // No sessions yet: an empty session list is a gap too, offered as intentionally empty.
     expect(before.camp.map((item) => item.requirementId).sort()).toEqual(
-      ['ageGroups', 'campType', 'category', 'city', 'description', 'pricing', 'registrationStatus', 'websiteUrl'].sort());
+      ['ageGroups', 'campType', 'category', 'city', 'description', 'pricing', 'registrationStatus', 'sessions-verified', 'websiteUrl'].sort());
+    expect(before.camp.filter((item) => item.intentionallyEmpty).map((item) => item.intentionallyEmpty!.field).sort()).toEqual(['ageGroups', 'pricing', 'schedules']);
     expect(before.websiteUrl).toBe(URL);
     expect(before.contactPhone).toBe(PHONE);
 
@@ -421,5 +427,140 @@ describe('POST /api/admin/camps/[campId]/steward-entry', () => {
     expect(await ok.json()).toEqual({ dataConfidence: 'VERIFIED', gapRequirementIds: [] });
     expect((await sessionOf(campId))[0]).toMatchObject({ startTime: '9:00 AM', endTime: '3:30 PM' });
     expect((await timeClaim(session!.id))!.event.actor).toBe(STEWARD);
+  });
+});
+
+describe('an empty required list', () => {
+  async function campWithReviewedSession(omit: readonly string[]) {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME, omit), campId);
+    return campId;
+  }
+  const latest = async (claimId: string) => (await getTestPool().query<{ status: string; method: string }>(
+    `SELECT status, method FROM "SurfaceVerificationEvent" WHERE "claimId" = $1 ORDER BY "createdAt" DESC LIMIT 1`, [claimId])).rows[0];
+
+  it('is not attested by Mark Verified: the camp stays below VERIFIED and the gap is listed, with no Mark Verified advice', async () => {
+    const campId = await campWithReviewedSession(['pricing']);
+    const result = await bulkAttestCamp(campId, STEWARD);
+    expect(result.dataConfidence).toBe('PLACEHOLDER');
+    // The session's price options follow the empty pricing, so the sessions are a gap too.
+    expect(result.gapRequirementIds).toEqual(['pricing', 'sessions-verified']);
+    expect(result.attestedFieldCount).toBe(7);
+    expect(await latest(`camp.${campId}.field.pricing`)).toBeUndefined();
+    // The session's price options follow the camp's pricing: not verified either.
+    const [session] = await sessionOf(campId);
+    const sessionRollup = await deriveSessionVerification(session!.id);
+    expect(sessionRollup.requirements.find((r) => r.id === 'price-options')!.status).not.toBe('verified');
+    const guidance = (await loadMissingRequirements(campId))!;
+    const pricing = guidance.camp.find((item) => item.requirementId === 'pricing')!;
+    expect(pricing.intentionallyEmpty).toEqual({ field: 'pricing' });
+    expect(pricing.detail).not.toMatch(/Mark Verified/);
+  });
+
+  it('becomes VERIFIED only through an explicit, reasoned "intentionally empty" attestation of its own kind', async () => {
+    const campId = await campWithReviewedSession(['pricing']);
+    await bulkAttestCamp(campId, STEWARD);
+    const result = await recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'pricing', reason: 'The camp office said the program is free.' }, STEWARD);
+    expect(result).toEqual({ dataConfidence: 'VERIFIED', gapRequirementIds: [] });
+    expect(await latest(`camp.${campId}.field.pricing`)).toEqual({ status: 'assumed', method: 'intentionally-empty' });
+    const evidence = (await getTestPool().query<{ metadata: Record<string, unknown> }>(
+      `SELECT metadata FROM "SurfaceEvidence" WHERE "claimId" = $1`, [`camp.${campId}.field.pricing`])).rows;
+    expect(evidence).toEqual([{ metadata: expect.objectContaining({ reviewKind: 'intentionally-empty', reason: 'The camp office said the program is free.' }) }]);
+  });
+
+  it('is refused as "intentionally empty" when the list has rows, and without a reason', async () => {
+    const campId = await campWithReviewedSession([]);
+    await expect(recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'pricing', reason: 'free' }, STEWARD)).rejects.toBeInstanceOf(StewardEntryValidationError);
+    expect(() => parseEntry({ kind: 'intentionally-empty', field: 'pricing', reason: '  ' })).toThrow('A reason is required');
+  });
+
+  it('does not count an earlier attestation that attested nothing (a Mark Verified before this change)', async () => {
+    const campId = await campWithReviewedSession(['pricing']);
+    await bulkAttestCamp(campId, STEWARD);
+    // What Mark Verified used to write for an empty list: an attestation of hash(null).
+    const pool = getTestPool();
+    const claimId = `camp.${campId}.field.pricing`;
+    await pool.query(`INSERT INTO "SurfaceClaimDefinition" (id, "subjectType", "subjectId", facet, "claimType", "fieldOrBehavior", "verificationPolicyId", "impactLevel", "createdAt", "updatedAt")
+      SELECT $1, "subjectType", "subjectId", facet, "claimType", 'pricing', "verificationPolicyId", "impactLevel", now(), now() FROM "SurfaceClaimDefinition" WHERE id = $2`, [claimId, `camp.${campId}.field.ageGroups`]);
+    await pool.query(`INSERT INTO "SurfaceEvidence" (id, "claimId", "evidenceType", method, "sourceRef", "excerptOrSummary", "observedAt", "collectedBy") VALUES ($1, $2, 'attestation', 'attestation', 'admin:x', 'legacy', now(), 'x')`, [`ev.legacy.${campId}`, claimId]);
+    await pool.query(`INSERT INTO "SurfaceVerificationEvent" (id, "claimId", status, type, actor, method, "evidenceIds", "createdAt") VALUES ($1, $2, 'assumed', 'verification', 'x', 'attestation', ARRAY[$3], now() + interval '1 second')`, [`evt.legacy.${campId}`, claimId, `ev.legacy.${campId}`]);
+    expect((await deriveCampVerification(campId)).status).not.toBe('verified');
+  });
+
+  it('Mark Verified attests a list from its rows, not from a column that does not exist', async () => {
+    const campId = await campWithReviewedSession([]);
+    await bulkAttestCamp(campId, STEWARD);
+    const rows = (await getTestPool().query(`SELECT label, amount::float AS amount, unit, "durationWeeks", "ageQualifier", "discountNotes" FROM "CampPricing" WHERE "campId" = $1 ORDER BY label, amount, id`, [campId])).rows;
+    const { rows: evidence } = await getTestPool().query<{ metadata: Record<string, unknown> }>(
+      `SELECT e.metadata FROM "SurfaceEvidence" e WHERE e."claimId" = $1 AND e."evidenceType" = 'attestation'`, [`camp.${campId}.field.pricing`]);
+    const hash = createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(evidence)).toContain(hash);
+    expect(JSON.stringify(evidence)).not.toContain(createHash('sha256').update('null').digest('hex'));
+  });
+
+  it('a camp with no sessions is a gap until its empty session list is attested as intentional', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME, ['schedules']), campId);
+    expect((await bulkAttestCamp(campId, STEWARD)).gapRequirementIds).toEqual(['sessions-verified']);
+    const result = await recordStewardEntry(campId, { kind: 'intentionally-empty', field: 'schedules', reason: 'Drop-in program; the office confirmed there are no sessions.' }, STEWARD);
+    expect(result.dataConfidence).toBe('VERIFIED');
+  });
+});
+
+describe('a session with no fixed daily time', () => {
+  it('is recorded with a reason as its own kind, and satisfies the session\'s time requirement', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    const result = await recordStewardEntry(campId, { kind: 'session-no-fixed-time', scheduleId: session!.id, reason: 'Overnight camp: campers stay all week.' }, STEWARD);
+    expect(result.dataConfidence).toBe('VERIFIED');
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ status: 'assumed', method: 'no-fixed-time' });
+    expect((await sessionOf(campId))[0]).toMatchObject({ startTime: null, endTime: null });
+    expect(() => parseEntry({ kind: 'session-no-fixed-time', scheduleId: session!.id })).toThrow('A reason is required');
+    expect(() => parseEntry({ kind: 'session-time', scheduleId: session!.id, startTime: '9:00 PM', endTime: '7:00 AM' })).toThrow('no fixed daily time');
+  });
+});
+
+describe('a pending proposal and a time a steward entered after it was built', () => {
+  it('is refused rather than overwriting the steward\'s time the reviewer never saw', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    // Built while the session had no time: old shows none, new cites 9:00-3:30.
+    const pending = listDiff([weekOne(null)], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }]);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '8:00 AM', endTime: '2:00 PM' }, STEWARD);
+    await expect(approveAll({ schedules: pending }, campId)).rejects.toBeInstanceOf(ReviewApplyValueError);
+    expect((await sessionOf(campId))[0]).toMatchObject({ startTime: '8:00 AM', endTime: '2:00 PM' });
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ method: 'steward-entry' });
+  });
+});
+
+describe('a session time citation not on the stored page', () => {
+  it('is not attested, even when its text states the time', async () => {
+    const campId = await seedCamp();
+    const offPage = listDiff([], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [{ excerpt: WEEK_ONE, times: [{ excerpt: 'Hours 9:00 AM - 3:30 PM (not on this page)' }] }]);
+    const result = await approveAll(fullChanges(offPage), campId);
+    expect(result.verification?.dataConfidence).toBe('PLACEHOLDER');
+    const [session] = await sessionOf(campId);
+    expect(await timeClaim(session!.id)).toBeNull();
+  });
+});
+
+describe('the guidance derivation', () => {
+  it('reads the camp and every session from one derivation, with the same result as deriving each', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(listDiff([], [weekOne(null), { ...weekOne(null), label: 'Week 2', startDate: '2027-06-21', endDate: '2027-06-25' }],
+      [{ excerpt: WEEK_ONE }, { excerpt: 'Week 2: June 21 - June 25, 2027' }])), campId);
+    const sessions = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: sessions[0]!.id, startTime: '9:00 AM', endTime: '3:30 PM' }, STEWARD);
+    const both = await deriveCampAndSessionVerification(campId);
+    expect(both.camp.status).toBe((await deriveCampVerification(campId)).status);
+    for (const session of sessions) {
+      const single = await deriveSessionVerification(session.id);
+      expect(both.sessions.get(session.id)!.requirements.map((r) => [r.id, r.status])).toEqual(single.requirements.map((r) => [r.id, r.status]));
+    }
+    expect(both.sessions.get(sessions[0]!.id)!.requirements.find((r) => r.id === 'time')!.status).toBe('verified');
+    expect(both.sessions.get(sessions[1]!.id)!.requirements.find((r) => r.id === 'time')!.status).not.toBe('verified');
   });
 });

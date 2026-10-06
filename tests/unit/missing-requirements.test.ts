@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }));
 
 import { describeMissingRequirements } from '@/lib/admin/missing-requirements';
-import { MissingRequirementsPanel } from '@/components/admin/missing-requirements-panel';
+import { MissingRequirementsPanel, telHref } from '@/components/admin/missing-requirements-panel';
 
 const CAMP_IDS = ['description', 'campType', 'category', 'registrationStatus', 'city', 'websiteUrl', 'ageGroups', 'pricing', 'sessions-verified'];
 const SESSION_IDS = ['dates', 'time', 'eligibility', 'registration-status', 'price-options', 'registration-path'];
@@ -77,6 +77,31 @@ describe('the missing-requirements guidance', () => {
     const html = renderToStaticMarkup(createElement(MissingRequirementsPanel, { guidance: bare }));
     expect(html).toContain('No website on file');
     expect(html).toContain('No phone number on file');
+  });
+
+  it('lists a requirement that was checked too long ago (stale), saying so', () => {
+    const guidance = describeMissingRequirements({
+      campId: 'c',
+      campRollup: { status: 'stale' as never, requirements: [{ id: 'city', title: 'City', status: 'stale' }, { id: 'pricing', title: 'Pricing', status: 'stale' }] as never },
+      camp: { city: 'Golden', pricing: [{}] },
+      sessions: [],
+    });
+    expect(guidance.camp.map((item) => item.requirementId)).toEqual(['city', 'pricing']);
+    expect(guidance.camp[0]!.detail).toContain('too long ago');
+  });
+
+  it('offers "intentionally empty" for an empty list and never suggests Mark Verified for it', () => {
+    const guidance = describeMissingRequirements({ campId: 'c', campRollup: rollup(['ageGroups', 'pricing', 'sessions-verified']), camp: { ageGroups: [], pricing: [] }, sessions: [] });
+    expect(guidance.camp.map((item) => item.intentionallyEmpty?.field)).toEqual(['ageGroups', 'pricing', 'schedules']);
+    for (const item of guidance.camp) expect(item.detail).not.toMatch(/Mark Verified/);
+    const html = renderToStaticMarkup(createElement(MissingRequirementsPanel, { guidance }));
+    expect(html).toContain('data-testid="intentionally-empty-pricing-open"');
+  });
+
+  it('dials the number without its extension', () => {
+    expect(telHref('(555) 010-0199 ext. 12')).toBe('tel:5550100199');
+    expect(telHref('555-010-0199 x12')).toBe('tel:5550100199');
+    expect(telHref('+1 555 010 0199')).toBe('tel:+15550100199');
   });
 
   it('says so when the list could not be worked out, instead of showing nothing', () => {

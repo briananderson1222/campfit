@@ -332,6 +332,11 @@ function buildSessionRollupClaim(scheduleId: string, memberClaimIds: readonly st
 }
 
 function buildCampSessionsVerifiedClaim(campId: string, sessionRollupClaimIds: readonly string[], now: Date): RollupClaimResult {
+  // A camp with no sessions has nothing to roll up: the requirement rests on
+  // an explicit "intentionally empty" attestation of its session list (the
+  // camp's `schedules` claim, kept in the bundle only when that is its
+  // governing event, see `buildEvaluationBundle`), and is a gap without one.
+  const derivedFrom = sessionRollupClaimIds.length > 0 ? sessionRollupClaimIds : [campCanonicalClaimId(campId, 'schedules')];
   return buildRollupClaim({
     id: campSessionsVerifiedClaimId(campId),
     subjectType: campfitVocabulary.subjectType,
@@ -339,7 +344,7 @@ function buildCampSessionsVerifiedClaim(campId: string, sessionRollupClaimIds: r
     facet: campfitVocabulary.facet,
     claimType: CAMP_SESSIONS_ROLLUP_CLAIM_TYPE,
     fieldOrBehavior: 'sessions-verified',
-    derivedFrom: sessionRollupClaimIds,
+    derivedFrom,
     now,
     summary:
       `Computed rollup over Camp "${campId}"'s ${sessionRollupClaimIds.length} non-archived ` +
@@ -383,7 +388,8 @@ async function buildEvaluationBundle(pool: Pool | PoolClient, campId: string, sc
     ...scheduleIds.map((scheduleId) => ({ subjectType: SESSION_SUBJECT_TYPE, subjectId: scheduleId })),
   ];
 
-  const bundle = await loadClaimBundle(pool, subjectRefs);
+  const loaded = await loadClaimBundle(pool, subjectRefs);
+  const bundle = await withoutUnattestedEmptyLists(pool, campId, loaded);
   const existingClaimIds = new Set(bundle.claims.map((claim) => claim.id));
 
   const claims: Claim[] = [...bundle.claims];
@@ -406,6 +412,50 @@ async function buildEvaluationBundle(pool: Pool | PoolClient, campId: string, sc
   }
 
   return { claims, evidence, events, policies: mergePolicies(bundle.policies), sessionRollupClaimIds };
+}
+
+/** The method of the event that records an explicit "this list is intentionally empty" attestation (steward-entry.ts). */
+export const INTENTIONALLY_EMPTY_METHOD = 'intentionally-empty';
+
+/**
+ * An empty required list (age groups, pricing, the session list) is a
+ * Verification Gap unless it is explicitly attested as intentionally empty
+ * (verification-policy.ts: "An empty list is acceptable only when explicitly
+ * attested as intentionally empty"; "An unknown price is an explicit
+ * Verification Gap"). So while a list is empty, its claim takes part in the
+ * evaluation only when its newest event is that attestation; any other
+ * history (a Mark Verified that attested nothing, an approval of a list that
+ * has since emptied) leaves the requirement a gap, and the session
+ * attributes inherited from it too.
+ */
+async function withoutUnattestedEmptyLists(
+  pool: Pool | PoolClient,
+  campId: string,
+  bundle: Awaited<ReturnType<typeof loadClaimBundle>>,
+): Promise<Awaited<ReturnType<typeof loadClaimBundle>>> {
+  const { rows } = await pool.query<{ ageGroups: number; pricing: number; schedules: number }>(
+    `SELECT (SELECT count(*)::int FROM "CampAgeGroup" WHERE "campId" = $1) AS "ageGroups",
+            (SELECT count(*)::int FROM "CampPricing" WHERE "campId" = $1) AS pricing,
+            (SELECT count(*)::int FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL) AS schedules`,
+    [campId],
+  );
+  const counts = rows[0] ?? { ageGroups: 0, pricing: 0, schedules: 0 };
+  const dropped = new Set<string>();
+  for (const field of ['ageGroups', 'pricing', 'schedules'] as const) {
+    if (counts[field] > 0) continue;
+    const claimId = campCanonicalClaimId(campId, field);
+    const newest = bundle.events
+      .filter((event) => event.claimId === claimId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+    if (newest?.method !== INTENTIONALLY_EMPTY_METHOD) dropped.add(claimId);
+  }
+  if (dropped.size === 0) return bundle;
+  return {
+    ...bundle,
+    claims: bundle.claims.filter((claim) => !dropped.has(claim.id)),
+    evidence: bundle.evidence.filter((item) => !dropped.has(item.claimId)),
+    events: bundle.events.filter((event) => !dropped.has(event.claimId)),
+  };
 }
 
 async function nonArchivedScheduleIds(pool: Pool | PoolClient, campId: string): Promise<string[]> {
@@ -475,6 +525,42 @@ export async function deriveCampVerification(campId: string, options: DeriveVeri
     throw new Error(`deriveCampVerification(${campId}): expected a "${VERIFIED_CAMP_CLAIM_GROUP_ID}" ClaimGroupRollup, got none.`);
   }
   return countAdminAttestedRequirements(rollup, bundleInput, derivation);
+}
+
+/**
+ * The camp's rollup and every current session's rollup from ONE bundle and
+ * one derivation (the missing-requirements guidance reads both; deriving
+ * each session separately reloaded the camp's claims once per session).
+ * Read-only: it never writes the cache.
+ */
+export async function deriveCampAndSessionVerification(
+  campId: string,
+  options: DeriveVerificationOptions = {},
+): Promise<{ camp: ClaimGroupRollup; sessions: Map<string, ClaimGroupRollup> }> {
+  const now = options.now ?? new Date();
+  const pool = options.client ?? getPool();
+  const scheduleIds = await nonArchivedScheduleIds(pool, campId);
+  const built = await buildEvaluationBundle(pool, campId, scheduleIds, now);
+  const campRollup = buildCampSessionsVerifiedClaim(campId, built.sessionRollupClaimIds, now);
+  const bundleInput: TrustBundle = {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    source: EVALUATION_SOURCE,
+    claims: [...built.claims, campRollup.claim],
+    evidence: [...built.evidence, campRollup.evidence],
+    policies: built.policies,
+    events: [...built.events, campRollup.event],
+    // Every session's group shares one id; each gets its own here so the rollups can be told apart.
+    claimGroups: [buildVerifiedCampClaimGroup(campId), ...scheduleIds.map((id) => ({ ...buildVerifiedSessionClaimGroup(id), id: `${VERIFIED_SESSION_CLAIM_GROUP_ID}.${id}` }))],
+  };
+  const derivation = deriveTrustSnapshot(bundleInput, { now });
+  const rollupOf = (groupId: string, label: string) => {
+    const rollup = derivation.claimGroupRollups.find((candidate) => candidate.id === groupId);
+    if (!rollup) throw new Error(`deriveCampAndSessionVerification(${campId}): no "${label}" ClaimGroupRollup.`);
+    return countAdminAttestedRequirements(rollup, bundleInput, derivation);
+  };
+  const sessions = new Map<string, ClaimGroupRollup>();
+  for (const id of scheduleIds) sessions.set(id, rollupOf(`${VERIFIED_SESSION_CLAIM_GROUP_ID}.${id}`, id));
+  return { camp: rollupOf(VERIFIED_CAMP_CLAIM_GROUP_ID, 'camp'), sessions };
 }
 
 /**

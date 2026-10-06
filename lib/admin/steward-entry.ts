@@ -17,6 +17,11 @@
  *    the only session field this path writes);
  *  - a missing single-value camp requirement: description, registration
  *    status, city, website.
+ *  - with a required reason: that a required list (age groups, pricing,
+ *    sessions) is intentionally empty (`intentionally-empty`), or that a
+ *    session has no fixed daily time (`no-fixed-time`, overnight camps).
+ *    Each is its own kind, and the only way an empty list or an absent
+ *    time satisfies its requirement.
  * Lists (age groups, pricing) are not entered here, and neither are camp type
  * and category: each is the twin of a list (`campTypes`, `categories`) that
  * review apply keeps it a member of, and entering the twin alone would leave
@@ -40,7 +45,7 @@ import type { ClaimDefinitionDraft, Evidence, VerificationEvent } from '@kontour
 import { getPool } from '@/lib/db';
 import { REGISTRATION_STATUS_OPTIONS } from '@/lib/enums';
 import type { DataConfidence } from '@/lib/types';
-import { canonicalTime } from '@/lib/ingestion/session-time';
+import { canonicalTime, minutesOfCanonical } from '@/lib/ingestion/session-time';
 
 import { writeChangeLogs } from './changelog-repository';
 import { recordEvidenceOnLockedClient } from './claim-store';
@@ -50,7 +55,7 @@ import { RepositoryConnectionError } from './repository-errors';
 import { SESSION_SUBJECT_TYPE } from './session-identity';
 import { campCanonicalClaimId } from './trust-projection';
 import { lockCampForClaimWrites, nextClaimEventTime } from './unreviewed-change';
-import { refreshCampVerificationCacheOnLockedClient } from './verification-authority';
+import { INTENTIONALLY_EMPTY_METHOD, refreshCampVerificationCacheOnLockedClient } from './verification-authority';
 import { sessionClaimId } from './verification-policy';
 import { campfitSessionVocabulary, campfitVocabulary } from '../trust-vocabulary';
 
@@ -63,9 +68,32 @@ export const STEWARD_FIELD_OPTIONS: Partial<Record<StewardCampField, readonly { 
   registrationStatus: REGISTRATION_STATUS_OPTIONS.filter((option) => option.value !== 'UNKNOWN'),
 };
 
+/** The required lists a steward can attest as intentionally empty (`schedules`: the camp lists no sessions). */
+export const INTENTIONALLY_EMPTY_FIELDS = ['ageGroups', 'pricing', 'schedules'] as const;
+export type IntentionallyEmptyField = (typeof INTENTIONALLY_EMPTY_FIELDS)[number];
+
 export type StewardEntry =
   | { readonly kind: 'session-time'; readonly scheduleId: string; readonly startTime: string; readonly endTime: string }
-  | { readonly kind: 'camp-field'; readonly field: StewardCampField; readonly value: string };
+  | { readonly kind: 'session-no-fixed-time'; readonly scheduleId: string; readonly reason: string }
+  | { readonly kind: 'camp-field'; readonly field: StewardCampField; readonly value: string }
+  | { readonly kind: 'intentionally-empty'; readonly field: IntentionallyEmptyField; readonly reason: string };
+
+/** Event methods, one per kind of steward attestation. */
+const EVENT_METHOD: Record<StewardEntry['kind'], string> = {
+  'session-time': 'steward-entry',
+  'camp-field': 'steward-entry',
+  'session-no-fixed-time': 'no-fixed-time',
+  'intentionally-empty': INTENTIONALLY_EMPTY_METHOD,
+};
+
+const MAX_REASON = 500;
+
+function parseReason(value: unknown): string {
+  const reason = typeof value === 'string' ? value.trim() : '';
+  if (!reason) throw new StewardEntryValidationError('A reason is required: say how you know (for example, what the camp said on the phone).');
+  if (reason.length > MAX_REASON) throw new StewardEntryValidationError(`The reason is longer than ${MAX_REASON} characters.`);
+  return reason;
+}
 
 export class StewardEntryValidationError extends Error {
   constructor(message: string) {
@@ -79,12 +107,6 @@ export class StewardEntryNotFoundError extends Error {
     super(message);
     this.name = 'StewardEntryNotFoundError';
   }
-}
-
-/** Minutes after midnight of a time in the stored spelling (`9:00 AM`). */
-function minutesOf(time: string): number {
-  const [, h, m, half] = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(time)!;
-  return (Number(h) % 12 + (half === 'PM' ? 12 : 0)) * 60 + Number(m);
 }
 
 const MAX_TEXT = { description: 5000, city: 100, websiteUrl: 2048 } as const;
@@ -103,8 +125,8 @@ export function parseStewardEntry(body: unknown): StewardEntry {
     if (!startTime || !endTime) {
       throw new StewardEntryValidationError('Enter both a start and an end time with am/pm, for example 9:00 AM and 3:00 PM.');
     }
-    if (minutesOf(endTime) <= minutesOf(startTime)) {
-      throw new StewardEntryValidationError(`The end time (${endTime}) must be after the start time (${startTime}).`);
+    if (minutesOfCanonical(endTime) <= minutesOfCanonical(startTime)) {
+      throw new StewardEntryValidationError(`The end time (${endTime}) must be after the start time (${startTime}). For an overnight or residential session, record that it has no fixed daily time instead.`);
     }
     return { kind: 'session-time', scheduleId: input.scheduleId.trim(), startTime, endTime };
   }
@@ -124,7 +146,18 @@ export function parseStewardEntry(body: unknown): StewardEntry {
     if (field === 'websiteUrl' && !isValidHttpUrl(value)) throw new StewardEntryValidationError('websiteUrl must be an http(s) URL.');
     return { kind: 'camp-field', field: field as StewardCampField, value };
   }
-  throw new StewardEntryValidationError('kind must be "session-time" or "camp-field".');
+  if (input.kind === 'session-no-fixed-time') {
+    if (typeof input.scheduleId !== 'string' || !input.scheduleId.trim()) throw new StewardEntryValidationError('scheduleId is required.');
+    return { kind: 'session-no-fixed-time', scheduleId: input.scheduleId.trim(), reason: parseReason(input.reason) };
+  }
+  if (input.kind === 'intentionally-empty') {
+    const field = input.field;
+    if (typeof field !== 'string' || !(INTENTIONALLY_EMPTY_FIELDS as readonly string[]).includes(field)) {
+      throw new StewardEntryValidationError(`field must be one of: ${INTENTIONALLY_EMPTY_FIELDS.join(', ')}.`);
+    }
+    return { kind: 'intentionally-empty', field: field as IntentionallyEmptyField, reason: parseReason(input.reason) };
+  }
+  throw new StewardEntryValidationError('kind must be "session-time", "session-no-fixed-time", "camp-field" or "intentionally-empty".');
 }
 
 export interface StewardEntryResult {
@@ -168,7 +201,8 @@ export async function recordStewardEntry(
     let claim: ClaimDefinitionDraft;
     let entered: unknown;
     let described: string;
-    if (entry.kind === 'session-time') {
+    let reason: string | undefined;
+    if (entry.kind === 'session-time' || entry.kind === 'session-no-fixed-time') {
       const { rows } = await client.query<{ id: string; label: string; startTime: string | null; endTime: string | null }>(
         `SELECT id, label, "startTime", "endTime" FROM "CampSchedule"
           WHERE id = $1 AND "campId" = $2 AND "archivedAt" IS NULL FOR UPDATE`,
@@ -176,7 +210,8 @@ export async function recordStewardEntry(
       );
       const session = rows[0];
       if (!session) throw new StewardEntryNotFoundError(`Session ${entry.scheduleId} is not a current session of camp ${campId}.`);
-      await client.query(`UPDATE "CampSchedule" SET "startTime" = $2, "endTime" = $3 WHERE id = $1`, [session.id, entry.startTime, entry.endTime]);
+      const next = entry.kind === 'session-time' ? { startTime: entry.startTime, endTime: entry.endTime } : { startTime: null, endTime: null };
+      await client.query(`UPDATE "CampSchedule" SET "startTime" = $2, "endTime" = $3 WHERE id = $1`, [session.id, next.startTime, next.endTime]);
       await client.query(`UPDATE "Camp" SET "updatedAt" = now() WHERE id = $1`, [campId]);
       await clearApprovedPageFingerprints(client, campId, ['schedules']);
       const claimId = sessionClaimId(session.id, 'time');
@@ -188,21 +223,49 @@ export async function recordStewardEntry(
         claimType: campfitSessionVocabulary.claimTypes.time,
         fieldOrBehavior: 'time',
         impactLevel: 'medium',
-        metadata: { reviewKind: 'steward-entry', sessionLabel: session.label },
+        metadata: { reviewKind: entry.kind === 'session-time' ? 'steward-entry' : 'no-fixed-time', sessionLabel: session.label },
       };
-      entered = { startTime: entry.startTime, endTime: entry.endTime };
-      described = `the time of session "${session.label}" as ${entry.startTime}–${entry.endTime}`;
+      if (entry.kind === 'session-time') {
+        entered = next;
+        described = `entered the time of session "${session.label}" as ${entry.startTime}–${entry.endTime}`;
+      } else {
+        reason = entry.reason;
+        entered = { noFixedTime: true };
+        described = `recorded that session "${session.label}" has no fixed daily time`;
+      }
       changeLog = {
         campId, proposalId: null, changedBy: steward, fieldName: 'schedules',
         oldValue: { id: session.id, label: session.label, startTime: session.startTime, endTime: session.endTime },
-        newValue: { id: session.id, label: session.label, ...(entered as object) },
+        newValue: { id: session.id, label: session.label, ...next, ...(reason ? { noFixedTime: true } : {}) },
         changeType: session.startTime ? 'UPDATE' : 'FIELD_POPULATED',
       };
+    } else if (entry.kind === 'intentionally-empty') {
+      const counted = entry.field === 'ageGroups'
+        ? `SELECT count(*)::int AS n FROM "CampAgeGroup" WHERE "campId" = $1`
+        : entry.field === 'pricing'
+          ? `SELECT count(*)::int AS n FROM "CampPricing" WHERE "campId" = $1`
+          : `SELECT count(*)::int AS n FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`;
+      const { rows } = await client.query<{ n: number }>(counted, [campId]);
+      if (rows[0]!.n > 0) throw new StewardEntryValidationError(`The camp's ${entry.field} list is not empty, so it cannot be attested as intentionally empty.`);
+      const claimId = campCanonicalClaimId(campId, entry.field);
+      claim = {
+        id: claimId,
+        subjectType: campfitVocabulary.subjectType,
+        subjectId: campId,
+        facet: campfitVocabulary.facet,
+        claimType: campfitVocabulary.claimTypes.repeatedField,
+        fieldOrBehavior: entry.field,
+      };
+      reason = entry.reason;
+      entered = [];
+      described = `recorded that the camp's ${entry.field} list is intentionally empty`;
+      changeLog = { campId, proposalId: null, changedBy: steward, fieldName: entry.field, oldValue: [], newValue: [], changeType: 'UPDATE' };
     } else {
       const previous = camp.rows[0][entry.field];
       await client.query(`UPDATE "Camp" SET "${entry.field}" = $2, "updatedAt" = now() WHERE id = $1`, [campId, entry.value]);
-      await clearApprovedPageFingerprints(client, campId, [entry.field]);
-      // The legacy per-field audit trail the editor reads ("attested").
+      // The per-field audit trail the editor reads ("attested"). It replaces
+      // the field's whole entry, which also drops any approved-page
+      // fingerprint, so a later crawl that reads another value proposes it.
       await client.query(
         `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
         [JSON.stringify({ [entry.field]: { excerpt: null, sourceUrl: `steward:${steward}`, approvedAt: iso, attestedBy: steward } }), campId],
@@ -217,7 +280,7 @@ export async function recordStewardEntry(
         fieldOrBehavior: entry.field,
       };
       entered = entry.value;
-      described = `${entry.field} as ${JSON.stringify(entry.value)}`;
+      described = `entered ${entry.field} as ${JSON.stringify(entry.value)}`;
       changeLog = {
         campId, proposalId: null, changedBy: steward, fieldName: entry.field,
         oldValue: previous ?? null, newValue: entry.value,
@@ -232,15 +295,16 @@ export async function recordStewardEntry(
       evidenceType: 'human_attestation',
       method: 'attestation',
       sourceRef: `campfit-steward:${steward}`,
-      sourceLocator: `steward-entry:${entry.kind === 'session-time' ? 'session-time' : entry.field}`,
-      excerptOrSummary: `${steward} entered ${described}, checked against the camp's own source.`,
+      sourceLocator: `steward-entry:${'field' in entry ? entry.field : entry.kind}`,
+      excerptOrSummary: `${steward} ${described}, checked against the camp's own source.${reason ? ` Reason: ${reason}` : ''}`,
       observedAt: iso,
       collectedBy: steward,
       metadata: {
-        reviewKind: 'steward-entry',
+        reviewKind: EVENT_METHOD[entry.kind],
         trustProducer: 'campfit.steward-entry',
         enteredValue: entered,
         contentHash: contentHash(entered),
+        ...(reason ? { reason } : {}),
       },
     };
     const event: VerificationEvent = {
@@ -249,10 +313,12 @@ export async function recordStewardEntry(
       status: 'assumed',
       type: 'verification',
       actor: steward,
-      method: 'steward-entry',
+      method: EVENT_METHOD[entry.kind],
       evidenceIds: [evidence.id],
       createdAt: iso,
-      notes: 'Entered by a steward; recorded as their attestation of this value.',
+      notes: reason
+        ? `Attested by a steward: ${reason}`
+        : 'Entered by a steward; recorded as their attestation of this value.',
     };
     await recordEvidenceOnLockedClient(pool, client, { claim, evidence, event });
 
