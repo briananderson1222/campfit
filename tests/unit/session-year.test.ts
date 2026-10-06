@@ -521,6 +521,9 @@ describe('fix round 5: a multi-year date line binds each date to its own year', 
     ['28 December 2026 - 3 January 2027', '2026-12-28', '2027-01-03', true],
     ['28 December 2026 - 3 January 2027', '2027-12-28', '2027-01-03', false],
     ['June 18, 2027 - June 14, 2026', '2026-06-14', '2027-06-18', false],
+    ['June 18, 2027 - June 14, 2026', '2027-06-18', '2026-06-14', false],
+    // A day with no month name before a year is not a date: only one date on the line.
+    ['June 14, 2026 - 18, 2027', '2026-06-14', '2027-06-18', false],
   ];
   for (const [line, start, end, accepted] of cases) {
     it(`${JSON.stringify(line)} as ${start}/${end} is ${accepted ? 'accepted' : 'refused'}`, async () => {
