@@ -4,8 +4,9 @@
  * Surface derives a claim's status from its LATEST event. A field verified for
  * one value stays verified until an event says otherwise, so every path that
  * changes a claim-set value without attesting the new one appends a
- * `proposed` event to that field's claim, in the same transaction as the
- * value, and then re-derives the camp's cached `dataConfidence`.
+ * `proposed` event to that field's claim and re-derives the camp's cached
+ * `dataConfidence` (`refreshCampVerificationCacheOnLockedClient`), all in the
+ * transaction that changes the value.
  *
  * Paths that use it: a manual admin edit (`updateAdminCampFields`,
  * `replaceAdminCampAgeGroups`), an assistant edit (`updateAssistantCampFields`)
@@ -19,7 +20,6 @@ import { acquireSubjectAdvisoryLock, appendEvent } from './claim-store';
 import { SESSION_SUBJECT_TYPE } from './session-identity';
 import { campfitVocabulary } from '../trust-vocabulary';
 import { campCanonicalClaimId } from './trust-projection';
-import { refreshCampVerificationCache } from './verification-authority';
 
 type Queryable = Pool | PoolClient;
 
@@ -84,6 +84,11 @@ export async function lockCampClaims(client: PoolClient, campId: string): Promis
  * holding only the subject lock (e.g. `persistClaim`) must not run in
  * between. A session created later in the same transaction is locked when
  * its first claim is written; no other transaction can know its id yet.
+ *
+ * ONE CONNECTION — a transaction holding these locks reads and writes only
+ * through its own client, never through `getPool()`: the pool has three
+ * connections, so three lock holders each waiting for a second one would
+ * wait on each other until one times out.
  */
 export async function lockCampForClaimWrites(client: PoolClient, campId: string): Promise<void> {
   await lockCampClaims(client, campId);
@@ -125,43 +130,7 @@ export async function withdrawEditedFields(
   await withdrawVerification(client, editedCampClaimIds(campId, fields), { ...opts, createdAt: at.toISOString() });
 }
 
-/** The camp changed after the admin loaded it: attesting now would attest values they never saw. */
-export class CampChangedError extends Error {
-  constructor() {
-    super('The camp changed since you loaded it. Reload the page and check the values again before verifying them.');
-    this.name = 'CampChangedError';
-  }
-}
-
-/**
- * The camp's version as the admin pages show it: its `updatedAt`, to the
- * microsecond. Every write of a camp value bumps it (edits and review applies).
- */
-export async function campVersion(queryable: Queryable, campId: string): Promise<string | null> {
-  const { rows } = await queryable.query<{ version: string }>(`SELECT "updatedAt"::text AS version FROM "Camp" WHERE id = $1`, [campId]);
-  return rows[0]?.version ?? null;
-}
-
-/** Under the camp lock: refuse when the caller saw an older version of the camp than the one about to be attested. */
-export async function assertCampUnchanged(client: PoolClient, campId: string, expectedVersion: string | undefined): Promise<void> {
-  if (expectedVersion === undefined) return;
-  if ((await campVersion(client, campId)) !== expectedVersion) throw new CampChangedError();
-}
-
 /** The camp claims a manual edit of these fields changes. */
 export function editedCampClaimIds(campId: string, fields: readonly string[]): string[] {
   return fields.map((field) => campCanonicalClaimId(campId, field));
-}
-
-/**
- * Re-derive the cached `dataConfidence` after a manual edit committed. A
- * failure is logged, not thrown: the edit and its `proposed` events are
- * already durable, and the next derivation reads them.
- */
-export async function refreshAfterUnreviewedChange(campId: string): Promise<void> {
-  try {
-    await refreshCampVerificationCache(campId);
-  } catch (error) {
-    console.error(`[unreviewed-change] refreshCampVerificationCache failed for camp ${campId}:`, error);
-  }
 }

@@ -29,7 +29,7 @@
  * each applied field. Every approved field's Review Decision becomes real,
  * persisted Evidence on that field's canonical Claim
  * (`lib/admin/verification-authority.ts`'s `recordEvidence`, re-exported from
- * `lib/admin/claim-store.ts`); `refreshCampVerificationCache` then re-derives
+ * `lib/admin/claim-store.ts`); `refreshCampVerificationCacheOnLockedClient` then re-derives
  * `Camp.dataConfidence`/`lastVerifiedAt` from the full Claim ledger — the ONLY
  * writer of those two columns (see `verification-authority.ts`'s header
  * comment, AC1). This module no longer computes `isFullyVerified`/coverage
@@ -37,9 +37,9 @@
  * verification.ts` (the module that used to) is retired by this slice.
  * `recordAppliedFieldEvidence` runs INSIDE the apply transaction, under a
  * per-camp lock and stamped by the database clock, so a value and the record
- * of how it was decided land together or not at all.
- * `refreshCampVerificationCache` runs after `COMMIT` (it reads through its own
- * pool connection). A rejected field's Current Value claim is left exactly
+ * of how it was decided land together or not at all. The cache is re-derived
+ * in the same transaction, on the same connection, before `COMMIT`: an apply
+ * that cannot re-derive it does not land. A rejected field's Current Value claim is left exactly
  * as-is: only `appliedFields` are iterated, never `decision.rejectedFields`.
  */
 import type { Pool, PoolClient } from 'pg';
@@ -57,7 +57,7 @@ import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
 import { writeChangeLogs } from './changelog-repository';
 import { recordReviewDecision } from './metrics-repository';
-import { refreshCampVerificationCache, revokeArchivedSessionClaims } from './verification-authority';
+import { refreshCampVerificationCacheOnLockedClient, revokeArchivedSessionClaims, type RefreshCampVerificationCacheResult } from './verification-authority';
 import { acquireSubjectAdvisoryLock, appendEvidence, persistClaimOnLockedClient, recordEvidenceOnLockedClient } from './claim-store';
 import { lockCampForClaimWrites, nextClaimEventTime, withdrawVerification } from './unreviewed-change';
 import { sessionClaimId } from './verification-policy';
@@ -185,13 +185,6 @@ export interface ProvenanceError {
     | 'writeChangeLogs'
     | 'recordReviewDecision'
     /**
-     * `refreshCampVerificationCache` runs after `COMMIT`; a failure is
-     * reported here, not thrown, because the apply already landed. (The
-     * evidence itself is recorded inside the transaction: its failure rolls
-     * the apply back and is thrown as `ReviewApplyEvidenceError`.)
-     */
-    | 'refreshCampVerificationCache'
-    /**
      * V3 fix (HIGH, review-code.md): `revokeArchivedSessionClaims` (AC6) —
      * appending a `revoked` VerificationEvent for an archived Session's
      * already-persisted Claims. Also non-fatal: the Session archive itself
@@ -220,9 +213,9 @@ export interface AppliedReview {
    */
   readonly provenanceErrors: readonly ProvenanceError[];
   /**
-   * The camp's verification as re-derived after this apply, with every
+   * The camp's verification as re-derived by this apply, with every
    * Verified Camp requirement that is not yet verified. Absent when nothing
-   * was applied or the re-derivation failed (see `provenanceErrors`).
+   * was applied.
    */
   readonly verification?: AppliedReviewVerification;
 }
@@ -379,6 +372,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // consumed AFTER `COMMIT` by `revokeArchivedSessionClaims` (below), same
   // reasoning as `reviewTrustBundle` above.
   const orphanedSessions: ExistingScheduleRow[] = [];
+  let refreshed: RefreshCampVerificationCacheResult | undefined;
 
   try {
     await client.query('BEGIN');
@@ -468,6 +462,9 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
         changes: decision.effectiveChanges,
         facts,
       });
+      // The cached status, re-derived from the claims as this transaction
+      // leaves them, commits with them or not at all.
+      refreshed = await refreshCampVerificationCacheOnLockedClient(client, proposal.campId);
     }
     await transitionProposalStatus(client, proposalId, keepPending, appliedFields, reviewer, decision.reviewerNotes, feedbackTags);
 
@@ -481,27 +478,13 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
     client.release();
   }
 
-  // The evidence was recorded inside the transaction above. What runs here
-  // re-derives `dataConfidence`/`lastVerifiedAt` from the claim ledger (the
-  // only writer of those columns). A failure is reported in
-  // `provenanceErrors`, not thrown: the apply already committed, and the
-  // claims it changed are already withdrawn or re-verified.
   const postCommitProvenanceErrors: ProvenanceError[] = [];
-  let verification: AppliedReviewVerification | undefined;
-  if (appliedFields.length > 0) {
-    try {
-      const refreshed = await refreshCampVerificationCache(proposal.campId);
-      verification = {
-        dataConfidence: refreshed.dataConfidence,
-        missingRequirements: refreshed.rollup.requirements
-          .filter((requirement) => requirement.required && requirement.status !== 'verified')
-          .map((requirement) => ({ id: requirement.id, title: requirement.title, status: requirement.status })),
-      };
-    } catch (err) {
-      console.error('refreshCampVerificationCache failed (non-fatal):', err);
-      postCommitProvenanceErrors.push({ step: 'refreshCampVerificationCache', message: String(err) });
-    }
-  }
+  const verification: AppliedReviewVerification | undefined = refreshed && {
+    dataConfidence: refreshed.dataConfidence,
+    missingRequirements: refreshed.rollup.requirements
+      .filter((requirement) => requirement.required && requirement.status !== 'verified')
+      .map((requirement) => ({ id: requirement.id, title: requirement.title, status: requirement.status })),
+  };
 
   // V3 fix (HIGH, review-code.md, AC6): revoke Claims for any Session this
   // round's `schedules` reconciliation archived (`orphanedSessions`, captured
@@ -548,8 +531,7 @@ export async function applyProposalReview(opts: ApplyProposalReviewOptions): Pro
   // no rejection-tracking column (mirroring appliedFields for approvals) to
   // de-duplicate against; this is audit-only (no Camp/Proposal state
   // corruption) and accepted rather than fixed here.
-  // `postCommitProvenanceErrors` (recordAppliedFieldEvidence/
-  // refreshCampVerificationCache/revokeArchivedSessionClaims) are always
+  // `postCommitProvenanceErrors` (revokeArchivedSessionClaims) are always
   // included — they already ran (or were skipped, per their own
   // `appliedFields.length`/`orphanedSessions.length` guards above)
   // independently of the writeChangeLogs/recordReviewDecision
@@ -603,7 +585,7 @@ export interface BatchAcceptOutcome {
  * cache primitives `applyProposalReview` already calls
  * (`lockAndCheckProposal`, `applyScalarField`, `transitionProposalStatus`,
  * `buildCampReviewTrustInput`, `recordAppliedFieldEvidence`,
- * `refreshCampVerificationCache`, `writeChangeLogs`, `recordReviewDecision`)
+ * `refreshCampVerificationCacheOnLockedClient`, `writeChangeLogs`, `recordReviewDecision`)
  * — NOT the Survey-session-gated `deriveDecision`, which has no meaning for
  * a rule-driven batch action with no interactive session. Bypassing these
  * primitives would silently break `Camp.dataConfidence` (see this module's
@@ -728,9 +710,10 @@ export async function applyBatchAcceptedClaims(
 
 /**
  * Applies one Proposal's already-validated, already-corroborated field
- * selections inside a single transaction, then (post-commit, non-fatal)
- * records Evidence/verification-cache/changelog/metrics provenance exactly
- * as `applyProposalReview` does for an interactive apply. Split out of
+ * selections inside a single transaction (values, evidence and the
+ * verification cache), then (post-commit, non-fatal) records changelog and
+ * metrics provenance exactly as `applyProposalReview` does for an
+ * interactive apply. Split out of
  * `applyBatchAcceptedClaims` so that function's per-proposal loop stays
  * readable; not exported (batch-internal only).
  */
@@ -813,6 +796,7 @@ async function applyBatchAcceptedFieldsForProposal(
         changes: narrowedChanges,
         facts,
       });
+      await refreshCampVerificationCacheOnLockedClient(client, proposal.campId);
     }
     await transitionProposalStatus(client, proposal.id, keepPending, newlyAppliedFields, actor, BATCH_ACCEPT_REVIEWER_NOTES, undefined);
 
@@ -831,12 +815,6 @@ async function applyBatchAcceptedFieldsForProposal(
   // nothing new to record as Evidence/changelog/audit-claim provenance.
   if (newlyAppliedFields.length === 0) {
     return { outcomes, claims: [] };
-  }
-
-  try {
-    await refreshCampVerificationCache(proposal.campId);
-  } catch (err) {
-    console.error('applyBatchAcceptedClaims: refreshCampVerificationCache failed (non-fatal):', err);
   }
 
   try {
@@ -1127,7 +1105,7 @@ async function applyScalarField(
 ): Promise<ChangeLogEntry> {
   const fieldSource = approvedFieldSource(proposal, diff, reviewedAt, facts.countsAsReview && facts.citations.get(field)?.reviewed === true);
   await client.query(
-    `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb, "updatedAt" = now() WHERE id = $3`,
+    `UPDATE "Camp" SET "${field}" = $1, "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb WHERE id = $3`,
     [diff.new, JSON.stringify({ [field]: fieldSource }), proposal.campId]
   );
   return {
@@ -1195,8 +1173,7 @@ async function applyEnumArrayField(
     `UPDATE "Camp"
         SET "${field}" = $1::text[],
             "${twin.column}" = CASE WHEN "${twin.column}"::text = ANY($1::text[]) THEN "${twin.column}" ELSE ($1::text[])[1]::"${twin.type}" END,
-            "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb,
-            "updatedAt" = now()
+            "fieldSources" = COALESCE("fieldSources", '{}') || $2::jsonb
       WHERE id = $3
       RETURNING "${twin.column}"::text AS twin`,
     [diff.new as string[], JSON.stringify({ [field]: fieldSource }), proposal.campId]
@@ -1273,7 +1250,7 @@ async function applyRelationField(
   // `pricing` used to record none, so a later crawl could not tell that a
   // reviewer had approved them.
   await client.query(
-    `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb, "updatedAt" = now() WHERE id = $2`,
+    `UPDATE "Camp" SET "fieldSources" = COALESCE("fieldSources", '{}') || $1::jsonb WHERE id = $2`,
     [JSON.stringify({ [field]: fieldSource }), proposal.campId],
   );
 

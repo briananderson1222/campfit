@@ -1,4 +1,3 @@
-import { CampChangedError } from '@/lib/admin/unreviewed-change';
 import { NextResponse } from 'next/server';
 import { requireAdminAccess } from '@/lib/admin/access';
 import { getCampCommunitySlug } from '@/lib/admin/community-access';
@@ -69,18 +68,10 @@ export async function POST(req: Request, props: { params: Promise<{ campId: stri
   const auth = await requireAdminAccess({ communitySlug, allowModerator: true });
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const { action, expectedVersion } = await req.json().catch(() => ({})) as { action?: string; expectedVersion?: string };
+  const { action } = await req.json().catch(() => ({})) as { action?: string };
   if (action !== 'mark_verified') return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
 
-  let result: Awaited<ReturnType<typeof bulkAttestCamp>>;
-  try {
-    result = await bulkAttestCamp(params.campId, auth.access.email, {
-      expectedVersion: typeof expectedVersion === 'string' ? expectedVersion : undefined,
-    });
-  } catch (error) {
-    if (error instanceof CampChangedError) return NextResponse.json({ error: error.message }, { status: 409 });
-    throw error;
-  }
+  const result = await bulkAttestCamp(params.campId, auth.access.email);
   return NextResponse.json({
     ok: true,
     verified: result.dataConfidence === 'VERIFIED',

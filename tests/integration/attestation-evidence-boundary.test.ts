@@ -28,7 +28,7 @@ vi.mock('@/lib/admin/claim-store', () => ({
   recordEvidenceOnLockedClient,
 }));
 vi.mock('@/lib/admin/verification-authority', () => ({
-  refreshCampVerificationCache: vi.fn(async () => undefined),
+  refreshCampVerificationCacheOnLockedClient: vi.fn(async () => undefined),
 }));
 
 import { buildSnapshotSourceRef } from '@kontourai/traverse/fetch';

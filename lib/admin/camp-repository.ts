@@ -10,7 +10,8 @@ import type { Camp, CampType, CampCategory, CampAgeGroup, CampSchedule, CampPric
 import { isValidHttpUrl } from './onboarding-validation';
 import { writeChangeLogs } from './changelog-repository';
 import { RepositoryConnectionError } from './repository-errors';
-import { lockCampForClaimWrites, refreshAfterUnreviewedChange, withdrawEditedFields } from './unreviewed-change';
+import { lockCampForClaimWrites, withdrawEditedFields } from './unreviewed-change';
+import { refreshCampVerificationCacheOnLockedClient } from './verification-authority';
 
 function db() {
   return getPool();
@@ -92,6 +93,7 @@ export async function updateAdminCampFields(
     await withdrawEditedFields(client, campId, fields, {
       actor, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
     });
+    await refreshCampVerificationCacheOnLockedClient(client, campId);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -99,7 +101,6 @@ export async function updateAdminCampFields(
   } finally {
     client.release();
   }
-  await refreshAfterUnreviewedChange(campId);
   return current;
 }
 
@@ -115,12 +116,14 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
   const client = await db().connect().catch((error) => {
     throw new RepositoryConnectionError(error);
   });
+  let previous: unknown[];
+  let rows: unknown[];
   try {
     await client.query('BEGIN');
     await lockCampForClaimWrites(client, campId);
-    const previous = await client.query(
+    previous = (await client.query(
       `SELECT label, "minAge", "maxAge", "minGrade", "maxGrade"
-       FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);
+       FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId])).rows;
     await client.query(`DELETE FROM "CampAgeGroup" WHERE "campId" = $1`, [campId]);
     for (const ag of ageGroups) {
       if (!ag.label?.trim()) continue;
@@ -134,27 +137,27 @@ export async function replaceAdminCampAgeGroups(campId: string, ageGroups: AgeGr
     await withdrawEditedFields(client, campId, ['ageGroups'], {
       actor: changedBy, method: 'manual-edit', notes: 'Edited by hand; the new value has not been reviewed.',
     });
-    await client.query('COMMIT');
-    await refreshAfterUnreviewedChange(campId);
-    await writeChangeLogs([{
-      campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous.rows,
-      newValue: ageGroups.filter((row) => row.label?.trim()),
-      changeType: previous.rows.length === 0 ? 'FIELD_POPULATED' : 'UPDATE',
-    }]).catch((error) => console.error('[age-groups PUT] writeChangeLogs failed:', error));
-    const { rows } = await client.query(
+    await refreshCampVerificationCacheOnLockedClient(client, campId);
+    const saved = await client.query(
       `SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]);
-    return rows;
+    await client.query('COMMIT');
+    rows = saved.rows;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+  // After the connection is back in the pool: the change log takes its own.
+  await writeChangeLogs([{
+    campId, proposalId: null, changedBy, fieldName: 'ageGroups', oldValue: previous,
+    newValue: ageGroups.filter((row) => row.label?.trim()),
+    changeType: previous.length === 0 ? 'FIELD_POPULATED' : 'UPDATE',
+  }]).catch((error) => console.error('[age-groups PUT] writeChangeLogs failed:', error));
+  return rows;
 }
 
 export type AdminCampDetail = Omit<Camp, 'organizationName' | 'providerId' | 'fieldSources' | 'registrationCloseDate'> & {
-  /** The camp version the page was rendered from (`campVersion`); sent back by Mark Verified and attest. */
-  versionToken: string;
   organizationName: string | null;
   providerId: string | null;
   fieldSources: Exclude<Camp['fieldSources'], undefined>;
@@ -194,7 +197,7 @@ export async function getAdminCampDetail(campId: string): Promise<AdminCampDetai
     registrationCloseDate: string | Date | null;
   };
   const [campRes, ageRes, schedRes, priceRes] = await Promise.all([
-    db().query<CampDatabaseRow>(`SELECT *, "updatedAt"::text AS "versionToken" FROM "Camp" WHERE id = $1`, [campId]),
+    db().query<CampDatabaseRow>(`SELECT * FROM "Camp" WHERE id = $1`, [campId]),
     db().query<CampAgeGroup>(`SELECT * FROM "CampAgeGroup" WHERE "campId" = $1 ORDER BY "minAge" ASC NULLS LAST`, [campId]),
     db().query<CampSchedule>(`SELECT * FROM "CampSchedule" WHERE "campId" = $1 ORDER BY "startDate" ASC`, [campId]),
     db().query<CampPricing>(`SELECT * FROM "CampPricing" WHERE "campId" = $1 ORDER BY amount ASC`, [campId]),

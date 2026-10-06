@@ -72,7 +72,8 @@ verification status and exports:
 ```ts
 deriveCampVerification(campId: string, options?: { now?: Date }): Promise<ClaimGroupRollup>
 deriveSessionVerification(scheduleId: string, options?: { now?: Date }): Promise<ClaimGroupRollup>
-refreshCampVerificationCache(campId: string, options?: { now?: Date }): Promise<{ dataConfidence: DataConfidence; lastVerifiedAt: Date }>
+refreshCampVerificationCacheOnLockedClient(client: PoolClient, campId: string, options?: { now?: Date }): Promise<{ dataConfidence: DataConfidence; lastVerifiedAt: Date; rollup: ClaimGroupRollup }>
+refreshCampVerificationCache(campId: string, options?: { now?: Date }): Promise<{ dataConfidence: DataConfidence; lastVerifiedAt: Date; rollup: ClaimGroupRollup }>
 buildInheritedSessionClaims(params: { campId, scheduleId, existingClaimIds, now? }): InheritedSessionClaimsResult
 revokeArchivedSessionClaims(params: { orphaned, actor, method, now? }): Promise<VerificationEvent[]>
 coverageFromRollup(rollup: ClaimGroupRollup, campValues: Partial<Camp>): CoverageResult
@@ -80,8 +81,12 @@ recordEvidence   // re-exported from lib/admin/claim-store.ts
 projectTrustStatusToDataConfidence   // re-exported from lib/admin/verification-policy.ts
 ```
 
-`refreshCampVerificationCache` is the **only** writer of
-`Camp.dataConfidence`/`lastVerifiedAt` in the codebase — a repo-wide grep for
+`refreshCampVerificationCacheOnLockedClient` is the **only** writer of
+`Camp.dataConfidence`/`lastVerifiedAt` in the codebase. It runs inside the
+transaction that changed the camp, on that transaction's client, and refuses
+to run unless the transaction holds the camp's `camp-claims` lock;
+`refreshCampVerificationCache` wraps it in a transaction of its own for a
+standalone re-derivation — a repo-wide grep for
 `dataConfidence" =` outside this module returns no matches. `recordEvidence`
 and `projectTrustStatusToDataConfidence` are re-exported (not reimplemented)
 so every writer call site (below) has exactly one module to import from.
@@ -235,7 +240,7 @@ cutover, now record real Evidence and let the evaluator derive the result —
 | `app/api/admin/assistant/route.ts` `mark_camp_verified` | Unconditional `UPDATE ... dataConfidence='VERIFIED'` | Same shared `bulkAttestCamp` path; the assistant's reply string reports the real outcome (`"Attested N required fields; M still need data..."`) when the result isn't actually `VERIFIED`, instead of unconditionally claiming success. |
 | `app/api/admin/camps/[campId]/attest/route.ts` | Wrote `fieldSources` JSON + `lastVerifiedAt` only, no evaluator | `entity-admin-repository.ts`'s `recordCampAttestationEvidence` — consumes `trust-projection.ts`'s `buildCampAttestationTrustInput` output (previously built and discarded) through `recordEvidence`, then `refreshCampVerificationCache`. The `fieldSources` JSON write is **kept** (legacy, rollback path). |
 | `app/api/admin/entities/[entityType]/[entityId]/route.ts` `attest` action / `addFieldAttestation` | Wrote a `FieldAttestation` row only | For `entityType === 'CAMP'` and `fieldKey` in the Verified Camp Claim Set: **also** calls `recordCampAttestationEvidence` (dual-write — the `FieldAttestation` row is still written, unaffected). For `PROVIDER`/`PERSON` entities and CAMP fields outside the claim set (`organizationName`, `applicationUrl`, indexed sub-fields, etc.): **unchanged**, `FieldAttestation`-only. |
-| `lib/admin/review-apply.ts` `recomputeVerification` | Read `isFullyVerified`, wrote `dataConfidence` conditionally | **Deleted.** `buildCampReviewTrustInput`'s previously-discarded result now feeds `recordAppliedFieldEvidence` (applied fields only; rejected fields leave Current Value claims untouched) post-`COMMIT`, then `refreshCampVerificationCache` — runs for both full and `keepPending` applies. |
+| `lib/admin/review-apply.ts` `recomputeVerification` | Read `isFullyVerified`, wrote `dataConfidence` conditionally | **Deleted.** `buildCampReviewTrustInput`'s previously-discarded result now feeds `recordAppliedFieldEvidence` (applied fields only; rejected fields leave Current Value claims untouched), then `refreshCampVerificationCacheOnLockedClient`, both inside the apply transaction — runs for both full and `keepPending` applies. |
 
 **Dual-write posture for legacy stores.** `Camp.fieldSources` and
 `FieldAttestation` both stay fully readable — this slice's stance is
@@ -359,7 +364,10 @@ as verified by events, not by evidence:
   session whose time changed), a manual admin edit (`updateAdminCampFields`,
   `replaceAdminCampAgeGroups`) and an assistant edit
   (`updateAssistantCampFields`). The cached `dataConfidence` is re-derived
-  afterwards.
+  in that same transaction, on its connection, before it commits
+  (`refreshCampVerificationCacheOnLockedClient`), so a change and the cache
+  that reflects it commit together; a re-derivation that fails rolls the
+  change back.
 - **Only a reviewed value is verified again, in the same transaction.** For a
   value a reviewer approved in a review session whose cited excerpt is on the
   stored page, `recordApprovedClaim` writes the crawl observation, the decision
@@ -375,9 +383,10 @@ as verified by events, not by evidence:
   sessions), then rows (`lockCampForClaimWrites` in `unreviewed-change.ts`).
   Events are stamped with the database clock, never earlier than one
   millisecond after the camp's newest event, so a later change always wins.
-- **Attest what was seen.** Mark Verified and the attest route take the camp
-  version the admin page was rendered from (`Camp.updatedAt`, which every
-  value write bumps) and refuse with 409 if the camp changed since.
+- **One connection per change.** A transaction holding these locks reads and
+  writes only through its own client. The pool has three connections; a lock
+  holder that waited for a second one could time out against two others
+  doing the same.
 
 "On the page" means the excerpt occurs verbatim in the stored page text. It
 does not show that the excerpt supports the value; the review page lists each
@@ -406,16 +415,16 @@ the event), and the trust display shows it as "Accepted in batch". Like a review
 excerpt is on the stored page; an uncited batch-accepted field stays
 `proposed`. Batch accept selects single values only, never lists. Only a
 counted approval records the page fingerprint that later withholds a
-re-proposal. Failures after commit (cache refresh,
-changelog, metrics) are reported as provenance errors, and the review page
+re-proposal. Failures after commit (changelog, metrics, revoking an archived
+session's claims) are reported as provenance errors, and the review page
 shows them instead of moving on.
 
-Not covered: if the cache refresh after a change fails, the stored
-`dataConfidence` is stale until the next refresh; the claims themselves are
-already withdrawn. Scripts that write camps directly (seed, CSV import) do not
-withdraw anything. Admin attestation stamps its events with the application
-clock; an attestation stamped before an edit's withdrawal does not count, which
-leaves the field unverified until it is attested again.
+Not covered: scripts that write camps directly (seed, CSV import) do not
+withdraw anything. Mark Verified and the attest route attest the values the
+camp holds when they run, not necessarily the values the admin's page showed:
+an edit from another tab in between is attested too. Stale-view protection
+needs a camp version that changes only when a value does; it is tracked as a
+follow-up.
 
 ## Accepted gaps
 

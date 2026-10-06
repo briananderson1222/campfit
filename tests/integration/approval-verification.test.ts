@@ -19,9 +19,8 @@ import { applyProposalReview } from '@/lib/admin/review-apply';
 import { getProposal } from '@/lib/admin/review-repository';
 import { bulkAttestCamp } from '@/lib/admin/bulk-attestation';
 import { acquireSubjectAdvisoryLock, appendEvent, appendEvidence, claimStoreTestHooks, persistClaim } from '@/lib/admin/claim-store';
-import { deriveCampVerification, verificationCacheTestHooks } from '@/lib/admin/verification-authority';
+import { CampLockNotHeldError, deriveCampVerification, refreshCampVerificationCache, refreshCampVerificationCacheOnLockedClient, verificationCacheTestHooks } from '@/lib/admin/verification-authority';
 import { projectTrustStatusToDataConfidence } from '@/lib/admin/verification-policy';
-import { CampChangedError, campVersion } from '@/lib/admin/unreviewed-change';
 import { createProposal } from '@/lib/admin/review-repository';
 import { replaceAdminCampAgeGroups, updateAdminCampFields } from '@/lib/admin/camp-repository';
 import { recordCampAttestationEvidence, updateAssistantCampFields } from '@/lib/admin/entity-admin-repository';
@@ -755,6 +754,7 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     afterEach(async () => {
       claimStoreTestHooks.afterLoad = undefined;
       verificationCacheTestHooks.beforeWrite = undefined;
+      verificationCacheTestHooks.afterLoad = undefined;
       vi.useRealTimers();
       for (const table of ['"Camp"', '"SurfaceVerificationEvent"', '"CampChangeProposal"']) await pool().query(`DROP TRIGGER IF EXISTS hold_once_tr ON ${table}`);
       await pool().query(`DROP FUNCTION IF EXISTS hold_once_fn() CASCADE`);
@@ -839,26 +839,6 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       expect(live).toEqual([{ id: amId, startTime: '09:00' }]);
     });
 
-    it('Mark Verified and the attest route refuse when the camp changed after the admin loaded it', async () => {
-      const campId = await seedCamp();
-      const seen = (await campVersion(pool(), campId))!;
-      // Another tab edits the city.
-      await updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER);
-      const refusal = await bulkAttestCamp(campId, REVIEWER, { expectedVersion: seen }).then(() => null, (error: unknown) => error);
-      expect(refusal).toBeInstanceOf(CampChangedError);
-      expect((refusal as Error).message).toBe('The camp changed since you loaded it. Reload the page and check the values again before verifying them.');
-      const attestRefusal = await recordCampAttestationEvidence({ campId, fields: ['city'], actor: REVIEWER, attestedAt: new Date().toISOString(), notes: 'checked', mode: 'override', expectedVersion: seen })
-        .then(() => null, (error: unknown) => error);
-      expect(attestRefusal).toBeInstanceOf(CampChangedError);
-      expect((await pool().query(`SELECT 1 FROM "SurfaceEvidence" WHERE "claimId" = $1`, [`camp.${campId}.field.city`])).rows).toHaveLength(0);
-      // With the current version it goes through.
-      expect((await bulkAttestCamp(campId, REVIEWER, { expectedVersion: (await campVersion(pool(), campId))! })).dataConfidence).toBe('VERIFIED');
-      // A review apply changes the version too.
-      const before = (await campVersion(pool(), campId))!;
-      await review((await seedProposal(campId, { city: diff('Boulder', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true })).id, 'all');
-      expect(await campVersion(pool(), campId)).not.toBe(before);
-    });
-
     it('two cache refreshes cannot write out of order', async () => {
       const campId = await seedCamp();
       await bulkAttestCamp(campId, REVIEWER);
@@ -873,6 +853,118 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
       await Promise.all([attest, edit]);
       expect(await dataConfidence(campId)).toBe(await derived(campId));
       expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+    });
+
+    it('a refresh derives under the camp lock: an edit cannot commit between its derivation and its write', async () => {
+      const campId = await seedCamp();
+      await bulkAttestCamp(campId, REVIEWER);
+      expect(await dataConfidence(campId)).toBe('VERIFIED');
+      // Once the refresh has read the claims, an edit starts. Holding the
+      // lock, the refresh makes it wait; otherwise it commits in the window.
+      let editing: Promise<unknown> | undefined;
+      verificationCacheTestHooks.afterLoad = async () => {
+        verificationCacheTestHooks.afterLoad = undefined;
+        editing = updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER);
+        await Promise.race([editing.catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 1500))]);
+      };
+      await refreshCampVerificationCache(campId);
+      expect(editing).toBeDefined();
+      await editing;
+      expect(await dataConfidence(campId)).toBe(await derived(campId));
+      expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+    });
+
+    it('the cache is written only by a transaction holding the camp lock', async () => {
+      const campId = await seedCamp();
+      const client = await getProductionPool().connect();
+      try {
+        await client.query('BEGIN');
+        // Another camp's lock is not this camp's.
+        await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`camp-claims:${randomUUID()}`]);
+        const refusal = await refreshCampVerificationCacheOnLockedClient(client, campId).then(() => null, (error: unknown) => error);
+        expect(refusal).toBeInstanceOf(CampLockNotHeldError);
+        await client.query('ROLLBACK');
+        await client.query('BEGIN');
+        await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`camp-claims:${campId}`]);
+        expect((await refreshCampVerificationCacheOnLockedClient(client, campId)).dataConfidence).toBe('PLACEHOLDER');
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+    });
+
+    it('an edit whose re-derivation fails does not land, so a VERIFIED cache never outlives it (fails closed)', async () => {
+      const campId = await seedCamp();
+      await bulkAttestCamp(campId, REVIEWER);
+      verificationCacheTestHooks.afterLoad = async () => {
+        verificationCacheTestHooks.afterLoad = undefined;
+        throw new Error('fixture: derivation failed');
+      };
+      const refusal = await updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER).then(() => null, (error: unknown) => error);
+      expect((refusal as Error | null)?.message).toBe('fixture: derivation failed');
+      const { rows } = await pool().query<{ city: string }>(`SELECT city FROM "Camp" WHERE id = $1`, [campId]);
+      expect(rows[0]!.city).toBe('');
+      expect(await dataConfidence(campId)).toBe('VERIFIED');
+      expect(await derived(campId)).toBe('VERIFIED');
+    });
+
+    describe('with the production pool (3 connections)', () => {
+      const settle = (promises: Promise<unknown>[]) => Promise.allSettled(promises)
+        .then((results) => results.map((result) => result.status === 'fulfilled' ? 'ok' : String((result.reason as Error)?.message ?? result.reason)));
+      /** Two other requests each hold a connection while `run` uses the third. */
+      const withTwoConnectionsHeld = async <T>(run: () => Promise<T>) => {
+        const busy = [await getProductionPool().connect(), await getProductionPool().connect()];
+        try {
+          return await run();
+        } finally {
+          for (const client of busy) client.release();
+        }
+      };
+
+      it('runs at the production pool size', () => {
+        expect(getProductionPool().options.max).toBe(3);
+      });
+
+      it('three concurrent cache refreshes of one camp all succeed', async () => {
+        const campId = await seedCamp();
+        await bulkAttestCamp(campId, REVIEWER);
+        expect(await settle([refreshCampVerificationCache(campId), refreshCampVerificationCache(campId), refreshCampVerificationCache(campId)])).toEqual(['ok', 'ok', 'ok']);
+        expect(await dataConfidence(campId)).toBe('VERIFIED');
+      }, 60_000);
+
+      it('a crawl proposal, Mark Verified and a refresh racing on one camp all succeed, and the cache matches the claims', async () => {
+        for (let round = 0; round < 5; round++) {
+          const campId = await seedCamp();
+          const outcomes = await settle([
+            createProposal({ campId, crawlRunId: null as unknown as string, sourceUrl: URL, rawExtraction: {}, proposedChanges: { city: diff('', 'Golden', 'Golden') }, overallConfidence: 0.9, extractionModel: 'm' }),
+            bulkAttestCamp(campId, REVIEWER),
+            refreshCampVerificationCache(campId),
+          ]);
+          expect(outcomes).toEqual(['ok', 'ok', 'ok']);
+          expect(await dataConfidence(campId)).toBe(await derived(campId));
+        }
+      }, 60_000);
+
+      it('an edit, Mark Verified, an attestation and an apply each succeed while two other requests hold connections, and the cache matches the claims', async () => {
+        const campId = await seedCamp();
+        await bulkAttestCamp(campId, REVIEWER);
+        expect(await dataConfidence(campId)).toBe('VERIFIED');
+
+        expect(await withTwoConnectionsHeld(() => settle([updateAdminCampFields(campId, [['city', 'Boulder']], REVIEWER)]))).toEqual(['ok']);
+        expect([await dataConfidence(campId), await derived(campId)]).toEqual(['PLACEHOLDER', 'PLACEHOLDER']);
+
+        expect(await withTwoConnectionsHeld(() => settle([bulkAttestCamp(campId, REVIEWER)]))).toEqual(['ok']);
+        expect([await dataConfidence(campId), await derived(campId)]).toEqual(['VERIFIED', 'VERIFIED']);
+
+        await updateAssistantCampFields(campId, [['description', 'assistant text']]);
+        expect(await dataConfidence(campId)).toBe('PLACEHOLDER');
+        expect(await withTwoConnectionsHeld(() => settle([recordCampAttestationEvidence({ campId, fields: ['description'], actor: REVIEWER, attestedAt: new Date().toISOString(), notes: 'checked', mode: 'override' })]))).toEqual(['ok']);
+        expect([await dataConfidence(campId), await derived(campId)]).toEqual(['VERIFIED', 'VERIFIED']);
+
+        const proposal = await seedProposal(campId, { city: diff('Boulder', 'Golden', 'Located in Golden, Colorado.') }, { snapshot: true });
+        expect(await withTwoConnectionsHeld(() => settle([review(proposal.id, 'all')]))).toEqual(['ok']);
+        expect(await dataConfidence(campId)).toBe(await derived(campId));
+      }, 120_000);
     });
 
     it('a transient database error anywhere in the apply is reported as retryable', async () => {
