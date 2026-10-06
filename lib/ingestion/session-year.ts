@@ -85,24 +85,48 @@ export function yearsStatedIn(text: string): Set<number> {
   return years;
 }
 
+/** A four-digit year token on a date line (1900–2099), not glued to other digits or a currency sign. */
+const LINE_YEAR_RE = /(?<![\d$£€])(?:19|20)\d{2}(?!\d)/g;
+/** Any dash or hyphen, including U+2010–U+2015 and U+2212. */
+const DASH = "-‐‑‒–—―−";
 /**
- * A year range: two consecutive years (the second is the first plus one; a
- * two-digit second year is read in the first's century, "2026-27" is 2026
- * and 2027), joined by "-", "–", "—", "/", "&", "to" or "and", with optional
- * spaces, whatever follows. Anything else after "YEAR -" is not a range:
- * "2027 - 10:00 AM", "2027 - 12 spots left" and "Session 2027-01" state one
- * year. "2027 - 28 spots" reads as a range and refuses (fail closed).
+ * A two-digit token (or 'NN) after a four-digit year through a joiner: a
+ * second year ("2026-27", "2026/'27", "2026 or 27"), unless it is a time
+ * (followed by ":" and digits, or by am/pm) or a date's month ("2027-06-14").
  */
-const YEAR_RANGE_RE = /(?<![\d$£€])((?:19|20)\d{2})\s*(?:[-–—/&]|\bto\b|\band\b)\s*((?:19|20)\d{2}|\d{2})(?!\d)/gi;
+const SHORT_SECOND_YEAR_RE = new RegExp(
+  String.raw`(?<![\d$£€])((?:19|20)\d{2})\s*(?:[${DASH}/&,]|\bto\b|\bthrough\b|\bthru\b|\band\b|\bor\b)\s*['’‘]?(\d{2})(?!\d)(?!\s*:\d)(?!\s*[ap]\.?\s?m\b\.?)(?![${DASH}/.]\d)`,
+  "gi",
+);
+/** Text right before a year that makes it a date's own year: a day ("June 18, 2027", "18 2027") or a numeric date ("6/18/2027"). */
+const DATE_BEFORE_YEAR_RE = /(?:(?<!\d)\d{1,2}(?:st|nd|rd|th)?,?\s+|(?<!\d)\d{1,2}\/\d{1,2}\/)$/i;
 
-/** Whether a text states a year range ("2026-27", "2026 to 2027"): two years at once. */
-export function statesAYearRange(text: string): boolean {
-  for (const match of text.matchAll(YEAR_RANGE_RE)) {
-    const first = Number(match[1]);
-    const second = match[2]!.length === 4 ? Number(match[2]) : first - (first % 100) + Number(match[2]);
-    if (second === first + 1) return true;
+/**
+ * Whether a date line states more than one year, so that it states none of
+ * them. Its years are every four-digit year token, whatever joins them
+ * ("2025-2027", "2027–2026", "2026, 2027", "2026 or 2027", "2026 through
+ * 2027"), and a two-digit token after a year through any joiner that is not a
+ * time ("2026-27", "2026-'27", and also "2027 - 12 spots left" or "2027-01:",
+ * which fail closed). The one exception keeps a session across a year
+ * boundary stated in full ("December 28, 2026 - January 3, 2027"): when every
+ * year on the line is a date's own year, the line states each date's year.
+ */
+export function statesSeveralYears(line: string): boolean {
+  const years = new Set<number>();
+  let allDateYears = true;
+  for (const match of line.matchAll(LINE_YEAR_RE)) {
+    years.add(Number(match[0]));
+    const before = line.slice(0, match.index);
+    const after = line.slice(match.index! + match[0].length);
+    const datesYear = (DATE_BEFORE_YEAR_RE.test(before) && statesADate(before)) || /^-\d{2}-\d{2}/.test(after);
+    if (!datesYear) allDateYears = false;
   }
-  return false;
+  for (const match of line.matchAll(SHORT_SECOND_YEAR_RE)) {
+    const first = Number(match[1]);
+    years.add(first - (first % 100) + Number(match[2]));
+    allDateYears = false;
+  }
+  return years.size > 1 && !allDateYears;
 }
 
 /**
@@ -292,17 +316,18 @@ export function isStretchedCitation(excerpt: string): boolean {
 }
 
 /**
- * The year-in-quote rule for a session date. A date line stating two years
- * at once ("June 14 – 18 (2026-27)") states neither. A citation that is not
- * stretched keeps today's rule: it states the year. A stretched citation
- * ("## 2027 Camp Dates / Week 1: June 28 – July 2 / Week 2: ...") must state
- * the year on one of its date lines: the heading is not the date's own text,
- * and its year is taken only by the rules above, shown as the year excerpt.
+ * The year-in-quote rule for a session date. A date line states year Y only
+ * when Y is the only year it states (`statesSeveralYears`): a line stating
+ * two or more years states none of them. A citation that is not stretched
+ * keeps today's rule: it states the year. A stretched citation ("## 2027
+ * Camp Dates / Week 1: June 28 – July 2 / Week 2: ...") must state the year
+ * on one of its date lines: the heading is not the date's own text, and its
+ * year is taken only by the rules above, shown as the year excerpt.
  */
 export function yearOnADateLine(excerpt: string, year: number): boolean {
   const lines = excerpt.split("\n").filter((line) => line.trim());
   const dateLines = lines.filter((line) => statesADate(line));
-  if ((dateLines.length > 0 ? dateLines : lines).some((line) => statesAYearRange(line))) return false;
+  if ((dateLines.length > 0 ? dateLines : lines).some((line) => statesSeveralYears(line))) return false;
   if (!isStretchedCitation(excerpt)) return excerpt.includes(String(year));
   return dateLines.some((line) => yearsStatedIn(line).has(year));
 }

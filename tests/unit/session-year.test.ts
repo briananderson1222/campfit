@@ -359,13 +359,12 @@ describe('fix round 1: two-digit and glued years', () => {
   });
 });
 
-describe('fix round 2: a year followed by a dash and a number on a date line', () => {
+describe('fix round 2 (superseded in part by round 4): a year followed by a dash and a number on a date line', () => {
   // A year, a dash and a time or a count is not a two-year range.
+  // Round 4 supersedes this block's count and code lines: they now refuse
+  // (see "fix round 4"). The time line stays accepted.
   const ACCEPTED = [
     'Week 1: June 14 - 18, 2027 - 10:00 AM to 2:00 PM',
-    'Week 1: June 14 - 18, 2027 - 12 spots left',
-    'Week 1: June 14 - 18, 2027 – 30 campers',
-    'Session 2027-01: June 14-18, 2027',
   ];
   for (const line of ACCEPTED) {
     it(`"${line}" keeps today's behaviour`, async () => {
@@ -391,7 +390,7 @@ describe('fix round 2: a year followed by a dash and a number on a date line', (
   });
 });
 
-describe('fix round 3: a year range is two consecutive years, whatever follows', () => {
+describe('fix round 3 (rule superseded by round 4; pins kept): two-year lines', () => {
   const TWO_YEARS = [
     'Week 1: June 14 - 18, 2026-27.',
     'Week 1: June 14 - 18, 2027-2028.',
@@ -419,5 +418,82 @@ describe('fix round 3: a year range is two consecutive years, whatever follows',
     const line = 'Week 1: June 14 - 18, 2027 - 28 spots';
     const { item } = await extract([line], session('2027-06-14', '2027-06-18', line));
     expect(item.schedules).toEqual([]);
+  });
+});
+
+describe('fix round 4: a date line states year Y only when Y is the only year it states', () => {
+  const TWO_YEARS = [
+    'Week 1: June 14 - 18, 2025-2027',
+    'Week 1: June 14 - 18, 2026 – 2028',
+    'Week 1: June 14 - 18, 2027–2026',
+    'Week 1: June 14 - 18, 2026-28',
+    'Week 1: June 14 - 18, 2099-00',
+    'Week 1: June 14 - 18, 2020-2026-27',
+    'Week 1: June 14 - 18, 2024 - 2026/27',
+    'Week 1: June 14 - 18, 2026 through 2027',
+    'Week 1: June 14 - 18, 2026 thru 2027',
+    'Week 1: June 14 - 18, 2026\u20112027',
+    'Week 1: June 14 - 18, 2026\u20102027',
+    'Week 1: June 14 - 18, 2026\u22122027',
+    "Week 1: June 14 - 18, 2026-'27",
+    'Week 1: June 14 - 18, 2026, 2027',
+    'Week 1: June 14 - 18, 2026 or 2027',
+    // Accepted fail-closed recall cost: a count or a code after "YEAR -" reads as a second year.
+    'Week 1: June 14 - 18, 2027 - 12 spots left',
+    'Week 1: June 14 - 18, 2027 – 30 campers',
+    'Week 1: June 14 - 18, 2027 - 28 spots',
+    'Session 2027-01: June 14-18, 2027',
+    // Two-digit second years through every joiner.
+    'Week 1: June 14 - 18, 2026\u201127',
+    'Week 1: June 14 - 18, 2026\u221227',
+    "Week 1: June 14 - 18, 2026 through '27",
+    "Week 1: June 14 - 18, 2026 or '27",
+    "Week 1: June 14 - 18, 2026, '27",
+    // Years after a week number are not dates' own years.
+    'Week 1 2026 - Week 2 2027: June 14 - 18',
+  ];
+  for (const line of TWO_YEARS) {
+    it(`${JSON.stringify(line)} is refused for every year it names`, async () => {
+      const stated = new Set<string>();
+      for (const m of line.matchAll(/(?:19|20)\d{2}/g)) stated.add(m[0]);
+      for (const m of line.matchAll(/(?:19|20)(\d{2})\s*\S{1,8}?\s*'?(\d{2})(?!\d)/g)) stated.add(`20${m[2]}`);
+      for (const year of stated) {
+        const { item } = await extract([line], session(`${year}-06-14`, `${year}-06-18`, line));
+        expect(item.schedules, year).toEqual([]);
+      }
+    });
+  }
+
+  const ONE_YEAR = [
+    'Week 1: June 14 - 18, 2027 - 10:00 AM to 2:00 PM',
+    'Week 1: June 14 - 18, 2027 - 9am',
+    'June 14 - 18, 2027',
+    'Week 1: June 14 - 18, 2027 (starts 2027-06-14)',
+  ];
+  for (const line of ONE_YEAR) {
+    it(`${JSON.stringify(line)} states 2027 only and is accepted`, async () => {
+      const { item } = await extract([line], session('2027-06-14', '2027-06-18', line));
+      expect(item.schedules.map((s) => [s.startDate, s.yearCitation])).toEqual([['2027-06-14', undefined]]);
+    });
+  }
+
+  it('a session across a year boundary with each date\'s own year on its line is still accepted (original brief)', async () => {
+    const line = 'Winter week: December 28, 2026 - January 3, 2027';
+    const { item } = await extract([line], session('2026-12-28', '2027-01-03', line));
+    expect(item.schedules.map((s) => [s.startDate, s.endDate])).toEqual([['2026-12-28', '2027-01-03']]);
+  });
+
+  it('the three real-page shapes still come through', async () => {
+    // A heading-year list cited narrowly and stretched; a year sentence above an undated list; a heading over linked dates.
+    const a = await extract(['## 2027 Camp Dates', '<ul><li>Week 1: June 28 – July 2</li><li>Week 2: July 6 – July 9 (No camp July 5th)</li></ul>'],
+      [...session('2027-06-28', '2027-07-02', '## 2027 Camp Dates\n\n-   Week 1: June 28 – July 2'), ...session('2027-07-06', '2027-07-09', '-   Week 2: July 6 – July 9 (No camp July 5th)')]);
+    expect(a.preparedText).toContain('## 2027 Camp Dates\n\n-   Week 1: June 28 – July 2\n-   Week 2: July 6 – July 9 (No camp July 5th)');
+    expect(a.item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['## 2027 Camp Dates', '## 2027 Camp Dates']);
+    const u = await extract(['Hurry, the 2026 summer day camp has limited enrollment!', '### Camp Dates', 'Week 1 – Decades Week: June 8 – 12'],
+      session('2026-06-08', '2026-06-12', 'Week 1 – Decades Week: June 8 – 12'));
+    expect(u.item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['Hurry, the 2026 summer day camp has limited enrollment!']);
+    const c = await extract(['## 2027 Summer Camp Sessions on the Island', '2027 Dates', 'Session #1', 'June 12 - June 18 (7-day)'],
+      session('2027-06-12', '2027-06-18', 'June 12 - June 18 (7-day)'));
+    expect(c.item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['## 2027 Summer Camp Sessions on the Island']);
   });
 });
