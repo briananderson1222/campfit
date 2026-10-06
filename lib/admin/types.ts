@@ -97,6 +97,8 @@ export interface FieldDiff {
     times?: { excerpt: string; locator?: string }[];
     /** Sessions only: the time is the page's one daily time applied to every session; the page line it was read from. */
     timePageWide?: string;
+    /** Sessions only: the excerpt the dates take their year from, when their own text states none (session-year.ts). */
+    year?: { excerpt: string; locator?: string };
   }[];
   mode?: 'update' | 'populate' | 'add_items'; // populate = was empty, add_items = array additions
 }

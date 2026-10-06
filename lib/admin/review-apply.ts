@@ -53,6 +53,7 @@ import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import { textStatesTime } from '@/lib/ingestion/session-time';
+import { excerptStatesOnlyYearOf, isStretchedCitation, statesADate, statesSeveralYears, yearOnADateLine, yearsStatedIn } from '@/lib/ingestion/session-year';
 import { keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
@@ -132,7 +133,14 @@ function assertApplicableValues(changes: ProposedChanges, fields: readonly strin
     const diff = changes[field];
     if (!diff) continue;
     const invalid = invalidEnumMembers(field, diff.new);
-    if (invalid.length > 0) {
+    const reversed = field === 'schedules' && Array.isArray(diff.new)
+      ? (diff.new as { label?: unknown; startDate?: unknown; endDate?: unknown }[]).filter((row) =>
+        typeof row?.startDate === 'string' && typeof row?.endDate === 'string' && row.endDate !== '' && row.endDate.slice(0, 10) < row.startDate.slice(0, 10))
+      : [];
+    if (reversed.length > 0) {
+      failing.push(field);
+      problems.push(`"${field}" has a session that ends before it starts (${reversed.map((row) => `${String(row.startDate)} – ${String(row.endDate)}`).join(', ')})`);
+    } else if (invalid.length > 0) {
       failing.push(field);
       problems.push(`"${field}" has value(s) that are not allowed: ${invalid.map((value) => `"${value}"`).join(', ')}`);
     } else if (CAMP_ENUM_ARRAY_FIELDS.includes(field) && Array.isArray(diff.new) && diff.new.length === 0) {
@@ -893,6 +901,13 @@ interface RowCitationCheck {
    * attested by this approval.
    */
   readonly time?: { readonly checked: boolean; readonly excerpt?: string; readonly locator?: string };
+  /**
+   * Sessions only, present when the row's dates take their year from another
+   * excerpt (`rowCitations[i].year`, session-year.ts): that excerpt is on the
+   * stored page AND states exactly one year, the row's start and end date's.
+   * The row is `checked` only when this is.
+   */
+  readonly year?: { readonly checked: boolean; readonly excerpt?: string; readonly locator?: string };
 }
 
 /** Whether an applied field's cited excerpts are on the stored page, and for a list, row by row. */
@@ -938,12 +953,24 @@ function checkCitations(changes: ProposedChanges, fields: readonly string[], cit
     }
     const rows = citations.map((row, index): RowCitationCheck => {
       const time = field === 'schedules' ? checkSessionTimeCitation((diff.new as unknown[])[index], row?.times, citation.text) : undefined;
+      // The dates' year, when it was taken from another excerpt, is part of
+      // what the row's dates assert: the row counts only when it checks too.
+      const year = field === 'schedules' ? checkSessionYearCitation((diff.new as unknown[])[index], row?.year, citation.text) : undefined;
+      const extra = { ...(time ? { time } : {}), ...(year ? { year } : {}) };
       const excerpt = typeof row?.excerpt === 'string' ? row.excerpt : '';
-      if (!excerpt.trim()) return { checked: false, ...(time ? { time } : {}) };
+      if (!excerpt.trim()) return { checked: false, ...extra };
       const resolved = resolveReviewExcerpt(excerpt, citation.text, row.locator);
-      return resolved.state === 'verified'
-        ? { checked: true, excerpt, locator: resolved.locator, ...(time ? { time } : {}) }
-        : { checked: false, excerpt, ...(time ? { time } : {}) };
+      // A row with no year citation whose dates' citation was stretched up to
+      // a heading (a proposal written before the session-year rules) counts
+      // only when one of its date lines states the year (session-year.ts).
+      // With a year citation, the dates' own lines must state no year at
+      // all (the year came from elsewhere); without one, a stretched or
+      // multi-year citation must state the row's years itself.
+      const ownYearStated = field !== 'schedules'
+        || (year !== undefined ? datesLinesStateNoYear(excerpt) : stretchedCitationStatesYear(excerpt, (diff.new as unknown[])[index]));
+      return resolved.state === 'verified' && ownYearStated && (year === undefined || year.checked)
+        ? { checked: true, excerpt, locator: resolved.locator, ...extra }
+        : { checked: false, excerpt, ...extra };
     });
     // A cited time is part of what the row asserts: a list whose cited time
     // fails the check is not reviewed as a whole.
@@ -975,6 +1002,48 @@ function checkSessionTimeCitation(
   return checked
     ? { checked, excerpt: excerpts.join(' / '), locator: first?.state === 'verified' ? first.locator : undefined }
     : { checked: false, excerpt: excerpts.join(' / ') };
+}
+
+/** For a session row with a year citation: none of its dates' citation's date lines states a year. */
+function datesLinesStateNoYear(excerpt: string): boolean {
+  return excerpt.split('\n').filter((line) => statesADate(line)).every((line) => yearsStatedIn(line).size === 0);
+}
+
+/**
+ * For a session row with no year citation: true unless its dates' citation
+ * is stretched (covers a heading or other sessions' date lines) or states
+ * more than one year across its lines, and its date lines do not state the row's start
+ * and end year by the same rule as extraction (`yearOnADateLine`: a
+ * multi-year line binds each date to its own year).
+ */
+function stretchedCitationStatesYear(excerpt: string, value: unknown): boolean {
+  if (!isStretchedCitation(excerpt) && !statesSeveralYears(excerpt)) return true;
+  const row = (value ?? {}) as { startDate?: unknown; endDate?: unknown };
+  const dates = ([[row.startDate, 'start'], [row.endDate, 'end']] as const)
+    .filter((entry): entry is readonly [string, 'start' | 'end'] => typeof entry[0] === 'string' && /^\d{4}-\d{2}-\d{2}/.test(entry[0]));
+  return dates.length > 0 && dates.every(([date, role]) => yearOnADateLine(excerpt, date, role));
+}
+
+/**
+ * Check a proposed session row's year citation: its excerpt is on the stored
+ * page and states exactly one year, the year of the row's start and end
+ * date. Undefined when the row cites no year of its own (its dates' own text
+ * states it).
+ */
+function checkSessionYearCitation(
+  value: unknown,
+  year: { excerpt?: unknown; locator?: string } | null | undefined,
+  pageText: string,
+): RowCitationCheck['year'] | undefined {
+  if (year === undefined || year === null) return undefined;
+  const excerpt = typeof year.excerpt === 'string' ? year.excerpt : '';
+  if (!excerpt.trim()) return { checked: false };
+  const resolved = resolveReviewExcerpt(excerpt, pageText, year.locator);
+  const row = (value ?? {}) as { startDate?: unknown; endDate?: unknown };
+  const checked = resolved.state === 'verified' && excerptStatesOnlyYearOf(excerpt, [row.startDate, row.endDate]);
+  return checked && resolved.state === 'verified'
+    ? { checked: true, excerpt, locator: resolved.locator }
+    : { checked: false, excerpt };
 }
 
 /** What the apply transaction learned that the evidence written after it needs. */
@@ -1735,7 +1804,16 @@ async function recordSessionClaims(
             metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
           },
           // This row's own citation (for the time, the text that states it), not the list's first row's.
-          evidence: { ...args.evidence, sourceLocator: cited.locator, excerptOrSummary: cited.excerpt ?? args.evidence.excerptOrSummary },
+          evidence: {
+            ...args.evidence,
+            sourceLocator: cited.locator,
+            excerptOrSummary: cited.excerpt ?? args.evidence.excerptOrSummary,
+            // The dates' year, when it came from another excerpt: the text that
+            // states it and where, checked on the stored page with the row.
+            ...(attribute === 'dates' && citation.year?.checked
+              ? { metadata: { ...args.evidence.metadata, yearExcerpt: citation.year.excerpt, yearLocator: citation.year.locator } }
+              : {}),
+          },
           event: {
             id: claimId,
             claimId,

@@ -17,18 +17,25 @@ export interface RowCitation {
   times?: { excerpt: string; locator?: string }[];
   /** Sessions only: the time is the page's one daily time, applied to every session; the page line it was read from. */
   timePageWide?: string;
+  /**
+   * Sessions only: present when the dates' own text states no year and the
+   * year was taken from another excerpt on the page (session-year.ts). That
+   * excerpt states exactly one year, the dates' year.
+   */
+  year?: { excerpt: string; locator?: string };
 }
 
 function rowCitation(excerpt: string, locator: string): RowCitation {
   return { excerpt, ...(locator ? { locator } : {}) };
 }
 
-/** One proposed session row: its dates' citation, plus its time's when the page stated one. */
+/** One proposed session row: its dates' citation, plus its time's when the page stated one, and its year's when taken from another excerpt. */
 export function scheduleRowCitation(row: AssembledItem["schedules"][number]): RowCitation {
   return {
     ...rowCitation(row.label, row.locator),
     ...(row.timeCitations.length > 0 ? { times: row.timeCitations.map((time) => rowCitation(time.excerpt, time.locator)) } : {}),
     ...(row.timePageWideLine ? { timePageWide: row.timePageWideLine } : {}),
+    ...(row.yearCitation ? { year: rowCitation(row.yearCitation.excerpt, row.yearCitation.locator) } : {}),
   };
 }
 

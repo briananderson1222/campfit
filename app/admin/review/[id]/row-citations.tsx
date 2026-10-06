@@ -26,6 +26,7 @@ export function RowCitations({ proposedChanges }: { proposedChanges: ProposedCha
                 <span className="break-words">{rowSummary(row)}</span>
                 <span className="grid gap-0.5">
                   <q className="break-words text-xs text-bark-500">{diff.rowCitations?.[index]?.excerpt?.trim() || 'no citation'}</q>
+                  <YearCitation year={diff.rowCitations?.[index]?.year} />
                   <TimeCitation row={row} times={diff.rowCitations?.[index]?.times} pageWide={diff.rowCitations?.[index]?.timePageWide} />
                 </span>
               </li>
@@ -34,6 +35,21 @@ export function RowCitations({ proposedChanges }: { proposedChanges: ProposedCha
         </div>
       ))}
     </section>
+  );
+}
+
+/**
+ * Where a session's dates take their year from, when their own text states
+ * none: another excerpt on the page (a heading such as "2027 Camp Dates").
+ * Shown apart from the dates' own text so the reviewer checks that this text
+ * gives the session its year.
+ */
+function YearCitation({ year }: { year: { excerpt?: string } | undefined }) {
+  if (!year) return null;
+  return (
+    <span data-testid="row-year-citation" className="w-fit max-w-full rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">
+      <strong>Year from:</strong> <q className="break-words">{year.excerpt?.trim() || 'no citation'}</q>
+    </span>
   );
 }
 
