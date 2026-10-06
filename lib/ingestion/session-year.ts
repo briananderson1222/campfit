@@ -86,15 +86,23 @@ export function yearsStatedIn(text: string): Set<number> {
 }
 
 /**
- * A year range token: "2026-27", "2026/27", "2026–2027". The second part must
- * end the token: a year followed by a dash and a time ("2027 - 10:00 AM"), a
- * count ("2027 - 12 spots left") or a code ("2027-01:") is not a range.
+ * A year range: two consecutive years (the second is the first plus one; a
+ * two-digit second year is read in the first's century, "2026-27" is 2026
+ * and 2027), joined by "-", "–", "—", "/", "&", "to" or "and", with optional
+ * spaces, whatever follows. Anything else after "YEAR -" is not a range:
+ * "2027 - 10:00 AM", "2027 - 12 spots left" and "Session 2027-01" state one
+ * year. "2027 - 28 spots" reads as a range and refuses (fail closed).
  */
-const YEAR_RANGE_RE = /(?<![\d$£€])(?:19|20)\d{2}\s*(?:[-–—/]\s*\d{2}|[-–—]\s*(?:19|20)\d{2})(?![\d:/.-]|\s*[-–—/]\s*\d|\s*(?:[ap]\.?m\b|spots?|campers?|kids|children|students|seats?|places|openings|slots?|spaces?|participants|people|weeks?|days?|nights?|hours?|hrs?|minutes?|mins?)\b)/i;
+const YEAR_RANGE_RE = /(?<![\d$£€])((?:19|20)\d{2})\s*(?:[-–—/&]|\bto\b|\band\b)\s*((?:19|20)\d{2}|\d{2})(?!\d)/gi;
 
-/** Whether a text states a year range ("2026-27", "2026–2027"): two years at once. */
+/** Whether a text states a year range ("2026-27", "2026 to 2027"): two years at once. */
 export function statesAYearRange(text: string): boolean {
-  return YEAR_RANGE_RE.test(text);
+  for (const match of text.matchAll(YEAR_RANGE_RE)) {
+    const first = Number(match[1]);
+    const second = match[2]!.length === 4 ? Number(match[2]) : first - (first % 100) + Number(match[2]);
+    if (second === first + 1) return true;
+  }
+  return false;
 }
 
 /**

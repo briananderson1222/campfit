@@ -464,10 +464,14 @@ the clear reading does not.
   the year excerpt under the rules below, or the date is refused. A citation
   that is not stretched keeps today's rule, including a year on the
   session's own label line or year cell ("Summer 2027 Session 1 / June 14 -
-  18"). A date line stating two years at once ("June 14 - 18 (2026-27)",
-  "2027-2028") states neither; a year followed by a dash and a time, a count
-  or a code ("2027 - 10:00 AM", "2027 - 12 spots left", "2027-01:") is not a
-  range.
+  18"). A date line stating a year range states neither year. A
+  year range is two consecutive years (the second is the first plus one; a
+  two-digit second year is read in the first's century) joined by "-", "–",
+  "—", "/", "&", "to" or "and", with optional spaces, whatever follows:
+  "2026-27.", "2027-2028", "2026/2027", "2026 to 2027", "(2026 and 2027)".
+  Anything else after a year and a dash is not a range, so "2027 - 10:00
+  AM", "2027 - 12 spots left" and "Session 2027-01" state one year; "2027 -
+  28 spots" reads as a range and refuses.
 - The date's own lines (the lines of a stretched citation that state a
   date; every line of any other citation) state no year in the broad
   reading. A date whose own line states its year keeps today's rule.

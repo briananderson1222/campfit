@@ -390,3 +390,34 @@ describe('fix round 2: a year followed by a dash and a number on a date line', (
     expect(item.schedules).toEqual([]);
   });
 });
+
+describe('fix round 3: a year range is two consecutive years, whatever follows', () => {
+  const TWO_YEARS = [
+    'Week 1: June 14 - 18, 2026-27.',
+    'Week 1: June 14 - 18, 2027-2028.',
+    'Week 1: June 14 - 18, 2026-27: 9am-3pm',
+    'Week 1: June 14 - 18, 2026-27/ages 5-12',
+    'Week 1: June 14 - 18, 2026-27...',
+    'Week 1: June 14 - 18, 2026/2027',
+    'Week 1: June 14 - 18, 2026 to 2027',
+    'Week 1: June 14 - 18 (2026 and 2027)',
+    'Week 1: June 14 - 18, 2026-27 - 9:00 AM',
+    'Week 1: June 14 - 18, 2026-27 - 12 spots left',
+  ];
+  for (const line of TWO_YEARS) {
+    it(`"${line}" is refused for either year`, async () => {
+      const years = [...line.matchAll(/20\d{2}/g)].map((m) => m[0]);
+      const second = years.length > 1 && years[1]!.length === 4 ? years[1]! : String(Number(years[0]) + 1);
+      for (const year of [years[0]!, second]) {
+        const { item } = await extract([line], session(`${year}-06-14`, `${year}-06-18`, line));
+        expect(item.schedules, year).toEqual([]);
+      }
+    });
+  }
+
+  it('"2027 - 28 spots" reads as a range and is refused (fail closed, accepted)', async () => {
+    const line = 'Week 1: June 14 - 18, 2027 - 28 spots';
+    const { item } = await extract([line], session('2027-06-14', '2027-06-18', line));
+    expect(item.schedules).toEqual([]);
+  });
+});
