@@ -37,6 +37,7 @@ const PAGE = [
   WEEK_ONE,
   'Camp runs 9:00 AM - 3:30 PM every day.',
   'Dates for 2026 and 2027 are below.',
+  'Winter week: December 28, 2026 - January 3, 2027',
 ].join('\n');
 
 const ROW = { label: 'Week 1', startDate: '2027-06-14', endDate: '2027-06-18', startTime: null, endTime: null, earlyDropOff: null, latePickup: null };
@@ -155,4 +156,30 @@ describe('a session whose year comes from another excerpt', () => {
     await approveAll(schedules({ excerpt: WEEK_ONE }), campId);
     expect(await datesClaim(campId)).toBe('verified');
   });
+
+  it('fix round 5: a multi-year line with no year citation binds each date to its own year at apply', async () => {
+    const winter = 'Winter week: December 28, 2026 - January 3, 2027';
+    const wrong = { ...ROW, label: 'Winter week', startDate: '2027-12-28', endDate: '2027-01-03' };
+    const campId = await seedCamp();
+    await approveAll({ schedules: { old: [], new: [wrong], confidence: 0.9, excerpt: winter, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: winter }] } }, campId);
+    expect(await datesClaimOf(campId)).not.toBe('verified');
+  });
+
+  it('fix round 5: control: the right pairing on that line is attested at apply', async () => {
+    const winter = 'Winter week: December 28, 2026 - January 3, 2027';
+    const right = { ...ROW, label: 'Winter week', startDate: '2026-12-28', endDate: '2027-01-03' };
+    const campId = await seedCamp();
+    await approveAll({ schedules: { old: [], new: [right], confidence: 0.9, excerpt: winter, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: winter }] } }, campId);
+    expect(await datesClaimOf(campId)).toBe('verified');
+  });
 });
+
+/** The only session's dates claim status, whatever its dates. */
+async function datesClaimOf(campId: string): Promise<string | null> {
+  const pool = getTestPool();
+  const { rows: sessions } = await pool.query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`, [campId]);
+  expect(sessions).toHaveLength(1);
+  const { rows } = await pool.query<{ status: string }>(
+    `SELECT status FROM "SurfaceVerificationEvent" WHERE "claimId" = $1 ORDER BY "createdAt" DESC LIMIT 1`, [`session.${sessions[0]!.id}.dates`]);
+  return rows[0]?.status ?? null;
+}

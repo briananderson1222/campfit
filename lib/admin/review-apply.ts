@@ -53,7 +53,7 @@ import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import { textStatesTime } from '@/lib/ingestion/session-time';
-import { excerptStatesOnlyYearOf, isStretchedCitation, yearOnADateLine } from '@/lib/ingestion/session-year';
+import { excerptStatesOnlyYearOf, isStretchedCitation, statesSeveralYearsOnALine, yearOnADateLine } from '@/lib/ingestion/session-year';
 import { keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
@@ -995,16 +995,17 @@ function checkSessionTimeCitation(
 
 /**
  * For a session row with no year citation: true unless its dates' citation
- * is stretched (covers a heading or other sessions' date lines) and none of
- * its date lines states the row's start and end year.
+ * is stretched (covers a heading or other sessions' date lines) or has a line
+ * stating more than one year, and its date lines do not state the row's start
+ * and end year by the same rule as extraction (`yearOnADateLine`: a
+ * multi-year line binds each date to its own year).
  */
 function stretchedCitationStatesYear(excerpt: string, value: unknown): boolean {
-  if (!isStretchedCitation(excerpt)) return true;
+  if (!isStretchedCitation(excerpt) && !statesSeveralYearsOnALine(excerpt)) return true;
   const row = (value ?? {}) as { startDate?: unknown; endDate?: unknown };
-  const years = [row.startDate, row.endDate]
-    .filter((date): date is string => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date))
-    .map((date) => Number(date.slice(0, 4)));
-  return years.length > 0 && years.every((year) => yearOnADateLine(excerpt, year));
+  const dates = ([[row.startDate, 'start'], [row.endDate, 'end']] as const)
+    .filter((entry): entry is readonly [string, 'start' | 'end'] => typeof entry[0] === 'string' && /^\d{4}-\d{2}-\d{2}/.test(entry[0]));
+  return dates.length > 0 && dates.every(([date, role]) => yearOnADateLine(excerpt, date, role));
 }
 
 /**

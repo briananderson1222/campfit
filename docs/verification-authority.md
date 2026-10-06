@@ -445,10 +445,20 @@ drops the page's header, navigation and footer, so text there is not seen.
 
 Years are read two ways. The broad reading takes every number that could be
 a year: a four-digit 1900-2099 (also in a phone number, a street number, a
-URL path or a room number), a short range ("2026-27"), a year glued to a
-table cell's time ("20279:00"), a two-digit year in a numeric date
-("6/14/26") or an abbreviation ("Summer '26"). It is used wherever another
-year makes a rule refuse, so reading too much there only refuses. The clear
+URL path or a room number, or glued to a table cell's time "20279:00");
+every two-digit number chained after such a year by up to three
+non-alphanumeric characters (any dash, "/", ",", ";", "|", "~", "+", "·",
+an apostrophe) or by "to", "through", "thru", "and", "or", "&" ("2026-27",
+"2026 '27", "2026/27/28", "2027 - 12 spots"), except a valid time (H:MM with
+H 0-23 and MM 00-59, or H am/pm with H 1-12: "2027 - 10:00 AM", "2027 -
+9am") and a date written year first ("2027-06-14"); a numeric date's
+two-digit year ("6/14/26"); an abbreviated year ("Summer '26"); and a fiscal
+year ("FY27"). Full-width digits are read as digits. It is the single source
+of truth for the years a date line, a heading's section or a page states,
+and is used wherever another year makes a rule refuse, so reading too much
+there only refuses. Accepted, fail-closed recall cost: a count or code after
+a year refuses the line ("2027 - 12 spots left", "2027 (10 spots)", "2027,
+10 - 12 year olds", "2027 – 12 & under", "Session 2027-01:"). The clear
 reading takes only a standalone four-digit year (after a space, "(", a quote
 or a Markdown marker, or as a numeric date's year), not after a number label
 ("Room", "Suite", "Tuition", a phone or price word) and not before a street
@@ -464,18 +474,20 @@ the clear reading does not.
   the year excerpt under the rules below, or the date is refused. A citation
   that is not stretched keeps today's rule, including a year on the
   session's own label line or year cell ("Summer 2027 Session 1 / June 14 -
-  18"). A date line states year Y only when Y is the only year
-  it states; a line stating two or more years states none of them. Its
-  years are every four-digit year, whatever joins them ("2025-2027",
-  "2027–2026", "2026, 2027", "2026 or 2027", "2026 through 2027"), and a
-  two-digit number after a year through any dash, "/", "&", ",", "to",
-  "through", "thru", "and" or "or" ("2026-27", "2026-'27"), unless it is a
-  time (followed by ":" and digits, or by am/pm: "2027 - 10:00 AM", "2027 -
-  9am"). So "2027 - 12 spots left", "2027 - 28 spots" and "Session 2027-01:"
-  read as two years and refuse (an accepted, fail-closed recall cost). One
-  exception keeps a session across a year boundary stated in full: when
-  every year on the line is a date's own ("December 28, 2026 - January 3,
-  2027"), the line states each date's year.
+  18"). A date line states year Y only when the broad reading
+  (below) finds exactly that one year on it. A line on which it finds more
+  than one year states none of them, with one exception: a session stated in
+  full across a year boundary. That needs exactly two dates on the line,
+  each followed by its own four-digit year (a month name and day, a day and
+  month name, or a numeric m/d), joined only by a range joiner ("-", "~",
+  "to", "through", "thru", "until"), the second not before the first, and no
+  other year on the line. Then the proposed start date must be the first
+  date and the end date the second, month, day and year
+  ("December 28, 2026 - January 3, 2027" as 2026-12-28 to 2027-01-03 only).
+  "Class of 3, 2027" and "Grades 1-5, 2027" are not dates; "June 14, 2026
+  and June 14, 2027" and "June 14 2026 (rescheduled from June 7 2025)" are
+  refused. Review apply applies the same rule to a row with no year citation
+  whose citation is stretched or has a line stating more than one year.
 - The date's own lines (the lines of a stretched citation that state a
   date; every line of any other citation) state no year in the broad
   reading. A date whose own line states its year keeps today's rule.

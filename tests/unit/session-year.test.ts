@@ -421,7 +421,7 @@ describe('fix round 3 (rule superseded by round 4; pins kept): two-year lines', 
   });
 });
 
-describe('fix round 4: a date line states year Y only when Y is the only year it states', () => {
+describe('fix round 4 (exception rebound in round 5; pins kept): a date line states year Y only when Y is the only year it states', () => {
   const TWO_YEARS = [
     'Week 1: June 14 - 18, 2025-2027',
     'Week 1: June 14 - 18, 2026 – 2028',
@@ -496,4 +496,82 @@ describe('fix round 4: a date line states year Y only when Y is the only year it
       session('2027-06-12', '2027-06-18', 'June 12 - June 18 (7-day)'));
     expect(c.item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['## 2027 Summer Camp Sessions on the Island']);
   });
+});
+
+describe('fix round 5: a multi-year date line binds each date to its own year', () => {
+  const cases: [string, string, string, boolean][] = [
+    ['December 28, 2026 - January 3, 2027', '2026-12-28', '2027-01-03', true],
+    ['December 28, 2026 - January 3, 2027', '2027-12-28', '2027-01-03', false],
+    ['December 28, 2026 - January 3, 2027', '2026-12-28', '2026-01-03', false],
+    ['December 28, 2026 - January 3, 2027', '2027-12-28', '2028-01-03', false],
+    ['June 14, 2026 - June 18, 2027', '2026-06-14', '2027-06-18', true],
+    ['June 14, 2026 - June 18, 2027', '2027-06-14', '2027-06-18', false],
+    ['June 14, 2026 - June 18, 2027', '2026-06-14', '2026-06-18', false],
+    ['June 14 2026 (rescheduled from June 7 2025)', '2025-06-14', '2025-06-14', false],
+    ['June 14 2026 (rescheduled from June 7 2025)', '2026-06-14', '2026-06-14', false],
+    ['6/14/2026 - 6/18/2027', '2026-06-14', '2027-06-18', true],
+    ['6/14/2026 - 6/18/2027', '2027-06-14', '2027-06-18', false],
+    ['Week of June 14, 2026 (Class of 3, 2027)', '2027-06-14', '2027-06-18', false],
+    ['Week of June 14, 2026 (Class of 3, 2027)', '2026-06-14', '2026-06-18', false],
+    ['Week of June 14, 2026 (Grades 1-5, 2027)', '2026-06-14', '2026-06-18', false],
+    ['June 14, 2026 and June 14, 2027', '2026-06-14', '2027-06-14', false],
+    ['June 14, 2026 and June 14, 2027', '2027-06-14', '2027-06-14', false],
+    ['Sessions: June 14, 2026; June 21, 2027', '2026-06-14', '2027-06-21', false],
+    ['Sessions: June 14, 2026; June 21, 2027', '2026-06-14', '2026-06-21', false],
+    ['28 December 2026 - 3 January 2027', '2026-12-28', '2027-01-03', true],
+    ['28 December 2026 - 3 January 2027', '2027-12-28', '2027-01-03', false],
+    ['June 18, 2027 - June 14, 2026', '2026-06-14', '2027-06-18', false],
+  ];
+  for (const [line, start, end, accepted] of cases) {
+    it(`${JSON.stringify(line)} as ${start}/${end} is ${accepted ? 'accepted' : 'refused'}`, async () => {
+      const { item } = await extract(['## Sessions', line], session(start, end, line));
+      expect(item.schedules.map((s) => [s.startDate, s.endDate])).toEqual(accepted ? [[start, end]] : []);
+    });
+  }
+});
+
+describe('fix round 5: the broad reading is the years a date line states', () => {
+  const TWO_YEARS = [
+    "Week 1: June 14 - 18, 2026 '27",
+    'Week 1: June 14 - 18, 2026 ’27',
+    "Week 1: June 14 - 18, 2026 summer '27",
+    'Week 1: June 14 - 18, 2026-27am',
+    'Week 1: June 14 - 18, 2026 - 27 PM',
+    'Week 1: June 14 - 18, 2026 - 13pm',
+    'Week 1: June 14 - 18, 2026 - 27:00',
+    'June 14-18 2026, 6/21-6/25/27',
+    'Week 1: June 14 - 18, 2026; 6/14/27',
+    'Week 1: June 14 - 18, 2026/27/28',
+    'Week 1: June 14 - 18, 2026-27-28',
+    'Week 1: June 14 - 18, FY27 2026',
+    "Week 1: June 14 - 18, FY'27 2026",
+    'Week 1: June 14 - 18, ２０２６-２７',
+    'Week 1: June 14 - 18, 2026-２７',
+    'Week 1: June 14 - 18, 2026 | 27',
+    'Week 1: June 14 - 18, 2026 ~ 27',
+    'Week 1: June 14 - 18, 2026 + 27',
+    'Week 1: June 14 - 18, 2026 · 27',
+  ];
+  for (const line of TWO_YEARS) {
+    it(`${JSON.stringify(line)} is refused as 2026`, async () => {
+      const { item } = await extract([line], session('2026-06-14', '2026-06-18', line));
+      expect(item.schedules).toEqual([]);
+    });
+  }
+
+  const ONE_YEAR = [
+    'Week 1: June 14 - 18, 2027 - 10:00 AM to 2:00 PM',
+    'Week 1: June 14 - 18, 2027 - 9am',
+    'Week 1: June 14 - 18, 2027 - 9 a.m.',
+    'Week 1: June 14 - 18, 2027 · 12:30 pm',
+    'June 14 - 18, 2027',
+    'Week 1: June 14 - 18, 2027 (starts 2027-06-14)',
+    'Ages 5-12, June 14 - 18, 2027',
+  ];
+  for (const line of ONE_YEAR) {
+    it(`${JSON.stringify(line)} states 2027 only and is accepted`, async () => {
+      const { item } = await extract([line], session('2027-06-14', '2027-06-18', line));
+      expect(item.schedules.map((s) => s.startDate)).toEqual(['2027-06-14']);
+    });
+  }
 });

@@ -171,7 +171,7 @@ function screenValue(relPath: string, value: unknown, excerpt: string): { ok: tr
       // stretched up to a heading is not the date's own text, and such a
       // year is taken only by the session-year rules (session-year.ts).
       if (SESSION_DATE_PATHS.has(relPath)) {
-        return yearOnADateLine(excerpt, Number((value as string).slice(0, 4)))
+        return yearOnADateLine(excerpt, value as string, relPath.endsWith("endDate") ? "end" : "start")
           ? { ok: true, value }
           : { ok: false, why: YEAR_NOT_IN_QUOTE };
       }
