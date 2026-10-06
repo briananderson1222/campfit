@@ -14,6 +14,8 @@ type EgressConnector = (request: { request: Request; url: URL; address: EgressAd
 export interface EgressResponseOracle {
   responses: Array<{
     status?: number; headers?: HeadersInit; body?: string; error?: true;
+    /** Exact response bytes, for a body that is not UTF-8 (e.g. a latin1 page). Wins over `body`. */
+    bodyBytes?: number[];
     urlSuffix?: string; whenHeaders?: Record<string, string>; withoutHeaders?: string[]; repeat?: boolean;
   }>;
 }
@@ -290,11 +292,11 @@ export function createGuardedFetch(options: {
       if (!response || response.error) throw new Error("fixture oracle failure");
       void headers;
       let sent = false;
-      const body = response.body === undefined ? null : new ReadableStream({
+      const body = response.body === undefined && response.bodyBytes === undefined ? null : new ReadableStream({
         pull(controller) {
           if (sent) return;
           sent = true;
-          controller.enqueue(new TextEncoder().encode(response.body));
+          controller.enqueue(response.bodyBytes !== undefined ? Uint8Array.from(response.bodyBytes) : new TextEncoder().encode(response.body));
           controller.close();
         },
       });

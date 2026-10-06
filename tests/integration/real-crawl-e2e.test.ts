@@ -7,6 +7,7 @@
  * Each block is one defect a live crawl exposed. The page, the model answer and
  * the request noise come from tests/fixtures/real-crawl.
  */
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createInMemorySnapshotStore, parseSnapshotSourceRef, type SnapshotStore } from '@kontourai/traverse/fetch';
@@ -101,6 +102,7 @@ import { loadCampTrustDisplays } from '@/lib/admin/trust-display-read';
 import { loadClaimBundle } from '@/lib/admin/claim-store';
 import { resolveCitationText } from '@/lib/admin/citation-text';
 import { resolveReviewExcerpt } from '@/lib/admin/review-excerpt-resolution';
+import { resolveProposalSnapshot } from '@/lib/admin/shadow-auto-accept-read';
 import { storedMultiProgram, storedRefusedValues } from '@/lib/admin/proposal-extraction-status';
 import { campLogHeldBackLabel, campLogModelLine, campLogOutcomeNote } from '@/app/admin/crawls/camp-log-view';
 import { campfitVocabulary } from '@/lib/trust-vocabulary';
@@ -316,6 +318,91 @@ describe('a crawl of a multi-program listing page produces a reviewable, applica
     expect((await campRow(campId)).applicationUrl).toBeNull();
     expect(await listRows(campId)).toEqual({ sessions: [], prices: [], ages: [] });
     expect((await getProposal(proposal.id))!.status).toBe('PENDING');
+  });
+});
+
+/** The listing page with its call to action in French, so a cited excerpt holds latin1 characters. */
+const LATIN1_CTA = 'Réservez dès maintenant!';
+function latin1Fixture() {
+  const html = listingHtml().replaceAll('Enroll Today!', LATIN1_CTA);
+  const proposals = JSON.parse(JSON.stringify(recorded.programs).replaceAll('Enroll Today!', LATIN1_CTA)) as unknown[];
+  // Every character is in latin1, so each byte is its code point.
+  const bytes = [...html].map((ch) => {
+    const code = ch.codePointAt(0)!;
+    if (code > 0xff) throw new Error(`not latin1: ${ch}`);
+    return code;
+  });
+  return { html, proposals, bytes };
+}
+
+describe('a page served in a charset other than UTF-8 (Traverse 5 hashes response bytes)', () => {
+  it('captures the bytes, decodes them by the declared charset, and applies exact citations of the decoded text', async () => {
+    const campId = await seedCamp();
+    const page = latin1Fixture();
+    fixture.proposals = page.proposals;
+    fixture.responses = [{ bodyBytes: page.bytes, headers: { 'content-type': 'text/html; charset=iso-8859-1' }, repeat: true }];
+
+    const { entry } = await crawl([campId]);
+    expect(entry(campId).status).toBe('ok');
+    const [proposal] = await proposalsFor(campId);
+    expect(proposal!.proposedChanges.applicationUrl!.excerpt).toBe(`[${LATIN1_CTA}](https://register.pineridge.example/apply)`);
+
+    // The reference covers the response bytes, not the UTF-8 of the decoded text.
+    const parsed = parseSnapshotSourceRef(proposal!.snapshotRef!)!;
+    const snapshot = (await (fixture.store as SnapshotStore).get(parsed.sourceId, parsed.bodyHash))!;
+    expect(snapshot.declaredCharset).toBe('iso-8859-1');
+    expect([...snapshot.bytes!]).toEqual(page.bytes);
+    expect(snapshot.body).toBe(page.html);
+    expect(parsed.bodyHash).toBe(createHash('sha256').update(Uint8Array.from(page.bytes)).digest('hex'));
+    expect(parsed.bodyHash).not.toBe(createHash('sha256').update(snapshot.body, 'utf8').digest('hex'));
+
+    // The shadow read resolves it (it rehashes on the bytes basis).
+    expect(await resolveProposalSnapshot({
+      snapshotRef: proposal!.snapshotRef,
+      snapshotBodyHash: proposal!.snapshotBodyHash,
+      proposedChanges: proposal!.proposedChanges,
+      preparedArtifact: proposal!.rawExtraction.preparedArtifact,
+    }, fixture.store as SnapshotStore)).toBe(true);
+
+    // Apply checks each excerpt against the prepared text of the decoded page.
+    const citation = resolveCitationText({ snapshotRef: proposal!.snapshotRef!, snapshot, preparedArtifact: proposal!.rawExtraction.preparedArtifact });
+    expect(citation.ok && citation.space).toBe('prepared');
+    expect((citation as { text: string }).text).toContain(LATIN1_CTA);
+    const applied = await approveAll(proposal!);
+    expect([...applied.appliedFields].sort()).toEqual(['ageGroups', 'applicationUrl', 'pricing', 'schedules']);
+    const bundle = await loadClaimBundle(getTestPool(), [{ subjectType: campfitVocabulary.subjectType, subjectId: campId }]);
+    const evidence = bundle.evidence.find((item) => item.claimId === `camp.${campId}.field.applicationUrl`)!;
+    expect(evidence.excerptOrSummary).toBe(`[${LATIN1_CTA}](https://register.pineridge.example/apply)`);
+  });
+
+  it('refuses to apply a pending proposal whose snapshot can no longer be read, and writes nothing', async () => {
+    const campId = await seedCamp();
+    const page = latin1Fixture();
+    fixture.proposals = page.proposals;
+    fixture.responses = [{ bodyBytes: page.bytes, headers: { 'content-type': 'text/html; charset=iso-8859-1' }, repeat: true }];
+    await crawl([campId]);
+    const [proposal] = await proposalsFor(campId);
+    const parsed = parseSnapshotSourceRef(proposal!.snapshotRef!)!;
+    const stored = (await (fixture.store as SnapshotStore).get(parsed.sourceId, parsed.bodyHash))!;
+
+    const refusals: unknown[] = [];
+    // Lost: the store no longer has the record. Damaged: its text is not what its bytes decode to.
+    for (const get of [
+      async () => undefined,
+      async () => ({ ...stored, body: stored.body.replace(LATIN1_CTA, 'Enroll Today!') }),
+    ] satisfies SnapshotStore['get'][]) {
+      fixture.store = { put: async () => undefined, latest: async () => undefined, list: async () => [], get } satisfies SnapshotStore;
+      const session = await openSession(proposal!);
+      refusals.push(await applyProposalReview({ proposalId: proposal!.id, reviewSessionId: session.id, reviewer: REVIEWER, keepPending: false })
+        .then(() => null, (error: unknown) => error));
+    }
+    for (const refusal of refusals) {
+      expect(refusal).toBeInstanceOf(ReviewApplyCitationError);
+      expect((refusal as Error).message).toContain('missing or does not match its reference');
+    }
+    expect((await campRow(campId)).applicationUrl).toBeNull();
+    expect(await listRows(campId)).toEqual({ sessions: [], prices: [], ages: [] });
+    expect((await getProposal(proposal!.id))!.status).toBe('PENDING');
   });
 });
 

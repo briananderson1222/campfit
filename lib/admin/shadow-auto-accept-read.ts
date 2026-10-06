@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import { parseAnySnapshotSourceRef, type Snapshot, type SnapshotStore } from '@kontourai/traverse/fetch';
 
+import { isSnapshotIntact } from '@/lib/ingestion/snapshot-integrity';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 
 import { resolveCitationText } from './citation-text';
@@ -27,13 +27,6 @@ export function isProposalSnapshotResolved(
   );
 }
 
-function actualSnapshotHash(snapshot: Snapshot): string {
-  const hash = createHash('sha256');
-  if (snapshot.bodyBytes) hash.update(snapshot.bodyBytes);
-  else hash.update(snapshot.body, 'utf8');
-  return hash.digest('hex');
-}
-
 async function resolveWithStore(
   proposal: ShadowSnapshotProposal,
   getSnapshot: (sourceId: string, bodyHash: string) => Promise<Snapshot | undefined>,
@@ -51,7 +44,10 @@ async function resolveWithStore(
       || snapshot.bodyHash !== parsed.bodyHash
       || snapshot.url !== parsed.url
       || snapshot.fetchedAt !== parsed.fetchedAt
-      || actualSnapshotHash(snapshot) !== parsed.bodyHash) return false;
+      // The hash is re-derived on the basis it was taken over (response bytes
+      // for a Traverse 5 capture, UTF-8 of the body for an earlier one), and a
+      // byte-hashed body must be the decode of those bytes.
+      || !isSnapshotIntact(snapshot)) return false;
     // Excerpts are checked against the text the extraction read (see
     // citation-text.ts); a prepared text that cannot be reproduced exactly
     // resolves nothing.

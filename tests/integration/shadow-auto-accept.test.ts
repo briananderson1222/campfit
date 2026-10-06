@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto';
-import { buildSnapshotSourceRef, createInMemorySnapshotStore, type Snapshot, type SnapshotStore } from '@kontourai/traverse/fetch';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  buildSnapshotSourceRef,
+  createFilesystemSnapshotStore,
+  createInMemorySnapshotStore,
+  fetchSource,
+  type Snapshot,
+  type SnapshotStore,
+} from '@kontourai/traverse/fetch';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -217,5 +227,64 @@ describe('isProposalSnapshotResolved', () => {
     };
     expect(await resolveProposalSnapshots([proposal, proposal, proposal], { concurrency: 2, store })).toEqual([true, true, true]);
     expect(getCalls).toBe(1);
+  });
+});
+
+/**
+ * Traverse 5 hashes a text capture by its response bytes. A page that is not
+ * plain UTF-8 has a bodyHash that is NOT the hash of the UTF-8 of its decoded
+ * body; the shadow read must rehash on the bytes basis or it rejects every
+ * such capture.
+ */
+describe('resolveProposalSnapshot for captures hashed by their bytes', () => {
+  async function capture(id: string, bytes: Uint8Array, contentType: string): Promise<Snapshot> {
+    const result = await fetchSource(
+      { id, url: `https://bytes.example.test/${id}`, respectRobots: false, retries: 0 },
+      {
+        clock: () => '2026-10-05T10:00:00.000Z',
+        sleep: async () => {},
+        fetch: async () => new Response(bytes.slice(), { status: 200, headers: { 'content-type': contentType } }),
+      },
+    );
+    if (!result.snapshot) throw new Error(`fetch failed: ${JSON.stringify(result.error)}`);
+    return result.snapshot;
+  }
+  const page = 'Summer at Café Camp: new';
+  const latin1 = Uint8Array.from([...page].map((ch) => ch.codePointAt(0)!));
+  const bom = Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(page)]);
+  // [id, bytes, Content-Type, the text Traverse decodes]. The last two declare no
+  // charset (declaredCharset null), which is still the bytes basis.
+  const cases: Array<[string, Uint8Array, string, string]> = [
+    ['latin1', latin1, 'text/html; charset=iso-8859-1', page],
+    ['utf8-bom', bom, 'text/html; charset=utf-8', page],
+    ['bom-no-charset', bom, 'text/html', page],
+    ['invalid-utf8-no-charset', latin1, 'text/html', page.replace('é', '\uFFFD')],
+  ];
+
+  it.each(cases)('resolves a %s capture read back from the filesystem and in-memory stores', async (id, bytes, contentType, text) => {
+    const snapshot = await capture(id, bytes, contentType);
+    expect(snapshot.body).toBe(text);
+    expect(snapshot.declaredCharset).toBe(contentType.includes('charset=') ? contentType.split('charset=')[1] : null);
+    expect(snapshot.bodyHash).toBe(createHash('sha256').update(bytes).digest('hex'));
+    expect(snapshot.bodyHash).not.toBe(createHash('sha256').update(snapshot.body, 'utf8').digest('hex'));
+    const proposal = { snapshotRef: buildSnapshotSourceRef(snapshot), snapshotBodyHash: snapshot.bodyHash, proposedChanges: changes() };
+
+    const root = await mkdtemp(path.join(os.tmpdir(), 'campfit-shadow-bytes-'));
+    try {
+      for (const store of [createInMemorySnapshotStore(), createFilesystemSnapshotStore({ root })]) {
+        await store.put(snapshot);
+        expect(await resolveProposalSnapshot(proposal, store)).toBe(true);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(cases)('refuses a %s capture whose body is not the decode of its bytes', async (id, bytes, contentType) => {
+    const snapshot = await capture(id, bytes, contentType);
+    const proposal = { snapshotRef: buildSnapshotSourceRef(snapshot), snapshotBodyHash: snapshot.bodyHash, proposedChanges: changes() };
+    const rewritten: Snapshot = { ...snapshot, body: 'Summer at another camp: new' };
+    const store: SnapshotStore = { put: async () => undefined, latest: async () => rewritten, list: async () => [rewritten], get: async () => rewritten };
+    expect(await resolveProposalSnapshot(proposal, store)).toBe(false);
   });
 });

@@ -5,7 +5,9 @@ const { snapshot, snapshotGet, connect, recordEvidenceOnLockedClient } = vi.hois
     sourceId: 'campfit-discovery:https://example.com/programs',
     url: 'https://example.com/programs',
     fetchedAt: '2026-07-10T00:00:00.000Z',
-    bodyHash: 'a'.repeat(64),
+    // SHA-256 of `body`: the attestation path refuses a snapshot whose content
+    // does not hash to its bodyHash (lib/ingestion/snapshot-integrity.ts).
+    bodyHash: '0c5f25769201eb45e833070124daa1cfd450808656e4f7f019c94808925bdb60',
     body: 'Camp description: exact source excerpt.',
     status: 200,
     contentType: 'html' as const,
@@ -83,6 +85,28 @@ describe('exported attestation evidence boundary', () => {
         sourceRef: buildSnapshotSourceRef(snapshot),
         sourceLocator: 'chars:0-8',
         excerpt: 'mismatch',
+      }),
+    ).rejects.toBeInstanceOf(AttestationValidationError);
+
+    expect(connect).not.toHaveBeenCalled();
+    expect(recordEvidenceOnLockedClient).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stored snapshot whose body no longer hashes to its reference', async () => {
+    const excerpt = 'exact source excerpt';
+    const start = snapshot.body.indexOf(excerpt);
+    // Same reference, same excerpt present, but the stored text was rewritten.
+    snapshotGet.mockResolvedValueOnce({ ...snapshot, body: `${snapshot.body} (rewritten)` });
+    await expect(
+      recordCampAttestationEvidence({
+        campId: 'camp-1',
+        fields: ['description'],
+        actor: 'reviewer@example.com',
+        attestedAt: '2026-07-12T00:00:00.000Z',
+        mode: 'source',
+        sourceRef: buildSnapshotSourceRef(snapshot),
+        sourceLocator: `chars:${start}-${start + excerpt.length}`,
+        excerpt,
       }),
     ).rejects.toBeInstanceOf(AttestationValidationError);
 
