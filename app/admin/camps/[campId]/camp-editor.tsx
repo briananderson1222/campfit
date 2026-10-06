@@ -918,9 +918,15 @@ export function CampEditor({
       )}
 
       {attestError && (
-        <p role="alert" data-testid="attest-error" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800/50 dark:bg-red-900/20 dark:text-red-300">
-          {attestError}
-        </p>
+        // Fixed, so it shows next to whichever field's Attest button was clicked.
+        <div role="alert" data-testid="attest-error"
+          className="fixed bottom-20 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 shadow-lg dark:border-red-800/50 dark:bg-red-950 dark:text-red-300">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">{attestError}</span>
+          <button onClick={() => setAttestError(null)} aria-label="Dismiss" className="shrink-0 rounded p-0.5 hover:bg-red-100 dark:hover:bg-red-900/40">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
 
       {/* Field coverage meter */}
