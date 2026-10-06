@@ -167,6 +167,49 @@ describe('a crawled session time', () => {
   });
 });
 
+describe('a time placed by where its text is', () => {
+  it('is refused when one text gives several sessions\' times at once', async () => {
+    const line = 'June 14 - June 18, 2027: 9:00 AM - 12:00 PM; June 21 - June 25, 2027: 1:00 PM - 4:00 PM';
+    const { item } = await extract([line], [
+      answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp'),
+      answer('items[].schedules[].startDate', '2027-06-14', line),
+      answer('items[].schedules[].endDate', '2027-06-18', line),
+      answer('items[].schedules[].startTime', '9:00 AM', line),
+      answer('items[].schedules[].endTime', '12:00 PM', line),
+      answer('items[].schedules[].startDate', '2027-06-21', line),
+      answer('items[].schedules[].endDate', '2027-06-25', line),
+      answer('items[].schedules[].startTime', '1:00 PM', line),
+      answer('items[].schedules[].endTime', '4:00 PM', line),
+    ]);
+    expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+    expect(item.operatorWarnings.join('\n')).toContain('several sessions at once');
+  });
+
+  it('stated with one session\'s ordinal dates stays on that session', async () => {
+    const w1 = 'Week 1: June 14th - 18th, 2027 from 9:00 AM - 12:00 PM';
+    const { item } = await extract([w1, DATES_W2], [
+      answer('items[].name', 'Larkspur Meadow Day Camp', 'Larkspur Meadow Day Camp'),
+      answer('items[].schedules[].startDate', '2027-06-14', w1),
+      answer('items[].schedules[].endDate', '2027-06-18', w1),
+      answer('items[].schedules[].startTime', '9:00 AM', w1),
+      answer('items[].schedules[].endTime', '12:00 PM', w1),
+      answer('items[].schedules[].startDate', '2027-06-21', DATES_W2),
+      answer('items[].schedules[].endDate', '2027-06-25', DATES_W2),
+    ]);
+    expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', null, null]]);
+  });
+
+  it('naming one session on a line of its own is not applied to every session', async () => {
+    const hours = 'Week 1 hours: 9:00 AM - 12:00 PM';
+    const { item } = await extract([DATES_W1, DATES_W2, hours], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '9:00 AM', hours),
+      answer('items[].schedules[].endTime', '12:00 PM', hours),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null], [null, null]]);
+  });
+});
+
 describe('a later crawl and a stored session time', () => {
   const stored = [{ id: 's1', label: DATES_W1, startDate: '2027-06-14', endDate: '2027-06-18', startTime: '9:00 AM', endTime: '3:00 PM', earlyDropOff: null, latePickup: null }];
   const crawled = (startTime: string | null, endTime: string | null) => [{ label: DATES_W1, startDate: '2027-06-14', endDate: '2027-06-18', startTime, endTime, earlyDropOff: null, latePickup: null }];

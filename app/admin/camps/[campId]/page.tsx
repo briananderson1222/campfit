@@ -39,7 +39,7 @@ export default async function AdminCampDetailPage(props: { params: Promise<{ cam
   // each session, and holds no connection between reads.
   const missingRequirements = await loadMissingRequirements(params.campId).catch((err) => {
     console.error('[admin/camps] loadMissingRequirements failed:', err);
-    return null;
+    return 'unavailable' as const;
   });
   const fieldTimeline = await getCampFieldTimeline(params.campId).catch((err) => {
     console.error('[admin/camps] getCampFieldTimeline failed:', err);

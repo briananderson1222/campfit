@@ -53,6 +53,7 @@ import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import { textStatesTime } from '@/lib/ingestion/session-time';
+import { keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
 import type { BatchAcceptClaimRecord, BatchAcceptExclusion } from './batch-accept-audit-repository';
@@ -957,10 +958,11 @@ function checkSessionTimeCitation(
   const excerpts = times.map((time) => (typeof time?.excerpt === 'string' ? time.excerpt : ''));
   const resolved = times.map((time, i) => (excerpts[i]!.trim() ? resolveReviewExcerpt(excerpts[i]!, pageText, time.locator) : null));
   const row = (value ?? {}) as { startTime?: unknown; endTime?: unknown };
-  const cited = excerpts.join('\n');
+  // Each time must be stated within one excerpt: joined, the end of one and
+  // the start of the next could read as a range.
   const checked = resolved.every((r) => r?.state === 'verified')
-    && textStatesTime(row.startTime, cited)
-    && textStatesTime(row.endTime, cited);
+    && excerpts.some((excerpt) => textStatesTime(row.startTime, excerpt))
+    && excerpts.some((excerpt) => textStatesTime(row.endTime, excerpt));
   const first = resolved[0];
   return checked
     ? { checked, excerpt: excerpts.join(' / '), locator: first?.state === 'verified' ? first.locator : undefined }
@@ -978,6 +980,8 @@ interface AppliedFacts {
   sessionsWithChangedTime: string[];
   /** This apply is a review that can verify (not a batch accept, unless the switch says so). */
   countsAsReview: boolean;
+  /** The session rows this apply wrote (`sessionRowsToApply`), index-aligned with the proposal's rows and their citations. */
+  appliedSchedules?: IncomingScheduleSnapshot[];
 }
 
 function newAppliedFacts(): AppliedFacts {
@@ -1012,6 +1016,21 @@ async function withdrawChangedClaims(
     notes: 'The value changed in a review apply; verified again only by the evidence recorded for this approval.',
     createdAt: at.toISOString(),
   });
+}
+
+/**
+ * The session rows an approved list writes. A time is applied only from the
+ * crawl's own citation of it (`rowCitations[i].times`): a row's time without
+ * one is not the page's statement (a time `computeDiff` kept from the stored
+ * session, possibly since changed by a steward, or no time at all), so it is
+ * treated as unstated, and an unstated time keeps the stored session's time
+ * (`keepUnstatedSessionTimes`, read here under the camp lock). A crawl never
+ * removes or rewinds a time it does not state.
+ */
+function sessionRowsToApply(diff: FieldDiff, stored: readonly unknown[]): IncomingScheduleSnapshot[] {
+  const rows = (Array.isArray(diff.new) ? diff.new as IncomingScheduleSnapshot[] : []).map((row, index) =>
+    (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 ? row : { ...row, startTime: null, endTime: null });
+  return keepUnstatedSessionTimes(stored, rows) as IncomingScheduleSnapshot[];
 }
 
 function sessionTimeKey(row: { startTime?: string | null; endTime?: string | null }): string {
@@ -1245,12 +1264,14 @@ async function applyRelationField(
   if (field === 'schedules') {
     // A matched session keeps its id; whether its time changed decides if an
     // earlier time claim still describes it.
-    const before = await client.query<{ id: string; startTime: string | null; endTime: string | null }>(
-      `SELECT id, "startTime", "endTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`,
+    const before = await client.query<{ id: string; label: string; startDate: string; endDate: string; startTime: string | null; endTime: string | null }>(
+      `SELECT id, label, to_char("startDate", 'YYYY-MM-DD') AS "startDate", to_char("endDate", 'YYYY-MM-DD') AS "endDate", "startTime", "endTime"
+         FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`,
       [proposal.campId],
     );
     for (const row of before.rows) facts.previousSessionTimes.set(row.id, sessionTimeKey(row));
-    const reconciliation = await applyScheduleReconciliation(client, proposal.campId, diff.new as IncomingScheduleSnapshot[]);
+    facts.appliedSchedules = sessionRowsToApply(diff, before.rows);
+    const reconciliation = await applyScheduleReconciliation(client, proposal.campId, facts.appliedSchedules);
     orphaned = reconciliation.orphaned;
     if (reconciliation.matchedIds.length > 0) {
       const after = await client.query<{ id: string; startTime: string | null; endTime: string | null }>(
@@ -1430,7 +1451,7 @@ async function recordAppliedField(
 
   // Each session the approved list leaves on the camp is its own claim subject.
   if (field === 'schedules' && diff) {
-    await recordSessionClaims(w, { campId, proposalId, diff, check, evidence, review });
+    await recordSessionClaims(w, { campId, proposalId, diff, check, evidence, review, applied: review.facts.appliedSchedules });
   }
 }
 
@@ -1574,6 +1595,7 @@ async function recordSessionClaims(
     readonly check: CitationCheck;
     readonly evidence: Evidence;
     readonly review: ReviewDecisionRecord;
+    readonly applied: readonly IncomingScheduleSnapshot[] | undefined;
   },
 ): Promise<void> {
   if (!countsAsReview(args.review)) return;
@@ -1582,7 +1604,8 @@ async function recordSessionClaims(
        FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL ORDER BY id`,
     [args.campId],
   );
-  const proposed = Array.isArray(args.diff.new) ? (args.diff.new as IncomingScheduleSnapshot[]) : [];
+  // The rows the apply wrote (cited times, stored times kept), index-aligned with the citations.
+  const proposed = args.applied ?? [];
   // The same keys the apply matched on (session-identity.ts): exact
   // duplicates are one session; sessions that share a label and dates are
   // told apart by their times.

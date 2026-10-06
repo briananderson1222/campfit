@@ -67,7 +67,7 @@ export default async function ReviewDetailPage(
   const overallConfidence = reportedOverallConfidence(proposal);
   const missingRequirements = await loadMissingRequirements(proposal.campId).catch((err) => {
     console.error('[admin/review] loadMissingRequirements failed:', err);
-    return null;
+    return 'unavailable' as const;
   });
 
   return (

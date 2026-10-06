@@ -744,6 +744,8 @@ describe("applyProposalReview", () => {
                 { label: "Session A", startDate: "2026-07-06", endDate: "2026-07-10", startTime: "10:00", endTime: "16:00", earlyDropOff: null, latePickup: null },
                 { label: "Session C", startDate: "2026-08-03", endDate: "2026-08-07", startTime: null, endTime: null, earlyDropOff: null, latePickup: null },
               ],
+              // A crawl's time is applied only with its own citation (review-apply.ts, sessionRowsToApply).
+              { rowCitations: [{ excerpt: "Session A: July 6-10", times: [{ excerpt: "10am-4pm" }] }, { excerpt: "Session C: Aug 3-7" }] },
             ),
           }),
         ],

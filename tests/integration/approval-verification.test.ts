@@ -287,21 +287,24 @@ describe('approving a crawl proposal re-derives the camp from reviewed claims', 
     expect(rows).toEqual([{ label: 'Session One', claims: 2 }, { label: 'Session Two', claims: 0 }]);
   });
 
-  it('a later approval that removes a session time drops the time claim', async () => {
+  it('a later approval whose crawl does not state the session time keeps the time and its verified claim', async () => {
     const campId = await seedCamp();
     const first = await seedProposal(campId, fullChanges({ sessionTimes: true }), { snapshot: true });
     expect((await review(first.id, 'all')).verification?.dataConfidence).toBe('VERIFIED');
 
+    // A page that does not state the time is not evidence the time was removed.
     const second = await seedProposal(campId, { schedules: listDiff([session(true)], [session(false)], [SESSION_ONE]) }, { snapshot: true });
     const applied = await review(second.id, 'all');
 
     expect(applied.provenanceErrors).toEqual([]);
-    expect(applied.verification?.missingRequirements.map((requirement) => requirement.id)).toEqual(['sessions-verified']);
+    expect(applied.verification?.missingRequirements).toEqual([]);
+    const { rows: sessions } = await getTestPool().query<{ startTime: string }>(`SELECT "startTime" FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`, [campId]);
+    expect(sessions).toEqual([{ startTime: '09:00' }]);
     const { rows } = await getTestPool().query<{ status: string }>(
       `SELECT e.status FROM "SurfaceVerificationEvent" e JOIN "SurfaceClaimDefinition" d ON d.id = e."claimId"
         WHERE d."fieldOrBehavior" = 'time' ORDER BY e."createdAt" DESC, e.id DESC LIMIT 1`,
     );
-    expect(rows[0]!.status).toBe('proposed');
+    expect(rows[0]!.status).toBe('verified');
   });
 
   it('approving a category together with a list that holds it records every field, with no id clash', async () => {

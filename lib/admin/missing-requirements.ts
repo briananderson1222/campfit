@@ -15,7 +15,7 @@
 import type { ClaimGroupRollup } from '@kontourai/surface';
 
 import { getPool } from '@/lib/db';
-import { labelFor } from '@/lib/enums';
+import { ENUM_OPTIONS, labelFor } from '@/lib/enums';
 
 import { STEWARD_CAMP_FIELDS, STEWARD_FIELD_OPTIONS, type StewardCampField } from './steward-entry';
 import { deriveCampVerification, deriveSessionVerification, projectTrustStatusToDataConfidence } from './verification-authority';
@@ -104,6 +104,8 @@ const INHERITED_FROM: Record<string, string> = {
 };
 
 const LIST_FIELDS = new Set(['ageGroups', 'pricing']);
+/** Single values that follow a list (review apply keeps each a member of its list); checked through the list, not entered here. */
+const LIST_TWINS: Record<string, string> = { campType: 'camp types', category: 'categories' };
 
 function isEmpty(value: unknown): boolean {
   return value === null || value === undefined || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && value.length === 0);
@@ -111,7 +113,7 @@ function isEmpty(value: unknown): boolean {
 
 function shortValue(field: string, value: unknown): string {
   if (typeof value !== 'string') return '';
-  const shown = STEWARD_FIELD_OPTIONS[field as StewardCampField] ? labelFor(field, value) : value;
+  const shown = ENUM_OPTIONS[field] ? labelFor(field, value) : value;
   return shown.length > 60 ? `${shown.slice(0, 57)}…` : shown;
 }
 
@@ -122,6 +124,12 @@ function campDetail(requirementId: string, status: string, value: unknown): stri
     return stale
       ? 'Checked, but too long ago. Check the list against the camp\'s website again, then attest it in the camp editor.'
       : 'Listed, but nobody has checked the list against the source yet. Approve it in review, or check it and attest it in the camp editor.';
+  }
+  const list = LIST_TWINS[requirementId];
+  if (list) {
+    return isEmpty(value)
+      ? `No value yet. Find it on the camp's website or call, then set the camp's ${list} in the camp editor and attest it.`
+      : `Not checked against the source yet. Approve the proposed ${list} in review, or check them and attest in the camp editor.`;
   }
   if (isEmpty(value)) return 'No value yet. Find it on the camp\'s website or call, then enter it here.';
   const shown = shortValue(requirementId, value);

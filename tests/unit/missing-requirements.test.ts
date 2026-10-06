@@ -44,7 +44,10 @@ describe('the missing-requirements guidance', () => {
     expect(byId.city!.detail).toContain('No value yet');
     expect(byId.description!.detail).toContain('nobody has checked');
     expect(byId.ageGroups!.entry).toBeUndefined();
-    expect(byId.campType!.entry).toMatchObject({ field: 'campType', input: 'select' });
+    // Camp type and category follow their lists; they are checked through the list, not entered here.
+    expect(byId.campType!.entry).toBeUndefined();
+    expect(byId.campType!.detail).toContain('camp editor');
+    expect(byId.registrationStatus!.entry).toMatchObject({ field: 'registrationStatus', input: 'select' });
     expect(byId['sessions-verified']!.detail).toBe('1 session is not fully checked (listed below).');
     expect(guidance.dataConfidence).toBe('PLACEHOLDER');
   });
@@ -74,5 +77,10 @@ describe('the missing-requirements guidance', () => {
     const html = renderToStaticMarkup(createElement(MissingRequirementsPanel, { guidance: bare }));
     expect(html).toContain('No website on file');
     expect(html).toContain('No phone number on file');
+  });
+
+  it('says so when the list could not be worked out, instead of showing nothing', () => {
+    const html = renderToStaticMarkup(createElement(MissingRequirementsPanel, { guidance: 'unavailable' }));
+    expect(html).toContain('data-testid="missing-requirements-unavailable"');
   });
 });

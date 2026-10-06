@@ -15,9 +15,12 @@
  * What a steward can enter here:
  *  - a session's start and end time (sessions have no other editor; this is
  *    the only session field this path writes);
- *  - a missing single-value camp requirement: description, camp type,
- *    category, registration status, city, website.
- * Lists (age groups, pricing) are not entered here.
+ *  - a missing single-value camp requirement: description, registration
+ *    status, city, website.
+ * Lists (age groups, pricing) are not entered here, and neither are camp type
+ * and category: each is the twin of a list (`campTypes`, `categories`) that
+ * review apply keeps it a member of, and entering the twin alone would leave
+ * the list, which public pages show, unchecked under a VERIFIED camp.
  *
  * One transaction on one connection, in the lock order every claim writer
  * uses (`lockCampForClaimWrites`), events stamped by the database clock after
@@ -35,7 +38,7 @@ import { createHash } from 'node:crypto';
 import type { ClaimDefinitionDraft, Evidence, VerificationEvent } from '@kontourai/surface';
 
 import { getPool } from '@/lib/db';
-import { CAMP_CATEGORY_OPTIONS, CAMP_TYPE_OPTIONS, REGISTRATION_STATUS_OPTIONS } from '@/lib/enums';
+import { REGISTRATION_STATUS_OPTIONS } from '@/lib/enums';
 import type { DataConfidence } from '@/lib/types';
 import { canonicalTime } from '@/lib/ingestion/session-time';
 
@@ -52,13 +55,11 @@ import { sessionClaimId } from './verification-policy';
 import { campfitSessionVocabulary, campfitVocabulary } from '../trust-vocabulary';
 
 /** The single-value camp requirements a steward can enter. */
-export const STEWARD_CAMP_FIELDS = ['description', 'campType', 'category', 'registrationStatus', 'city', 'websiteUrl'] as const;
+export const STEWARD_CAMP_FIELDS = ['description', 'registrationStatus', 'city', 'websiteUrl'] as const;
 export type StewardCampField = (typeof STEWARD_CAMP_FIELDS)[number];
 
 /** Allowed values for the select fields. `UNKNOWN` is not a registration status anyone can attest. */
 export const STEWARD_FIELD_OPTIONS: Partial<Record<StewardCampField, readonly { value: string; label: string }[]>> = {
-  campType: CAMP_TYPE_OPTIONS,
-  category: CAMP_CATEGORY_OPTIONS,
   registrationStatus: REGISTRATION_STATUS_OPTIONS.filter((option) => option.value !== 'UNKNOWN'),
 };
 
@@ -80,6 +81,12 @@ export class StewardEntryNotFoundError extends Error {
   }
 }
 
+/** Minutes after midnight of a time in the stored spelling (`9:00 AM`). */
+function minutesOf(time: string): number {
+  const [, h, m, half] = /^(\d{1,2}):(\d{2}) (AM|PM)$/.exec(time)!;
+  return (Number(h) % 12 + (half === 'PM' ? 12 : 0)) * 60 + Number(m);
+}
+
 const MAX_TEXT = { description: 5000, city: 100, websiteUrl: 2048 } as const;
 
 /**
@@ -95,6 +102,9 @@ export function parseStewardEntry(body: unknown): StewardEntry {
     const endTime = canonicalTime(input.endTime);
     if (!startTime || !endTime) {
       throw new StewardEntryValidationError('Enter both a start and an end time with am/pm, for example 9:00 AM and 3:00 PM.');
+    }
+    if (minutesOf(endTime) <= minutesOf(startTime)) {
+      throw new StewardEntryValidationError(`The end time (${endTime}) must be after the start time (${startTime}).`);
     }
     return { kind: 'session-time', scheduleId: input.scheduleId.trim(), startTime, endTime };
   }

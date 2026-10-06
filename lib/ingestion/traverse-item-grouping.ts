@@ -586,23 +586,29 @@ function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
  * page that states one daily time for every session ("Camp runs 9am-3pm")
  * arrives as ONE start/end time, paired positionally with the first session.
  * And without item indices a time can land on the wrong session's row. So a
- * row's time is decided by what its cited text is:
- *  - text that also states a date is about one session: it is kept only on
- *    the row whose own date citation it overlaps (the same line or card);
- *  - text that states no date is about every session ("every day", "camp
- *    hours"): when the page states exactly one such time, it applies to each
- *    session without a time of its own; when it states several (half day,
- *    full day), none is assigned — which one a session has is not stated.
+ * time is placed by where its cited text is, never by the row it arrived on:
+ *  - text that overlaps one session's own date citation (the same line or
+ *    card) is that session's time, and only that session's. Text that
+ *    overlaps several sessions' dates ("June 14-18: 9-12; June 21-25: 1-4")
+ *    is refused: which time belongs to which session is not settled by it.
+ *  - text that overlaps no session's dates, states no date and names no
+ *    session ("Week 2", "Session 1") is about every session: when the page
+ *    states exactly one such time, it applies to each session without a
+ *    time of its own; when it states several (half day, full day), none is.
+ *  - anything else (a date or session name the session's own citation does
+ *    not cover) is refused: it may be another session's.
  * A row whose start or end time was refused (`screenValue`), or that has only
- * one of the two, gets no time from its own proposals. Nothing is filled in
- * from a usual camp day.
+ * one of the two, contributes no time. Nothing is filled in from a usual camp
+ * day. Known limit: a per-session time written on its own line, away from
+ * the session's dates and without naming the session, reads as general.
  */
 function assignSessionTimes(
   rows: readonly { row: Map<string, FieldProposal>; dateParts: Map<string, FieldProposal>; label: string }[],
   undatedTimes: readonly Map<string, FieldProposal>[],
 ): { times: ({ start: FieldProposal; end: FieldProposal } | null)[]; notes: string[] } {
+  type Pair = { start: FieldProposal; end: FieldProposal };
   const notes: string[] = [];
-  const pairOf = (row: Map<string, FieldProposal>, label: string): { start: FieldProposal; end: FieldProposal } | null => {
+  const pairOf = (row: Map<string, FieldProposal>, label: string): Pair | null => {
     const start = row.get("startTime");
     const end = row.get("endTime");
     if (!start && !end) return null;
@@ -610,46 +616,61 @@ function assignSessionTimes(
     notes.push(`"${label}": ${start?.refused ?? end?.refused ?? `no ${start ? "end" : "start"} time was extracted`}`);
     return null;
   };
-  const isGeneral = (pair: { start: FieldProposal; end: FieldProposal }) => !statesADate(pair.start.excerpt) && !statesADate(pair.end.excerpt);
-
   const stated = [
     ...rows.map(({ row, label }) => pairOf(row, label)),
     ...undatedTimes.map((row) => pairOf(row, rowExcerpt(row))),
-  ].filter((pair): pair is { start: FieldProposal; end: FieldProposal } => pair !== null);
+  ].filter((pair): pair is Pair => pair !== null);
 
-  const general = new Map<string, { start: FieldProposal; end: FieldProposal }>();
-  for (const pair of stated.filter(isGeneral)) {
-    const key = `${pair.start.candidateValue}|${pair.end.candidateValue}`;
-    if (!general.has(key)) general.set(key, pair);
+  const dateLocatorsOf = rows.map(({ dateParts }) => [...dateParts.values()].map((fp) => fp.locator));
+  /** The sessions whose own date citation both ends of the pair's text overlap. */
+  const sessionsCovering = (pair: Pair): number[] =>
+    dateLocatorsOf.flatMap((locators, index) =>
+      [pair.start, pair.end].every((fp) => locators.some((locator) => spansOverlap(fp.locator, locator))) ? [index] : []);
+  const touchesAnySession = (pair: Pair): boolean =>
+    [pair.start, pair.end].some((fp) => dateLocatorsOf.some((locators) => locators.some((locator) => spansOverlap(fp.locator, locator))));
+  const namesASession = (pair: Pair): boolean =>
+    [pair.start, pair.end].some((fp) => statesADate(fp.excerpt) || SESSION_NAME_RE.test(fp.excerpt));
+
+  const own = new Map<number, Pair>();
+  const conflicted = new Set<number>();
+  const general = new Map<string, Pair>();
+  for (const pair of stated) {
+    const covering = sessionsCovering(pair);
+    if (covering.length === 1) {
+      const index = covering[0]!;
+      const existing = own.get(index);
+      if (existing && (existing.start.candidateValue !== pair.start.candidateValue || existing.end.candidateValue !== pair.end.candidateValue)) {
+        conflicted.add(index);
+      } else {
+        own.set(index, pair);
+      }
+    } else if (covering.length > 1) {
+      notes.push(`"${pair.start.excerpt}": the cited text gives the times of several sessions at once; which is which is not settled by it`);
+    } else if (!touchesAnySession(pair) && !namesASession(pair)) {
+      const key = `${pair.start.candidateValue}|${pair.end.candidateValue}`;
+      if (!general.has(key)) general.set(key, pair);
+    } else {
+      notes.push(`"${pair.start.excerpt}": the cited time is not in any one session's own text`);
+    }
+  }
+  for (const index of conflicted) {
+    own.delete(index);
+    notes.push(`"${rows[index]!.label}": the page states different times for this session`);
   }
   if (general.size > 1) {
     notes.push(`the page states ${general.size} different daily times (${[...general.values()].map((pair) => `${pair.start.candidateValue}–${pair.end.candidateValue}`).join(", ")}) without saying which session has which`);
   }
   const everySession = general.size === 1 ? [...general.values()][0]! : null;
-
-  // A time stated with a session's dates belongs to the session whose own
-  // date citation it overlaps, whichever row it arrived on.
-  const specific = stated.filter((pair) => !isGeneral(pair));
-  const used = new Set<{ start: FieldProposal; end: FieldProposal }>();
-  const times = rows.map(({ dateParts }) => {
-    const dateLocators = [...dateParts.values()].map((fp) => fp.locator);
-    const own = specific.find((pair) => [pair.start, pair.end].every((fp) => dateLocators.some((locator) => spansOverlap(fp.locator, locator))));
-    if (own) {
-      used.add(own);
-      return own;
-    }
-    return everySession;
-  });
-  for (const pair of specific) {
-    if (!used.has(pair)) notes.push(`"${pair.start.excerpt}": the cited time is not in any one session's own text`);
-  }
+  const times = rows.map((_row, index) => (conflicted.has(index) ? null : own.get(index) ?? everySession));
   return { times, notes };
 }
 
-const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b/i;
+const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i;
 const NUMERIC_DATE_RE = /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/;
+/** "Week 2", "Session 1", "Wk 3", "Term B": text that names one session. */
+const SESSION_NAME_RE = /\b(week|wk|session|term|block)\s*(\d+|[a-z]\b|one|two|three|four|five|six|seven|eight|nine|ten)\b/i;
 
-/** Whether a text states a calendar date ("June 14", "6/14", "2027-06-14"). */
+/** Whether a text states a calendar date ("June 14", "June 14th", "14 June", "6/14", "2027-06-14"). */
 function statesADate(text: string): boolean {
   return MONTH_DAY_RE.test(text) || NUMERIC_DATE_RE.test(text);
 }

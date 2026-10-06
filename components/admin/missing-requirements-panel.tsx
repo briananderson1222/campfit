@@ -125,7 +125,19 @@ function SessionTimeEntry({ campId, session }: { campId: string; session: Missin
   );
 }
 
-export function MissingRequirementsPanel({ guidance }: { guidance: MissingRequirementsGuidance | null }) {
+/**
+ * `'unavailable'`: the list could not be worked out. Said so, never shown as
+ * "nothing missing".
+ */
+export function MissingRequirementsPanel({ guidance }: { guidance: MissingRequirementsGuidance | 'unavailable' | null }) {
+  if (guidance === 'unavailable') {
+    return (
+      <p role="alert" data-testid="missing-requirements-unavailable"
+        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800/50 dark:bg-red-950 dark:text-red-300">
+        Could not work out which requirements are still missing. Reload the page to try again.
+      </p>
+    );
+  }
   if (!guidance || guidance.dataConfidence === 'VERIFIED') return null;
   const website = safeExternalHref(guidance.websiteUrl);
   const phone = guidance.contactPhone ? telHref(guidance.contactPhone) : undefined;

@@ -346,6 +346,35 @@ describe('a later crawl after a steward entry', () => {
   });
 });
 
+describe('an approval after a steward entry', () => {
+  it('a list that carries no time (a first-pass crawl shape, old: null) keeps the steward\'s time', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '9:00 AM', endTime: '3:30 PM' }, STEWARD);
+
+    await approveAll({ schedules: { ...NO_TIME, old: null } }, campId);
+    expect((await sessionOf(campId))[0]).toMatchObject({ id: session!.id, startTime: '9:00 AM', endTime: '3:30 PM' });
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ status: 'assumed', method: 'steward-entry' });
+    expect(await dataConfidence(campId)).toBe('VERIFIED');
+  });
+
+  it('a time the crawl kept from the stored session does not rewind a newer steward entry', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(NO_TIME), campId);
+    const [session] = await sessionOf(campId);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '9:00 AM', endTime: '3:30 PM' }, STEWARD);
+    // A proposal built now keeps 9:00-3:30 (the page states no time) ...
+    const kept = listDiff([], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' }), { ...weekOne(null), label: 'Week 2', startDate: '2027-06-21', endDate: '2027-06-25' }],
+      [{ excerpt: WEEK_ONE }, { excerpt: 'Week 2: June 21 - June 25, 2027' }]);
+    // ... then the steward corrects the time before it is approved.
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '8:00 AM', endTime: '2:00 PM' }, STEWARD);
+    await approveAll({ schedules: kept }, campId);
+    expect((await sessionOf(campId)).find((s) => s.id === session!.id)).toMatchObject({ startTime: '8:00 AM', endTime: '2:00 PM' });
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ status: 'assumed', method: 'steward-entry' });
+  });
+});
+
 describe('POST /api/admin/camps/[campId]/steward-entry', () => {
   function post(campId: string, body: unknown) {
     return stewardEntryRoute(
@@ -367,6 +396,9 @@ describe('POST /api/admin/camps/[campId]/steward-entry', () => {
     expect(vague.status).toBe(400);
     expect((await vague.json()).error).toContain('am/pm');
     expect((await sessionOf(campId))[0]!.startTime).toBeNull();
+    const backwards = await post(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '3:30 PM', endTime: '9:00 AM' });
+    expect(backwards.status).toBe(400);
+    expect((await post(campId, { kind: 'camp-field', field: 'campType', value: 'SUMMER_DAY' })).status).toBe(400);
 
     const ok = await post(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '9am', endTime: '3:30pm' });
     expect(ok.status).toBe(200);

@@ -434,16 +434,22 @@ follow-up.
 cited text states it with its half of the day (`9am`, `3:30 PM`, `9-3pm`,
 `15:00`); `8:30-3:00` states no half of the day and is refused, the time-of-day
 analogue of the year-in-quote rule for dates. A time is never defaulted: a
-session whose time is not stated is proposed without one. Text that states a
-date belongs to that session (matched by overlapping citation spans); text
-that states no date ("Camp runs 9am-3pm every day") applies to every session,
-but only when the page states exactly one such time.
+session whose time is not stated is proposed without one. A time is placed by
+where its cited text is: text overlapping one session's own date citation is
+that session's time; text overlapping several sessions' dates is refused;
+text that overlaps no session's dates, states no date and names no session
+("Camp runs 9am-3pm every day") applies to every session, but only when the
+page states exactly one such time. Anything else is refused.
 
 **A crawl never removes a stored time it does not state.** In `computeDiff`, a
 crawled session with no time that is the same session as a stored one (same
 plain label and dates, and the only stored session with them) keeps the
 stored time (`keepUnstatedSessionTimes`). A crawled time that differs is
-proposed for review.
+proposed for review. Review apply enforces the same rule under the camp lock
+for every proposal shape (`sessionRowsToApply`): a row's time is written only
+when the row cites where its time was read; any other time in a row (one
+`computeDiff` kept, possibly since changed by a steward) is treated as
+unstated and the stored time stays.
 
 **Missing requirements.** For a camp that is not VERIFIED, the admin camp page
 and the review page list every requirement the derivation reports as not
@@ -453,7 +459,8 @@ attributes under it, with the camp's website and phone.
 **Steward entry** (`lib/admin/steward-entry.ts`, `POST
 /api/admin/camps/[campId]/steward-entry`). A steward can enter a session's
 start and end time, or a missing single-value camp requirement (description,
-camp type, category, registration status, city, website). The entry is stored
+registration status, city, website). Camp type and category are not entered
+there: each is the twin of a list review apply keeps it a member of. The entry is stored
 and recorded as that steward's attestation: `human_attestation` evidence
 (`method: 'attestation'`, `metadata.reviewKind: 'steward-entry'`) and an
 `assumed` event with method `steward-entry`, counted like an admin
