@@ -442,12 +442,20 @@ The year excerpt is derived from the prepared page text
 citation, and only by these rules. A "heading" is a Markdown heading line
 (`#`) of the prepared text; a bold line is not one.
 
-- The date's own line (every line its cited text covers) states no year.
-  A line that states a year keeps today's rule: its cited text must state
-  the date's year.
+- The date's own lines (the lines its cited text covers that state a date)
+  state no year. A date whose own line states its year keeps today's rule.
+  A one-line citation still passes when it states the year. A citation over
+  several lines passes only when a line of it that states a date states the
+  year: models stretch a date's citation up to the heading ("## 2027 Camp
+  Dates / Week 1: ... / Week 2: ..."), and that heading is not the date's
+  own text. It is taken, and shown, as the year excerpt under the rules
+  below, or the date is refused.
 - The session is within one year: start and end in the same year, end not
   before start. A range across a year boundary ("December 28 - January 3")
   is never given one year; both years must be on its own line.
+- A citation that runs past a heading below the session's first own line
+  (one stretched across two sections) is refused: which heading is over the
+  session is not settled.
 - **Governing heading.** The nearest heading above the session's line, with
   no other heading between them, states exactly one year (a "2026-27"
   heading states two), the text under it up to the next heading states no

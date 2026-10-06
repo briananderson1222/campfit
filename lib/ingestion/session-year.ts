@@ -121,7 +121,7 @@ export function sessionYearFromPage(
   }
   const days = dates.map((date) => date.value.slice(0, 10));
   if (days.length === 2 && days[1]! < days[0]!) {
-    return { ok: false, why: "its end date is before its start date in the same year; a range across a year boundary needs both years stated on its own line" };
+    return { ok: false, why: `its end date (${days[1]}) is before its start date (${days[0]}); a range across a year boundary needs both years stated on its own line` };
   }
   const year = [...valueYears][0]!;
 
@@ -136,34 +136,33 @@ export function sessionYearFromPage(
     for (let index = from; index <= to; index++) covered.add(index);
   }
   const lineText = (index: number) => preparedText.slice(lines[index]!.start, lines[index]!.end);
-  const ownYears = new Set([...covered].flatMap((index) => [...yearsStatedIn(lineText(index))]));
-  if (ownYears.size > 0) {
-    return { ok: false, why: `its own line states ${yearList(ownYears)} but its cited text does not state ${year}; a year is taken from another excerpt only when the session's own line states none` };
-  }
-
-  // The session's own lines are those of its cited text that state a date (a
-  // card's dates may be a heading of their own); a heading among them is not
-  // the heading over the session.
+  // The session's own lines are those of its cited text that state a date. A
+  // citation the model stretched up to a heading or an intro line ("## 2027
+  // Camp Dates / Week 1: ... / Week 2: ...") covers lines that are not the
+  // session's; those are candidates for the year excerpt, not its own text.
   const own = new Set([...covered].filter((index) => statesADate(lineText(index))));
   const ownLines = own.size > 0 ? own : covered;
+  const ownYears = new Set([...ownLines].flatMap((index) => [...yearsStatedIn(lineText(index))]));
+  if (ownYears.size > 0) {
+    return { ok: false, why: `its own line states ${yearList(ownYears)} but not with this date (${year}); a year is taken from another excerpt only when the session's own line states none` };
+  }
+
   const firstOwn = Math.min(...ownLines);
+  const lastOwn = Math.max(...ownLines);
+  // The heading over the session: the nearest heading above its first own
+  // line. A heading among or below its own lines (a citation stretched across
+  // two sections) leaves which section the session is in unsettled.
+  for (let index = firstOwn + 1; index <= Math.max(lastOwn, ...covered); index++) {
+    if (!ownLines.has(index) && isHeading(lineText(index))) {
+      return { ok: false, why: `its cited text runs past the heading "${lineText(index).trim()}", so which heading is over the session is not settled` };
+    }
+  }
   const lastCovered = Math.max(...covered);
   let heading = -1;
-  for (let index = lastCovered; index >= 0; index--) {
-    if (ownLines.has(index)) continue;
+  for (let index = firstOwn - 1; index >= 0; index--) {
     if (isHeading(lineText(index))) {
       heading = index;
       break;
-    }
-  }
-  if (heading > firstOwn) {
-    // A heading inside the cited text, below the date line: it does not head this session.
-    heading = -1;
-    for (let index = firstOwn - 1; index >= 0; index--) {
-      if (isHeading(lineText(index))) {
-        heading = index;
-        break;
-      }
     }
   }
 
@@ -204,6 +203,20 @@ export function sessionYearFromPage(
     }
   }
   return { ok: false, why: `no line above it states ${year} without also stating a date` };
+}
+
+/**
+ * The year-in-quote rule for a session date. A one-line citation keeps
+ * today's rule: it states the year. A citation over several lines must state
+ * the year on one of its lines that also states a date: a heading or intro
+ * line the model stretched its citation up to ("## 2027 Camp Dates / Week 1:
+ * June 28 – July 2 / Week 2: ...") is not the date's own text, and such a
+ * year is taken only by the rules above, shown as the year excerpt.
+ */
+export function yearOnADateLine(excerpt: string, year: number): boolean {
+  const lines = excerpt.split("\n").filter((line) => line.trim());
+  if (lines.length <= 1) return excerpt.includes(String(year));
+  return lines.some((line) => statesADate(line) && yearsStatedIn(line).has(year));
 }
 
 /** Whether a year excerpt states exactly one year and it is every one of `dates`' year (the review-apply check). */

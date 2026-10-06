@@ -69,7 +69,7 @@
 import type { ExtractionProposal } from "@kontourai/traverse";
 import type { PricingUnit } from "@/lib/types";
 import { canonicalTime, readTimes, textStatesOnlyRange, textStatesTime } from "./session-time";
-import { sessionYearFromPage, statesADate, type YearCitation } from "./session-year";
+import { sessionYearFromPage, statesADate, yearOnADateLine, type YearCitation } from "./session-year";
 import {
   CAMP_TARGET_SCHEMA,
   ENUM_ARRAY_SCHEMA_PATHS,
@@ -103,6 +103,9 @@ function twentyFourHourAnswer(value: unknown): string | null {
 
 /** The per-session time leaves, relative to one item. */
 const SESSION_TIME_PATHS = new Set(["schedules[].startTime", "schedules[].endTime"]);
+
+/** The per-session date leaves, relative to one item. */
+const SESSION_DATE_PATHS = new Set(["schedules[].startDate", "schedules[].endDate"]);
 
 /** Why a date whose cited text does not state its year is refused. */
 const YEAR_NOT_IN_QUOTE = "its year is not stated in the cited text";
@@ -163,7 +166,15 @@ function screenValue(relPath: string, value: unknown, excerpt: string): { ok: tr
       if (!isIsoCalendarDate(value)) return { ok: false, why: "not a full calendar date (YYYY-MM-DD)" };
       // A provider asked for YYYY-MM-DD will supply a year the text does not
       // state ("December 21" becomes this year, or next). The cited excerpt
-      // must carry the year, or the date is a guess.
+      // must carry the year, or the date is a guess. For a session date the
+      // year must be on a line of the excerpt that states a date: a citation
+      // stretched up to a heading is not the date's own text, and such a
+      // year is taken only by the session-year rules (session-year.ts).
+      if (SESSION_DATE_PATHS.has(relPath)) {
+        return yearOnADateLine(excerpt, Number((value as string).slice(0, 4)))
+          ? { ok: true, value }
+          : { ok: false, why: YEAR_NOT_IN_QUOTE };
+      }
       return excerpt.includes((value as string).slice(0, 4))
         ? { ok: true, value }
         : { ok: false, why: YEAR_NOT_IN_QUOTE };

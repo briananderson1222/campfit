@@ -128,6 +128,31 @@ describe('a session date with no year on its own line', () => {
   });
 });
 
+describe('a citation the model stretched up to a heading', () => {
+  it('is not the date\'s own text: the heading becomes the year excerpt, shown to the reviewer', async () => {
+    const stretched = `## 2027 Camp Dates\n\n${W1}\n\n${W2}`;
+    const { item, preparedText } = await extract(['## 2027 Camp Dates', W1, W2],
+      [...session('2027-06-14', '2027-06-18', `## 2027 Camp Dates\n\n${W1}`), ...session('2027-06-21', '2027-06-25', stretched)]);
+    expect(preparedText).toContain(stretched);
+    expect(item.schedules.map((s) => [s.startDate, s.yearCitation?.excerpt])).toEqual([['2027-06-14', '## 2027 Camp Dates'], ['2027-06-21', '## 2027 Camp Dates']]);
+  });
+
+  it('across two sections does not take the year of the heading it starts from', async () => {
+    const old = 'Week 1: June 15 - June 19';
+    const across = `## 2027 Sessions\n\n${W1}\n\n## 2026 Sessions\n\n${old}`;
+    const { item, preparedText } = await extract(['## 2027 Sessions', W1, '## 2026 Sessions', old], session('2027-06-15', '2027-06-19', across));
+    expect(preparedText).toContain(across);
+    expect(item.schedules).toEqual([]);
+    expect(yearNote(item)).toContain('its cited text runs past the heading "## 2026 Sessions"');
+  });
+
+  it('a one-line citation keeps today\'s rule: the year in it is enough', async () => {
+    const narrow = 'Week 1: Nature 2027';
+    const { item } = await extract([`${narrow} June 14-18`], session('2027-06-14', '2027-06-18', narrow));
+    expect(item.schedules.map((s) => [s.startDate, s.yearCitation])).toEqual([['2027-06-14', undefined]]);
+  });
+});
+
 describe('two or more years that could apply', () => {
   it('a page stating two years, with no year in the heading over the sessions, is refused', async () => {
     const { item } = await extract(
@@ -195,7 +220,7 @@ describe('a range across a year boundary', () => {
   it('is refused when the model assigns both dates the heading\'s year', async () => {
     const { item } = await extract(['## 2026 Winter Break Camp', LINE], session('2026-12-28', '2026-01-03', LINE));
     expect(item.schedules).toEqual([]);
-    expect(yearNote(item)).toContain('its end date is before its start date');
+    expect(yearNote(item)).toContain('its end date (2026-01-03) is before its start date (2026-12-28)');
   });
 
   it('keeps today\'s behaviour when both years are stated on its own line', async () => {
