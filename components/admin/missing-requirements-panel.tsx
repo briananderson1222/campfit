@@ -44,7 +44,7 @@ async function postEntry(campId: string, body: Record<string, string>): Promise<
 function SaveButton({ busy, label = 'Save as checked' }: { busy: boolean; label?: string }) {
   return (
     <button type="submit" disabled={busy}
-      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-pine-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pine-700 disabled:opacity-60">
+      className="inline-flex max-w-full shrink-0 items-center justify-center gap-1.5 whitespace-normal rounded-lg bg-pine-600 px-3 py-1.5 text-left text-xs font-semibold text-white hover:bg-pine-700 disabled:opacity-60">
       {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
       {label}
     </button>
