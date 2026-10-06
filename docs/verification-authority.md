@@ -499,7 +499,7 @@ the clear reading does not.
   whose end date is before its start date is refused at extraction and at
   review apply, wherever its year came from. Review apply applies the same
   year rule to a row with no year citation whose citation is stretched or
-  has a line stating more than one year; a row with a year citation counts
+  states more than one year across its lines; a row with a year citation counts
   only when none of its dates' date lines states a year.
 - The date's own lines (the lines of a stretched citation that state a
   date; every line of any other citation) state no year in the broad

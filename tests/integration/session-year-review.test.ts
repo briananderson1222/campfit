@@ -40,6 +40,9 @@ const PAGE = [
   'Dates for 2026 and 2027 are below.',
   'Winter week: December 28, 2026 - January 3, 2027',
   WEEK_SIX,
+  'Founded in 2009.',
+  'Summer 2027 Session 1',
+  'June 14 - 18',
 ].join('\n');
 
 const ROW = { label: 'Week 1', startDate: '2027-06-14', endDate: '2027-06-18', startTime: null, endTime: null, earlyDropOff: null, latePickup: null };
@@ -189,6 +192,14 @@ describe('a session whose year comes from another excerpt', () => {
     const campId = await seedCamp();
     const row = { ...ROW, label: 'Week 6', startDate: '2027-07-19', endDate: '2027-07-23' };
     await approveAll({ schedules: { old: [], new: [row], confidence: 0.9, excerpt: WEEK_SIX, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt: WEEK_SIX, year: { excerpt: HEADING } }] } }, campId);
+    expect(await datesClaimOf(campId)).not.toBe('verified');
+  });
+
+  it('fix round 6: a row with no year citation whose citation states two years across its lines is not attested', async () => {
+    const excerpt = 'Founded in 2009.\nSummer 2027 Session 1\nJune 14 - 18';
+    const row = { ...ROW, label: 'Session 1', startDate: '2027-06-14', endDate: '2027-06-18' };
+    const campId = await seedCamp();
+    await approveAll({ schedules: { old: [], new: [row], confidence: 0.9, excerpt, sourceUrl: URL, mode: 'add_items', rowCitations: [{ excerpt }] } }, campId);
     expect(await datesClaimOf(campId)).not.toBe('verified');
   });
 });

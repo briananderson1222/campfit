@@ -437,9 +437,9 @@ export function yearOnADateLine(excerpt: string, value: string, role: "start" | 
   });
 }
 
-/** Whether any line of a citation states more than one year in the broad reading. */
-export function statesSeveralYearsOnALine(excerpt: string): boolean {
-  return excerpt.split("\n").some((line) => yearsStatedIn(line).size > 1);
+/** Whether a citation, across all its lines, states more than one year in the broad reading. */
+export function statesSeveralYears(excerpt: string): boolean {
+  return new Set(excerpt.split("\n").flatMap((line) => [...yearsStatedIn(line)])).size > 1;
 }
 
 /** Whether a year excerpt clearly states exactly one year, with no other number that could be one, and it is every one of `dates`' year (the review-apply check). */
