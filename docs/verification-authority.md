@@ -452,8 +452,8 @@ defaulted or guessed:
   own is never one session's, wherever it sits (a card's time above or below
   its dates is refused: position does not say whose it is);
 - such a line is the camp's daily time, for every session without its own,
-  only when it is before the first or after the last session line and not
-  right next to it, states no date, names no session, does not read as office
+  only when it is above the first session line and not right above it (after
+  or among the session lines it may be the last card's own time), states no date, names no session, does not read as office
   or contact hours (on the line or under its heading), and the WHOLE page
   outside the session date lines states exactly one time range, this one.
   The proposal marks it (`rowCitations[i].timePageWide`, the page line), and
@@ -476,20 +476,23 @@ proposed for review. Review apply enforces the same rule under the camp lock
 for every proposal shape (`sessionRowsToApply`): a row's time is written only
 when the row cites where its time was read; any other time in a row (one
 `computeDiff` kept, possibly since changed by a steward) is treated as
-unstated and the stored time stays. A cited time that would replace a stored
-value the proposal did not show (a steward's time entered or changed after
-the page was read, a proposal with no `old` row for the session, or a
-steward's "no fixed daily time", decided by the time claim's newest event) is not applied for that session: the stored
-value stays, the rest of the apply goes through, and the apply result says
-so (`provenanceErrors`, step `sessionTimeKept`), which the review page
-shows as a deliberate keep, naming each session. Sessions that share a label
-and dates and are told apart only by their times refuse the apply when the
-cited time is neither stored session's and the proposal did not show them. So is a cited time the proposal showed
+unstated and the stored time stays. So is a cited time the proposal showed
 as unchanged (its `old` row had the same time): it was not a change the
-reviewer approved, and a time changed since (by a steward) stays. Known limit:
-sessions that share a label and dates and are told apart only by their times
-(morning and afternoon) are matched by time; a crawl that lists them without
-times does not keep their stored times, and the approval replaces them.
+reviewer approved, and a time changed since (by a steward) stays.
+
+A cited time that would replace a stored value the proposal did not show (a
+steward's time entered or changed after the page was read, a proposal with
+no `old` row for the session, or a steward's "no fixed daily time", decided
+by the time claim's newest event) is not applied for that session: the
+stored value stays, the rest of the apply goes through, and the apply result
+says so (`provenanceErrors`, step `sessionTimeKept`), which the review page
+shows as a deliberate keep, naming each session.
+
+Sessions that share a label and dates and are told apart only by their
+times (morning and afternoon) are matched by time. Known limits: a cited
+time that is neither stored session's, when the proposal did not show them,
+refuses the apply; and a crawl that lists them without times does not keep
+their stored times, so the approval replaces them.
 
 **Missing requirements.** For a camp that is not VERIFIED, the admin camp page
 and the review page list every requirement the derivation reports as not

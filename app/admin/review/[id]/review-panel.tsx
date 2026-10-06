@@ -421,7 +421,7 @@ export function ReviewPanel({
         <div data-testid="kept-session-times" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p className="font-semibold">Applied. These session times were kept on purpose, not replaced:</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
-            {keptSessions.map((sentence) => <li key={sentence}>{sentence}</li>)}
+            {keptSessions.map((sentence, index) => <li key={`kept-${index}`}>{sentence}</li>)}
           </ul>
         </div>
       )}

@@ -649,9 +649,9 @@ function rowConfidence(row: Map<string, FieldProposal>): number | undefined {
  *    own, above or below its dates, is refused, because position does not
  *    say which card it belongs to (the steward-entry guidance covers it);
  *  - the camp's daily time, for every session without one, only when its
- *    line is before the first or after the last session line and not right
- *    next to it (there it may be one card's own time), states no date and
- *    names no session,
+ *    line is before the first session line and not right above it (after or
+ *    among the session lines it may be the last card's own time), states no
+ *    date and names no session,
  *    neither it nor its heading
  *    reads as office or contact hours, and the whole page outside the
  *    session date lines states exactly one time range, this one. Such a time
@@ -762,10 +762,15 @@ function assignSessionTimes(
       continue;
     }
     const sessionIndices = [...sessionLineSet];
-    if (index >= Math.min(...sessionIndices) - 1 && index <= Math.max(...sessionIndices) + 1) {
-      // Between session lines, or right next to the first or last one, it
-      // may be one card's own time. Refused, never attributed.
-      notes.push(`"${pair.start.excerpt}": it sits among or right next to the session lines; whether it is one session's time or every session's is not settled`);
+    if (sessionIndices.length === 0) {
+      notes.push(`"${pair.start.excerpt}": no session's dates could be placed on the page, so a page-wide time cannot be told from a session's`);
+      continue;
+    }
+    if (index >= Math.min(...sessionIndices) - 1) {
+      // Only text BEFORE the session list (and not right above it) can be the
+      // camp's daily time. After or among the session lines it may be the
+      // last card's own time. Refused, never attributed.
+      notes.push(`"${pair.start.excerpt}": it is not above the session list; whether it is one session's time or every session's is not settled`);
       continue;
     }
     const heading = lines.slice(0, index).reverse().find((candidate) => preparedText.slice(candidate.start, candidate.end).trimStart().startsWith("#"));

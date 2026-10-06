@@ -23,7 +23,7 @@ import { createReplayProvider } from '../fixtures/real-crawl/replay';
 const DATES_W1 = 'Week 1: June 14 - June 18, 2027';
 const DATES_W2 = 'Week 2: June 21 - June 25, 2027';
 const DAILY = 'Camp runs 9:00 AM - 3:30 PM every day.';
-/** A line between the sessions and a daily-time line, so the daily line is not next to a session's line. */
+/** A line between a daily-time line and the sessions below it, so the daily line is not right above a session's line. */
 const GAP = 'Ask the office about early drop-off.';
 
 function page(lines: readonly string[]): string {
@@ -90,7 +90,7 @@ describe('a crawled session time', () => {
   it('is extracted with its own citation; one daily time stated once applies to every session', async () => {
     // The model gives the daily time on each session; Traverse keeps one copy
     // of a repeated proposal (same field, value and text).
-    const { result, item } = await extract([DATES_W1, DATES_W2, GAP, DAILY], [
+    const { result, item } = await extract([DAILY, GAP, DATES_W1, DATES_W2], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', DAILY),
       answer('items[].schedules[].endTime', '3:30 PM', DAILY),
@@ -129,7 +129,7 @@ describe('a crawled session time', () => {
   });
 
   it('is refused with only one end stated', async () => {
-    const { item } = await extract([DATES_W1, DATES_W2, GAP, DAILY], [
+    const { item } = await extract([DAILY, GAP, DATES_W1, DATES_W2], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', DAILY),
     ]);
@@ -158,7 +158,7 @@ describe('a crawled session time', () => {
   it('is not assigned when the page states several daily times without saying which session has which', async () => {
     const half = 'Half day: 9:00 AM - 12:00 PM.';
     const full = 'Full day: 9:00 AM - 3:00 PM.';
-    const { item } = await extract([DATES_W1, DATES_W2, half, full], [
+    const { item } = await extract([half, full, GAP, DATES_W1, DATES_W2], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', half),
       answer('items[].schedules[].endTime', '12:00 PM', half),
@@ -207,7 +207,7 @@ describe('a time placed by where its text is', () => {
     'Hours for all weeks: 9:00 AM - 3:30 PM.',
     'Each week 9 am - 3:30 pm.',
   ])('a daily time stated for every session ("%s") applies to each', async (daily) => {
-    const { item } = await extract([DATES_W1, DATES_W2, GAP, daily], [
+    const { item } = await extract([daily, GAP, DATES_W1, DATES_W2], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', daily),
       answer('items[].schedules[].endTime', '3:30 PM', daily),
@@ -302,7 +302,7 @@ describe('a time is not guessed', () => {
   });
 
   it('without the page text, no daily time is applied to every session', async () => {
-    const { result } = await extract([DATES_W1, DATES_W2, GAP, DAILY], [
+    const { result } = await extract([DAILY, GAP, DATES_W1, DATES_W2], [
       ...SESSION_DATES,
       answer('items[].schedules[].startTime', '9:00 AM', DAILY),
       answer('items[].schedules[].endTime', '3:30 PM', DAILY),
@@ -399,6 +399,44 @@ describe('a time belongs to a session only when the page text settles it', () =>
     ]);
     expect(shape(item)).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', null, null]]);
     expect(item.schedules[0]!.timePageWideLine).toBeUndefined();
+  });
+
+  // The layout a review found leaking: the last card's own time, two lines after the last session line.
+  it('H1 (round 5): the last card\'s own time below the session list is never every session\'s', async () => {
+    const page = `<h2>Sessions</h2><p>${D1}</p><p>Morning explorers. Times TBA.</p><p>${D2}</p><p>Afternoon makers</p><p>1:00 PM - 4:00 PM</p>`;
+    const item = await fromHtml(page, [NAME, ...dates, ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+    const variant = `<h2>Sessions</h2><p>${D1}</p><p>Morning explorers. Times TBA.</p><p>${D2}</p><p>Afternoon makers</p><p>Ages 8-12</p><p>1:00 PM - 4:00 PM</p>`;
+    expect(shape(await fromHtml(variant, [NAME, ...dates, ...time('1:00 PM', '4:00 PM', '1:00 PM - 4:00 PM')]))).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+  });
+
+  it('H1 (round 5): no page-wide time when no session\'s dates could be placed on the page', () => {
+    const text = '# Camp\n\nCamp runs 9:00 AM - 3:00 PM.\n\nMore below.';
+    const at = (excerpt: string) => { const i = text.indexOf(excerpt); return `chars:${i}-${i + excerpt.length}`; };
+    const proposal = (fieldPath: string, candidateValue: unknown, excerpt: string, locator: string): ExtractionProposal =>
+      ({ fieldPath, candidateValue, provenance: { excerpt, locator }, extractor: 'test' } as ExtractionProposal);
+    // The dates' citations point past the end of this text: no session line can be placed.
+    const item = assembleItems([
+      proposal('items[].name', 'Camp', 'Camp', at('Camp')),
+      proposal('items[].schedules[].startDate', '2027-06-14', D1, 'chars:900-923'),
+      proposal('items[].schedules[].endDate', '2027-06-18', D1, 'chars:900-923'),
+      proposal('items[].schedules[].startTime', '9:00 AM', 'Camp runs 9:00 AM - 3:00 PM.', at('Camp runs 9:00 AM - 3:00 PM.')),
+      proposal('items[].schedules[].endTime', '3:00 PM', 'Camp runs 9:00 AM - 3:00 PM.', at('Camp runs 9:00 AM - 3:00 PM.')),
+    ], { preparedText: text })[0]!;
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([[null, null]]);
+    expect(item.operatorWarnings.join('\n')).toContain('no session\'s dates could be placed');
+  });
+
+  it('a time whose line carries several sessions\' dates is refused', async () => {
+    const line = `${D1} and ${D2}: 9:00 AM - 3:00 PM`;
+    const item = await fromHtml(`<p>${line}</p>`, [
+      NAME,
+      answer('items[].schedules[].startDate', '2027-06-14', D1), answer('items[].schedules[].endDate', '2027-06-18', D1),
+      answer('items[].schedules[].startDate', '2027-06-21', D2), answer('items[].schedules[].endDate', '2027-06-25', D2),
+      ...time('9:00 AM', '3:00 PM', '9:00 AM - 3:00 PM'),
+    ]);
+    expect(shape(item)).toEqual([['2027-06-14', null, null], ['2027-06-21', null, null]]);
+    expect(item.operatorWarnings.join('\n')).toContain('carries several sessions');
   });
 
   it('M2: office hours are not the camp day, on the line or under its heading', async () => {

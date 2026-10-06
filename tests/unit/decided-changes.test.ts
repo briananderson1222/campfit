@@ -94,6 +94,14 @@ describe('after an approve, the review page', () => {
       { step: 'sessionTimeKept', message: 'Session "Week 2": a steward recorded that it has no fixed daily time.' },
     ] });
     expect(kept).toEqual({ stay: true, message: null, kept: ['Session "Week 1": kept 8:00 AM–2:00 PM.', 'Session "Week 2": a steward recorded that it has no fixed daily time.'] });
+    const two = approveOutcome({ provenanceErrors: [
+      { step: 'writeChangeLogs', message: 'change log blocked' },
+      { step: 'sessionTimeKept', message: 'Session "Week 1": kept.' },
+      { step: 'recordReviewDecision', message: 'metrics blocked' },
+    ] });
+    expect(two.message).toContain('change log blocked');
+    expect(two.message).toContain('metrics blocked');
+    expect(two.kept).toEqual(['Session "Week 1": kept.']);
     const both = approveOutcome({ provenanceErrors: [{ step: 'sessionTimeKept', message: 'Session "Week 1": kept.' }, { step: 'writeChangeLogs', message: 'blocked' }] });
     expect(both.message).toContain('(writeChangeLogs)');
     expect(both.message).not.toContain('sessionTimeKept');
