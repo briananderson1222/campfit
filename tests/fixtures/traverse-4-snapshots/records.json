@@ -1,0 +1,48 @@
+{
+  "traverseVersion": "4.1.0",
+  "records": [
+    {
+      "writer": "traverse.fetchSource",
+      "id": "v4-utf8",
+      "snapshotRef": "traverse-snapshot:v4-utf8?url=https%3A%2F%2Fv4.example.test%2Fv4-utf8&sha256=4c55727623123571722357e060cad5a023b10f473181304e9870d984de62ec58&fetchedAt=2026-10-01T12%3A00%3A00.000Z",
+      "bodyHash": "4c55727623123571722357e060cad5a023b10f473181304e9870d984de62ec58",
+      "preparedArtifact": {
+        "format": "traverse-prepared-artifact",
+        "version": 1,
+        "digest": "47fd43efa3a98a8433bddb1c9c6f107cb708ea70d1580487b6499c95ebccc775",
+        "preparationMode": "markdown",
+        "preparationVersion": "3+linkedom@0.18.12+turndown@7.2.4",
+        "contentLength": 40,
+        "sourceSnapshotRef": "traverse-snapshot:v4-utf8?url=https%3A%2F%2Fv4.example.test%2Fv4-utf8&sha256=4c55727623123571722357e060cad5a023b10f473181304e9870d984de62ec58&fetchedAt=2026-10-01T12%3A00%3A00.000Z",
+        "ref": "traverse-prepared-artifact:v1:sha256:7eb96339bd0fb5124bdac3d01e191a6240df7266a713156b67d362ea1348b7bc"
+      },
+      "preparedText": "# Pine Ridge\n\nAges 8 - 10\n\nPrice: $3,850",
+      "body": "<html><body><main><h1>Pine Ridge</h1><p>Ages 8 - 10</p><p>Price: $3,850</p></main></body></html>"
+    },
+    {
+      "writer": "traverse.fetchSource",
+      "id": "v4-latin1",
+      "snapshotRef": "traverse-snapshot:v4-latin1?url=https%3A%2F%2Fv4.example.test%2Fv4-latin1&sha256=850343361ebbe15d52028764c60cc0d794cfbf000f7d482cf9d861c2172df59d&fetchedAt=2026-10-01T12%3A00%3A00.000Z",
+      "bodyHash": "850343361ebbe15d52028764c60cc0d794cfbf000f7d482cf9d861c2172df59d",
+      "preparedArtifact": {
+        "format": "traverse-prepared-artifact",
+        "version": 1,
+        "digest": "ea580ea82bc6fe9e8dcd8d707084b58d33e724c0021f09213a6356a65ab3686f",
+        "preparationMode": "markdown",
+        "preparationVersion": "3+linkedom@0.18.12+turndown@7.2.4",
+        "contentLength": 47,
+        "sourceSnapshotRef": "traverse-snapshot:v4-latin1?url=https%3A%2F%2Fv4.example.test%2Fv4-latin1&sha256=850343361ebbe15d52028764c60cc0d794cfbf000f7d482cf9d861c2172df59d&fetchedAt=2026-10-01T12%3A00%3A00.000Z",
+        "ref": "traverse-prepared-artifact:v1:sha256:f9d0a26ea4c8d7eada2faa3727c9e15edf04ab843af1a740c5976a86967718cc"
+      },
+      "preparedText": "# Pine Ridge\n\nAges 8 - 10\n\nCaf� du camp: $3,850",
+      "body": "<html><body><main><h1>Pine Ridge</h1><p>Ages 8 - 10</p><p>Caf� du camp: $3,850</p></main></body></html>"
+    },
+    {
+      "writer": "forage.fetchSource",
+      "id": "v4-forage-latin1",
+      "snapshotRef": "traverse-snapshot:v4-forage-latin1?url=https%3A%2F%2Fv4.example.test%2Fforage-latin1&sha256=1181730064a43fded32fbd74ff86ff3ea80087ab248307fbfc25a0623b786006&fetchedAt=2026-10-01T12%3A00%3A00.000Z",
+      "bodyHash": "1181730064a43fded32fbd74ff86ff3ea80087ab248307fbfc25a0623b786006",
+      "body": "<html><body><main><h1>Pine Ridge</h1><p>Ages 8 - 10</p><p>Café du camp: $3,850</p></main></body></html>"
+    }
+  ]
+}

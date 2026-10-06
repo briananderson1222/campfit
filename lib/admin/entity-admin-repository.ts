@@ -7,6 +7,7 @@ import { refreshCampVerificationCacheOnLockedClient } from './verification-autho
 import { recordEvidenceOnLockedClient } from './claim-store';
 import { VERIFIED_CAMP_FIELDS } from './verification-policy';
 import { buildSnapshotSourceRef, parseAnySnapshotSourceRef } from '@kontourai/traverse/fetch';
+import { isSnapshotIntact } from '@/lib/ingestion/snapshot-integrity';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 import { parseCharsLocator, resolveReviewExcerpt } from './review-excerpt-resolution';
 
@@ -432,7 +433,7 @@ async function resolveStoredSourceCitation(citation: ValidatedSourceCitation): P
   const parsed = parseAnySnapshotSourceRef(sourceRef);
   if (!parsed) throw new AttestationValidationError('A valid snapshot sourceRef is required for source attestations.');
   const snapshot = await createCampfitSnapshotStore().get(parsed.sourceId, parsed.bodyHash);
-  if (!snapshot) throw new AttestationValidationError('The referenced snapshot is unavailable.');
+  if (!snapshot || !isSnapshotIntact(snapshot)) throw new AttestationValidationError('The referenced snapshot is unavailable.');
   if (!/^[a-f0-9]{64}$/i.test(parsed.bodyHash) || snapshot.bodyHash !== parsed.bodyHash) {
     throw new AttestationValidationError('The snapshot reference must contain the exact full body hash.');
   }

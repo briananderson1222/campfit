@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import type { Snapshot } from "@kontourai/traverse/fetch";
+import { buildSnapshotSourceRef, fetchSource, snapshotHashBasis, type Snapshot } from "@kontourai/traverse/fetch";
 import { buildSnapshotSourceRef as buildForageSnapshotRef, parseSnapshotSourceRef as parseForageSnapshotRef } from "@kontourai/forage/fetch";
 
 import { withExactSnapshotLookup } from "@/lib/ingestion/lookout-snapshot-lookup";
+import { isSnapshotIntact } from "@/lib/ingestion/snapshot-integrity";
 
 import {
   SNAPSHOT_BUCKET,
@@ -145,17 +146,23 @@ describe("createSupabaseSnapshotStore", () => {
   it("returns undefined for an ambiguous body-hash prefix", async () => {
     const storage = new InMemoryStorageClient();
     const store = createSupabaseSnapshotStore({ storage });
-    const first = snapshot("2026-07-13T10:00:00.000Z", {
-      bodyHash: `abc${"1".repeat(61)}`,
-    });
-    const second = snapshot("2026-07-13T11:00:00.000Z", {
-      body: "different body",
-      bodyHash: `abc${"2".repeat(61)}`,
-    });
+    // Two real bodies whose hashes share a 3-hex-digit prefix (put() refuses a
+    // record whose bodyHash is not the hash of its content).
+    const byPrefix = new Map<string, string>();
+    let pair: [string, string] | undefined;
+    for (let i = 0; !pair; i += 1) {
+      const body = `body ${i}`;
+      const prefix = createHash("sha256").update(body).digest("hex").slice(0, 3);
+      const seen = byPrefix.get(prefix);
+      if (seen) pair = [seen, body];
+      else byPrefix.set(prefix, body);
+    }
+    const first = snapshot("2026-07-13T10:00:00.000Z", { body: pair[0] });
+    const second = snapshot("2026-07-13T11:00:00.000Z", { body: pair[1] });
     await store.put(first);
     await store.put(second);
 
-    expect(await store.get(first.sourceId, "abc")).toBeUndefined();
+    expect(await store.get(first.sourceId, first.bodyHash.slice(0, 3))).toBeUndefined();
     expect(await store.get(first.sourceId, first.bodyHash)).toEqual(first);
   });
 
@@ -242,5 +249,133 @@ describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () =>
     const found = await exact.findExact(laterLookup);
     expect(found.kind).toBe('found');
     expect(found.kind === 'found' && found.snapshot.fetchedAt).toBe('2026-09-29T10:00:00.000Z');
+  });
+});
+
+/**
+ * Traverse 5's SnapshotStore contract (docs/decisions/text-snapshot-bytes.md in
+ * @kontourai/traverse), run against CampFit's own Supabase store.
+ */
+describe("Traverse 5 snapshot contract in the Supabase store", () => {
+  const sourceId = "https://latin1.example/camps";
+  // "Café Camp" in ISO-8859-1: é is the single byte 0xE9, not valid UTF-8.
+  const latin1Html = "<html><body><h1>Café Camp</h1></body></html>";
+  const latin1Bytes = Uint8Array.from([...latin1Html].map((ch) => ch.codePointAt(0)!));
+
+  /** A capture made by Traverse 5's own fetchSource, so the record has the exact shape its writer produces. */
+  async function capture(bytes: Uint8Array, contentType: string, fetchedAt = "2026-10-05T10:00:00.000Z"): Promise<Snapshot> {
+    const result = await fetchSource(
+      { id: sourceId, url: "https://latin1.example/camps", respectRobots: false, retries: 0 },
+      {
+        clock: () => fetchedAt,
+        sleep: async () => {},
+        fetch: async () => new Response(bytes.slice(), { status: 200, headers: { "content-type": contentType } }),
+      },
+    );
+    if (!result.snapshot) throw new Error(`fetch failed: ${JSON.stringify(result.error)}`);
+    return result.snapshot;
+  }
+
+  it("stores and reads back a latin1 capture hashed by its bytes", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const latin1 = await capture(latin1Bytes, "text/html; charset=iso-8859-1");
+    expect(latin1.body).toBe(latin1Html);
+    expect(snapshotHashBasis(latin1)).toBe("bytes");
+    expect(latin1.bodyHash).toBe(createHash("sha256").update(latin1Bytes).digest("hex"));
+    expect(latin1.bodyHash).not.toBe(createHash("sha256").update(latin1Html, "utf8").digest("hex"));
+
+    await store.put(latin1);
+    const readBack = await store.get(sourceId, latin1.bodyHash);
+    expect(readBack).toEqual(latin1);
+    expect(isSnapshotIntact(readBack!)).toBe(true);
+    expect(buildSnapshotSourceRef(readBack!)).toBe(buildSnapshotSourceRef(latin1));
+  });
+
+  it("put() throws for a record that would not read back, and stores nothing", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const latin1 = await capture(latin1Bytes, "text/html; charset=iso-8859-1");
+    const legacy = snapshot("2026-07-12T10:00:00.000Z");
+
+    const refused: Snapshot[] = [
+      { ...legacy, bodyHash: "a".repeat(64) }, // placeholder hash
+      { ...latin1, body: "Caf� Camp" }, // body is not the decode of its bytes
+      { ...latin1, bodyHash: createHash("sha256").update(latin1.body, "utf8").digest("hex") }, // hash on the wrong basis
+      { ...legacy, fetchedAt: "July 12 2026" }, // not an ISO-8601 instant
+      { ...legacy, fetchedAt: "2026-07-12T10:00:00.000Z/../../other" },
+    ];
+    for (const record of refused) {
+      await expect(store.put(record)).rejects.toBeInstanceOf(TypeError);
+    }
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("skips a stored record whose content no longer hashes to its bodyHash", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const latin1 = await capture(latin1Bytes, "text/html; charset=iso-8859-1");
+    const older = await capture(Uint8Array.from([...latin1Bytes, 0x0a]), "text/html; charset=iso-8859-1", "2026-10-04T10:00:00.000Z");
+    await store.put(older);
+    await store.put(latin1);
+    const key = [...storage.objects.keys()].find((name) => name.includes("2026-10-05"))!;
+
+    // A byte changed in storage: the record is absent, and latest() falls back to the older capture.
+    const stored = JSON.parse(storage.objects.get(key)!) as { bytes: Record<string, number> };
+    stored.bytes["5"] = 0x41;
+    storage.objects.set(key, JSON.stringify(stored));
+    expect(await store.get(sourceId, latin1.bodyHash)).toBeUndefined();
+    expect((await store.latest(sourceId))?.fetchedAt).toBe("2026-10-04T10:00:00.000Z");
+  });
+
+  it("reads a byte-hashed record's text from its bytes, whatever body it stored", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const latin1 = await capture(latin1Bytes, "text/html; charset=iso-8859-1");
+    await store.put(latin1);
+    const [key] = [...storage.objects.keys()];
+    const stored = JSON.parse(storage.objects.get(key!)!) as { body: string };
+    stored.body = "<html><body><h1>Rewritten</h1></body></html>";
+    storage.objects.set(key!, JSON.stringify(stored));
+
+    expect((await store.get(sourceId, latin1.bodyHash))?.body).toBe(latin1Html);
+  });
+
+  it("skips a stored pre-Traverse-5 record whose body was rewritten", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const legacy = snapshot("2026-07-12T10:00:00.000Z");
+    await store.put(legacy);
+    const [key] = [...storage.objects.keys()];
+    const stored = JSON.parse(storage.objects.get(key!)!) as { body: string };
+    stored.body = `${stored.body} (rewritten)`;
+    storage.objects.set(key!, JSON.stringify(stored));
+
+    expect(await store.get(legacy.sourceId, legacy.bodyHash)).toBeUndefined();
+    expect(await store.list(legacy.sourceId)).toEqual([]);
+  });
+
+  it("orders snapshots by the instant fetchedAt names, not its text", async () => {
+    const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
+    // 10:00+05:00 is 05:00Z, before 06:00Z, though its text sorts after.
+    const offset = snapshot("2026-07-13T10:00:00+05:00", { body: "offset" });
+    const utc = snapshot("2026-07-13T06:00:00Z", { body: "utc" });
+    const subSecond = snapshot("2026-07-13T06:00:00.500Z", { body: "sub-second" });
+    await store.put(utc);
+    await store.put(offset);
+    await store.put(subSecond);
+
+    expect((await store.list(utc.sourceId)).map((item) => item.body)).toEqual(["sub-second", "utc", "offset"]);
+    expect((await store.latest(utc.sourceId))?.body).toBe("sub-second");
+  });
+
+  it("still reads a UTF-8 page's capture on the same reference as before (no bytes difference)", async () => {
+    const store = createSupabaseSnapshotStore({ storage: new InMemoryStorageClient() });
+    const utf8Html = "<html><body><h1>Pine Ridge</h1></body></html>";
+    const utf8 = await capture(new TextEncoder().encode(utf8Html), "text/html; charset=utf-8");
+    // Plain UTF-8 without a byte-order mark: the hash is the same on either basis.
+    expect(utf8.bodyHash).toBe(createHash("sha256").update(utf8Html, "utf8").digest("hex"));
+    await store.put(utf8);
+    expect(await store.get(sourceId, utf8.bodyHash)).toEqual(utf8);
   });
 });

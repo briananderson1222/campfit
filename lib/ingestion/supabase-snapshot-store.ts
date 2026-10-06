@@ -7,7 +7,9 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import type { Snapshot, SnapshotStore } from "@kontourai/traverse/fetch";
+import { createInMemorySnapshotStore, type Snapshot, type SnapshotStore } from "@kontourai/traverse/fetch";
+
+import { decodedSnapshotText, snapshotIntegrityProblem } from "@/lib/ingestion/snapshot-integrity";
 
 if (typeof window !== "undefined") {
   throw new Error("supabase-snapshot-store is server-only");
@@ -93,9 +95,11 @@ function parseObjectName(name: string): ParsedObjectName | undefined {
 
 /**
  * JSON has no byte type: a Uint8Array is stored as an index-keyed object.
- * Traverse captures carry `bodyBytes`; Forage 1.0 text captures (Lookout's
- * CHECK path) carry `bytes`, the exact bytes their `bodyHash` covers. Both are
- * revived, or a Forage capture read back could not be hashed or referenced.
+ * Binary captures carry `bodyBytes`; text captures from Traverse 5 and Forage
+ * 1.0 carry `bytes`, the exact bytes their `bodyHash` covers. Both are
+ * revived, or such a capture read back could not be hashed or referenced.
+ * Records keep their decoded `body` too, so a reader that predates Traverse 5
+ * still reads them.
  */
 function reviveBodyBytes(value: unknown): unknown {
   return reviveByteField(reviveByteField(value, "bodyBytes"), "bytes");
@@ -128,20 +132,67 @@ function reviveByteField(value: unknown, field: "bodyBytes" | "bytes"): unknown 
   };
 }
 
-function isSnapshot(value: unknown): value is Snapshot {
-  if (typeof value !== "object" || value === null) return false;
+/**
+ * The snapshot a stored record reads as, or `undefined` when it does not read.
+ *
+ * Same rule as Traverse 5's bundled stores (docs/decisions/text-snapshot-bytes.md
+ * in @kontourai/traverse): a record is returned only if its content hashes to
+ * its `bodyHash` on the basis its fields allow, so a damaged or rewritten
+ * record is absent rather than readable with text its reference does not
+ * cover. A byte-hashed text record reads with `body` decoded from its bytes,
+ * whatever `body` it stored. Records written before Traverse 5 (no `bytes`)
+ * are checked against the UTF-8 of their stored `body`, as before.
+ */
+function readRecord(value: unknown): Snapshot | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.sourceId === "string" &&
-    typeof candidate.url === "string" &&
-    typeof candidate.fetchedAt === "string" &&
-    typeof candidate.status === "number" &&
-    typeof candidate.contentType === "string" &&
-    typeof candidate.body === "string" &&
-    typeof candidate.bodyHash === "string" &&
-    (candidate.bodyBytes === undefined || candidate.bodyBytes instanceof Uint8Array) &&
-    (candidate.bytes === undefined || candidate.bytes instanceof Uint8Array)
-  );
+  if (
+    typeof candidate.sourceId !== "string" ||
+    typeof candidate.url !== "string" ||
+    typeof candidate.fetchedAt !== "string" ||
+    typeof candidate.status !== "number" ||
+    !Number.isFinite(candidate.status) ||
+    typeof candidate.contentType !== "string" ||
+    typeof candidate.bodyHash !== "string"
+  ) {
+    return undefined;
+  }
+  let snapshot = candidate as unknown as Snapshot;
+  if (snapshot.bodyBytes === undefined && snapshot.bytes instanceof Uint8Array) {
+    const decoded = decodedSnapshotText(snapshot);
+    if (decoded === undefined) return undefined;
+    snapshot = { ...snapshot, body: decoded };
+  }
+  return snapshotIntegrityProblem(snapshot) === null ? snapshot : undefined;
+}
+
+/**
+ * Newest first by the instant `fetchedAt` names, not its text (`10:00Z` is
+ * before `10:00:30Z`; `10:00+05:00` is before `06:00Z`), as Traverse 5's
+ * stores order them. Digits past the millisecond still count. Ties fall back
+ * to `fetchedAt` text, then `bodyHash`, both descending. A `fetchedAt` that
+ * does not parse orders last.
+ */
+function sortNewestFirst(snapshots: Snapshot[]): Snapshot[] {
+  const keyed = snapshots.map((snapshot) => {
+    const ms = Date.parse(snapshot.fetchedAt);
+    return {
+      snapshot,
+      ms: Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms,
+      subMs: /\.\d{3}(\d+)/.exec(snapshot.fetchedAt)?.[1] ?? "",
+    };
+  });
+  const desc = (a: string, b: string) => (a === b ? 0 : a < b ? 1 : -1);
+  keyed.sort((a, b) => {
+    if (a.ms !== b.ms) return b.ms > a.ms ? 1 : -1;
+    const width = Math.max(a.subMs.length, b.subMs.length);
+    const bySubMs = desc(a.subMs.padEnd(width, "0"), b.subMs.padEnd(width, "0"));
+    if (bySubMs !== 0) return bySubMs;
+    return a.snapshot.fetchedAt === b.snapshot.fetchedAt
+      ? desc(a.snapshot.bodyHash, b.snapshot.bodyHash)
+      : desc(a.snapshot.fetchedAt, b.snapshot.fetchedAt);
+  });
+  return keyed.map((entry) => entry.snapshot);
 }
 
 function createStorageClient(opts: SupabaseSnapshotStoreOptions): SnapshotStorageClient {
@@ -230,9 +281,9 @@ export function createSupabaseSnapshotStore(
       try {
         const result = await objects.download(`${prefix}/${object.name}`);
         if (result.error || !result.data) continue;
-        const parsed = reviveBodyBytes(JSON.parse(await result.data.text()));
+        const parsed = readRecord(reviveBodyBytes(JSON.parse(await result.data.text())));
         if (
-          isSnapshot(parsed) &&
+          parsed !== undefined &&
           parsed.sourceId === sourceId &&
           parsed.fetchedAt === object.fetchedAt &&
           parsed.bodyHash === object.bodyHash
@@ -244,16 +295,18 @@ export function createSupabaseSnapshotStore(
       }
     }
 
-    snapshots.sort((a, b) =>
-      a.fetchedAt === b.fetchedAt
-        ? b.bodyHash.localeCompare(a.bodyHash)
-        : b.fetchedAt.localeCompare(a.fetchedAt),
-    );
-    return snapshots;
+    return sortNewestFirst(snapshots);
   }
 
   return {
     async put(snapshot) {
+      // Traverse 5's put() contract: throw a TypeError for a snapshot that would
+      // not read back unchanged (content that does not hash to bodyHash, a body
+      // that is not the decode of its bytes, a fetchedAt that is not an ISO-8601
+      // instant, ...). Traverse does not export that check, so it is run through
+      // Traverse's own in-memory store, whose put() applies exactly it. The
+      // fetchedAt check also keeps the object name below one path segment.
+      await createInMemorySnapshotStore().put(snapshot);
       await ensureSnapshotBucket();
       const sourcePrefix = encodeURIComponent(snapshot.sourceId);
       const objectPath = `${sourcePrefix}/${snapshot.fetchedAt}__${snapshot.bodyHash}.json`;

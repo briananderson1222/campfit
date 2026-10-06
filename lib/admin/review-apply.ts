@@ -77,6 +77,7 @@ import {
   SurveyReviewSessionStaleError,
 } from './survey-review-sessions';
 import type { CampChangeProposal, FieldDiff, ProposedChanges } from './types';
+import { isSnapshotIntact } from '@/lib/ingestion/snapshot-integrity';
 import { createCampfitSnapshotStore } from '@/lib/ingestion/traverse-snapshot-store';
 
 /**
@@ -89,7 +90,10 @@ async function exactProposalSnapshot(proposal: CampChangeProposal): Promise<{ sn
   const parsed = parseSnapshotSourceRef(proposal.snapshotRef);
   if (!parsed || !/^[a-f0-9]{64}$/i.test(parsed.bodyHash)) throw new ReviewApplyCitationError(`Proposal ${proposal.id} has a malformed snapshot reference.`);
   const snapshot = await createCampfitSnapshotStore().get(parsed.sourceId, parsed.bodyHash);
-  if (!snapshot || snapshot.bodyHash !== parsed.bodyHash || snapshot.url !== parsed.url || snapshot.fetchedAt !== parsed.fetchedAt) {
+  // The store checks a record's content against its bodyHash on read; this
+  // repeats the check here so apply never cites text its reference does not
+  // cover, whichever store is configured (snapshot-integrity.ts).
+  if (!snapshot || snapshot.bodyHash !== parsed.bodyHash || snapshot.url !== parsed.url || snapshot.fetchedAt !== parsed.fetchedAt || !isSnapshotIntact(snapshot)) {
     throw new ReviewApplyCitationError(`The stored snapshot for proposal ${proposal.id} is missing or does not match its reference, so its excerpts cannot be checked. Nothing was applied; re-crawl the camp.`);
   }
   const preparedArtifact = storedPreparedArtifact(proposal.rawExtraction);

@@ -1,0 +1,9 @@
+{
+  "sourceId": "v4-latin1",
+  "url": "https://v4.example.test/v4-latin1",
+  "fetchedAt": "2026-10-01T12:00:00.000Z",
+  "status": 200,
+  "contentType": "html",
+  "body": "<html><body><main><h1>Pine Ridge</h1><p>Ages 8 - 10</p><p>Caf� du camp: $3,850</p></main></body></html>",
+  "bodyHash": "850343361ebbe15d52028764c60cc0d794cfbf000f7d482cf9d861c2172df59d"
+}
