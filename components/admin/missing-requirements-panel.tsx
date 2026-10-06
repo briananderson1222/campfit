@@ -110,11 +110,11 @@ function SessionTimeEntry({ campId, session }: { campId: string; session: Missin
       <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
         <label className="text-xs text-bark-500 dark:text-cream-300">
           Starts
-          <input value={startTime} onChange={(e) => setStartTime(e.target.value)} placeholder="9:00 AM" className={inputClass} />
+          <input value={startTime} onChange={(e) => setStartTime(e.target.value)} placeholder="e.g. 9:00 AM" className={inputClass} />
         </label>
         <label className="text-xs text-bark-500 dark:text-cream-300">
           Ends
-          <input value={endTime} onChange={(e) => setEndTime(e.target.value)} placeholder="3:00 PM" className={inputClass} />
+          <input value={endTime} onChange={(e) => setEndTime(e.target.value)} placeholder="e.g. 3:00 PM" className={inputClass} />
         </label>
         <div className="col-span-2 sm:col-span-1 sm:self-end">
           <SaveButton busy={busy} label="Save time as checked" />

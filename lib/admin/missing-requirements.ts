@@ -119,6 +119,10 @@ function shortValue(field: string, value: unknown): string {
 
 function campDetail(requirementId: string, status: string, value: unknown): string {
   const stale = status === 'stale';
+  if (requirementId === 'pricing' && isEmpty(value)) {
+    // The camp editor has no price editor: say what the steward can do.
+    return 'No prices listed yet. Find them on the camp\'s website or call. Prices come in through a crawl a reviewer approves; Mark Verified attests the camp as it stands.';
+  }
   if (LIST_FIELDS.has(requirementId)) {
     if (isEmpty(value)) return 'None listed yet. Find them on the camp\'s website or call, then add them in the camp editor and attest them.';
     return stale
