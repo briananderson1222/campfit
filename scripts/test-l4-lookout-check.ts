@@ -10,17 +10,28 @@ import type { Camp } from "../lib/types";
 import { deliverRecrawlReview } from "../lib/ingestion/crawl-pipeline";
 
 const known = campToLookoutSource({ id: "raw-camp-id", websiteUrl: "https://camp.test" });
-assert.equal(known.id, "raw-camp-id");
-assert.equal(listingToLookoutSource("https://listing.test").id, "campfit-discovery:https://listing.test");
+// Lookout's source ids are namespaced away from the ids Traverse's live
+// fetches write (lookout-sources.ts), so neither writer's captures become the
+// other's prior.
+assert.equal(known.id, "lookout:raw-camp-id");
+assert.equal(listingToLookoutSource("https://listing.test").id, "lookout:campfit-discovery:https://listing.test");
 assert.ok(known.cadenceHint);
 
+// Fetches return Forage captures, the shape Forage's fetchSource produces (no
+// contentType); stores hold Traverse records, which is what Lookout's
+// fromTraverseSnapshotStore writes into a Traverse store.
+const forage = (record: Snapshot) => {
+  const { contentType: _contentType, ...capture } = record;
+  void _contentType;
+  return { ...capture, headers: { "content-type": "text/html" } };
+};
 const snapshot: Snapshot = { sourceId: known.id, url: known.url, fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "same", bodyHash: "0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5" };
 const store: SnapshotStore = { latest: async () => snapshot, get: async () => snapshot, list: async () => [snapshot], put: async () => undefined };
 let received: Record<string, unknown> | undefined;
-const result = await runLookoutCheck(known, { store, clock: () => "2026-07-11T01:00:00.000Z", fetchSource: async (config) => { received = config as unknown as Record<string, unknown>; return { snapshot: { ...snapshot, fetchedAt: "2026-07-11T01:00:00.000Z" } }; } });
+const result = await runLookoutCheck(known, { store, clock: () => "2026-07-11T01:00:00.000Z", fetchSource: async (config) => { received = config as unknown as Record<string, unknown>; return { snapshot: forage({ ...snapshot, fetchedAt: "2026-07-11T01:00:00.000Z" }) }; } });
 assert.equal(result.kind, "unchanged-hash");
 assert.equal(isLookoutUnchanged(result), true);
-assert.equal(received?.id, "raw-camp-id");
+assert.equal(received?.id, "lookout:raw-camp-id");
 assert.equal(received?.revalidate, true);
 assert.equal(typeof received?.userAgent, "string");
 
@@ -78,7 +89,8 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
 // JS shell warning must cause exactly one second, rendered classification and
 // extract exclusively from that rendered classified ref.
 {
-  const sourceId = "shell-retry-camp";
+  const campId = "shell-retry-camp";
+  const sourceId = campToLookoutSource({ id: campId, websiteUrl: "https://shell-retry.test" }).id;
   const plain: Snapshot = { ...snapshot, sourceId, url: "https://shell-retry.test", body: "shell", bodyHash: "ce635c4eabff5e4f56dba8fb1e39ca235530aa2b6b18533eef1af3862016c577", fetchedAt: "2026-07-11T03:00:00.000Z" };
   const renderedSnapshot: Snapshot = { ...plain, body: "rendered", bodyHash: "69d0044d65bc72753132efe821effd54c8072b5f75703772caa15a13d400dc5a", fetchedAt: "2026-07-11T03:01:00.000Z" };
   let latestShell: Snapshot | undefined;
@@ -86,8 +98,8 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
   const classifiedModes: boolean[] = [];
   const replayedRefs: string[] = [];
   const result = await runLookoutRecrawlForCamp({
-    campId: sourceId, websiteUrl: plain.url, campName: "Shell Camp",
-    current: { id: sourceId, websiteUrl: plain.url, name: "Shell Camp" } as unknown as Camp,
+    campId, websiteUrl: plain.url, campName: "Shell Camp",
+    current: { id: campId, websiteUrl: plain.url, name: "Shell Camp" } as unknown as Camp,
     provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) },
     store: shellStore, fetchOptions: { renderImpl: async () => ({ html: "rendered" }) as never },
   }, {
@@ -95,7 +107,7 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
     fetchSource: async (config) => {
       const isRendered = config.render === true;
       classifiedModes.push(isRendered);
-      return { snapshot: isRendered ? renderedSnapshot : plain };
+      return { snapshot: forage(isRendered ? renderedSnapshot : plain) };
     },
     replayCamp: async () => {
       const ref = buildSnapshotSourceRef(latestShell!);
@@ -115,7 +127,8 @@ await runLookoutCheck(shellPolicy, { store: { ...store, latest: async () => unde
 // emit nothing, then let the next changed snapshot emit normally.
 const baselineRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-baseline-"));
 try {
-  const sourceId = "baseline-camp";
+  const campId = "baseline-camp";
+  const sourceId = campToLookoutSource({ id: campId, websiteUrl: "https://baseline.test" }).id;
   let latest: Snapshot = { ...snapshot, sourceId, url: "https://baseline.test", body: "Old", bodyHash: "bca97160f4e1211fe659338d0a9705a7dff8aa3ea2e1be1cc1958100a33962c2", fetchedAt: "2026-07-11T00:00:00.000Z" };
   // Keeps history like the production store: Lookout 0.7+ resolves the prior
   // observation's snapshot reference too, so a store that forgets earlier
@@ -140,13 +153,13 @@ try {
   });
   const observationStore = createObservationStore({ root: path.join(baselineRoot, "observations") });
   const options = {
-    campId: sourceId, websiteUrl: latest.url, campName: "Baseline Camp",
-    current: { id: sourceId, websiteUrl: latest.url, name: "Baseline Camp" } as unknown as Camp,
+    campId, websiteUrl: latest.url, campName: "Baseline Camp",
+    current: { id: campId, websiteUrl: latest.url, name: "Baseline Camp" } as unknown as Camp,
     provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: corpusStore,
   };
   const unchanged = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
-    fetchSource: async () => ({ snapshot: latest }), clock: () => "2026-07-11T01:00:00.000Z",
+    fetchSource: async () => ({ snapshot: forage(latest) }), clock: () => "2026-07-11T01:00:00.000Z",
   });
   assert.equal(unchanged.ok, true, unchanged.error ?? "baseline failed");
   assert.equal(unchanged.notModified, undefined, "nonempty DB-current review changes must not take the pipeline freshness-only branch");
@@ -161,7 +174,7 @@ try {
   assert.deepEqual(await readdir(path.join(baselineRoot, "survey")).catch(() => []), [], "baseline emits no consumer-visible survey");
   const unchangedAgain = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
-    fetchSource: async () => ({ snapshot: latest }), clock: () => "2026-07-11T02:00:00.000Z",
+    fetchSource: async () => ({ snapshot: forage(latest) }), clock: () => "2026-07-11T02:00:00.000Z",
   });
   assert.equal(unchangedAgain.ok, true);
   assert.equal(replayCalls, 1, "a seeded unchanged baseline skips replay/provider work and does not rebaseline");
@@ -169,7 +182,7 @@ try {
   const next: Snapshot = { ...latest, body: "New", bodyHash: "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359", fetchedAt: "2026-07-12T00:00:00.000Z" };
   const changed = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
-    fetchSource: async () => ({ snapshot: next }), clock: () => "2026-07-12T01:00:00.000Z",
+    fetchSource: async () => ({ snapshot: forage(next) }), clock: () => "2026-07-12T01:00:00.000Z",
   });
   assert.equal(changed.ok, true, changed.error ?? "changed failed");
   assert.equal((await readdir(path.join(baselineRoot, "survey"))).filter((name) => name.endsWith(".json")).length, 1, "first later change emits exactly one survey");
@@ -181,14 +194,14 @@ try {
   const recoverySnapshot: Snapshot = { ...next, body: "Recovery", bodyHash: "48f6a8d5688b0cf59fb8109b7903507ed9d2e1580be2ad7ae169df659e1ddeea", fetchedAt: "2026-07-12T02:00:00.000Z" };
   const failedFinalize = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
-    fetchSource: async () => ({ snapshot: recoverySnapshot }), clock: () => "2026-07-12T03:00:00.000Z",
+    fetchSource: async () => ({ snapshot: forage(recoverySnapshot) }), clock: () => "2026-07-12T03:00:00.000Z",
     emissionFaults: { beforeSurveyFinalize: () => { throw new Error("injected coordinator finalize failure"); } },
   });
   assert.equal(failedFinalize.ok, false, "coordinator exposes finalize failure");
   latest = recoverySnapshot;
   const recoveredUnchanged = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp,
-    fetchSource: async () => ({ snapshot: recoverySnapshot }), clock: () => "2026-07-12T04:00:00.000Z",
+    fetchSource: async () => ({ snapshot: forage(recoverySnapshot) }), clock: () => "2026-07-12T04:00:00.000Z",
   });
   assert.equal(recoveredUnchanged.ok, true, recoveredUnchanged.error ?? "unchanged recovery failed");
   assert.equal(recoveredUnchanged.notModified, true);
@@ -204,7 +217,7 @@ try {
   const ambiguousSnapshot = { ...next, body: "Ambiguous", bodyHash: "70a8b6912f2ef82fd38f1658b8533a40d079abde48449368ad17d26f3f3fa589", fetchedAt: "2026-07-13T00:00:00.000Z" };
   const ambiguous = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot: path.join(baselineRoot, "survey"), replayCamp: ambiguousReplay,
-    fetchSource: async () => ({ snapshot: ambiguousSnapshot }), clock: () => "2026-07-13T01:00:00.000Z",
+    fetchSource: async () => ({ snapshot: forage(ambiguousSnapshot) }), clock: () => "2026-07-13T01:00:00.000Z",
   });
   assert.equal(ambiguous.ok, false);
   assert.match(ambiguous.error ?? "", /multiple-known-camp-entities/);

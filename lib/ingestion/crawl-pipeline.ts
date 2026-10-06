@@ -1075,7 +1075,9 @@ async function runSourceSweepBody(
       // CHECK falls through to the normal extraction path below exactly as if
       // `driftGate` were unset (fail OPEN, never closed). Reuses the SAME
       // `snapshotStore` the sweep already resolved above — no second store
-      // instance.
+      // instance — under Lookout's own source id (`lookoutSourceId(src.key)`),
+      // so the 304 is answered against Lookout's last capture, never against
+      // the capture extraction writes under `src.key`.
       if (options.driftGate) {
         const checkResult = await runLookoutCheck(providerSourceToLookoutSource(src), {
           store: snapshotStore!,

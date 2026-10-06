@@ -122,6 +122,14 @@ export interface TraverseRecrawlOptions {
   store: SnapshotStore;
   /** fetch mode; default "live-with-capture" (prod). Tests pass "replay" or inject `fetchOptions.fetch`. */
   mode?: FetchMode;
+  /**
+   * Replay the capture stored under this source id instead of the camp id.
+   * The Lookout coordinator replays the capture its CHECK stored under the
+   * Lookout source id (see `lookoutSourceId`). Replay only: a live fetch
+   * always writes under the camp id, so Traverse never writes into a Lookout
+   * history, and a live call that names one is refused.
+   */
+  replaySourceId?: string;
   /** injectable fetch/time seams — network-free tests. */
   fetchOptions?: FetchSourceOptions;
   maxContentChars?: number;
@@ -368,8 +376,16 @@ function selectTargetItem(items: AssembledItem[], campName: string): ItemSelecti
 export async function runTraverseRecrawlForCamp(
   opts: TraverseRecrawlOptions
 ): Promise<TraverseRecrawlResult> {
+  if (opts.replaySourceId !== undefined && opts.mode !== "replay") {
+    const error = "traverse-recrawl:replay-source-live: replaySourceId is replay-only; a live fetch writes under the camp id";
+    return {
+      ok: false, error, proposedChanges: {}, overallConfidence: 0, model: `traverse:${opts.provider.name}`,
+      rawExtraction: { via: "traverse-recrawl", campId: opts.campId, error }, matchedItemName: null, itemCount: 0,
+      snapshot: { ref: null, bodyHash: null }, tokensUsed: null, providerCalls: 0, latencyMs: 0, warnings: [],
+    };
+  }
   const src: IngestionSourceConfig = {
-    key: opts.campId,
+    key: opts.replaySourceId ?? opts.campId,
     name: opts.campName,
     url: opts.websiteUrl,
     render: opts.requiresRender,

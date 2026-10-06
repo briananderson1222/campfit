@@ -14,6 +14,15 @@ import { runLookoutRecrawlForCamp } from "../lib/ingestion/lookout-check-adapter
 import { deliverRecrawlReview } from "../lib/ingestion/crawl-pipeline";
 import type { TraverseRecrawlResult } from "../lib/ingestion/traverse-recrawl-adapter";
 import type { Camp } from "../lib/types";
+import { lookoutSourceId } from "../lib/ingestion/lookout-sources";
+
+// A fetch returns a Forage capture: response headers, no contentType. Lookout's
+// fromTraverseSnapshotStore adds the contentType when it stores one.
+const forage = (record: Snapshot) => {
+  const { contentType: _contentType, ...capture } = record;
+  void _contentType;
+  return { ...capture, headers: { "content-type": "text/html" } };
+};
 
 const evidence = { sourceId: "camp-1", snapshotRef: "traverse-snapshot:camp-1?url=https://camp.test&sha256=abc&fetchedAt=x", observedAt: "2026-07-11T00:00:00.000Z", entityKey: "camp-1", fieldKey: "name", value: "New", confidence: 0.91, provenance: { excerpt: "New", locator: "chars:0-3" }, extractor: "fixture", fieldPath: "name" };
 const events: ProposalDiffEvent[] = [
@@ -135,7 +144,8 @@ try {
 // publish that batch at entry, before its unchanged early return.
 const coordinatorRoot = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-coordinator-recovery-"));
 try {
-  const sourceId = "camp-coordinator-recovery";
+  const campId = "camp-coordinator-recovery";
+  const sourceId = lookoutSourceId(campId);
   const base: Snapshot = { sourceId, url: "https://recovery.test", fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "Old", bodyHash: "bca97160f4e1211fe659338d0a9705a7dff8aa3ea2e1be1cc1958100a33962c2" };
   let latest: Snapshot = base;
   const history: Snapshot[] = [base];
@@ -144,20 +154,20 @@ try {
   const surveySpoolRoot = path.join(coordinatorRoot, "survey");
   const proposal = (value: string): ExtractionProposal => ({ fieldPath: "items[].name", candidateValue: value, confidence: 0.9, provenance: { excerpt: value, locator: "chars:0-3" }, extractor: "fixture", pathIndices: [0] });
   const replayCamp = async (): Promise<TraverseRecrawlResult> => ({ ok: true, error: null, proposedChanges: {}, overallConfidence: 0, model: "fixture", rawExtraction: { itemIndex: 0, itemName: "Recovery Camp", proposals: [proposal(latest.body)] }, matchedItemName: "Recovery Camp", itemCount: 1, snapshot: { ref: buildSnapshotSourceRef(latest), bodyHash: latest.bodyHash }, tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: [] });
-  const options = { campId: sourceId, websiteUrl: base.url, campName: "Recovery Camp", current: { id: sourceId, websiteUrl: base.url, name: "Recovery Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
+  const options = { campId, websiteUrl: base.url, campName: "Recovery Camp", current: { id: campId, websiteUrl: base.url, name: "Recovery Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
 
   // Establish the native zero-event observation baseline.
-  await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: base }) });
+  await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: forage(base) }) });
   const changed: Snapshot = { ...base, body: "New", bodyHash: "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359", fetchedAt: "2026-07-12T00:00:00.000Z" };
   const staged = await runLookoutRecrawlForCamp(options, {
     observationStore, surveySpoolRoot, replayCamp,
-    fetchSource: async () => ({ snapshot: changed }),
+    fetchSource: async () => ({ snapshot: forage(changed) }),
     emissionFaults: { beforeSurveyFinalize: () => { throw new Error("injected production finalize failure"); } },
   });
   assert.equal(staged.ok, false, "production coordinator exposes the staged finalize failure");
   latest = changed;
   assert.equal((await readdir(surveySpoolRoot)).filter((name) => name.endsWith(".json")).length, 0, "staged batch is not yet consumer-visible");
-  const unchanged = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: changed }) });
+  const unchanged = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: forage(changed) }) });
   assert.equal(unchanged.ok, true, unchanged.error ?? "unchanged production recovery failed");
   assert.equal(unchanged.notModified, true, "recovery invocation follows the production unchanged path");
   assert.equal((await readdir(surveySpoolRoot)).filter((name) => name.endsWith(".json")).length, 1, "coordinator-entry recovery publishes the staged batch before unchanged return");
@@ -203,7 +213,8 @@ try {
 for (const markIncomplete of [false, true]) {
   const root = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-incomplete-"));
   try {
-    const sourceId = `camp-incomplete-${markIncomplete}`;
+    const campId = `camp-incomplete-${markIncomplete}`;
+    const sourceId = lookoutSourceId(campId);
     const base: Snapshot = { sourceId, url: "https://incomplete.test", fetchedAt: "2026-07-11T00:00:00.000Z", status: 200, contentType: "html", body: "Full", bodyHash: createHash("sha256").update("Full").digest("hex") };
     const next: Snapshot = { ...base, body: "Partial", bodyHash: createHash("sha256").update("Partial").digest("hex"), fetchedAt: "2026-07-12T00:00:00.000Z" };
     let latest = base;
@@ -221,12 +232,12 @@ for (const markIncomplete of [false, true]) {
       matchedItemName: "Incomplete Camp", itemCount: 1, snapshot: { ref: buildSnapshotSourceRef(latest), bodyHash: latest.bodyHash },
       tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: [],
     });
-    const options = { campId: sourceId, websiteUrl: base.url, campName: "Incomplete Camp", current: { id: sourceId, websiteUrl: base.url, name: "Incomplete Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
+    const options = { campId, websiteUrl: base.url, campName: "Incomplete Camp", current: { id: campId, websiteUrl: base.url, name: "Incomplete Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
     const surveySpoolRoot = path.join(root, "survey");
-    const first = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: base }) });
+    const first = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: forage(base) }) });
     assert.equal(first.ok, true, first.error ?? "baseline failed");
     phase = "partial";
-    const second = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: next }) });
+    const second = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: forage(next) }) });
     assert.equal(second.ok, true, second.error ?? "partial run failed");
     const spooled = (await readdir(surveySpoolRoot).catch(() => [] as string[])).filter((name) => name.endsWith(".json"));
     const bodies = await Promise.all(spooled.map((name) => readFile(path.join(surveySpoolRoot, name), "utf8")));
@@ -246,7 +257,8 @@ for (const markIncomplete of [false, true]) {
 {
   const root = await mkdtemp(path.join(os.tmpdir(), "campfit-l4-rehash-"));
   try {
-    const sourceId = "camp-rehash";
+    const campId = "camp-rehash";
+    const sourceId = lookoutSourceId(campId);
     const oldHash: Snapshot = { sourceId, url: "https://rehash.test", fetchedAt: "2026-09-28T00:00:00.000Z", status: 200, contentType: "html", body: "Café Camp", bodyHash: createHash("sha256").update("Café Camp").digest("hex") };
     const bytes = Uint8Array.from([...Buffer.from("Caf", "latin1"), 0xe9, ...Buffer.from(" Camp", "latin1")]);
     const rehashed = { ...oldHash, fetchedAt: "2026-09-29T09:00:00.000Z", bytes, declaredCharset: "windows-1252", bodyHash: createHash("sha256").update(bytes).digest("hex") } as unknown as Snapshot;
@@ -262,11 +274,11 @@ for (const markIncomplete of [false, true]) {
       rawExtraction: { itemIndex: 0, itemName: "Café Camp", proposals: [name] }, matchedItemName: "Café Camp", itemCount: 1,
       snapshot: { ref: buildSnapshotSourceRef(latest), bodyHash: latest.bodyHash }, tokensUsed: 1, providerCalls: 1, latencyMs: 1, warnings: [],
     });
-    const options = { campId: sourceId, websiteUrl: oldHash.url, campName: "Café Camp", current: { id: sourceId, websiteUrl: oldHash.url, name: "Café Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
+    const options = { campId, websiteUrl: oldHash.url, campName: "Café Camp", current: { id: campId, websiteUrl: oldHash.url, name: "Café Camp" } as unknown as Camp, provider: { name: "fixture", extract: async () => ({ proposals: [], raw: { response: "{}", model: "fixture" } }) }, store: snapshotStore };
     const surveySpoolRoot = path.join(root, "survey");
-    await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: oldHash }) });
+    await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: forage(oldHash) }) });
     const before = replays;
-    const result = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: rehashed }) });
+    const result = await runLookoutRecrawlForCamp(options, { observationStore, surveySpoolRoot, replayCamp, fetchSource: async () => ({ snapshot: forage(rehashed) }) });
     assert.equal(result.ok, true, result.error ?? "rehash run failed");
     assert.equal(replays - before, 1, "the rehashed page is re-extracted once");
     assert.deepEqual((await readdir(surveySpoolRoot).catch(() => [] as string[])).filter((file) => file.endsWith(".json")), [], "no Survey batch for identical values");

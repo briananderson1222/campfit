@@ -2,9 +2,8 @@ import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { SurveyInput } from "@kontourai/survey";
-import { createDriftEmitter, createObservationStore, diffProposalSets, type LookoutSource, type ObservationStore, type ProposalSetObservation, type StoredProposalObservation } from "@kontourai/lookout";
+import { createDriftEmitter, createObservationStore, diffProposalSets, fromTraverseSnapshotStore, type LookoutSource, type ObservationStore, type ProposalSetObservation, type StoredProposalObservation } from "@kontourai/lookout";
 import type { SnapshotStore } from "@kontourai/traverse/fetch";
-import { withExactSnapshotLookup } from "./lookout-snapshot-lookup";
 import { authorDriftSurveyInput } from "./lookout-survey-authoring";
 import type { ExtractionProposal } from "@kontourai/traverse";
 
@@ -165,7 +164,7 @@ export async function emitCampfitObservation(input: {
   };
   const emitter = createDriftEmitter<readonly ExtractionProposal[]>({
     store: orderedStore,
-    snapshotStore: withExactSnapshotLookup(input.snapshotStore),
+    snapshotStore: fromTraverseSnapshotStore(input.snapshotStore),
     now: () => recordedAt,
     diff: (diffInput) => {
       const result = diffProposalSets(diffInput);
