@@ -241,3 +241,105 @@ describe('the review page', () => {
     expect(html).toContain('<strong>Year from:</strong> <q class="break-words">## 2027 Camp Dates</q>');
   });
 });
+
+describe('a number that is not a year (fix round 1)', () => {
+  // Each line states 2027 as a phone number, a street number, an amount, a
+  // URL path or a room label. None may become the year excerpt, by either
+  // rule, and none passes the review-apply check.
+  const NOT_YEARS = [
+    'Call us at 303-555-2027',
+    'Tuition: 2027 per week',
+    '[Photos](https://larkspur.example.test/2027/summer)',
+    'Meet in Room 2027',
+  ];
+
+  for (const line of NOT_YEARS) {
+    it(`"${line}" is not the page's only year (rule 2)`, async () => {
+      const block = line.startsWith('[') ? '<a href="https://larkspur.example.test/2027/summer">Photos</a>' : line;
+      const { item, preparedText } = await extract([block, '## Sessions', W1], session('2027-06-14', '2027-06-18', W1));
+      expect(preparedText).toContain(line);
+      expect(item.schedules).toEqual([]);
+    });
+    it(`"${line}" fails the review-apply check`, () => {
+      expect(excerptStatesOnlyYearOf(line, ['2027-06-14', '2027-06-18'])).toBe(false);
+    });
+  }
+
+  it('a heading with a street number is not a year heading (rule 1)', async () => {
+    const { item } = await extract(['## Lakeside Camp, 2027 Pine Street', W1], session('2027-06-14', '2027-06-18', W1));
+    expect(item.schedules).toEqual([]);
+    expect(excerptStatesOnlyYearOf('## Lakeside Camp, 2027 Pine Street', ['2027-06-14'])).toBe(false);
+  });
+
+  it('a real year line is still found above a phone number line (rule 2)', async () => {
+    const { item } = await extract(['Summer 2027 at the meadow.', 'Call us at 303-555-2027', '## Sessions', W1], session('2027-06-14', '2027-06-18', W1));
+    expect(item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['Summer 2027 at the meadow.']);
+  });
+
+  it('a phone number stating another year still makes the page state two years (fail closed)', async () => {
+    const { item } = await extract(['Summer 2027 at the meadow.', 'Call us at 303-555-2026', '## Sessions', W1], session('2027-06-14', '2027-06-18', W1));
+    expect(item.schedules).toEqual([]);
+  });
+
+  it('reads years in the usual places', () => {
+    for (const text of ['2027 Camp Dates', 'Summer 2027', 'Summer 2027 at the meadow.', '(2027)', 'June 14, 2027', '6/14/2027', '**2027 SUMMER DAY CAMP**', '## 2027 Camp Dates']) {
+      expect(excerptStatesOnlyYearOf(text, ['2027-06-14']), text).toBe(true);
+    }
+  });
+});
+
+describe('a year on the session\'s own label line (fix round 2)', () => {
+  it('"Summer 2027 Session 1" above its dates keeps today\'s behaviour, with another year on the page', async () => {
+    const cited = 'Summer 2027 Session 1\n\nJune 14 - 18';
+    const { item, preparedText } = await extract(['Summer 2027 Session 1', 'June 14 - 18', 'Founded in 2009.'], session('2027-06-14', '2027-06-18', cited));
+    expect(preparedText).toContain(cited);
+    expect(item.schedules.map((s) => [s.startDate, s.yearCitation])).toEqual([['2027-06-14', undefined]]);
+  });
+
+  it('a year cell above its date cell (cell-by-cell table) keeps today\'s behaviour, with another year on the page', async () => {
+    const cited = '2027\n\nJune 14 - 18';
+    const { item, preparedText } = await extract(['Year', 'Dates', '2027', 'June 14 - 18', 'Founded in 2009.'], session('2027-06-14', '2027-06-18', cited));
+    expect(preparedText).toContain(cited);
+    expect(item.schedules.map((s) => [s.startDate, s.yearCitation])).toEqual([['2027-06-14', undefined]]);
+  });
+
+  it('two-year text on a date line ("2026-27") is refused for either year', async () => {
+    const cited = 'Week 1\n\nJune 14 – 18 (2026-27)';
+    for (const year of ['2026', '2027']) {
+      const { item } = await extract(['Week 1', 'June 14 – 18 (2026-27)'], session(`${year}-06-14`, `${year}-06-18`, cited));
+      expect(item.schedules, year).toEqual([]);
+    }
+  });
+});
+
+describe('guards (fix round 4)', () => {
+  it('rule 2 does not take a line that also states a date ("Registration opens Jan 5, 2027") as the year excerpt', async () => {
+    const { item } = await extract(['Summer 2027 at the meadow.', 'Registration opens Jan 5, 2027.', '## Sessions', W1], session('2027-06-14', '2027-06-18', W1));
+    expect(item.schedules.map((s) => s.yearCitation?.excerpt)).toEqual(['Summer 2027 at the meadow.']);
+  });
+
+  it('a year excerpt stating two years fails at review in either order', () => {
+    expect(excerptStatesOnlyYearOf('Dates for 2027 and 2026', ['2027-06-14'])).toBe(false);
+    expect(excerptStatesOnlyYearOf('Dates for 2026 and 2027', ['2027-06-14'])).toBe(false);
+  });
+});
+
+describe('two-digit years (fix round, low)', () => {
+  it('"6/14/26" on the session\'s own line is a year there: no year is taken from a heading', async () => {
+    const line = 'Week 1: 6/14/26 - 6/18/26';
+    const { item } = await extract(['## 2027 Camp Dates', line], session('2027-06-14', '2027-06-18', line));
+    expect(item.schedules).toEqual([]);
+    expect(yearNote(item)).toContain('its own line states 2026');
+  });
+
+  it('a "Summer \'26" heading is not read as no year: the 2027 sessions under it are refused', async () => {
+    const { item } = await extract(['Summer 2027 at the meadow.', "## Summer '26", W1], session('2027-06-14', '2027-06-18', W1));
+    expect(item.schedules).toEqual([]);
+  });
+
+  it('a year glued to a table cell\'s time ("20269:00 AM") counts as another year on the page', async () => {
+    const { item, preparedText } = await extract(['Summer 2027 at the meadow.', '## Sessions', W1, '20269:00 AM - 3:00 PM'], session('2027-06-14', '2027-06-18', W1));
+    expect(preparedText).toContain('20269:00 AM');
+    expect(item.schedules).toEqual([]);
+  });
+});

@@ -26,7 +26,7 @@ import { assertTestDatabase, closeTestPool, getTestPool } from './test-db';
 
 const REVIEWER = 'reviewer@campfit.test';
 const URL = 'https://larkspur.example.test/summer';
-const HEADING = '2027 Camp Dates';
+const HEADING = '## 2027 Camp Dates';
 const WEEK_ONE = 'Week 1: June 14 - June 18';
 
 /** The stored page. Every excerpt below is one of its lines, verbatim and unique. */
@@ -74,6 +74,16 @@ async function approveAll(changes: ProposedChanges, campId: string) {
   return applyProposalReview({ proposalId: proposal.id, reviewSessionId: reviewSession.id, reviewer: REVIEWER, keepPending: false });
 }
 
+/** The evidence the session's dates claim's newest event cites. */
+async function datesEvidence(campId: string) {
+  const pool = getTestPool();
+  const { rows: sessions } = await pool.query<{ id: string }>(`SELECT id FROM "CampSchedule" WHERE "campId" = $1 AND "archivedAt" IS NULL`, [campId]);
+  const event = (await pool.query<{ evidenceIds: string[] }>(
+    `SELECT "evidenceIds" FROM "SurfaceVerificationEvent" WHERE "claimId" = $1 ORDER BY "createdAt" DESC LIMIT 1`, [`session.${sessions[0]!.id}.dates`])).rows[0]!;
+  return (await pool.query<{ excerptOrSummary: string; sourceLocator: string | null; metadata: Record<string, unknown> }>(
+    `SELECT "excerptOrSummary", "sourceLocator", metadata FROM "SurfaceEvidence" WHERE id = ANY($1::text[])`, [event.evidenceIds])).rows;
+}
+
 /** The session's dates claim: its newest event's status, or null when none. */
 async function datesClaim(campId: string): Promise<string | null> {
   const pool = getTestPool();
@@ -102,6 +112,14 @@ describe('a session whose year comes from another excerpt', () => {
     expect(await datesClaim(campId)).toBe('verified');
   });
 
+  it('records the year excerpt and its locator on the verified dates claim\'s evidence', async () => {
+    const campId = await seedCamp();
+    await approveAll(schedules({ excerpt: WEEK_ONE, year: { excerpt: HEADING } }), campId);
+    const start = PAGE.indexOf(HEADING);
+    const evidence = await datesEvidence(campId);
+    expect(evidence.some((e) => e.metadata.yearExcerpt === HEADING && e.metadata.yearLocator === `chars:${start}-${start + HEADING.length}`)).toBe(true);
+  });
+
   it('is not attested when the year excerpt is not on the stored page', async () => {
     const campId = await seedCamp();
     await approveAll(schedules({ excerpt: WEEK_ONE, year: { excerpt: '2027 Summer Sessions' } }), campId);
@@ -124,5 +142,17 @@ describe('a session whose year comes from another excerpt', () => {
     const campId = await seedCamp();
     await approveAll(schedules({ excerpt: WEEK_ONE, year: { excerpt: HEADING, locator: 'chars:0-15' } }), campId);
     expect(await datesClaim(campId)).not.toBe('verified');
+  });
+
+  it('a row with no year citation whose citation was stretched up to the heading is not attested (a proposal from before)', async () => {
+    const campId = await seedCamp();
+    await approveAll(schedules({ excerpt: `${HEADING}\n${WEEK_ONE}` }), campId);
+    expect(await datesClaim(campId)).not.toBe('verified');
+  });
+
+  it('control: a row with no year citation and an unstretched citation is attested as before', async () => {
+    const campId = await seedCamp();
+    await approveAll(schedules({ excerpt: WEEK_ONE }), campId);
+    expect(await datesClaim(campId)).toBe('verified');
   });
 });

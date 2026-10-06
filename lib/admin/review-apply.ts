@@ -53,7 +53,7 @@ import { invalidEnumMembers } from './review-format-validation';
 import { resolveCitationText, storedPreparedArtifact } from './citation-text';
 import { resolveReviewExcerpt } from './review-excerpt-resolution';
 import { textStatesTime } from '@/lib/ingestion/session-time';
-import { excerptStatesOnlyYearOf } from '@/lib/ingestion/session-year';
+import { excerptStatesOnlyYearOf, isStretchedCitation, yearOnADateLine } from '@/lib/ingestion/session-year';
 import { keepUnstatedSessionTimes } from '@/lib/ingestion/diff-engine';
 import { deriveFieldCorroboration, type ProposalHistoryRow } from './claim-corroboration';
 import { contradictsRecentApproval } from './proposal-classification';
@@ -953,7 +953,11 @@ function checkCitations(changes: ProposedChanges, fields: readonly string[], cit
       const excerpt = typeof row?.excerpt === 'string' ? row.excerpt : '';
       if (!excerpt.trim()) return { checked: false, ...extra };
       const resolved = resolveReviewExcerpt(excerpt, citation.text, row.locator);
-      return resolved.state === 'verified' && (year === undefined || year.checked)
+      // A row with no year citation whose dates' citation was stretched up to
+      // a heading (a proposal written before the session-year rules) counts
+      // only when one of its date lines states the year (session-year.ts).
+      const ownYearStated = field !== 'schedules' || year !== undefined || stretchedCitationStatesYear(excerpt, (diff.new as unknown[])[index]);
+      return resolved.state === 'verified' && ownYearStated && (year === undefined || year.checked)
         ? { checked: true, excerpt, locator: resolved.locator, ...extra }
         : { checked: false, excerpt, ...extra };
     });
@@ -987,6 +991,20 @@ function checkSessionTimeCitation(
   return checked
     ? { checked, excerpt: excerpts.join(' / '), locator: first?.state === 'verified' ? first.locator : undefined }
     : { checked: false, excerpt: excerpts.join(' / ') };
+}
+
+/**
+ * For a session row with no year citation: true unless its dates' citation
+ * is stretched (covers a heading or other sessions' date lines) and none of
+ * its date lines states the row's start and end year.
+ */
+function stretchedCitationStatesYear(excerpt: string, value: unknown): boolean {
+  if (!isStretchedCitation(excerpt)) return true;
+  const row = (value ?? {}) as { startDate?: unknown; endDate?: unknown };
+  const years = [row.startDate, row.endDate]
+    .filter((date): date is string => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date))
+    .map((date) => Number(date.slice(0, 4)));
+  return years.length > 0 && years.every((year) => yearOnADateLine(excerpt, year));
 }
 
 /**
@@ -1769,7 +1787,16 @@ async function recordSessionClaims(
             metadata: { proposalId: args.proposalId, reviewKind: 'crawl-proposal', sessionLabel: session.label },
           },
           // This row's own citation (for the time, the text that states it), not the list's first row's.
-          evidence: { ...args.evidence, sourceLocator: cited.locator, excerptOrSummary: cited.excerpt ?? args.evidence.excerptOrSummary },
+          evidence: {
+            ...args.evidence,
+            sourceLocator: cited.locator,
+            excerptOrSummary: cited.excerpt ?? args.evidence.excerptOrSummary,
+            // The dates' year, when it came from another excerpt: the text that
+            // states it and where, checked on the stored page with the row.
+            ...(attribute === 'dates' && citation.year?.checked
+              ? { metadata: { ...args.evidence.metadata, yearExcerpt: citation.year.excerpt, yearLocator: citation.year.locator } }
+              : {}),
+          },
           event: {
             id: claimId,
             claimId,

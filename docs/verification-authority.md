@@ -440,16 +440,35 @@ year, the date is refused as before, and with it the whole session list.
 The year excerpt is derived from the prepared page text
 (`lib/ingestion/session-year.ts`), never from how the model cut its
 citation, and only by these rules. A "heading" is a Markdown heading line
-(`#`) of the prepared text; a bold line is not one.
+(`#`) of the prepared text; a bold line is not one. Content preparation
+drops the page's header, navigation and footer, so text there is not seen.
 
-- The date's own lines (the lines its cited text covers that state a date)
-  state no year. A date whose own line states its year keeps today's rule.
-  A one-line citation still passes when it states the year. A citation over
-  several lines passes only when a line of it that states a date states the
-  year: models stretch a date's citation up to the heading ("## 2027 Camp
-  Dates / Week 1: ... / Week 2: ..."), and that heading is not the date's
-  own text. It is taken, and shown, as the year excerpt under the rules
-  below, or the date is refused.
+Years are read two ways. The broad reading takes every number that could be
+a year: a four-digit 1900-2099 (also in a phone number, a street number, a
+URL path or a room number), a short range ("2026-27"), a year glued to a
+table cell's time ("20279:00"), a two-digit year in a numeric date
+("6/14/26") or an abbreviation ("Summer '26"). It is used wherever another
+year makes a rule refuse, so reading too much there only refuses. The clear
+reading takes only a standalone four-digit year (after a space, "(", a quote
+or a Markdown marker, or as a numeric date's year), not after a number label
+("Room", "Suite", "Tuition", a phone or price word) and not before a street
+or amount word ("Pine Street", "per week"). A year excerpt must clearly
+state its year, and no number in it may be one the broad reading takes and
+the clear reading does not.
+
+- A citation is stretched when it covers a heading or several date lines
+  (other sessions'): models stretch a date's citation up to the heading
+  ("## 2027 Camp Dates / Week 1: ... / Week 2: ..."). A stretched citation
+  passes the year-in-quote rule only when one of its date lines states the
+  year; the heading is not the date's own text, and is taken, and shown, as
+  the year excerpt under the rules below, or the date is refused. A citation
+  that is not stretched keeps today's rule, including a year on the
+  session's own label line or year cell ("Summer 2027 Session 1 / June 14 -
+  18"). A date line stating two years at once ("June 14 - 18 (2026-27)")
+  states neither.
+- The date's own lines (the lines of a stretched citation that state a
+  date; every line of any other citation) state no year in the broad
+  reading. A date whose own line states its year keeps today's rule.
 - The session is within one year: start and end in the same year, end not
   before start. A range across a year boundary ("December 28 - January 3")
   is never given one year; both years must be on its own line.
@@ -457,31 +476,45 @@ citation, and only by these rules. A "heading" is a Markdown heading line
   (one stretched across two sections) is refused: which heading is over the
   session is not settled.
 - **Governing heading.** The nearest heading above the session's line, with
-  no other heading between them, states exactly one year (a "2026-27"
-  heading states two), the text under it up to the next heading states no
-  other year, and the date is in that year. Years elsewhere on the page do
-  not matter, so a page with a "2026 Sessions" list and a "2027 Sessions"
-  list gives each session its own heading's year.
+  no other heading between them, clearly states exactly one year (a
+  "2026-27" heading states two; "Lakeside Camp, 2027 Pine Street" states a
+  number that may not be a year, and is refused), the text under it up to
+  the next heading states no other year, and the date is in that year.
+  Years elsewhere on the page do not matter, so a page with a "2026
+  Sessions" list and a "2027 Sessions" list gives each session its own
+  heading's year.
 - **Only year on the page.** Otherwise (the governing heading states no
-  year, or there is none) the whole prepared page states exactly one year,
-  the date is in it, and the excerpt is the nearest line above the session
-  that states it and states no date. Any second year anywhere on the page
-  (a "Last year (2026)" note, a "Founded in 2019" line, a footer) refuses.
+  year, or there is none) the whole prepared page states exactly one year
+  in the broad reading, the date is in it, and the excerpt is the nearest
+  line above the session that clearly states it and states no date. Any
+  second year anywhere in the prepared text (a "Last year (2026)" note, a
+  "Founded in 2019" line, a phone number ending in another year) refuses.
 
 The proposal stores the excerpt with the session's own citation
 (`rowCitations[i].year`: the verbatim text and its `chars:` locator). Review
 apply checks it like the other citations: the excerpt is on the stored page
-(at its locator) and states exactly one year, the row's start and end
-year. Only then is the session's `dates` claim attested; a failing year
-citation leaves the row unattested, like a failing time citation. The review
-page shows "Year from:" with the excerpt beside the session, apart from the
-dates' own text.
+(at its locator) and clearly states exactly one year, the row's start and
+end year. Only then is the session's `dates` claim attested, and its
+evidence records the year excerpt and its locator (`metadata.yearExcerpt`,
+`metadata.yearLocator`). A failing year citation leaves the row unattested,
+like a failing time citation. A row with no year citation whose dates'
+citation is stretched is attested only when one of its date lines states
+the year, so a proposal written before these rules does not apply as
+verified. The review page shows "Year from:" with the excerpt beside the
+session, apart from the dates' own text.
+
+Accepted, fail-closed recall costs: a session under a year heading whose
+text also mentions another year ("returning 2026 families") is refused; a
+session under a sub-heading with no year falls to the only-year rule, which
+refuses when the page states a second year; a heading with an ambiguous
+number refuses.
 
 Known limits: a year excerpt can be a heading of a different program on the
-page that happens to be the nearest; the reviewer sees it beside each
-session. A row that cites no year excerpt is checked as before (its date
-excerpt on the page); the apply does not re-check that its own text states
-its year.
+page that happens to be the nearest, or a seasonal sub-heading with no year
+under a year heading may belong to another season; the reviewer sees the
+excerpt beside each session. A row with no year citation and a citation
+that is not stretched is checked as before (its date excerpt on the page);
+the apply does not re-check that its own text states its year.
 
 ## Session times and steward entry
 
