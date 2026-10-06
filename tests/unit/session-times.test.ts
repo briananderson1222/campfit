@@ -199,6 +199,19 @@ describe('a time placed by where its text is', () => {
     expect(item.schedules.map((s) => [s.startDate, s.startTime, s.endTime])).toEqual([['2027-06-14', '9:00 AM', '12:00 PM'], ['2027-06-21', null, null]]);
   });
 
+  it.each([
+    'All sessions run 9:00 AM - 3:30 PM.',
+    'Hours for all weeks: 9:00 AM - 3:30 PM.',
+    'Each week 9 am - 3:30 pm.',
+  ])('a daily time stated for every session ("%s") applies to each', async (daily) => {
+    const { item } = await extract([DATES_W1, DATES_W2, daily], [
+      ...SESSION_DATES,
+      answer('items[].schedules[].startTime', '9:00 AM', daily),
+      answer('items[].schedules[].endTime', '3:30 PM', daily),
+    ]);
+    expect(item.schedules.map((s) => [s.startTime, s.endTime])).toEqual([['9:00 AM', '3:30 PM'], ['9:00 AM', '3:30 PM']]);
+  });
+
   it('naming one session on a line of its own is not applied to every session', async () => {
     const hours = 'Week 1 hours: 9:00 AM - 12:00 PM';
     const { item } = await extract([DATES_W1, DATES_W2, hours], [

@@ -449,7 +449,12 @@ proposed for review. Review apply enforces the same rule under the camp lock
 for every proposal shape (`sessionRowsToApply`): a row's time is written only
 when the row cites where its time was read; any other time in a row (one
 `computeDiff` kept, possibly since changed by a steward) is treated as
-unstated and the stored time stays.
+unstated and the stored time stays. So is a cited time the proposal showed
+as unchanged (its `old` row had the same time): it was not a change the
+reviewer approved, and a time changed since (by a steward) stays. Known limit:
+sessions that share a label and dates and are told apart only by their times
+(morning and afternoon) are matched by time; a crawl that lists them without
+times does not keep their stored times, and the approval replaces them.
 
 **Missing requirements.** For a camp that is not VERIFIED, the admin camp page
 and the review page list every requirement the derivation reports as not

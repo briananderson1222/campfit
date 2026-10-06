@@ -668,7 +668,9 @@ function assignSessionTimes(
 const MONTH_DAY_RE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/i;
 const NUMERIC_DATE_RE = /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/;
 /** "Week 2", "Session 1", "Wk 3", "Term B": text that names one session. */
-const SESSION_NAME_RE = /\b(week|wk|session|term|block)\s*(\d+|[a-z]\b|one|two|three|four|five|six|seven|eight|nine|ten)\b/i;
+// A separator is required ("sessions", "weeks" do not name one), and a
+// number followed by a time ("week 9 am") is a time, not a session number.
+const SESSION_NAME_RE = /\b(week|wk|session|term|block)\s+(?:#\s*)?(?:\d+(?![\d:]|\s*[ap]\.?\s?m\b)|[a-z](?![\w.])|(?:one|two|three|four|five|six|seven|eight|nine|ten)\b)/i;
 
 /** Whether a text states a calendar date ("June 14", "June 14th", "14 June", "6/14", "2027-06-14"). */
 function statesADate(text: string): boolean {

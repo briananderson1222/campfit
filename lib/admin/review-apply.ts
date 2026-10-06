@@ -69,7 +69,7 @@ import type { DataConfidence } from '@/lib/types';
 import { buildCampReviewTrustInput, campCanonicalClaimId, type ReviewCitationSource } from './trust-projection';
 import { deriveCampApplyFromSurveySession, SurveyReviewApplyError } from './survey-review-apply';
 import { getSurveyReviewEvents } from './survey-review-events';
-import { applyScheduleReconciliation, distinctSessions, sessionMatchKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
+import { applyScheduleReconciliation, distinctSessions, scheduleNaturalKey, sessionMatchKey, type ExistingScheduleRow, type IncomingScheduleSnapshot } from './session-identity';
 import {
   assertSurveyReviewSessionFreshForProposal,
   getSurveyReviewSessionForProposal,
@@ -1029,8 +1029,22 @@ async function withdrawChangedClaims(
  */
 function sessionRowsToApply(diff: FieldDiff, stored: readonly unknown[]): IncomingScheduleSnapshot[] {
   const rows = (Array.isArray(diff.new) ? diff.new as IncomingScheduleSnapshot[] : []).map((row, index) =>
-    (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 ? row : { ...row, startTime: null, endTime: null });
+    (diff.rowCitations?.[index]?.times?.length ?? 0) > 0 && !timeShownUnchanged(diff, row) ? row : { ...row, startTime: null, endTime: null });
   return keepUnstatedSessionTimes(stored, rows) as IncomingScheduleSnapshot[];
+}
+
+/**
+ * Whether the reviewer was shown this row's time as unchanged: the
+ * proposal's `old` list has the same session (same plain label and dates,
+ * the only one) with the same time. Such a time is not a change the reviewer
+ * approved, so it does not overwrite a time changed since (by a steward);
+ * it is treated as unstated, which keeps the stored time.
+ */
+function timeShownUnchanged(diff: FieldDiff, row: IncomingScheduleSnapshot): boolean {
+  const old = Array.isArray(diff.old) ? diff.old as IncomingScheduleSnapshot[] : [];
+  const key = scheduleNaturalKey(row.label, row.startDate, row.endDate);
+  const same = old.filter((candidate) => candidate && scheduleNaturalKey(candidate.label, candidate.startDate, candidate.endDate) === key);
+  return same.length === 1 && sessionTimeKey(same[0]!) === sessionTimeKey(row);
 }
 
 function sessionTimeKey(row: { startTime?: string | null; endTime?: string | null }): string {
@@ -1624,9 +1638,14 @@ async function recordSessionClaims(
     // and stating this time; a time the crawl did not state (kept from the
     // stored session) is left to whoever attested it before.
     const timeStated = Boolean(session.startTime?.trim() && session.endTime?.trim());
+    // The time the citation was checked against is the proposal's own row;
+    // the stored time must still be that one (a kept or newer time is not
+    // what the cited text states).
     const row = proposed[index!]!;
+    const proposedRow = (Array.isArray(args.diff.new) ? args.diff.new as IncomingScheduleSnapshot[] : [])[index!];
     const timeChecked = timeStated && citation.time?.checked === true
-      && session.startTime === row.startTime && session.endTime === row.endTime;
+      && session.startTime === row.startTime && session.endTime === row.endTime
+      && session.startTime === proposedRow?.startTime && session.endTime === proposedRow?.endTime;
     // A session created by this apply was not locked up front (its id did not exist yet).
     await acquireSubjectAdvisoryLock(w.client, SESSION_SUBJECT_TYPE, session.id);
     const attributes: ('dates' | 'time')[] = timeChecked ? ['dates', 'time'] : ['dates'];

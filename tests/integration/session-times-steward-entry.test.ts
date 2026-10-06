@@ -375,6 +375,22 @@ describe('an approval after a steward entry', () => {
   });
 });
 
+describe('a cited time shown unchanged to the reviewer', () => {
+  it('does not rewind a time a steward changed after the proposal was built', async () => {
+    const campId = await seedCamp();
+    await approveAll(fullChanges(CITED_TIME), campId);
+    const [session] = await sessionOf(campId);
+    // The crawl reads Week 1 at 9:00-3:30 again (unchanged, cited) and a new Week 2.
+    const week2 = { ...weekOne(null), label: 'Week 2', startDate: '2027-06-21', endDate: '2027-06-25' };
+    const proposal = listDiff([weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' })], [weekOne({ startTime: '9:00 AM', endTime: '3:30 PM' }), week2],
+      [{ excerpt: WEEK_ONE, times: [{ excerpt: DAILY }] }, { excerpt: 'Week 2: June 21 - June 25, 2027' }]);
+    await recordStewardEntry(campId, { kind: 'session-time', scheduleId: session!.id, startTime: '8:00 AM', endTime: '2:00 PM' }, STEWARD);
+    await approveAll({ schedules: proposal }, campId);
+    expect((await sessionOf(campId)).find((s) => s.id === session!.id)).toMatchObject({ startTime: '8:00 AM', endTime: '2:00 PM' });
+    expect((await timeClaim(session!.id))!.event).toMatchObject({ status: 'assumed', method: 'steward-entry' });
+  });
+});
+
 describe('POST /api/admin/camps/[campId]/steward-entry', () => {
   function post(campId: string, body: unknown) {
     return stewardEntryRoute(
