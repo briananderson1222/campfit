@@ -93,16 +93,56 @@ function parseObjectName(name: string): ParsedObjectName | undefined {
   return { name, fetchedAt: match[1], bodyHash: match[2] };
 }
 
+const BYTE_FIELDS = ["bodyBytes", "bytes"] as const;
+
 /**
- * JSON has no byte type: a Uint8Array is stored as an index-keyed object.
- * Binary captures carry `bodyBytes`; text captures from Traverse 5 and Forage
- * 1.0 carry `bytes`, the exact bytes their `bodyHash` covers. Both are
- * revived, or such a capture read back could not be hashed or referenced.
- * Records keep their decoded `body` too, so a reader that predates Traverse 5
- * still reads them.
+ * The stored JSON shape, the one Traverse 5's filesystem store writes: each
+ * byte field present becomes base64 in a sibling `<field>Base64` string, and a
+ * byte-hashed text record (one that carries `bytes`) is written WITHOUT
+ * `body`, since its text is decoded from the bytes on read. A Uint8Array
+ * given to JSON.stringify would instead become an index-keyed object, about
+ * 13 times the size of the bytes; base64 is about 1.34 times.
+ *
+ * A record written this way has no `body`, so a reader from before Traverse 5
+ * cannot read it. Nothing from before the upgrade reads this store after it
+ * is deployed.
  */
-function reviveBodyBytes(value: unknown): unknown {
-  return reviveByteField(reviveByteField(value, "bodyBytes"), "bytes");
+function toStoredShape(snapshot: Snapshot): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...snapshot };
+  for (const field of BYTE_FIELDS) {
+    const value = snapshot[field];
+    if (value === undefined) continue;
+    delete out[field];
+    out[`${field}Base64`] = Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64");
+  }
+  if (snapshot.bytes !== undefined) delete out.body;
+  return out;
+}
+
+/**
+ * Reverse of `toStoredShape`, and the reader for every shape already in
+ * storage. A `<field>Base64` sibling must be a string (a damaged string is
+ * caught by the hash check), and a record carrying both it and the raw field
+ * is refused. Records written before this shape stored a byte field as an
+ * index-keyed object (CampFit at Traverse 4.x: binary `bodyBytes`, and Forage
+ * captures' `bytes`); those are still revived. Body-only records need no
+ * conversion.
+ */
+function fromStoredShape(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  let out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const field of BYTE_FIELDS) {
+    const key = `${field}Base64`;
+    if (!(key in out)) {
+      out = reviveByteField(out, field) as Record<string, unknown>;
+      continue;
+    }
+    const encoded = out[key];
+    if (typeof encoded !== "string" || field in out) return undefined;
+    delete out[key];
+    out[field] = new Uint8Array(Buffer.from(encoded, "base64"));
+  }
+  return out;
 }
 
 function reviveByteField(value: unknown, field: "bodyBytes" | "bytes"): unknown {
@@ -281,7 +321,7 @@ export function createSupabaseSnapshotStore(
       try {
         const result = await objects.download(`${prefix}/${object.name}`);
         if (result.error || !result.data) continue;
-        const parsed = readRecord(reviveBodyBytes(JSON.parse(await result.data.text())));
+        const parsed = readRecord(fromStoredShape(JSON.parse(await result.data.text())));
         if (
           parsed !== undefined &&
           parsed.sourceId === sourceId &&
@@ -310,7 +350,7 @@ export function createSupabaseSnapshotStore(
       await ensureSnapshotBucket();
       const sourcePrefix = encodeURIComponent(snapshot.sourceId);
       const objectPath = `${sourcePrefix}/${snapshot.fetchedAt}__${snapshot.bodyHash}.json`;
-      const result = await objects.upload(objectPath, JSON.stringify(snapshot), {
+      const result = await objects.upload(objectPath, JSON.stringify(toStoredShape(snapshot)), {
         contentType: "application/json",
         upsert: true,
       });

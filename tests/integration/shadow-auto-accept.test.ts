@@ -250,14 +250,21 @@ describe('resolveProposalSnapshot for captures hashed by their bytes', () => {
     return result.snapshot;
   }
   const page = 'Summer at Café Camp: new';
-  const cases: Array<[string, Uint8Array, string]> = [
-    ['latin1', Uint8Array.from([...page].map((ch) => ch.codePointAt(0)!)), 'text/html; charset=iso-8859-1'],
-    ['utf8-bom', Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(page)]), 'text/html; charset=utf-8'],
+  const latin1 = Uint8Array.from([...page].map((ch) => ch.codePointAt(0)!));
+  const bom = Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(page)]);
+  // [id, bytes, Content-Type, the text Traverse decodes]. The last two declare no
+  // charset (declaredCharset null), which is still the bytes basis.
+  const cases: Array<[string, Uint8Array, string, string]> = [
+    ['latin1', latin1, 'text/html; charset=iso-8859-1', page],
+    ['utf8-bom', bom, 'text/html; charset=utf-8', page],
+    ['bom-no-charset', bom, 'text/html', page],
+    ['invalid-utf8-no-charset', latin1, 'text/html', page.replace('é', '\uFFFD')],
   ];
 
-  it.each(cases)('resolves a %s capture read back from the filesystem and in-memory stores', async (id, bytes, contentType) => {
+  it.each(cases)('resolves a %s capture read back from the filesystem and in-memory stores', async (id, bytes, contentType, text) => {
     const snapshot = await capture(id, bytes, contentType);
-    expect(snapshot.body).toBe(page);
+    expect(snapshot.body).toBe(text);
+    expect(snapshot.declaredCharset).toBe(contentType.includes('charset=') ? contentType.split('charset=')[1] : null);
     expect(snapshot.bodyHash).toBe(createHash('sha256').update(bytes).digest('hex'));
     expect(snapshot.bodyHash).not.toBe(createHash('sha256').update(snapshot.body, 'utf8').digest('hex'));
     const proposal = { snapshotRef: buildSnapshotSourceRef(snapshot), snapshotBodyHash: snapshot.bodyHash, proposedChanges: changes() };

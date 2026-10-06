@@ -193,9 +193,9 @@ describe("createSupabaseSnapshotStore", () => {
 
 describe("Forage 1.0 captures in the Supabase store (Lookout CHECK path)", () => {
   // A windows-1252 page: Forage 1.0 hashes the received bytes and keeps them on
-  // `bytes`, with the decoded text on `body`. JSON stores the Uint8Array as an
-  // index-keyed object, so it must be revived for the capture to be hashed and
-  // referenced again after a read.
+  // `bytes`, with the decoded text on `body`. The store keeps the bytes as
+  // base64 and must give them back as a Uint8Array, or the capture could not be
+  // hashed and referenced again after a read.
   const bytes = Uint8Array.from([0x43, 0x61, 0x66, 0xe9]); // "Café" in windows-1252
   const capture = {
     sourceId: "https://charset.example/camps",
@@ -321,8 +321,10 @@ describe("Traverse 5 snapshot contract in the Supabase store", () => {
     const key = [...storage.objects.keys()].find((name) => name.includes("2026-10-05"))!;
 
     // A byte changed in storage: the record is absent, and latest() falls back to the older capture.
-    const stored = JSON.parse(storage.objects.get(key)!) as { bytes: Record<string, number> };
-    stored.bytes["5"] = 0x41;
+    const stored = JSON.parse(storage.objects.get(key)!) as { bytesBase64: string };
+    const damaged = Buffer.from(stored.bytesBase64, "base64");
+    damaged[5] = 0x41;
+    stored.bytesBase64 = damaged.toString("base64");
     storage.objects.set(key, JSON.stringify(stored));
     expect(await store.get(sourceId, latin1.bodyHash)).toBeUndefined();
     expect((await store.latest(sourceId))?.fetchedAt).toBe("2026-10-04T10:00:00.000Z");
@@ -377,5 +379,53 @@ describe("Traverse 5 snapshot contract in the Supabase store", () => {
     expect(utf8.bodyHash).toBe(createHash("sha256").update(utf8Html, "utf8").digest("hex"));
     await store.put(utf8);
     expect(await store.get(sourceId, utf8.bodyHash)).toEqual(utf8);
+  });
+
+  it("stores a byte-hashed text record as bytesBase64 with no body", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const latin1 = await capture(latin1Bytes, "text/html; charset=iso-8859-1");
+    await store.put(latin1);
+    const [stored] = [...storage.objects.values()].map((json) => JSON.parse(json) as Record<string, unknown>);
+    expect(stored).toMatchObject({ bytesBase64: Buffer.from(latin1Bytes).toString("base64"), declaredCharset: "iso-8859-1", bodyHash: latin1.bodyHash });
+    expect(stored).not.toHaveProperty("body");
+    expect(stored).not.toHaveProperty("bytes");
+  });
+
+  it("stores a 200 KB page at about the size of its base64, not an index-keyed byte object", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    // ~200 KB of HTML with latin1 characters, so the record is byte-hashed.
+    const html = `<html><body>${"<p>Café Camp: été, señor, años.</p>\n".repeat(5_800)}</body></html>`;
+    const bytes = Uint8Array.from([...html].map((ch) => ch.codePointAt(0)!));
+    expect(bytes.length).toBeGreaterThan(200_000);
+    const page = await capture(bytes, "text/html; charset=iso-8859-1");
+    await store.put(page);
+
+    const [json] = [...storage.objects.values()];
+    // base64 is 4/3 of the bytes plus a few hundred characters of fields. An
+    // index-keyed object (the JSON of a raw Uint8Array) is about 13x.
+    expect(json!.length / bytes.length).toBeLessThan(1.5);
+    expect(json!.length / bytes.length).toBeGreaterThan(1.3);
+    expect((await store.get(sourceId, page.bodyHash))?.body).toBe(html);
+  });
+
+  it("still reads a binary record written by the Traverse 4.x store, its bytes as an index-keyed object", async () => {
+    const storage = new InMemoryStorageClient();
+    const store = createSupabaseSnapshotStore({ storage });
+    const pdf = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0xff]);
+    const legacy: Snapshot = {
+      sourceId, url: "https://latin1.example/brochure.pdf", fetchedAt: "2026-09-01T10:00:00.000Z",
+      status: 200, contentType: "pdf", body: "", bodyBytes: pdf,
+      bodyHash: createHash("sha256").update(pdf).digest("hex"),
+    };
+    await store.put(legacy); // creates the bucket
+    storage.objects.clear();
+    // Exactly what the pre-upgrade store uploaded: JSON.stringify of the snapshot.
+    storage.objects.set(`${SNAPSHOT_BUCKET}/${encodeURIComponent(sourceId)}/${legacy.fetchedAt}__${legacy.bodyHash}.json`, JSON.stringify(legacy));
+
+    const readBack = await store.get(sourceId, legacy.bodyHash);
+    expect(readBack?.bodyBytes).toEqual(pdf);
+    expect(isSnapshotIntact(readBack!)).toBe(true);
   });
 });
